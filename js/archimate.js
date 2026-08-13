@@ -1,20 +1,20 @@
 // ===================== ARCHIMATE EXCHANGE FORMAT IMPORT =====================
 // Parses an ArchiMate 3.0 Exchange Format XML document (<model> root in the
-// http://www.opengroup.org/xsd/archimate/3.0/ namespace) into FlowRun Part/Connector/
+// http://www.opengroup.org/xsd/archimate/3.0/ namespace) into DyCAD Part/Connector/
 // View/ViewMember records.
 //   - <organizations> (the folder tree grouping elements for navigation in tools like
-//     Archi) is NOT imported — it's purely presentational, and FlowRun has no folder/
+//     Archi) is NOT imported — it's purely presentational, and DyCAD has no folder/
 //     tree concept for parts to map it onto.
-//   - <views>/<diagrams>/<view> ARE imported — one FlowRun View per ArchiMate view,
+//   - <views>/<diagrams>/<view> ARE imported — one DyCAD View per ArchiMate view,
 //     walking its (possibly nested) <node> elements for placement and its <connection>
 //     elements for wiring. Diagram nodes with no elementRef (pure visual grouping boxes
-//     or free-floating labels — xsi:type="Label" in practice) are skipped; FlowRun has
+//     or free-floating labels — xsi:type="Label" in practice) are skipped; DyCAD has
 //     no equivalent visual-grouping concept for viewMembers.
 //   - AndJunction/OrJunction elements are NOT imported as Parts at all — see below.
 //
 // Junction flattening: a junction (AndJunction/OrJunction) is structurally a routing
 // node with N incoming relationships and M outgoing ones. Rather than importing it as a
-// Part (FlowRun has no multi-way-routing connector concept), every junction is DISSOLVED
+// Part (DyCAD has no multi-way-routing connector concept), every junction is DISSOLVED
 // at both the model level and the view level:
 //   - Model level: for each junction, every incoming source is directly connected to
 //     every outgoing target (the full cross product), using the relationship type of
@@ -92,7 +92,7 @@ function collectNestedElementPairs(parentEl, ancestors, results) {
 
 /**
  * Parses ArchiMate Exchange Format XML text. `knownElementTypes` is a Set of type
- * strings FlowRun already has an element definition for (store.settings.elements) —
+ * strings DyCAD already has an element definition for (store.settings.elements) —
  * used only to report which imported types have no matching definition (they still
  * import fine, just render with the generic Unknown-type grey fallback until a
  * definition is added).
@@ -247,7 +247,7 @@ function parseArchimateXml(xmlText, knownElementTypes, elementDefs, elementGroup
     for (const nodeEl of nodeEls) {
       const diagramNodeId = nodeEl.getAttribute('identifier');
       const elementRef = nodeEl.getAttribute('elementRef');
-      if (!diagramNodeId || !elementRef) continue; // pure visual/group/label node — no FlowRun equivalent
+      if (!diagramNodeId || !elementRef) continue; // pure visual/group/label node — no DyCAD equivalent
       if (junctionIds.has(elementRef)) continue; // junction's own diagram placement is dissolved along with the junction
       if (!partIds.has(elementRef)) continue; // dangling reference
       const x = Number(nodeEl.getAttribute('x')) || 0;

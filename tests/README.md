@@ -1,4 +1,4 @@
-# FlowRun regression suite
+# DyCAD regression suite
 
 A lightweight Playwright-based regression net covering the mechanisms that have
 actually broken during development — not exhaustive feature coverage, but the specific
@@ -7,7 +7,7 @@ things that are easy to silently break while changing something else nearby.
 ## Running
 
 ```
-cd flowrun
+cd dycad
 python3 tests/run_all.py
 ```
 
@@ -68,7 +68,7 @@ surfaced both of the bugs this fixture now guards against; if you're touching
 ## Adding a new check
 
 Write a function `check_something(page) -> (bool, str)`:
-- `page` is a Playwright page already navigated to the running app (`window.flowrunApp`
+- `page` is a Playwright page already navigated to the running app (`window.dycadApp`
   is available).
 - Do the setup and assertion via a single `js(page, "async () => {...}")` call where
   possible — keeps the check self-contained and fast.
@@ -82,7 +82,7 @@ failures hard to diagnose — prefer more small checks over fewer large ones.
 
 ## What this suite deliberately doesn't do
 
-- No visual/screenshot regression testing — FlowRun's correctness is almost entirely
+- No visual/screenshot regression testing — DyCAD's correctness is almost entirely
   structural (data model, layout math, routing geometry), not pixel-level rendering.
 - No coverage of every UI dialog end-to-end — a few checks exercise the underlying
   commands directly (faster, more stable) rather than clicking through every modal.

@@ -1,7 +1,7 @@
 <div class="docs-content">
 
-<h1>FlowRun — Instructions</h1>
-<p class="docs-lead">FlowRun is a browser-based enterprise architecture modeling tool built around ArchiMate,
+<h1>DyCAD — Instructions</h1>
+<p class="docs-lead">DyCAD is a browser-based enterprise architecture modeling tool built around ArchiMate,
 with one addition standard ArchiMate tools don't have: <strong>Streams</strong> — a tagging and pattern-generation
 layer that lets you describe and regenerate whole business flows, not just draw individual boxes and lines.
 This page is a working reference, not a tutorial — skim the headings, come back to the section you need.</p>
@@ -21,7 +21,7 @@ This page is a working reference, not a tutorial — skim the headings, come bac
 </nav>
 
 <h2 id="data-model">1. The Data Model</h2>
-<p>Five kinds of record make up everything in FlowRun. Understanding how they relate is the single most useful
+<p>Five kinds of record make up everything in DyCAD. Understanding how they relate is the single most useful
 thing to know before you start clicking around — most "why did that happen" moments trace back to this.</p>
 
 <table class="docs-table">
@@ -71,7 +71,7 @@ color), that's the ViewMember-level fields at the top of the property panel, des
 <p>A Stream is a tag you attach to parts and connectors to say "these belong to this named business flow."
 Streams are what the <strong>Generate Stream</strong> and <strong>Remap</strong> commands key off of — a
 stream template describes the shape a flow should take (which element types, in what order, how they connect),
-and FlowRun builds or reorganizes a set of tagged nodes to match it. This is the part of FlowRun that goes
+and DyCAD builds or reorganizes a set of tagged nodes to match it. This is the part of DyCAD that goes
 beyond standard ArchiMate drawing: instead of manually placing and connecting a dozen boxes for a business
 capability flow, you generate the whole pattern from a template and a few names.</p>
 
@@ -126,7 +126,7 @@ canvas. Availability depends on what's selected — greyed out means the current
   <thead><tr><th>Command</th><th>What it does</th></tr></thead>
   <tbody>
     <tr><td><strong>Generate Stream</strong></td><td>Builds a whole flow from a stream template — pick a
-    template, name the function/capability/entity, and FlowRun creates and connects the matching set of parts
+    template, name the function/capability/entity, and DyCAD creates and connects the matching set of parts
     for you.</td></tr>
     <tr><td><strong>Duplicate Stream</strong></td><td>Clones an existing stream (a part that already has a
     stream tag) under a new name — useful for variations on an existing flow without starting from scratch.</td></tr>
@@ -254,14 +254,14 @@ controls to choose which one you're running.</p>
 
 <h2 id="archimate">7. ArchiMate Import</h2>
 <p>Import a standard ArchiMate 3.0 Exchange Format file (File menu) to bring in its elements, relationships,
-and views as FlowRun parts/connectors/views. Notes on how it handles two ArchiMate conventions that don't map
-directly onto FlowRun's own model:</p>
+and views as DyCAD parts/connectors/views. Notes on how it handles two ArchiMate conventions that don't map
+directly onto DyCAD's own model:</p>
 <ul>
-  <li><strong>Junctions</strong> (AND/OR routing points) aren't imported as nodes — FlowRun has no equivalent.
+  <li><strong>Junctions</strong> (AND/OR routing points) aren't imported as nodes — DyCAD has no equivalent.
   Instead, each junction is dissolved: every real source connects directly to every real target it fed
   through the junction, with a note recording which logic (AND/OR) the junction used to represent.</li>
   <li><strong>Nested shapes</strong> — some ArchiMate diagrams show a Composition or Aggregation relationship
-  by drawing one shape inside another instead of a connecting line. FlowRun detects this and adds the
+  by drawing one shape inside another instead of a connecting line. DyCAD detects this and adds the
   connector anyway, noting on whichever record it had to create ("connector" if the relationship didn't exist
   yet, otherwise the view placement) that it was inferred from nesting rather than an explicit line.</li>
 </ul>
@@ -283,7 +283,7 @@ them in place rather than duplicating.</p>
   a visual change from editing them.</li>
   <li><strong>Everything nested-shape or junction-related is a permanent tradeoff, not a bug to chase</strong> —
   force-directed layout can't guarantee every edge in a cycle lands in an adjacent cell (a hard 2D-layout
-  limit, not a FlowRun gap), and obstacle-avoiding routing only looks at nearby obstacles for performance
+  limit, not a DyCAD gap), and obstacle-avoiding routing only looks at nearby obstacles for performance
   reasons on large diagrams.</li>
 </ul>
 

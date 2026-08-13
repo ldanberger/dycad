@@ -30,7 +30,7 @@ class App {
     if (this.refreshSimToolbar) this.refreshSimToolbar();
     document.getElementById('save-json-btn').classList.toggle('dirty', this.store.dirty);
     document.getElementById('loaded-file-name').textContent = this.store.loadedFileName ? `(${this.store.loadedFileName})` : '';
-    document.body.dataset.theme = localStorage.getItem('flowrun-theme') || 'light';
+    document.body.dataset.theme = localStorage.getItem('dycad-theme') || 'light';
   }
 
   recordAndRender() {
@@ -957,7 +957,7 @@ class App {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'flowrun-model.json';
+    a.download = 'dycad-model.json';
     a.click();
     URL.revokeObjectURL(url);
     this.store.dirty = false;
@@ -1423,7 +1423,7 @@ function showAbortScreen() {
 }
 
 async function bootstrap() {
-  document.body.dataset.theme = localStorage.getItem('flowrun-theme') || 'light';
+  document.body.dataset.theme = localStorage.getItem('dycad-theme') || 'light';
   const versionEl = document.getElementById('app-version');
   versionEl.textContent = `v${APP_VERSION}`;
   versionEl.title = 'Designed by:\nLarry Danberger, Calgary, AB, Canada\nLarry.Danberger@larryhere.com\nCoding by Claude';
@@ -1442,7 +1442,7 @@ async function bootstrap() {
   document.body.appendChild(buildMarkerDefs(store));
 
   const app = new App(store);
-  window.flowrunApp = app; // debugging aid
+  window.dycadApp = app; // debugging aid
 
   const homeView = store.doc.views[0];
   const homeTab = app.createCanvasTab(homeView);
@@ -1484,8 +1484,8 @@ function wireGlobalEvents(app) {
   // ===== resizable left/right panels =====
   const leftPanel = document.getElementById('left-panel');
   const rightPanel = document.getElementById('right-panel');
-  const savedLeft = Number(localStorage.getItem('flowrun-left-width'));
-  const savedRight = Number(localStorage.getItem('flowrun-right-width'));
+  const savedLeft = Number(localStorage.getItem('dycad-left-width'));
+  const savedRight = Number(localStorage.getItem('dycad-right-width'));
   if (savedLeft) leftPanel.style.width = `${savedLeft}px`;
   if (savedRight) rightPanel.style.width = `${savedRight}px`;
 
@@ -1510,17 +1510,17 @@ function wireGlobalEvents(app) {
       document.addEventListener('pointerup', onUp);
     });
   }
-  wireResizer(document.getElementById('left-resizer'), leftPanel, 'left', 'flowrun-left-width');
-  wireResizer(document.getElementById('right-resizer'), rightPanel, 'right', 'flowrun-right-width');
+  wireResizer(document.getElementById('left-resizer'), leftPanel, 'left', 'dycad-left-width');
+  wireResizer(document.getElementById('right-resizer'), rightPanel, 'right', 'dycad-right-width');
 
   // ===== collapsible panels (toolkit/selection/commands/properties) — default expanded =====
   document.querySelectorAll('.panel-section.collapsible').forEach((section) => {
     const panelId = section.dataset.panelId;
-    const collapsed = localStorage.getItem(`flowrun-panel-${panelId}-collapsed`) === 'true';
+    const collapsed = localStorage.getItem(`dycad-panel-${panelId}-collapsed`) === 'true';
     section.classList.toggle('collapsed', collapsed);
     section.querySelector('.panel-toggle').addEventListener('click', () => {
       const nowCollapsed = section.classList.toggle('collapsed');
-      localStorage.setItem(`flowrun-panel-${panelId}-collapsed`, String(nowCollapsed));
+      localStorage.setItem(`dycad-panel-${panelId}-collapsed`, String(nowCollapsed));
     });
   });
 
@@ -1985,9 +1985,9 @@ function wireGlobalEvents(app) {
   });
 
   document.getElementById('theme-toggle-btn').addEventListener('click', () => {
-    const cur = localStorage.getItem('flowrun-theme') || 'light';
+    const cur = localStorage.getItem('dycad-theme') || 'light';
     const next = cur === 'light' ? 'dark' : 'light';
-    localStorage.setItem('flowrun-theme', next);
+    localStorage.setItem('dycad-theme', next);
     document.body.dataset.theme = next;
   });
 

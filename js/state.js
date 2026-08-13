@@ -1,4 +1,4 @@
-// state.js — central store for FlowRun.
+// state.js — central store for DyCAD.
 
 function newId() {
   return (crypto.randomUUID && crypto.randomUUID()) || `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -82,7 +82,7 @@ class Store {
     // user-loaded JSON file, for secrets (API keys etc.) that must never end up in a
     // save file. Exposed to scripts as ctx.secrets. Memory-only — does NOT survive a
     // page refresh (must be re-loaded each session); does survive closing/reopening
-    // FlowRun's own tabs/views, since it's unrelated to tab lifecycle.
+    // DyCAD's own tabs/views, since it's unrelated to tab lifecycle.
     this.localSettings = {};
     // Filename of the last file that fully replaced store.doc (Save/Load JSON's own
     // "Load JSON" button, File > Load, File > Load Example) — NOT set by Import Data,

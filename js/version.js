@@ -1096,4 +1096,30 @@
 // 'c'-type connectors as before, and the two connector types have genuinely independent
 // routing settings. Added six new permanent regression checks covering all of the above
 // — full suite now 29/29.
-export const APP_VERSION = '0.62';
+// 0.63 = Rebrand: FlowRun -> DyCAD. Every user-facing name and every code identifier
+// that referenced the old name has been updated: the page title, public/instructions.html
+// (10 mentions), README.md and tests/README.md, code comments in state.js/archimate.js,
+// the debug global window.flowrunApp -> window.dycadApp (and all 27 references to it in
+// tests/run_all.py updated to match, so the suite still runs), and every localStorage
+// key (theme, left/right panel widths, panel-collapsed states, Root Properties collapsed
+// state) renamed from flowrun-* to dycad-*. Download filenames changed too: saved model
+// files are now dycad-model.json, simulation snapshots dycad-sim-*.json.
+// Two deliberate exceptions, not oversights: (1) the simulation snapshot file format's
+// internal "kind" field is now 'dycad-sim-snapshot' for newly-saved files, but loading
+// still accepts the old 'flowrun-sim-snapshot' value too, so snapshots saved before this
+// rebrand still load correctly instead of being silently rejected. (2) historical
+// changelog entries further up this file that describe past work (e.g. the ArchiMate
+// import build steps) still say "FlowRun" — left as-is since they're an accurate record
+// of what was true at the time, not something to retroactively rewrite. localStorage
+// preference keys were NOT given the same old-key-fallback treatment as the snapshot
+// format — renamed outright, so existing users will see their theme/panel-width/
+// collapsed-state preferences reset once after updating. Considered a reasonable,
+// expected one-time side effect of a rebrand rather than something worth the added
+// complexity of a migration for low-stakes UI preferences.
+// Verified with a real browser: confirmed the actual page title, confirmed
+// window.dycadApp exists and window.flowrunApp no longer does, confirmed toggling the
+// theme writes to the new localStorage key and not the old one. Full regression suite
+// re-run after the window.flowrunApp -> window.dycadApp rename across all 27 references
+// in tests/run_all.py itself — 29/29 still passing, confirming the rename didn't silently
+// break the suite's own ability to reach the app.
+export const APP_VERSION = '0.63';

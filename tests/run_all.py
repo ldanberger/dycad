@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FlowRun regression suite.
+DyCAD regression suite.
 
 Runs a fixed set of checks against a live instance of the app via Playwright,
 covering the mechanisms that have actually broken during development (force-directed
@@ -10,7 +10,7 @@ This is not exhaustive coverage of every feature — it's the regression net for
 things that are easy to silently break while changing something else.
 
 Usage:
-    cd flowrun
+    cd dycad
     python3 tests/run_all.py
 
 Requires: playwright (sync API), a Python 3 with `python3 -m http.server` available.
@@ -62,7 +62,7 @@ def check_boots_clean(page):
 def check_example_simulates(page):
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const sim = await import('./js/simulation.js');
       const res = await fetch('public/examples/right badge chain demo.json', { cache: 'no-store' });
       const obj = await res.json();
@@ -85,7 +85,7 @@ def check_example_simulates(page):
 def check_remap_patterns(page):
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const commands = await import('./js/commands.js');
       const view = store.addView('RegrRemap_' + Date.now());
       view.viewType = 'ff';
@@ -114,7 +114,7 @@ def check_force_directed_no_runaway_drift(page):
     thousands of pixels apart. Confirms a-b/c-d stay within a sane bound."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const commands = await import('./js/commands.js');
       const view = store.addView('RegrDrift_' + Date.now());
       view.viewType = 'ff';
@@ -148,7 +148,7 @@ def check_force_directed_adjacent_cells(page):
     just 'closer than before'."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const commands = await import('./js/commands.js');
       const view = store.addView('RegrAdjacent_' + Date.now());
       view.viewType = 'ff';
@@ -176,7 +176,7 @@ def check_force_directed_adjacent_cells(page):
 def check_smart_check_view(page):
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const commands = await import('./js/commands.js');
       const view = store.addView('RegrSCV_' + Date.now());
       view.viewType = 'ff';
@@ -203,7 +203,7 @@ def check_smart_check_view(page):
 def check_property_panel_field_split(page):
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const view = store.addView('RegrPanel_' + Date.now());
       view.viewType = 'ff';
       const tab = app.createCanvasTab(view);
@@ -236,7 +236,7 @@ def check_spacing_scale_uniform(page):
     compressing their nearest gap while other gaps scaled correctly."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const view = store.addView('RegrSpacing_' + Date.now());
       view.viewType = 'ff';
       const tab = app.createCanvasTab(view);
@@ -263,7 +263,7 @@ def check_spacing_scale_uniform(page):
 def check_routing_avoids_obstacle(page):
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const view = store.addView('RegrRouting_' + Date.now());
       view.viewType = 'ff';
       view.nodeWidth = 130; view.nodeHeight = 46;
@@ -298,7 +298,7 @@ def check_archimate_import_fixture(page):
     xml_text = fixture_path.read_text()
     result = js(page, f"""
     async () => {{
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const xmlText = {json.dumps(xml_text)};
       const blob = new Blob([xmlText], {{ type: 'application/xml' }});
       const file = new File([blob], 'mini_archimate.xml', {{ type: 'application/xml' }});
@@ -339,7 +339,7 @@ def check_archimate_import_fixture(page):
 def check_timestamps(page):
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const part = store.createPart({ type: 'Unknown', label: 'TS', model: store.defaultModel, streams: [] });
       const formatOk = /^\\d{8}_\\d{6}$/.test(part.createdAt);
       const equalInitially = part.createdAt === part.updatedAt;
@@ -363,7 +363,7 @@ def check_section_drag_title_overlap(page):
     rejecting them, since title's elementTypes is always empty."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const commands = await import('./js/commands.js');
       const sections = await import('./js/sections.js');
       const view = store.addView('RegrSectionDrag_' + Date.now());
@@ -392,7 +392,7 @@ def check_section_drag_no_stacking(page):
     directly on top, hiding the existing node with no visual sign anything went wrong."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const sections = await import('./js/sections.js');
       const view = store.addView('RegrNoStack_' + Date.now());
       view.viewType = 'org';
@@ -437,7 +437,7 @@ def check_section_drag_grows_full_section(page):
     a drop into it should grow the section by a row rather than accept an overlap."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const sections = await import('./js/sections.js');
       const view = store.addView('RegrGrow_' + Date.now());
       view.viewType = 'org';
@@ -482,7 +482,7 @@ def check_connector_popover_matches_panel(page):
     from/to element types."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const rules = await import('./js/rules.js');
       const view = store.addView('RegrPopover_' + Date.now());
       view.viewType = 'ff';
@@ -528,7 +528,7 @@ def check_instructions_tab_on_startup(page):
     than silently failing or duplicating it."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const out = {};
       const activeTab = store.activeTab();
       out.activeIsDocs = activeTab && activeTab.type === 'docs';
@@ -565,7 +565,7 @@ def check_import_logs_to_message_log(page):
     xml_text = fixture_path.read_text()
     result = js(page, f"""
     async () => {{
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const homeTab = store.tabs.find(t => t.type === 'canvas');
       app.switchToTab(homeTab.id);
       const xmlText = {json.dumps(xml_text)};
@@ -593,7 +593,7 @@ def check_section_rowcount_realigns_nodes(page):
     section boundaries (rescaleSectionPositions existed but wasn't wired to this)."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const commands = await import('./js/commands.js');
       const sections = await import('./js/sections.js');
       const homeTab = store.tabs.find(t => t.type === 'canvas');
@@ -633,7 +633,7 @@ def check_new_content_sized_and_non_overlapping(page):
     overlaps that resize could create."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const commands = await import('./js/commands.js');
       const out = {};
       const homeTab = store.tabs.find(t => t.type === 'canvas');
@@ -700,7 +700,7 @@ def check_smart_check_view_default_levels_unlimited(page):
     (unlimited/"All"), not 1."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const homeTab = store.tabs.find(t => t.type === 'canvas');
       app.switchToTab(homeTab.id);
       app.promptSmartCheckView();
@@ -725,7 +725,7 @@ def check_force_directed_options(page):
     a row instead of scattering)."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const commands = await import('./js/commands.js');
       const homeTab = store.tabs.find(t => t.type === 'canvas');
       app.switchToTab(homeTab.id);
@@ -784,7 +784,7 @@ def check_sfce_import_and_generate(page):
     section value silently never reached the generated part until fixed."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const commands = await import('./js/commands.js');
       const sfce = await import('./js/sfce.js');
       const homeTab = store.tabs.find(t => t.type === 'canvas');
@@ -859,7 +859,7 @@ def check_generate_industry_no_collapse_keeps_functions_separate(page):
     the second Function (and its whole branch) just vanished."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const commands = await import('./js/commands.js');
       const sfce = await import('./js/sfce.js');
       const homeTab = store.tabs.find(t => t.type === 'canvas');
@@ -909,7 +909,7 @@ def check_enterprise_template_is_short_default(page):
     default pointing at the wrong one."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const templates = store.settings.streamTemplates || [];
       const ent = templates.find(t => t.name === 'Enterprise');
       const entFull = templates.find(t => t.name === 'Enterprise Full');
@@ -933,7 +933,7 @@ def check_generate_industry_selection_cap(page):
     last individual stream happened to select)."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const commands = await import('./js/commands.js');
       const homeTab = store.tabs.find(t => t.type === 'canvas');
       app.switchToTab(homeTab.id);
@@ -965,7 +965,7 @@ def check_modal_no_close_on_outside_click(page):
     via their own Cancel/Close controls, not a click anywhere outside the box."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const homeTab = store.tabs.find(t => t.type === 'canvas');
       app.switchToTab(homeTab.id);
       const out = {};
@@ -1014,7 +1014,7 @@ def check_sfce_catalog_page(page):
     Load SFCE import."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const homeTab = store.tabs.find(t => t.type === 'canvas');
       app.switchToTab(homeTab.id);
       app.promptSfceCatalog();
@@ -1047,7 +1047,7 @@ def check_routing_style_per_connector_type(page):
     "default", which still curves 'c'-type connectors."""
     result = js(page, """
     async () => {
-      const app = window.flowrunApp, store = app.store;
+      const app = window.dycadApp, store = app.store;
       const homeTab = store.tabs.find(t => t.type === 'canvas');
       app.switchToTab(homeTab.id);
 

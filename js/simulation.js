@@ -323,7 +323,7 @@ function saveSimSnapshot(app, modelName) {
     values[partId] = { value: entry.value, state: entry.state, lastError: entry.lastError || null };
   }
   const snapshot = {
-    kind: 'flowrun-sim-snapshot', version: 2,
+    kind: 'dycad-sim-snapshot', version: 2,
     tick: runtime.tick, timestamp: new Date().toISOString(),
     model: modelName,
     values, log: store.simLog.get(modelName) || [],
@@ -332,7 +332,7 @@ function saveSimSnapshot(app, modelName) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `flowrun-sim-${modelName}-tick${runtime.tick}.json`;
+  a.download = `dycad-sim-${modelName}-tick${runtime.tick}.json`;
   a.click();
   URL.revokeObjectURL(url);
   app.toast('Simulation snapshot saved.');
@@ -344,7 +344,9 @@ async function loadSimSnapshot(app, modelName, file) {
   try {
     const text = await file.text();
     const snap = JSON.parse(text);
-    if (snap.kind !== 'flowrun-sim-snapshot') { app.toast('Not a simulation snapshot file.', true); return; }
+    // Accepts the pre-rebrand 'flowrun-sim-snapshot' kind too, so snapshots saved
+    // before the DyCAD rename still load correctly rather than being rejected outright.
+    if (snap.kind !== 'dycad-sim-snapshot' && snap.kind !== 'flowrun-sim-snapshot') { app.toast('Not a simulation snapshot file.', true); return; }
     if (snap.model && snap.model !== modelName) {
       const proceed = await app.confirmModal(`This snapshot was recorded for model "${snap.model}", but "${modelName}" is currently selected. Load it into "${modelName}" anyway?`);
       if (!proceed) return;

@@ -1,6 +1,6 @@
-# DyCAD
+# DyCAD (formerly FlowRun)
 
-A single-page workflow canvas for enterprise architects. Pure vanilla
+A single-page workflow designer and simulator canvas for enterprise architects. Pure vanilla
 JS/HTML/CSS — no backend, no build step, no npm packages. Open `index.html` in a browser
 served from this folder (a local static server is fine; `file://` will block the
 `fetch()` calls to `public/*.json` and `public/relationships.xml` due to browser CORS
@@ -43,11 +43,6 @@ public/                 copies of the source data files, fetched at runtime
 tests/                  lightweight Playwright-based regression suite — see tests/README.md
 ```
 
-Per-version changes from Step 26 onward are documented as detailed comments directly
-above `APP_VERSION` in `js/version.js` (what changed, why, and how it was verified) rather
-than in this file — check there for anything past Step 25. The step-by-step log below
-covers the earlier build (Steps 2–23).
-
 ## Known limitations
 
 A few permanent, deliberate tradeoffs — not bugs to keep re-investigating:
@@ -72,3 +67,44 @@ A few permanent, deliberate tradeoffs — not bugs to keep re-investigating:
   connectors and nodes" checked, a pair that was already both-present and disconnected
   before the command ran stays disconnected — fixing that is specifically "missing
   connectors"'s job. Most users will want both checked together.
+
+## Design decisions on underspecified areas
+
+The instructions document has more implicit logic in the sample data (`onestream.json`)
+than in its own prose, and a few things are referenced without a full spec. Where I had
+to make a call, here's what I did and why — flag any of these if they don't match intent:
+
+- **Generate / createStream**: I reverse-engineered the exact labeling and passive-node
+  logic against `onestream.json`'s `home` view, which is consistent with the Enterprise
+  stream template's `value`/`passive` arrays and matches node-for-node (same relationship
+  names, same connectorType `s`). The `Data` template's `capabilityNameBegin`/
+  `entityNameBegin` intentionally reference element types that don't exist
+  (`BusinessServicetbd`, `TechnologyLogicalComponenttbd`) — Generate correctly aborts
+  with an error for that template rather than proceeding, per spec.
+- **Undo/redo snapshots**: the spec says "each tab owns nodes/edges/viewport/history,"
+  but nodes/edges are really just viewMembers referencing globally-shared Parts/Connectors
+  across views. I snapshot the full doc (`parts`, `connectors`, `viewMembers`, `views`)
+  per recorded action, keyed per tab. This is safer than a partial snapshot (it can't
+  desync from cross-view references) at the cost of slightly larger snapshots.
+- **Level Down "preserve id so edges resolve"**: taken literally, this would require two
+  viewMembers sharing one `id` across two views, which breaks id-based lookup. I copy the
+  neighbor into the new view with a *new* viewMember id but the *same* `objectId` (the
+  underlying Part), marked `isExternal: true` — functionally equivalent (same node,
+  recognizable as external) without ambiguous ids.
+- **Level Up linkedViewName direction**: the new "Unknown" node's `linkedViewName` points
+  back down to the view you leveled up *from*, mirroring how Level Down's placeholder
+  node links down into its new sub-view. Double-clicking either navigates to the
+  more-detailed view.
+- **"Merge" command**: mentioned once in the instructions but never specified (also
+  flagged in the earlier audit of this project). Not implemented — no behavior to infer.
+- **connectorType 's' vs 'c'**: `s` (stream) is used exactly where specified (Generate,
+  Duplicate Stream); everything drawn by hand via the connect-handle uses `c`.
+- **Relationship validation**: `relationships.xml` (full ArchiMate 3.2 matrix) is merged
+  with `custom.json`'s `relationshipPairs` — union of relation letters per `A→B` pair,
+  A→B never inferred to also allow B→A. This is what lets the proprietary types
+  (`GeneralActor`, `Tester`, `Multi`, etc., absent from the ArchiMate standard) get valid
+  connections, since those rules only exist in `custom.json`.
+- **View toggles**: `chkShowElementTypes` and `chkShowConnectors` have visible effects
+  (type label, edge visibility). `chkShowKeys` shows the part id under the label.
+  `chkShowOnPageCatalogs` is stored/persisted but has no rendering behavior yet — the
+  spec doesn't describe what an "on-page catalog" should look like.

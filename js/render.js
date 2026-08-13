@@ -788,14 +788,14 @@ function renderViewOnlyProperties(app, view) {
  * fresh on every call since this content is injected dynamically, unlike the sidebar's
  * own sections which are wired once at page load. */
 function renderRootPropertiesSection(app, entityKey, accessors, body, ctx) {
-  const collapsed = localStorage.getItem('flowrun-root-properties-collapsed') === 'true';
+  const collapsed = localStorage.getItem('dycad-root-properties-collapsed') === 'true';
   const wrap = document.createElement('div');
   wrap.className = 'panel-section collapsible root-properties-section' + (collapsed ? ' collapsed' : '');
   wrap.innerHTML = `<h3 class="panel-title" style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border);"><button class="panel-toggle" title="Expand/collapse">▾</button>Root Properties</h3><div class="panel-body"></div>`;
   body.appendChild(wrap);
   wrap.querySelector('.panel-toggle').addEventListener('click', () => {
     const nowCollapsed = wrap.classList.toggle('collapsed');
-    localStorage.setItem('flowrun-root-properties-collapsed', String(nowCollapsed));
+    localStorage.setItem('dycad-root-properties-collapsed', String(nowCollapsed));
   });
   renderShowFieldsPanel(app, null, entityKey, accessors, {}, wrap.querySelector('.panel-body'), ctx);
 }
