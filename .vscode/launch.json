@@ -1,0 +1,13 @@
+ {
+     "version": "0.2.0",
+  "configurations": [
+    
+        {
+      "name": "Debug with Live Server",
+      "type": "msedge",
+      "request": "launch",
+      "url": "http://localhost:5500/index.html",
+      "webRoot": "${workspaceFolder}"
+    }
+  ]
+}
