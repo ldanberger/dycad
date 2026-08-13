@@ -1,0 +1,178 @@
+{
+  "version": "0.2",
+  "readme": {
+    "note": "Script variable reference demo. Four independent nodes (no need to run them in any particular order) show: current date/time, a node's own attributes (ctx.part), declaring new local variables in a script, reading the incoming packet (ctx.inputs), and folding new variables into the outgoing packet (the returned value). Step or Run Simulation, then watch the badges and the Message Log."
+  },
+  "defaultModel": "Reference",
+  "currentView": "variable-reference-demo",
+  "models": [
+    {
+      "modelName": "Reference"
+    }
+  ],
+  "views": [
+    {
+      "id": "variable-reference-demo",
+      "viewName": "variable-reference-demo",
+      "viewType": "ff",
+      "chkShowConnectorType": true,
+      "chkShowStreamType": false,
+      "chkShowKeys": false,
+      "chkShowElementTypes": true,
+      "chkShowDescription": true,
+      "chkShowOnPageCatalogs": false,
+      "chkShowSimValues": true,
+      "margin": 50,
+      "sections": [],
+      "nodeWidth": 150,
+      "nodeHeight": 56,
+      "remapSortKeys": null,
+      "spacingScale": 1
+    }
+  ],
+  "parts": [
+    {
+      "id": "part-datetime-demo",
+      "type": "Unknown",
+      "label": "DateTimeDemo",
+      "rawLabel": "DateTimeDemo",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "Current date/time: plain JS Date() works inside a script, same as anywhere else.",
+      "scriptEnabled": true,
+      "script": "// current date/time \u2014 plain JS, nothing special\nconst now = new Date();\nconst iso = now.toISOString();\nconst readable = now.toLocaleString();\nctx.log('current time: ' + readable);\nreturn { value: { iso, readable, tick: ctx.tick }, state: {} };"
+    },
+    {
+      "id": "part-attrs-demo",
+      "type": "Unknown",
+      "label": "PartAttributesDemo",
+      "rawLabel": "PartAttributesDemo",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "Underlying part attributes: ctx.part gives you the node's own id/type/label/model.",
+      "scriptEnabled": true,
+      "script": "// ctx.part is this node's own Part record \u2014 its identity, not incoming data\nconst info = { id: ctx.part.id, type: ctx.part.type, label: ctx.part.label, model: ctx.part.model };\nctx.log('I am \"' + ctx.part.label + '\" of type ' + ctx.part.type);\nreturn { value: info, state: {} };"
+    },
+    {
+      "id": "part-packet-emitter",
+      "type": "Unknown",
+      "label": "PacketEmitter",
+      "rawLabel": "PacketEmitter",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "New variables in a script, folded into the outgoing packet \u2014 the object you return as `value` becomes what PacketReceiver sees as its incoming packet next tick.",
+      "scriptEnabled": true,
+      "script": "// declare new local variables, then put them in the RETURNED value \u2014 that return\n// value is the outgoing packet every downstream connector will see as their input\nlet counter = (ctx.state.counter || 0) + 1;\nconst tag = 'batch-' + counter;\nconst payload = { counter, tag, generatedAt: new Date().toISOString() };\nctx.log('emitting packet ' + tag);\nreturn { value: payload, state: { counter } };"
+    },
+    {
+      "id": "part-packet-receiver",
+      "type": "Unknown",
+      "label": "PacketReceiver",
+      "rawLabel": "PacketReceiver",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "Content in the incoming packet: ctx.inputs[i].value is exactly what the upstream node returned as `value` last tick. This node reads it, adds its own new variable, and passes an enriched packet onward.",
+      "scriptEnabled": true,
+      "script": "// ctx.inputs is an array \u2014 one entry per incoming connector this tick.\n// value is undefined until the upstream node has actually produced something.\nif (ctx.inputs.length === 0) return { value: null, state: {} };\nconst incoming = ctx.inputs[0].value;\nif (!incoming) return { value: null, state: {} };\n\n// read fields off the incoming packet\nconst receivedTag = incoming.tag;\nconst receivedCounter = incoming.counter;\n\n// a NEW variable of this node's own\nconst receivedAt = new Date().toISOString();\n\nctx.log('received ' + receivedTag + ' (counter=' + receivedCounter + ') from ' + ctx.inputs[0].fromLabel);\n\n// fold the new variable INTO the outgoing packet, alongside everything received\nreturn { value: { ...incoming, receivedAt, receivedBy: ctx.part.label }, state: {} };"
+    }
+  ],
+  "connectors": [
+    {
+      "id": "conn-emitter-receiver",
+      "from": "part-packet-emitter",
+      "to": "part-packet-receiver",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "connectorType": "c",
+      "relationship": "Association"
+    }
+  ],
+  "viewMembers": [
+    {
+      "id": "vm-datetime-demo",
+      "view": "variable-reference-demo",
+      "objectType": "part",
+      "objectId": "part-datetime-demo",
+      "x": 60,
+      "y": 60,
+      "fillColor": "#ff5e61",
+      "order": 0,
+      "note": "",
+      "linkedViewName": "",
+      "isExternal": false,
+      "sectionId": ""
+    },
+    {
+      "id": "vm-attrs-demo",
+      "view": "variable-reference-demo",
+      "objectType": "part",
+      "objectId": "part-attrs-demo",
+      "x": 280,
+      "y": 60,
+      "fillColor": "#ff5e61",
+      "order": 0,
+      "note": "",
+      "linkedViewName": "",
+      "isExternal": false,
+      "sectionId": ""
+    },
+    {
+      "id": "vm-packet-emitter",
+      "view": "variable-reference-demo",
+      "objectType": "part",
+      "objectId": "part-packet-emitter",
+      "x": 60,
+      "y": 200,
+      "fillColor": "#ff5e61",
+      "order": 0,
+      "note": "",
+      "linkedViewName": "",
+      "isExternal": false,
+      "sectionId": ""
+    },
+    {
+      "id": "vm-packet-receiver",
+      "view": "variable-reference-demo",
+      "objectType": "part",
+      "objectId": "part-packet-receiver",
+      "x": 320,
+      "y": 200,
+      "fillColor": "#ff5e61",
+      "order": 0,
+      "note": "",
+      "linkedViewName": "",
+      "isExternal": false,
+      "sectionId": ""
+    },
+    {
+      "id": "vm-conn-emitter-receiver",
+      "view": "variable-reference-demo",
+      "objectType": "connector",
+      "objectId": "conn-emitter-receiver",
+      "order": 0,
+      "note": "",
+      "fromVmId": "vm-packet-emitter",
+      "toVmId": "vm-packet-receiver"
+    }
+  ],
+  "settingsUser": {
+    "relationshipPairs": []
+  }
+}

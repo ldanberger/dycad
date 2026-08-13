@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://www.opengroup.org/xsd/archimate/3.0/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" identifier="id-mini-model">
+  <name>Mini Regression Fixture</name>
+  <elements>
+    <element identifier="id-elA" xsi:type="BusinessActor"><name>A</name></element>
+    <element identifier="id-elB" xsi:type="BusinessActor"><name>B</name></element>
+    <element identifier="id-elJ" xsi:type="AndJunction"><name>J</name></element>
+    <element identifier="id-elWhole" xsi:type="ApplicationComponent"><name>Whole</name></element>
+    <element identifier="id-elPart" xsi:type="ApplicationComponent"><name>Part</name></element>
+  </elements>
+  <relationships>
+    <relationship identifier="id-relAJ" xsi:type="Triggering" source="id-elA" target="id-elJ" />
+    <relationship identifier="id-relJB" xsi:type="Triggering" source="id-elJ" target="id-elB" />
+    <relationship identifier="id-relComp" xsi:type="Composition" source="id-elWhole" target="id-elPart" />
+  </relationships>
+  <views>
+    <diagrams>
+      <view identifier="id-view1" xsi:type="Diagram">
+        <name>Mini View</name>
+        <node identifier="id-nodeA" xsi:type="Element" elementRef="id-elA" x="0" y="0" w="120" h="55" />
+        <node identifier="id-nodeJ" xsi:type="Element" elementRef="id-elJ" x="150" y="0" w="20" h="20" />
+        <node identifier="id-nodeB" xsi:type="Element" elementRef="id-elB" x="300" y="0" w="120" h="55" />
+        <node identifier="id-nodeWhole" xsi:type="Element" elementRef="id-elWhole" x="0" y="150" w="300" h="200">
+          <node identifier="id-nodePart" xsi:type="Element" elementRef="id-elPart" x="30" y="180" w="120" h="55" />
+        </node>
+        <connection identifier="id-connAJ" xsi:type="Connection" relationshipRef="id-relAJ" source="id-nodeA" target="id-nodeJ" />
+        <connection identifier="id-connJB" xsi:type="Connection" relationshipRef="id-relJB" source="id-nodeJ" target="id-nodeB" />
+      </view>
+    </diagrams>
+  </views>
+</model>

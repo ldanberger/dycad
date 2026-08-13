@@ -1,0 +1,290 @@
+<div class="docs-content">
+
+<h1>FlowRun — Instructions</h1>
+<p class="docs-lead">FlowRun is a browser-based enterprise architecture modeling tool built around ArchiMate,
+with one addition standard ArchiMate tools don't have: <strong>Streams</strong> — a tagging and pattern-generation
+layer that lets you describe and regenerate whole business flows, not just draw individual boxes and lines.
+This page is a working reference, not a tutorial — skim the headings, come back to the section you need.</p>
+
+<nav class="docs-toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#data-model">The Data Model</a></li>
+    <li><a href="#views">Views &amp; Layout</a></li>
+    <li><a href="#commands">Commands</a></li>
+    <li><a href="#filtering">Filtering, Streams &amp; Catalogs</a></li>
+    <li><a href="#properties">Property Panels</a></li>
+    <li><a href="#simulation">Simulation Scripting</a></li>
+    <li><a href="#archimate">ArchiMate Import</a></li>
+    <li><a href="#tips">Tips &amp; Things to Know</a></li>
+  </ol>
+</nav>
+
+<h2 id="data-model">1. The Data Model</h2>
+<p>Five kinds of record make up everything in FlowRun. Understanding how they relate is the single most useful
+thing to know before you start clicking around — most "why did that happen" moments trace back to this.</p>
+
+<table class="docs-table">
+  <thead><tr><th>Record</th><th>What it is</th><th>Key fields</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Part</strong></td>
+      <td>A "thing" in your architecture — an actor, capability, application, data entity, technology component,
+      etc. Parts are shared: the same part can appear on many views.</td>
+      <td>Type (from the toolkit), Label, Model, Description, Note, Script (see Simulation)</td>
+    </tr>
+    <tr>
+      <td><strong>Connector</strong></td>
+      <td>A relationship between two parts (Serves, Realizes, Triggers, Composition, etc.). Also shared across
+      views the same way parts are.</td>
+      <td>From, To, Relationship type, Model, Note</td>
+    </tr>
+    <tr>
+      <td><strong>View</strong></td>
+      <td>A diagram — what you actually look at and edit. A view doesn't contain parts or connectors directly;
+      it contains <em>placements</em> of them (see ViewMember, next).</td>
+      <td>Name, View Type, spacing/routing settings, display toggles</td>
+    </tr>
+    <tr>
+      <td><strong>ViewMember</strong></td>
+      <td>One part or connector's <em>appearance on one specific view</em> — its position, color, and whether
+      it's flagged "external." The same underlying part can have a different position and color on every view
+      that shows it, because each view has its own ViewMember for that part.</td>
+      <td>x/y position, Fill Color, Order, Linked View Name, External flag</td>
+    </tr>
+    <tr>
+      <td><strong>Model</strong></td>
+      <td>A namespace parts and connectors belong to — use it to separate as-is vs to-be architectures,
+      different business units, or anything else you want scoped independently. Simulation runs per-model.</td>
+      <td>Just a name — parts/connectors reference it</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Why this separation matters in practice:</strong> if you edit a part's Label or Type from the
+property panel, that change shows up on <em>every</em> view that part appears on — you're editing the shared
+thing, not just this drawing of it. If you only want to change how it looks on <em>this one view</em> (position,
+color), that's the ViewMember-level fields at the top of the property panel, described more in
+<a href="#properties">Property Panels</a> below.</p>
+
+<h3>Streams</h3>
+<p>A Stream is a tag you attach to parts and connectors to say "these belong to this named business flow."
+Streams are what the <strong>Generate Stream</strong> and <strong>Remap</strong> commands key off of — a
+stream template describes the shape a flow should take (which element types, in what order, how they connect),
+and FlowRun builds or reorganizes a set of tagged nodes to match it. This is the part of FlowRun that goes
+beyond standard ArchiMate drawing: instead of manually placing and connecting a dozen boxes for a business
+capability flow, you generate the whole pattern from a template and a few names.</p>
+
+<h2 id="views">2. Views &amp; Layout</h2>
+
+<h3>View types</h3>
+<p>Every view is one of a small set of types, chosen when you create it:</p>
+<ul>
+  <li><strong>Free form</strong> — an open canvas, place things anywhere. Most modeling happens here.</li>
+  <li><strong>Section-based views</strong> (e.g. "Business function organization," "empty with 1 section") —
+  the canvas is divided into fixed, named sections (a grid of cells), each restricted to certain element
+  types. Dragging a node snaps it to the nearest valid cell in the section it's dropped near; dropping onto an
+  occupied cell finds the next free one, and a completely full section automatically grows by a row rather
+  than let two nodes overlap.</li>
+</ul>
+
+<h3>Remap</h3>
+<p>Reorganizes a view's layout. Three patterns:</p>
+<ul>
+  <li><strong>Default</strong> — groups nodes by stream into rows, following the stream template's own
+  ordering.</li>
+  <li><strong>None</strong> — a plain sorted grid, no stream grouping.</li>
+  <li><strong>Force-directed</strong> — an entirely different approach: connected nodes are pulled together
+  and placed in directly adjacent grid cells; unconnected clusters are packed into their own separate regions.
+  Good for "just show me how this is actually connected" rather than a prescribed row order. Doesn't use sort
+  order or column limits, since the layout is driven by connectivity instead.</li>
+</ul>
+<p>Remap also has an "only remap filtered nodes" option — combine it with the Stream or Type filter to
+reorganize just a subset of a busy view without disturbing everything else.</p>
+
+<h3>Connector routing</h3>
+<p>A per-view setting (Root Properties on the view, or the view's own property panel) with three styles:</p>
+<ul>
+  <li><strong>Default</strong> — a gentle curve or straight line, no obstacle avoidance.</li>
+  <li><strong>Direct</strong> — routes around any node in the way with straight segments, falling back to the
+  default curve when nothing's actually blocking the path.</li>
+  <li><strong>Manhattan</strong> — same idea, but every segment is horizontal or vertical (right angles only).</li>
+</ul>
+<p>Routing only looks at obstacles near each connector's own path, not the whole diagram — this keeps large
+views fast, but means it won't reroute around something on the far side of the canvas that isn't actually in
+the way.</p>
+
+<h3>Spacing</h3>
+<p>The Spacing +/- control scales the gap between every node uniformly, keeping their relative arrangement
+intact — it doesn't reflow the layout, just stretches or compresses the space between what's already there.</p>
+
+<h2 id="commands">3. Commands</h2>
+<p>Available from the Commands panel (left sidebar) when a canvas view is active, and via right-click on the
+canvas. Availability depends on what's selected — greyed out means the current selection doesn't apply.</p>
+
+<table class="docs-table">
+  <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Generate Stream</strong></td><td>Builds a whole flow from a stream template — pick a
+    template, name the function/capability/entity, and FlowRun creates and connects the matching set of parts
+    for you.</td></tr>
+    <tr><td><strong>Duplicate Stream</strong></td><td>Clones an existing stream (a part that already has a
+    stream tag) under a new name — useful for variations on an existing flow without starting from scratch.</td></tr>
+    <tr><td><strong>Split Node</strong></td><td>Creates a sibling copy of the selected part and rewires its
+    outgoing connectors to the new copy — handy for splitting one node's responsibilities into two.</td></tr>
+    <tr><td><strong>Level Up</strong></td><td>Opens a new parent view containing this view's nodes, letting you
+    build a higher-level diagram that this one nests under.</td></tr>
+    <tr><td><strong>Level Down</strong></td><td>Pushes two or more selected nodes into a new sub-view,
+    replacing them here with a single node linked down to that detail view (double-click to navigate down;
+    double-click the linked placeholder to come back up).</td></tr>
+    <tr><td><strong>Merge</strong></td><td>Combines two or more selected nodes into one, keeping their
+    combined connections.</td></tr>
+    <tr><td><strong>Copy / Paste</strong></td><td>Standard copy-paste for selected nodes, within or across
+    views.</td></tr>
+    <tr><td><strong>Remap</strong></td><td>See <a href="#views">Views &amp; Layout</a> above.</td></tr>
+    <tr><td><strong>Redraw</strong></td><td>Recalculates the best node size for the current view based on its
+    content.</td></tr>
+    <tr><td><strong>Add Existing</strong></td><td>Brings parts that already exist elsewhere in the model into
+    this view (optionally including their connectors), instead of creating duplicates.</td></tr>
+    <tr><td><strong>Populate From Template</strong></td><td>Fills a view from a page template matching its
+    view type (e.g. a full "Enterprise Functions" section layout) — reuses existing parts by label/type/model
+    match where possible rather than duplicating them.</td></tr>
+    <tr><td><strong>Smart Check View</strong></td><td>(Advanced menu) Repairs gaps between a view and the
+    underlying model: adds any connector that should exist between two nodes already on the view, and
+    optionally pulls in nodes connected to what's already there (with a Levels setting for how many hops to
+    follow). Every change it makes is written to the Message Log, and it notes what it created directly on the
+    connector.</td></tr>
+    <tr><td><strong>Generate Industry / Generate Inventory View</strong></td><td>(Advanced menu) Bulk-generate
+    a starter set of parts/connectors for a named industry, or a summary inventory view of everything in the
+    model.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="filtering">4. Filtering, Streams &amp; Catalogs</h2>
+<ul>
+  <li><strong>Stream filter</strong> — show only nodes/connectors tagged with a chosen stream.</li>
+  <li><strong>Type filter</strong> — show only chosen element types; select-all/exclude-all and scrollable for
+  toolkits with many types.</li>
+  <li><strong>Connector levels</strong> — when a Stream or Type filter is active, how many extra hops of
+  connected nodes to also show beyond the ones that directly match (blank = unlimited). Lets you see a filtered
+  node's immediate context instead of it floating in isolation.</li>
+  <li><strong>Toolkit filters</strong> (left sidebar) — Source chips (TOGAF/ArchiMate/Other) and Group chips
+  (Application/Business/Data/etc., shown in light blue) narrow which element types appear in the drag-and-drop
+  toolkit itself.</li>
+  <li><strong>Catalog tables</strong> — Parts, Connectors, Views, and ViewMembers each have a full sortable
+  table (via the header menu), independent of any one diagram — useful for bulk review or finding something
+  by name rather than hunting across views. Selecting a row shows the same property panel a canvas selection
+  would.</li>
+</ul>
+
+<h2 id="properties">5. Property Panels</h2>
+<p>Selecting a node or connector on canvas shows two layers, deliberately kept separate:</p>
+<ul>
+  <li><strong>Top level</strong> — fields that belong to <em>this view's placement</em> of the part/connector:
+  position, Fill Color, Order, whether it's flagged External, and (for connectors) which nodes it connects on
+  this view.</li>
+  <li><strong>Root Properties</strong> (collapsible section below) — fields that belong to the underlying
+  part/connector itself, shared across every view: Label, Type, Description, Script, Note, Relationship, and
+  the read-only Created/Updated timestamps. Editing something here changes it everywhere that part or
+  connector appears, not just on this view.</li>
+</ul>
+<p>The same split applies to the Parts/Connectors catalog tables, which show only the Root Properties side
+(there's no "view placement" to speak of when you're not looking at a specific diagram).</p>
+<p><strong>A few fields exist in the panel but currently have no visible effect</strong> — Font Color, Font
+Size, and Border Color on a node, and Margin on a view. They're stored if you set them, but nothing in the
+current build reads them back to change how anything looks. Worth knowing so you don't spend time tuning a
+setting that isn't wired up yet.</p>
+
+<h2 id="simulation">6. Simulation Scripting</h2>
+<p>Any part can carry a script that runs once per simulation "tick," letting you model how values or state
+flow and change across a live architecture — not just a static diagram. Turn it on per-part with "Part Script
+Enabled" in Root Properties, then write the script body in the Script field.</p>
+
+<h3>What a script receives (the <code>ctx</code> object)</h3>
+<table class="docs-table">
+  <thead><tr><th>Field</th><th>What it is</th></tr></thead>
+  <tbody>
+    <tr><td><code>ctx.part</code></td><td>The part record itself (id, type, label, ...).</td></tr>
+    <tr><td><code>ctx.inputs</code></td><td>One entry per incoming connector this tick:
+    <code>{ fromPartId, fromLabel, connector: { relationship, streams }, value }</code>. A neighbor that hasn't
+    produced a value yet shows <code>value: undefined</code>.</td></tr>
+    <tr><td><code>ctx.responses</code></td><td>One entry per outgoing connector whose target sent a
+    <em>response</em> back last tick (same shape as inputs) — see "Responses" below.</td></tr>
+    <tr><td><code>ctx.state</code></td><td>Whatever this part's own script returned as <code>state</code> last
+    tick — empty on tick 0 or right after Reset. This is how a script remembers something between ticks.</td></tr>
+    <tr><td><code>ctx.tick</code></td><td>The current tick number, starting at 0.</td></tr>
+    <tr><td><code>ctx.log(message)</code></td><td>Writes a line to the Message Log panel — use freely for
+    narration or debugging while building a script.</td></tr>
+    <tr><td><code>ctx.secrets</code></td><td>Read-only access to locally-loaded settings (e.g. an API key) that
+    should never end up saved into a shared model file.</td></tr>
+    <tr><td><code>ctx.setState(patch)</code></td><td>For asynchronous work (e.g. a fetch whose result arrives
+    later) — merges into this part's state at the start of the <em>next</em> tick rather than immediately.</td></tr>
+  </tbody>
+</table>
+
+<h3>What a script must return</h3>
+<p>A script must return an object <code>{ value, state, response, badge }</code> — <code>response</code> and
+<code>badge</code> are both optional.</p>
+<ul>
+  <li><strong>value</strong> — what downstream connectors carry to their targets next tick.</li>
+  <li><strong>state</strong> — carried forward to this same part's own <code>ctx.state</code> next tick.</li>
+  <li><strong>response</strong> (optional) — a value sent <em>backward</em> to every node that feeds into this
+  one, arriving as their <code>ctx.responses</code> one tick later. Useful for acknowledgement/feedback flows
+  where a downstream node needs to signal something back upstream.</li>
+  <li><strong>badge</strong> (optional) — <code>{ text, color }</code> to show a freeform label on the node
+  (bottom-right), independent of the automatic value badge. Only shows while the view's "Show Script Badge"
+  toggle is on, and only for the tick a script actually returns one.</li>
+</ul>
+
+<h3>A minimal example</h3>
+<pre class="docs-code">// Adds up every incoming value and passes the sum onward.
+let sum = 0;
+for (const input of ctx.inputs) {
+  if (typeof input.value === 'number') sum += input.value;
+}
+return { value: sum, state: {} };</pre>
+
+<p>A part with no script (or script disabled) just passes a single input through unchanged if it has exactly
+one incoming connector, otherwise sits idle. A thrown error is caught per-part — that node keeps its last good
+value, the error is logged, and every other part still runs normally that tick.</p>
+
+<p>Simulation runs per <strong>Model</strong>, not per view, using every scripted part in that model regardless
+of which views currently show them — use the model selector next to the simulation Run/Pause/Step/Stop
+controls to choose which one you're running.</p>
+
+<h2 id="archimate">7. ArchiMate Import</h2>
+<p>Import a standard ArchiMate 3.0 Exchange Format file (File menu) to bring in its elements, relationships,
+and views as FlowRun parts/connectors/views. Notes on how it handles two ArchiMate conventions that don't map
+directly onto FlowRun's own model:</p>
+<ul>
+  <li><strong>Junctions</strong> (AND/OR routing points) aren't imported as nodes — FlowRun has no equivalent.
+  Instead, each junction is dissolved: every real source connects directly to every real target it fed
+  through the junction, with a note recording which logic (AND/OR) the junction used to represent.</li>
+  <li><strong>Nested shapes</strong> — some ArchiMate diagrams show a Composition or Aggregation relationship
+  by drawing one shape inside another instead of a connecting line. FlowRun detects this and adds the
+  connector anyway, noting on whichever record it had to create ("connector" if the relationship didn't exist
+  yet, otherwise the view placement) that it was inferred from nesting rather than an explicit line.</li>
+</ul>
+<p>Re-importing the same file is safe — it matches existing records by the file's own stable ids and updates
+them in place rather than duplicating.</p>
+
+<h2 id="tips">8. Tips &amp; Things to Know</h2>
+<ul>
+  <li><strong>Undo/Redo</strong> (Ctrl+Z / Ctrl+Shift+Z) covers the full model, not just the current view —
+  it's safe even though views share underlying parts and connectors.</li>
+  <li><strong>The Message Log</strong> (left sidebar) records every warning/rejection message the app shows
+  you, not just the ones you happened to catch as a popup — worth checking after a bulk operation
+  (Smart Check View, a big drag-and-drop, an import) to see everything that happened, with Copy and Clear
+  buttons for convenience.</li>
+  <li><strong>Rejections give a specific reason</strong> — e.g. dragging a node into a section that doesn't
+  allow its type names the section and what it does allow, rather than a generic "that didn't work."</li>
+  <li><strong>A part's Note</strong> and <strong>a view's Margin</strong> are stored but not currently shown
+  anywhere on the canvas itself (Note does appear in the catalog table and the row's Copy text) — don't expect
+  a visual change from editing them.</li>
+  <li><strong>Everything nested-shape or junction-related is a permanent tradeoff, not a bug to chase</strong> —
+  force-directed layout can't guarantee every edge in a cycle lands in an adjacent cell (a hard 2D-layout
+  limit, not a FlowRun gap), and obstacle-avoiding routing only looks at nearby obstacles for performance
+  reasons on large diagrams.</li>
+</ul>
+
+</div>

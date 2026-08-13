@@ -1,0 +1,451 @@
+[
+  {
+    "nodeElementType": "BusinessFunction",
+    "nodeName": "Production",
+    "nodeId": "prod",
+    "nodeDescription": "Activities involved in manufacturing or creating products and services.",
+    "nodeChildren": [
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Manufacturing Operations",
+        "nodeId": "prodmanop",
+        "nodeDescription": "Plan, execute, and monitor the production of goods or services, ensuring efficiency and adherence to production targets.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Production Schedule",
+            "nodeId": "prodschedule",
+            "nodeDescription": "Detailed timetable outlining when and how products will be manufactured, including resource allocation."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Bill of Materials",
+            "nodeId": "bom",
+            "nodeDescription": "Comprehensive list of raw materials, components, and instructions required for production."
+          }
+        ]
+      },
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Production Planning",
+        "nodeId": "prodplan",
+        "nodeDescription": "Forecast, plan, and allocate resources to meet production demand.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Production Schedule",
+            "nodeId": "prodschedule",
+            "nodeDescription": "Detailed timetable outlining when and how products will be manufactured, including resource allocation."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Demand Forecast",
+            "nodeId": "demandforecast",
+            "nodeDescription": "Projected customer demand used to plan production volumes."
+          }
+        ]
+      }
+    ]
+  },
+
+  {
+    "nodeElementType": "BusinessFunction",
+    "nodeName": "Product Improvement & Development",
+    "nodeId": "proddev",
+    "nodeDescription": "Enhancing existing products and developing new ones.",
+    "nodeChildren": [
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "R&D Management",
+        "nodeId": "rdmgmt",
+        "nodeDescription": "Manage research initiatives and innovation pipelines.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Product Specification",
+            "nodeId": "productspec",
+            "nodeDescription": "Technical and functional details of the product."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Research Findings",
+            "nodeId": "researchfindings",
+            "nodeDescription": "Insights and results from research activities."
+          }
+        ]
+      },
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Product Lifecycle Management",
+        "nodeId": "plm",
+        "nodeDescription": "Manage product evolution from concept to retirement.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Product Specification",
+            "nodeId": "productspec",
+            "nodeDescription": "Technical and functional details of the product."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Change Request",
+            "nodeId": "changereq",
+            "nodeDescription": "Formal proposals for product modifications."
+          }
+        ]
+      }
+    ]
+  },
+
+  {
+    "nodeElementType": "BusinessFunction",
+    "nodeName": "Selling",
+    "nodeId": "selling",
+    "nodeDescription": "Activities related to selling products and services.",
+    "nodeChildren": [
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Sales Management",
+        "nodeId": "salesmgmt",
+        "nodeDescription": "Manage sales operations, pipelines, and performance.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Customer Profile",
+            "nodeId": "customerprofile",
+            "nodeDescription": "Information describing customer identity and attributes."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Sales Order",
+            "nodeId": "salesorder",
+            "nodeDescription": "Confirmed customer purchase request."
+          }
+        ]
+      },
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Channel Management",
+        "nodeId": "channelmgmt",
+        "nodeDescription": "Manage sales channels such as retail, online, and partners.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Channel Partner",
+            "nodeId": "channelpartner",
+            "nodeDescription": "Information about external sales partners."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Sales Contract",
+            "nodeId": "salescontract",
+            "nodeDescription": "Formal agreement governing sales terms."
+          }
+        ]
+      }
+    ]
+  },
+
+  {
+    "nodeElementType": "BusinessFunction",
+    "nodeName": "Marketing",
+    "nodeId": "marketing",
+    "nodeDescription": "Promoting products and engaging target audiences.",
+    "nodeChildren": [
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Campaign Management",
+        "nodeId": "campaignmgmt",
+        "nodeDescription": "Plan and execute marketing campaigns.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Customer Profile",
+            "nodeId": "customerprofile",
+            "nodeDescription": "Information describing customer identity and attributes."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Marketing Asset",
+            "nodeId": "marketingasset",
+            "nodeDescription": "Creative materials used in marketing campaigns."
+          }
+        ]
+      },
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Market Analysis",
+        "nodeId": "marketanalysis",
+        "nodeDescription": "Analyze market trends, competitors, and opportunities.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Market Data",
+            "nodeId": "marketdata",
+            "nodeDescription": "Information about market conditions and trends."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Competitor Profile",
+            "nodeId": "competitorprofile",
+            "nodeDescription": "Information describing competitors and their offerings."
+          }
+        ]
+      }
+    ]
+  },
+
+  {
+    "nodeElementType": "BusinessFunction",
+    "nodeName": "Delivery",
+    "nodeId": "delivery",
+    "nodeDescription": "Delivering products and services to customers.",
+    "nodeChildren": [
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Logistics Management",
+        "nodeId": "logisticsmgmt",
+        "nodeDescription": "Manage transportation, warehousing, and distribution.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Delivery Order",
+            "nodeId": "deliveryorder",
+            "nodeDescription": "Instruction for delivering goods to customers."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Shipment",
+            "nodeId": "shipment",
+            "nodeDescription": "Record of goods being transported."
+          }
+        ]
+      },
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Fulfillment Management",
+        "nodeId": "fulfillmentmgmt",
+        "nodeDescription": "Ensure customer orders are fulfilled accurately and on time.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Sales Order",
+            "nodeId": "salesorder",
+            "nodeDescription": "Confirmed customer purchase request."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Inventory Item",
+            "nodeId": "inventoryitem",
+            "nodeDescription": "Record of stock items available for sale."
+          }
+        ]
+      }
+    ]
+  },
+
+  {
+    "nodeElementType": "BusinessFunction",
+    "nodeName": "Customer Relations",
+    "nodeId": "customerrelations",
+    "nodeDescription": "Managing customer interactions and satisfaction.",
+    "nodeChildren": [
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Customer Support",
+        "nodeId": "customersupport",
+        "nodeDescription": "Provide assistance and resolve customer issues.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Customer Profile",
+            "nodeId": "customerprofile",
+            "nodeDescription": "Information describing customer identity and attributes."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Support Ticket",
+            "nodeId": "supportticket",
+            "nodeDescription": "Record of customer issues and resolutions."
+          }
+        ]
+      },
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Customer Feedback Management",
+        "nodeId": "feedbackmgmt",
+        "nodeDescription": "Collect and analyze customer feedback.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Feedback Record",
+            "nodeId": "feedbackrecord",
+            "nodeDescription": "Customer comments, ratings, and suggestions."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Customer Profile",
+            "nodeId": "customerprofile",
+            "nodeDescription": "Information describing customer identity and attributes."
+          }
+        ]
+      }
+    ]
+  },
+
+  {
+    "nodeElementType": "BusinessFunction",
+    "nodeName": "Data Management",
+    "nodeId": "datamgmt",
+    "nodeDescription": "Managing enterprise data, governance, and analytics.",
+    "nodeChildren": [
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Data Governance",
+        "nodeId": "datagov",
+        "nodeDescription": "Define policies and standards for data usage.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Data Dictionary",
+            "nodeId": "datadictionary",
+            "nodeDescription": "Definitions and metadata for enterprise data."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Data Policy",
+            "nodeId": "datapolicy",
+            "nodeDescription": "Rules governing data access and usage."
+          }
+        ]
+      },
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Analytics & Reporting",
+        "nodeId": "analyticsreporting",
+        "nodeDescription": "Analyze data and generate insights.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Market Data",
+            "nodeId": "marketdata",
+            "nodeDescription": "Information about market conditions and trends."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Sales Order",
+            "nodeId": "salesorder",
+            "nodeDescription": "Confirmed customer purchase request."
+          }
+        ]
+      }
+    ]
+  },
+
+  {
+    "nodeElementType": "BusinessFunction",
+    "nodeName": "Procurement",
+    "nodeId": "procurement",
+    "nodeDescription": "Acquiring goods and services from suppliers.",
+    "nodeChildren": [
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Supplier Management",
+        "nodeId": "suppliermgmt",
+        "nodeDescription": "Manage relationships and performance of suppliers.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Supplier Profile",
+            "nodeId": "supplierprofile",
+            "nodeDescription": "Information describing suppliers and capabilities."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Purchase Contract",
+            "nodeId": "purchasecontract",
+            "nodeDescription": "Agreement governing procurement terms."
+          }
+        ]
+      },
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Procurement Execution",
+        "nodeId": "procexec",
+        "nodeDescription": "Execute purchasing activities and manage orders.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Purchase Order",
+            "nodeId": "purchaseorder",
+            "nodeDescription": "Formal request to procure goods or services."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Inventory Item",
+            "nodeId": "inventoryitem",
+            "nodeDescription": "Record of stock items available for sale."
+          }
+        ]
+      }
+    ]
+  },
+
+  {
+    "nodeElementType": "BusinessFunction",
+    "nodeName": "Human Resourcing",
+    "nodeId": "hr",
+    "nodeDescription": "Managing employees, recruitment, and workforce development.",
+    "nodeChildren": [
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Recruitment Management",
+        "nodeId": "recruitmgmt",
+        "nodeDescription": "Manage hiring processes and candidate evaluation.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Candidate Profile",
+            "nodeId": "candidateprofile",
+            "nodeDescription": "Information describing job applicants."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Job Posting",
+            "nodeId": "jobposting",
+            "nodeDescription": "Descriptions of open roles and requirements."
+          }
+        ]
+      },
+      {
+        "nodeElementType": "BusinessCapability",
+        "nodeName": "Employee Management",
+        "nodeId": "employeemgmt",
+        "nodeDescription": "Manage employee records, performance, and development.",
+        "nodeChildren": [
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Employee Record",
+            "nodeId": "employeerecord",
+            "nodeDescription": "Information describing employees and employment history."
+          },
+          {
+            "nodeElementType": "DataDataEntity",
+            "nodeName": "Training Record",
+            "nodeId": "trainingrecord",
+            "nodeDescription": "Documentation of employee training activities."
+          }
+        ]
+      }
+    ]
+  }
+]
+			  
+			  
+			  
+
+
+
+
+
+		  

@@ -1,0 +1,2610 @@
+{
+  "notes": [
+    {
+      "ver": "0.7",
+      "changes": "updated showFields.view"
+    }
+  ],
+  "showFields": {
+    "part": {
+      "fields": {
+        "id": {
+          "show": "t",
+          "access": "r",
+          "label": "Id"
+        },
+        "type": {
+          "show": "s",
+          "access": "w",
+          "label": "Type"
+        },
+        "label": {
+          "show": "t",
+          "access": "w",
+          "label": "Label"
+        },
+        "rawLabel": {
+          "show": "t",
+          "access": "r",
+          "label": "Raw Label"
+        },
+        "model": {
+          "show": "s",
+          "access": "w",
+          "label": "Model"
+        },
+        "section": {
+          "show": "t",
+          "access": "w",
+          "label": "Section"
+        },
+        "streams": {
+          "show": "t",
+          "access": "r",
+          "label": "Streams"
+        },
+        "note": {
+          "show": "m",
+          "access": "w",
+          "label": "Note"
+        },
+        "order": {
+          "show": "n",
+          "access": "w",
+          "label": "Order"
+        },
+        "other": {
+          "show": "t",
+          "access": "r",
+          "label": "Other"
+        },
+        "xIds": {
+          "show": "t",
+          "access": "w",
+          "label": "Crossref ids"
+        },
+        "description": {
+          "show": "m",
+          "access": "w",
+          "label": "Description"
+        },
+        "script": {
+          "show": "m",
+          "access": "w",
+          "label": "Script"
+        },
+        "scriptEnabled": {
+          "show": "y",
+          "access": "w",
+          "label": "Part Script Enabled"
+        },
+        "createdAt": {
+          "show": "t",
+          "access": "r",
+          "label": "Created"
+        },
+        "updatedAt": {
+          "show": "t",
+          "access": "r",
+          "label": "Updated"
+        }
+      }
+    },
+    "viewMember": {
+      "fields": {
+        "id": {
+          "show": "t",
+          "access": "r",
+          "label": "Id"
+        },
+        "view": {
+          "show": "t",
+          "access": "r",
+          "label": "View"
+        },
+        "objectType": {
+          "show": "t",
+          "access": "r",
+          "label": "Object Type"
+        },
+        "objectId": {
+          "show": "t",
+          "access": "r",
+          "label": "Object Id"
+        },
+        "x": {
+          "show": "n",
+          "access": "w",
+          "label": "x"
+        },
+        "y": {
+          "show": "n",
+          "access": "w",
+          "label": "y"
+        },
+        "fillColor": {
+          "show": "c",
+          "access": "w",
+          "label": "Fill Color"
+        },
+        "fontColor": {
+          "show": "c",
+          "access": "w",
+          "label": "Font Color"
+        },
+        "fontSize": {
+          "show": "n",
+          "access": "w",
+          "label": "Font Size"
+        },
+        "borderColor": {
+          "show": "c",
+          "access": "w",
+          "label": "Border Color"
+        },
+        "order": {
+          "show": "n",
+          "access": "w",
+          "label": "Order"
+        },
+        "note": {
+          "show": "m",
+          "access": "w",
+          "label": "Note"
+        },
+        "linkedViewName": {
+          "show": "t",
+          "access": "w",
+          "label": "Linked View Name"
+        },
+        "isExternal": {
+          "show": "y",
+          "access": "w",
+          "label": "External"
+        },
+        "sectionId": {
+          "show": "t",
+          "access": "r",
+          "label": "Section Id"
+        },
+        "fromVmId": {
+          "show": "t",
+          "access": "r",
+          "label": "From (view node)"
+        },
+        "toVmId": {
+          "show": "t",
+          "access": "r",
+          "label": "To (view node)"
+        }
+      }
+    },
+    "connector": {
+      "fields": {
+        "id": {
+          "show": "t",
+          "access": "r",
+          "label": "Id"
+        },
+        "from": {
+          "show": "t",
+          "access": "r",
+          "label": "From"
+        },
+        "to": {
+          "show": "t",
+          "access": "r",
+          "label": "To"
+        },
+        "model": {
+          "show": "s",
+          "access": "r",
+          "label": "Model"
+        },
+        "streams": {
+          "show": "t",
+          "access": "r",
+          "label": "Streams"
+        },
+        "note": {
+          "show": "m",
+          "access": "w",
+          "label": "Note"
+        },
+        "connectorType": {
+          "show": "t",
+          "access": "r",
+          "label": "Connector Type"
+        },
+        "relationship": {
+          "show": "s",
+          "access": "w",
+          "label": "Relationship"
+        },
+        "fromLineEndSettings": {
+          "show": "t",
+          "access": "r",
+          "label": "From Line End Settings"
+        },
+        "toLineEndSettings": {
+          "show": "t",
+          "access": "r",
+          "label": "To Line End Settings"
+        },
+        "stroke": {
+          "show": "c",
+          "access": "r",
+          "label": "Stroke"
+        },
+        "strokeWidth": {
+          "show": "n",
+          "access": "r",
+          "label": "Stroke Width"
+        },
+        "strokeNormal": {
+          "show": "c",
+          "access": "r",
+          "label": "Stroke (Normal)"
+        },
+        "strokeWidthNormal": {
+          "show": "n",
+          "access": "r",
+          "label": "Stroke Width (Normal)"
+        },
+        "dash": {
+          "show": "t",
+          "access": "r",
+          "label": "Dash"
+        },
+        "fill": {
+          "show": "c",
+          "access": "r",
+          "label": "Fill"
+        },
+        "createdAt": {
+          "show": "t",
+          "access": "r",
+          "label": "Created"
+        },
+        "updatedAt": {
+          "show": "t",
+          "access": "r",
+          "label": "Updated"
+        }
+      }
+    },
+    "section": {
+      "fields": {
+        "addSection": {
+          "show": "b",
+          "access": "w",
+          "label": "Add Section"
+        },
+        "removeSection": {
+          "show": "b",
+          "access": "w",
+          "label": "Remove Section"
+        },
+        "duplicateSection": {
+          "show": "b",
+          "access": "w",
+          "label": "Duplicate Section"
+        },
+        "viewType": {
+          "show": "t",
+          "access": "r",
+          "label": "View Type"
+        },
+        "sectionId": {
+          "show": "t",
+          "access": "r",
+          "label": "Section Id"
+        },
+        "order": {
+          "show": "n",
+          "access": "w",
+          "label": "Order"
+        },
+        "name": {
+          "show": "t",
+          "access": "w",
+          "label": "Name"
+        },
+        "rowCount": {
+          "show": "n",
+          "access": "w",
+          "label": "Row Count"
+        },
+        "columnCount": {
+          "show": "n",
+          "access": "w",
+          "label": "Column Count"
+        },
+        "elementTypes": {
+          "show": "t",
+          "access": "w",
+          "label": "Element Types"
+        }
+      }
+    },
+    "view": {
+      "fields": {
+        "id": {
+          "show": "t",
+          "access": "w",
+          "label": "Id"
+        },
+        "viewName": {
+          "show": "t",
+          "access": "w",
+          "label": "Name"
+        },
+        "viewType": {
+          "show": "t",
+          "access": "r",
+          "label": "View Type"
+        },
+        "margin": {
+          "show": "n",
+          "access": "w",
+          "label": "Margin"
+        },
+        "spacingScale": {
+          "show": "n",
+          "access": "w",
+          "label": "Spacing"
+        },
+        "chkShowConnectorType": {
+          "show": "y",
+          "access": "w",
+          "label": "Connectors"
+        },
+        "chkShowStreamType": {
+          "show": "y",
+          "access": "w",
+          "label": "Streams"
+        },
+        "chkShowElementTypes": {
+          "show": "y",
+          "access": "w",
+          "label": "Types"
+        },
+        "chkShowDescription": {
+          "show": "y",
+          "access": "w",
+          "label": "Description"
+        },
+        "chkShowKeys": {
+          "show": "y",
+          "access": "w",
+          "label": "Keys"
+        },
+        "chkShowSimValues": {
+          "show": "y",
+          "access": "w",
+          "label": "Show Simulation Values"
+        },
+        "chkShowScriptBadge": {
+          "show": "y",
+          "access": "w",
+          "label": "Show Script Badge"
+        },
+        "routingStyle": {
+          "show": "s",
+          "access": "w",
+          "label": "Connector Routing"
+        },
+        "routingStyleStream": {
+          "show": "s",
+          "access": "w",
+          "label": "Stream Connector Routing"
+        }
+      }
+    }
+  },
+  "elementGroups": [
+    {
+      "group": "Application",
+      "fill": "#97fac9"
+    },
+    {
+      "group": "Business",
+      "fill": "#ffffb5"
+    },
+    {
+      "group": "Data",
+      "fill": "#f9baff"
+    },
+    {
+      "group": "Strategymotivation",
+      "fill": "#f5deaa"
+    },
+    {
+      "group": "Technology",
+      "fill": "#8bc8f7"
+    },
+    {
+      "group": "ImplementationMigration",
+      "fill": "#ffe0e0"
+    },
+    {
+      "group": "General",
+      "fill": "#e0a365"
+    },
+    {
+      "group": "Unknown",
+      "fill": "#ff5e61"
+    }
+  ],
+  "lineEnds": {
+    "arrowSmall": {
+      "path": " M -5 10 L 0 0 L 5 10 z ",
+      "stroke": "black",
+      "strokeNormal": "black",
+      "strokeWidth": 2,
+      "strokeWidthNormal": 2,
+      "fill": "black"
+    },
+    "openArrowSmall": {
+      "path": " M -5 10 L 0 0 L 5 10 ",
+      "stroke": "black",
+      "strokeNormal": "black",
+      "strokeWidth": 2,
+      "strokeWidthNormal": 2,
+      "fill": ""
+    },
+    "openHalfArrowSmall": {
+      "path": " M -5 10 L 0 0 L 5 10 ",
+      "stroke": "black",
+      "strokeNormal": "black",
+      "strokeWidth": 2,
+      "strokeWidthNormal": 2,
+      "fill": ""
+    },
+    "arrowLargeBlack": {
+      "path": " M -5 20 L 0 0 L 5 20 z ",
+      "stroke": "black",
+      "strokeNormal": "black",
+      "strokeWidth": 2,
+      "strokeWidthNormal": 2,
+      "fill": "black"
+    },
+    "arrowLargeWhite": {
+      "path": " M -5 20 L 0 0 L 5 20 z ",
+      "stroke": "black",
+      "strokeNormal": "black",
+      "strokeWidth": 2,
+      "strokeWidthNormal": 2,
+      "fill": "white"
+    },
+    "diamondSmallWhite": {
+      "path": " M -5 10 L 0 0 L 5 10 L 0 20 z ",
+      "stroke": "black",
+      "strokeNormal": "black",
+      "strokeWidth": 2,
+      "strokeWidthNormal": 2,
+      "fill": "white"
+    },
+    "diamondSmallBlack": {
+      "path": " M -5 10 L 0 0 L 5 10 L 0 20 z ",
+      "stroke": "black",
+      "strokeNormal": "black",
+      "strokeWidth": 2,
+      "strokeWidthNormal": 2,
+      "fill": "black"
+    },
+    "circleSmall": {
+      "path": "M -7 7 a 7 7 0 1 0 14 0  a 7 7 0 1 0 -14 0",
+      "stroke": "black",
+      "strokeNormal": "black",
+      "strokeWidth": 2,
+      "strokeWidthNormal": 2,
+      "fill": "white"
+    },
+    "none": {
+      "path": "",
+      "stroke": "black",
+      "strokeNormal": "black",
+      "strokeWidth": 2,
+      "strokeWidthNormal": 2,
+      "fill": "red"
+    },
+    "arrowStream": {
+      "path": "   M -10 10 L 0 0 L 10 10 M -6 11 L 0 0 M 6 11 L 0 0    ",
+      "stroke": "#5c22e2",
+      "strokeNormal": "#5c22e2",
+      "strokeWidth": 2,
+      "strokeWidthNormal": 2,
+      "fill": "transparent"
+    }
+  },
+  "highlightLineStrokeColor": "orange",
+  "highlightLineStrokeWidth": "4",
+  "connectorTypes": [
+    {
+      "key": "c",
+      "name": "connector"
+    },
+    {
+      "key": "s",
+      "name": "stream"
+    }
+  ],
+  "relations": [
+    {
+      "key": "a",
+      "name": "Access",
+      "source": "a"
+    },
+    {
+      "key": "c",
+      "name": "Composition",
+      "source": "a"
+    },
+    {
+      "key": "f",
+      "name": "Flow",
+      "source": "a"
+    },
+    {
+      "key": "g",
+      "name": "Aggregation",
+      "source": "a"
+    },
+    {
+      "key": "i",
+      "name": "Assignment",
+      "source": "a"
+    },
+    {
+      "key": "n",
+      "name": "Influence",
+      "source": "a"
+    },
+    {
+      "key": "o",
+      "name": "Association",
+      "source": "a"
+    },
+    {
+      "key": "r",
+      "name": "Realization",
+      "source": "a"
+    },
+    {
+      "key": "s",
+      "name": "Specialization",
+      "source": "a"
+    },
+    {
+      "key": "t",
+      "name": "Triggering",
+      "source": "a"
+    },
+    {
+      "key": "v",
+      "name": "Serving",
+      "source": "a"
+    },
+    {
+      "key": "d",
+      "name": "Derived",
+      "source": "o"
+    },
+    {
+      "key": "x",
+      "name": "Not Configured",
+      "source": "o"
+    },
+    {
+      "key": "y",
+      "name": "Invalid",
+      "source": "o"
+    },
+    {
+      "key": "z",
+      "name": "Notation",
+      "source": "o"
+    },
+    {
+      "key": "q",
+      "name": "Stream",
+      "source": "s"
+    },
+    {
+      "key": "p",
+      "name": "Passive",
+      "source": "s"
+    }
+  ],
+  "relationshipStyles": [
+    {
+      "type": "Not Configured",
+      "code": "x",
+      "stroke": "#ec5f5f",
+      "strokeWidth": 2,
+      "dash": [],
+      "fill": "#ec5f5f",
+      "ABRoleName": "not configured",
+      "BARoleName": "not configured",
+      "fromLineEndSettingType": "none",
+      "toLineEndSettingType": "arrowSmall"
+    },
+    {
+      "type": "Derived",
+      "code": "d",
+      "stroke": "#fc1d89",
+      "strokeWidth": 2,
+      "dash": [
+        3,
+        2,
+        1
+      ],
+      "fill": "#fc1d89",
+      "ABRoleName": "derived",
+      "BARoleName": "derived",
+      "fromLineEndSettingType": "none",
+      "toLineEndSettingType": "arrowSmall"
+    },
+    {
+      "type": "Notation",
+      "code": "z",
+      "stroke": "black",
+      "strokeWidth": 2,
+      "dash": [],
+      "fill": "black",
+      "ABRoleName": "notation",
+      "BARoleName": "notation",
+      "fromLineEndSettingType": "none",
+      "toLineEndSettingType": "none"
+    },
+    {
+      "type": "Invalid",
+      "code": "y",
+      "stroke": "red",
+      "strokeWidth": 2,
+      "dash": [],
+      "fill": "red",
+      "ABRoleName": "invalid",
+      "BARoleName": "invalid",
+      "fromLineEndSettingType": "none",
+      "toLineEndSettingType": "arrowSmall"
+    },
+    {
+      "type": "Assignment",
+      "code": "i",
+      "stroke": "black",
+      "strokeWidth": 2,
+      "dash": [],
+      "fill": "black",
+      "ABRoleName": "has assigned",
+      "BARoleName": "assigned to",
+      "fromLineEndSettingType": "none",
+      "toLineEndSettingType": "arrowSmall"
+    },
+    {
+      "type": "Composition",
+      "code": "c",
+      "stroke": "black",
+      "strokeWidth": 2,
+      "dash": [
+        2,
+        5
+      ],
+      "fill": "black",
+      "ABRoleName": "composed of",
+      "BARoleName": "composed in",
+      "fromLineEndSettingType": "diamondSmallBlack",
+      "toLineEndSettingType": "none"
+    },
+    {
+      "type": "Aggregation",
+      "code": "g",
+      "stroke": "black",
+      "strokeWidth": 2,
+      "dash": [
+        2,
+        5
+      ],
+      "fill": "white",
+      "ABRoleName": "aggregation of",
+      "BARoleName": "aggregated in",
+      "fromLineEndSettingType": "diamondSmallWhite",
+      "toLineEndSettingType": "none"
+    },
+    {
+      "type": "Realization",
+      "code": "r",
+      "stroke": "black",
+      "strokeWidth": 2,
+      "dash": [
+        3,
+        2
+      ],
+      "fill": "black",
+      "ABRoleName": "realizes",
+      "BARoleName": "realized by",
+      "fromLineEndSettingType": "none",
+      "toLineEndSettingType": "arrowLargeWhite"
+    },
+    {
+      "type": "Serving",
+      "code": "v",
+      "stroke": "black",
+      "strokeWidth": 2,
+      "dash": [
+        20,
+        5
+      ],
+      "fill": "black",
+      "ABRoleName": "serves",
+      "BARoleName": "served by",
+      "fromLineEndSettingType": "none",
+      "toLineEndSettingType": "openArrowSmall"
+    },
+    {
+      "type": "Access",
+      "code": "a",
+      "stroke": "black",
+      "strokeWidth": 2,
+      "dash": [
+        5,
+        5
+      ],
+      "fill": "black",
+      "ABRoleName": "accesses",
+      "BARoleName": "accessed by",
+      "fromLineEndSettingType": "none",
+      "toLineEndSettingType": "openArrowSmall"
+    },
+    {
+      "type": "Influence",
+      "code": "n",
+      "stroke": "black",
+      "strokeWidth": 2,
+      "dash": [
+        15,
+        5
+      ],
+      "fill": "black",
+      "ABRoleName": "influences",
+      "BARoleName": "influenced by",
+      "fromLineEndSettingType": "none",
+      "toLineEndSettingType": "arrowSmall"
+    },
+    {
+      "type": "Association",
+      "code": "o",
+      "stroke": "black",
+      "strokeWidth": 2,
+      "dash": [],
+      "fill": "black",
+      "ABRoleName": "associated with",
+      "BARoleName": "associated with",
+      "fromLineEndSettingType": "none",
+      "toLineEndSettingType": "openHalfArrowSmall"
+    },
+    {
+      "type": "Flow",
+      "code": "f",
+      "stroke": "black",
+      "strokeWidth": 2,
+      "dash": [
+        7,
+        2
+      ],
+      "fill": "black",
+      "ABRoleName": "flows to",
+      "BARoleName": "flows from",
+      "fromLineEndSettingType": "none",
+      "toLineEndSettingType": "arrowSmall"
+    },
+    {
+      "type": "Specialization",
+      "code": "s",
+      "stroke": "purple",
+      "strokeWidth": 2,
+      "dash": [
+        7,
+        2
+      ],
+      "fill": "black",
+      "ABRoleName": "goes to",
+      "BARoleName": "comes from",
+      "fromLineEndSettingType": "none",
+      "toLineEndSettingType": "arrowSmall"
+    },
+    {
+      "type": "Triggering",
+      "code": "t",
+      "stroke": "black",
+      "strokeWidth": 2,
+      "dash": [],
+      "fill": "black",
+      "ABRoleName": "triggers",
+      "BARoleName": "triggered by",
+      "fromLineEndSettingType": "none",
+      "toLineEndSettingType": "arrowLargeBlack"
+    },
+    {
+      "type": "Stream",
+      "code": "q",
+      "stroke": "#5c22e2",
+      "strokeWidth": 2,
+      "dash": [
+        3,
+        2
+      ],
+      "fill": "#5c22e2",
+      "ABRoleName": "utilizes",
+      "BARoleName": "utilized by",
+      "fromLineEndSettingType": "none",
+      "toLineEndSettingType": "arrowStream"
+    },
+    {
+      "type": "Passive",
+      "code": "p",
+      "stroke": "#5c22e2",
+      "strokeWidth": 2,
+      "dash": [
+        3,
+        2
+      ],
+      "fill": "#5c22e2",
+      "ABRoleName": "delivers",
+      "BARoleName": "delivered by",
+      "fromLineEndSettingType": "none",
+      "toLineEndSettingType": "arrowStream"
+    }
+  ],
+  "viewTypes": [
+    {
+      "key": "ff",
+      "name": "free form"
+    },
+    {
+      "key": "sec",
+      "name": "empty with 1 section"
+    },
+    {
+      "key": "org",
+      "name": "Business function organization"
+    },
+    {
+      "key": "org4lob",
+      "name": "Business function organization 4 LOB"
+    }
+  ],
+  "relationshipPairs": [
+    {
+      "typeA": "Text",
+      "typeB": "ApplicationCapability",
+      "default": "z",
+      "relations": "z"
+    },
+    {
+      "typeA": "Tester",
+      "typeB": "Tester",
+      "default": "a",
+      "relations": "acfginorstvdxyzpq"
+    },
+    {
+      "typeA": "Multi",
+      "typeB": "Multi",
+      "default": "f",
+      "relations": "acfginorstvdxyz"
+    },
+    {
+      "typeA": "ApplicationApplication",
+      "typeB": "ApplicationComponent",
+      "default": "r",
+      "relations": "cgor"
+    },
+    {
+      "typeA": "ApplicationApplication",
+      "typeB": "ApplicationPhysicalComponent",
+      "default": "r",
+      "relations": "cgor"
+    },
+    {
+      "typeA": "ApplicationCapability",
+      "typeB": "ApplicationProcess",
+      "default": "r",
+      "relations": "odrq"
+    },
+    {
+      "typeA": "ApplicationFunction",
+      "typeB": "ApplicationProcess",
+      "default": "r",
+      "relations": "r"
+    },
+    {
+      "typeA": "ApplicationLogicalComponent",
+      "typeB": "ApplicationPhysicalComponent",
+      "default": "r",
+      "relations": "frq"
+    },
+    {
+      "typeA": "ApplicationProcess",
+      "typeB": "ApplicationLogicalComponent",
+      "default": "f",
+      "relations": "frq"
+    },
+    {
+      "typeA": "ApplicationService",
+      "typeB": "ApplicationCapability",
+      "default": "r",
+      "relations": "frq"
+    },
+    {
+      "typeA": "ApplicationService",
+      "typeB": "ApplicationLogicalComponent",
+      "default": "r",
+      "relations": "cgor"
+    },
+    {
+      "typeA": "ApplicationPhysicalComponent",
+      "typeB": "ApplicationLogicalComponent",
+      "default": "r",
+      "relations": "cgor"
+    },
+    {
+      "typeA": "ApplicationPhysicalComponent",
+      "typeB": "TechnologyService",
+      "default": "r",
+      "relations": "frq"
+    },
+    {
+      "typeA": "BusinessCapability",
+      "typeB": "BusinessProcess",
+      "default": "r",
+      "relations": "odrq"
+    },
+    {
+      "typeA": "BusinessFunction",
+      "typeB": "BusinessProcess",
+      "default": "r",
+      "relations": "r"
+    },
+    {
+      "typeA": "BusinessProcess",
+      "typeB": "ApplicationService",
+      "default": "f",
+      "relations": "fq"
+    },
+    {
+      "typeA": "BusinessService",
+      "typeB": "BusinessCapability",
+      "default": "r",
+      "relations": "fq"
+    },
+    {
+      "typeA": "DataDataEntity",
+      "typeB": "DataLogicalComponent",
+      "default": "r",
+      "relations": "cfgor"
+    },
+    {
+      "typeA": "DataDataEntity",
+      "typeB": "DataPhysicalComponent",
+      "default": "r",
+      "relations": "rq"
+    },
+    {
+      "typeA": "DataLogicalComponent",
+      "typeB": "DataPhysicalComponent",
+      "default": "r",
+      "relations": "cfgor"
+    },
+    {
+      "typeA": "DataPhysicalComponent",
+      "typeB": "DataLogicalComponent",
+      "default": "r",
+      "relations": "rq"
+    },
+    {
+      "typeA": "GeneralActor",
+      "typeB": "BusinessService",
+      "default": "f",
+      "relations": "frq"
+    },
+    {
+      "typeA": "GeneralActor",
+      "typeB": "GeneralCapability",
+      "default": "f",
+      "relations": "frq"
+    },
+    {
+      "typeA": "GeneralCapability",
+      "typeB": "BusinessService",
+      "default": "f",
+      "relations": "frq"
+    },
+    {
+      "typeA": "GeneralEntity",
+      "typeB": "GeneralEntity",
+      "default": "f",
+      "relations": "acfginorstvdxyz"
+    },
+    {
+      "typeA": "MetadataRegistry",
+      "typeB": "GeneralEntity",
+      "default": "f",
+      "relations": "acfginorstvdxyz"
+    },
+    {
+      "typeA": "MetadataRegistry",
+      "typeB": "DataDataEntity",
+      "default": "f",
+      "relations": "acfginorstvdxyz"
+    },
+    {
+      "typeA": "TechnologyCapability",
+      "typeB": "TechnologyProcess",
+      "default": "f",
+      "relations": "odrq"
+    },
+    {
+      "typeA": "TechnologyFunction",
+      "typeB": "TechnologyProcess",
+      "default": "r",
+      "relations": "r"
+    },
+    {
+      "typeA": "TechnologyLogicalComponent",
+      "typeB": "TechnologyPhysicalComponent",
+      "default": "r",
+      "relations": "rq"
+    },
+    {
+      "typeA": "TechnologyPhysicalComponent",
+      "typeB": "DataDataEntity",
+      "default": "r",
+      "relations": "rq"
+    },
+    {
+      "typeA": "TechnologyProcess",
+      "typeB": "TechnologyLogicalComponent",
+      "default": "r",
+      "relations": "rq"
+    },
+    {
+      "typeA": "TechnologyService",
+      "typeB": "TechnologyCapability",
+      "default": "r",
+      "relations": "frq"
+    }
+  ],
+  "sources": [
+    {
+      "code": "a",
+      "name": "Archimate"
+    },
+    {
+      "code": "t",
+      "name": "TOGAF"
+    },
+    {
+      "code": "o",
+      "name": "Other"
+    },
+    {
+      "code": "s",
+      "name": "Stream"
+    }
+  ],
+  "elements": [
+    {
+      "type": "Tester",
+      "title": "Tester",
+      "group": "General",
+      "tkDisplayOrder": 2,
+      "cornerRadius": 5,
+      "sources": "o",
+      "prefix": "",
+      "suffix": "",
+      "path": " M 15, 10 L 20, 3 L 25, 10 L 20 , 3"
+    },
+    {
+      "type": "Multi",
+      "title": "Multi",
+      "group": "General",
+      "tkDisplayOrder": 2,
+      "cornerRadius": 5,
+      "sources": "o",
+      "prefix": "",
+      "suffix": "",
+      "path": " M20 18a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z M20 14 c-.55 0-1-.45-1-1 0-2.2 3-2.4 3-5 0-1.1-.9-2-2-2s-2 .9-2 2H16 C16 5.24 17.79 3 20 3s4 2.02 4 5 c0 3.06-3 3.34-3 5 0 .55-.45 1-1 1Z"
+    },
+    {
+      "type": "Text",
+      "title": "Text",
+      "group": "General",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 0,
+      "sources": "o",
+      "prefix": "",
+      "suffix": "",
+      "path": " M 14, 1 L 26, 1 M 20, 1 V 19"
+    },
+    {
+      "type": "Unknown",
+      "title": "Unknown",
+      "group": "Unknown",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 0,
+      "sources": "o",
+      "prefix": "",
+      "suffix": "",
+      "path": " M20 18a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z M20 14c.55 0 1-.45 1-1 0-2.2-3-2.4-3-5 0-1.1.9-2 2-2s2 .9 2 2h2c0-3.06-1.79-5.24-4-5.24s-4 2.02-4 5c0 3.06 3 3.34 3 5 0 .55.45 1 1 1Z"
+    },
+    {
+      "type": "MetadataRegistry",
+      "title": "Metadata Registry",
+      "group": "General",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 0,
+      "sources": "o",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 8 5 L 2 10 L 8 15    M 13 3 L 11 17    M 16 5 L 22 10 L 16 15"
+    },
+    {
+      "type": "ApplicationApplication",
+      "title": "Application",
+      "group": "Application",
+      "tkDisplayOrder": 0,
+      "cornerRadius": 0,
+      "sources": "o",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 8 5 v -3 h 24 v 15 h -24 v -15"
+    },
+    {
+      "type": "ApplicationComponent",
+      "title": "Application Component",
+      "group": "Application",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 0,
+      "sources": "t",
+      "prefix": "",
+      "suffix": "",
+      "note": "don't use",
+      "path": "M 8 5 v -3 h 24 v 15 h -24 v -3 m 0 -3 v -3 m 0 -3 v -3 m -6 3 h 12 v 3 h -12 z m 0 6 h 12 v 3 h -12 z"
+    },
+    {
+      "type": "ApplicationLogicalComponent",
+      "title": "App Logical Component",
+      "group": "Application",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 10,
+      "sources": "t",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 8 5 v -3 h 24 v 15 h -24 v -3 m 0 -3 v -3 m 0 -3 v -3 m -6 3 h 12 v 3 h -12 z m 0 6 h 12 v 3 h -12 z M 20 5 v 9 h 4 h -4"
+    },
+    {
+      "type": "ApplicationPhysicalComponent",
+      "title": "App Physical Component",
+      "group": "Application",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 10,
+      "sources": "t",
+      "prefix": "<",
+      "suffix": "> Solution",
+      "path": "M 8 5 v -3 h 24 v 15 h -24 v -3 m 0 -3 v -3 m 0 -3 v -3 m -6 3 h 12 v 3 h -12 z m 0 6 h 12 v 3 h -12 z M 20 14 v -9 c 8 1 3 3 0 5"
+    },
+    {
+      "type": "ApplicationCapability",
+      "title": "Application Capability",
+      "group": "Application",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 10,
+      "sources": "o",
+      "prefix": "Manage",
+      "suffix": "",
+      "path": "M 23,1 h 6 v 6 h -6 v -6 M 17,7 h 6 v 6 h -6 v -6 M 23,7 h 6 v 6 h -6 v -6 M 11,13 h 6 v 6 h -6 v -6 M 17,13 h 6 v 6 h -6 v -6 M 23,13 h 6 v 6 h -6 v -6"
+    },
+    {
+      "type": "ApplicationService",
+      "title": "Application Service",
+      "group": "Application",
+      "tkDisplayOrder": 4,
+      "cornerRadius": 10,
+      "sources": "t",
+      "prefix": "Provide",
+      "suffix": "",
+      "path": "M11 6 H 28 A 18 8 0 0 1 29 16 H11 A 18 8 0 0 1 11 6 Z"
+    },
+    {
+      "type": "ApplicationFunction",
+      "title": "Application Function",
+      "group": "Application",
+      "tkDisplayOrder": 2,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 20,2 29,5 V 18 L 20,15 11,18 V 5 Z"
+    },
+    {
+      "type": "ApplicationProcess",
+      "title": "Application Process",
+      "group": "Application",
+      "tkDisplayOrder": 3,
+      "cornerRadius": 10,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "Process",
+      "path": "M 24, 3 L 35, 10 L 24, 17 V 13 H 5 V 7 H 24 Z"
+    },
+    {
+      "type": "BusinessActor",
+      "title": "Business Actor",
+      "group": "Business",
+      "tkDisplayOrder": 0,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 24 5 A 2 2 0 1 0 16 5 A 2 2 0 1 0 24 5 M 20, 9 V 14 M 14, 11 L 26, 11 M 20, 14 L 13, 19 M 20,14 L 27, 19"
+    },
+    {
+      "type": "BusinessCapability",
+      "title": "Business Capability",
+      "group": "Business",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 10,
+      "sources": "a",
+      "prefix": "Manage",
+      "suffix": "",
+      "path": "M 23,1 h 6 v 6 h -6 v -6 M 17,7 h 6 v 6 h -6 v -6 M 23,7 h 6 v 6 h -6 v -6 M 11,13 h 6 v 6 h -6 v -6 M 17,13 h 6 v 6 h -6 v -6 M 23,13 h 6 v 6 h -6 v -6"
+    },
+    {
+      "type": "BusinessFunction",
+      "title": "Business Function",
+      "group": "Business",
+      "tkDisplayOrder": 2,
+      "cornerRadius": 0,
+      "sources": "at",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 20,2 29,5 V 18 L 20,15 11,18 V 5 Z"
+    },
+    {
+      "type": "BusinessProcess",
+      "title": "Business Process",
+      "group": "Business",
+      "tkDisplayOrder": 3,
+      "cornerRadius": 10,
+      "sources": "at",
+      "prefix": "",
+      "suffix": "Process",
+      "path": "M 24, 3 L 35, 10 L 24, 17 V 13 H 5 V 7 H 24 Z"
+    },
+    {
+      "type": "BusinessInterface",
+      "title": "Business Interface",
+      "group": "Business",
+      "tkDisplayOrder": 4,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 8,10 h 8 a 2 2 0 1 0 16 0 a 2 2 0 1 0 -16 0"
+    },
+    {
+      "type": "BusinessService",
+      "title": "Business Service",
+      "group": "Business",
+      "tkDisplayOrder": 5,
+      "cornerRadius": 10,
+      "sources": "at",
+      "prefix": "Provide",
+      "suffix": "",
+      "path": "M11 6 H 28 A 18 8 0 0 1 29 16 H11 A 18 8 0 0 1 11 6 Z"
+    },
+    {
+      "type": "DataDataEntity",
+      "title": "Data Entity",
+      "group": "Data",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,1 H 29 V 19 H 11 V 1 M 11,5 H 29"
+    },
+    {
+      "type": "GeneralActor",
+      "title": "General Actor",
+      "group": "General",
+      "tkDisplayOrder": 0,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "Consumer",
+      "path": "M 24 5 A 2 2 0 1 0 16 5 A 2 2 0 1 0 24 5 M 20, 9 V 14 M 14, 11 L 26, 11 M 20, 14 L 13, 19 M 20,14 L 27, 19"
+    },
+    {
+      "type": "GeneralCapability",
+      "title": "General Capability",
+      "group": "General",
+      "tkDisplayOrder": 0,
+      "cornerRadius": 10,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 23,1 h 6 v 6 h -6 v -6 M 17,7 h 6 v 6 h -6 v -6 M 23,7 h 6 v 6 h -6 v -6 M 11,13 h 6 v 6 h -6 v -6 M 17,13 h 6 v 6 h -6 v -6 M 23,13 h 6 v 6 h -6 v -6"
+    },
+    {
+      "type": "GeneralEntity",
+      "title": "General Entity",
+      "group": "General",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 0,
+      "sources": "o",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,1 H 29 V 19 H 11 V 1"
+    },
+    {
+      "type": "TechnologyCapability",
+      "title": "Technology Capability",
+      "group": "Technology",
+      "tkDisplayOrder": 0,
+      "cornerRadius": 10,
+      "sources": "o",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 23,1 h 6 v 6 h -6 v -6 M 17,7 h 6 v 6 h -6 v -6 M 23,7 h 6 v 6 h -6 v -6 M 11,13 h 6 v 6 h -6 v -6 M 17,13 h 6 v 6 h -6 v -6 M 23,13 h 6 v 6 h -6 v -6"
+    },
+    {
+      "type": "TechnologyFunction",
+      "title": "Technology Function",
+      "group": "Technology",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 0,
+      "sources": "t",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 20,2 29,5 V 18 L 20,15 11,18 V 5 Z"
+    },
+    {
+      "type": "DataObject",
+      "title": "Data Object",
+      "group": "Application",
+      "tkDisplayOrder": 0,
+      "cornerRadius": 0,
+      "note": "don't use",
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,1 H 29 V 19 H 11 V 1 M 11,5 H 29"
+    },
+    {
+      "type": "TechnologyService",
+      "title": "Technology Service",
+      "group": "Technology",
+      "tkDisplayOrder": 3,
+      "cornerRadius": 10,
+      "sources": "at",
+      "prefix": "",
+      "suffix": "",
+      "path": "M11 6 H 28 A 18 8 0 0 1 29 16 H11 A 18 8 0 0 1 11 6 Z"
+    },
+    {
+      "type": "TechnologyProcess",
+      "title": "Technology Process",
+      "group": "Technology",
+      "tkDisplayOrder": 2,
+      "cornerRadius": 10,
+      "sources": "t",
+      "prefix": "",
+      "suffix": "process",
+      "path": "M 24, 3 L 35, 10 L 24, 17 V 13 H 5 V 7 H 24 Z"
+    },
+    {
+      "type": "TechnologyLogicalComponent",
+      "title": "Tech Logical Component",
+      "group": "Technology",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 10,
+      "sources": "t",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 8 5 v -3 h 24 v 15 h -24 v -3 m 0 -3 v -3 m 0 -3 v -3 m -6 3 h 12 v 3 h -12 z m 0 6 h 12 v 3 h -12 z M 20 5 v 9 h 4 h -4"
+    },
+    {
+      "type": "TechnologyPhysicalComponent",
+      "title": "Tech Physical Component",
+      "group": "Technology",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 10,
+      "sources": "t",
+      "prefix": "<",
+      "suffix": "> Solution",
+      "path": "M 8 5 v -3 h 24 v 15 h -24 v -3 m 0 -3 v -3 m 0 -3 v -3 m -6 3 h 12 v 3 h -12 z m 0 6 h 12 v 3 h -12 z M 20 14 v -9 c 8 1 3 3 0 5"
+    },
+    {
+      "type": "DataLogicalComponent",
+      "title": "Data Logical Component",
+      "group": "Data",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 10,
+      "sources": "t",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 8 5 v -3 h 24 v 15 h -24 v -3 m 0 -3 v -3 m 0 -3 v -3 m -6 3 h 12 v 3 h -12 z m 0 6 h 12 v 3 h -12 z M 20 5 v 9 h 4 h -4"
+    },
+    {
+      "type": "DataPhysicalComponent",
+      "title": "Data Physical Component",
+      "group": "Data",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 10,
+      "sources": "t",
+      "prefix": "<",
+      "suffix": "> Solution",
+      "path": "M 8 5 v -3 h 24 v 15 h -24 v -3 m 0 -3 v -3 m 0 -3 v -3 m -6 3 h 12 v 3 h -12 z m 0 6 h 12 v 3 h -12 z M 20 14 v -9 c 8 1 3 3 0 5"
+    },
+    {
+      "type": "Capability",
+      "title": "Capability",
+      "group": "Strategymotivation",
+      "tkDisplayOrder": 0,
+      "cornerRadius": 10,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 23,1 h 6 v 6 h -6 v -6 M 17,7 h 6 v 6 h -6 v -6 M 23,7 h 6 v 6 h -6 v -6 M 11,13 h 6 v 6 h -6 v -6 M 17,13 h 6 v 6 h -6 v -6 M 23,13 h 6 v 6 h -6 v -6"
+    },
+    {
+      "type": "CourseOfAction",
+      "title": "Course Of Action",
+      "group": "Strategymotivation",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 10,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 14,18 V 3 M 14,4 L 27,7 L 14,10"
+    },
+    {
+      "type": "Resource",
+      "title": "Resource",
+      "group": "Strategymotivation",
+      "tkDisplayOrder": 2,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,5 A 9 2 0 0 1 29 5 A 9 2 0 0 1 11 5 M 11,5 V 15 A 9 2 0 0 0 29 15 V 5"
+    },
+    {
+      "type": "Assessment",
+      "title": "Assessment",
+      "group": "Strategymotivation",
+      "tkDisplayOrder": 3,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 15,10 A 5 5 0 1 1 25 10 A 5 5 0 1 1 15 10 M 22,14 L 28,19"
+    },
+    {
+      "type": "Constraint",
+      "title": "Constraint",
+      "group": "Strategymotivation",
+      "tkDisplayOrder": 4,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 20,3 L 28,17 H 12 Z M 20,7 V 13"
+    },
+    {
+      "type": "Driver",
+      "title": "Driver",
+      "group": "Strategymotivation",
+      "tkDisplayOrder": 5,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 20,10 m -6,0 a 6,6 0 1,0 12,0 a 6,6 0 1,0 -12,0 M 20,4 V 16 M 14,10 H 26"
+    },
+    {
+      "type": "Goal",
+      "title": "Goal",
+      "group": "Strategymotivation",
+      "tkDisplayOrder": 6,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 20,10 m -7,0 a 7,7 0 1,0 14,0 a 7,7 0 1,0 -14,0 M 20,10 m -4,0 a 4,4 0 1,0 8,0 a 4,4 0 1,0 -8,0 M 20,10 m -1,0 a 1,1 0 1,0 2,0 a 1,1 0 1,0 -2,0"
+    },
+    {
+      "type": "Meaning",
+      "title": "Meaning",
+      "group": "Strategymotivation",
+      "tkDisplayOrder": 7,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 12,4 H 28 V 14 H 18 L 14,18 V 14 H 12 Z"
+    },
+    {
+      "type": "Outcome",
+      "title": "Outcome",
+      "group": "Strategymotivation",
+      "tkDisplayOrder": 8,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 20,10 m -7,0 a 7,7 0 1,0 14,0 a 7,7 0 1,0 -14,0 M 16,10 L 19,13 L 25,6"
+    },
+    {
+      "type": "Principle",
+      "title": "Principle",
+      "group": "Strategymotivation",
+      "tkDisplayOrder": 9,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 20,3 L 22,9 L 28,10 L 22,11 L 20,17 L 18,11 L 12,10 L 18,9 Z"
+    },
+    {
+      "type": "Requirement",
+      "title": "Requirement",
+      "group": "Strategymotivation",
+      "tkDisplayOrder": 10,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,10 A 9 4 0 1 1 29 10 A 9 4 0 1 1 11 10"
+    },
+    {
+      "type": "Stakeholder",
+      "title": "Stakeholder",
+      "group": "Strategymotivation",
+      "tkDisplayOrder": 11,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,10 C 14,4 26,4 29,10 C 26,16 14,16 11,10 Z M 20,10 m -3,0 a 3,3 0 1,0 6,0 a 3,3 0 1,0 -6,0"
+    },
+    {
+      "type": "Value",
+      "title": "Value",
+      "group": "Strategymotivation",
+      "tkDisplayOrder": 12,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 20,10 m -7,0 a 7,7 0 1,0 14,0 a 7,7 0 1,0 -14,0 M 20,5 V 15 M 17,8 H 23 M 17,12 H 23"
+    },
+    {
+      "type": "BusinessCollaboration",
+      "title": "Business Collaboration",
+      "group": "Business",
+      "tkDisplayOrder": 6,
+      "cornerRadius": 10,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 16,10 m -6,0 a 6,6 0 1,0 12,0 a 6,6 0 1,0 -12,0 M 24,10 m -6,0 a 6,6 0 1,0 12,0 a 6,6 0 1,0 -12,0"
+    },
+    {
+      "type": "BusinessObject",
+      "title": "Business Object",
+      "group": "Business",
+      "tkDisplayOrder": 7,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,1 H 29 V 19 H 11 V 1 M 11,5 H 29"
+    },
+    {
+      "type": "BusinessRole",
+      "title": "Business Role",
+      "group": "Business",
+      "tkDisplayOrder": 8,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 20,2 L 28,5 V 12 C 28,16 24,19 20,19 C 16,19 12,16 12,12 V 5 Z M 20,7 m -2.5,0 a 2.5,2.5 0 1,0 5,0 a 2.5,2.5 0 1,0 -5,0 M 16,15 C 16,12 24,12 24,15"
+    },
+    {
+      "type": "Contract",
+      "title": "Contract",
+      "group": "Business",
+      "tkDisplayOrder": 9,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 12,2 H 28 V 18 H 12 V 2 M 15,6 H 25 M 15,10 H 25 M 15,14 H 21"
+    },
+    {
+      "type": "Product",
+      "title": "Product",
+      "group": "Business",
+      "tkDisplayOrder": 10,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,7 H 29 V 18 H 11 V 7 M 11,7 L 20,2 L 29,7"
+    },
+    {
+      "type": "Representation",
+      "title": "Representation",
+      "group": "Business",
+      "tkDisplayOrder": 11,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 12,2 H 28 V 14 C 26,17 24,13 22,16 C 20,19 18,15 16,17 C 14,19 13,16 12,17 Z M 15,6 H 25 M 15,9 H 25"
+    },
+    {
+      "type": "ApplicationCollaboration",
+      "title": "Application Collaboration",
+      "group": "Application",
+      "tkDisplayOrder": 5,
+      "cornerRadius": 10,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 16,10 m -6,0 a 6,6 0 1,0 12,0 a 6,6 0 1,0 -12,0 M 24,10 m -6,0 a 6,6 0 1,0 12,0 a 6,6 0 1,0 -12,0"
+    },
+    {
+      "type": "ApplicationEvent",
+      "title": "Application Event",
+      "group": "Application",
+      "tkDisplayOrder": 6,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 15,3 L 22,3 L 17,10 L 24,10 L 14,19 L 17,11 L 11,11 Z"
+    },
+    {
+      "type": "ApplicationInteraction",
+      "title": "Application Interaction",
+      "group": "Application",
+      "tkDisplayOrder": 7,
+      "cornerRadius": 10,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 15,10 m -4,0 a 4,4 0 1,0 8,0 a 4,4 0 1,0 -8,0 M 25,10 m -4,0 a 4,4 0 1,0 8,0 a 4,4 0 1,0 -8,0 M 19,10 H 21"
+    },
+    {
+      "type": "ApplicationInterface",
+      "title": "Application Interface",
+      "group": "Application",
+      "tkDisplayOrder": 8,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 8,10 h 8 a 2 2 0 1 0 16 0 a 2 2 0 1 0 -16 0"
+    },
+    {
+      "type": "CommunicationNetwork",
+      "title": "Communication Network",
+      "group": "Technology",
+      "tkDisplayOrder": 4,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 20,3 L 12,15 H 28 Z M 20,3 m -1.5,0 a1.5,1.5 0 1,0 3,0 a1.5,1.5 0 1,0 -3,0 M 12,15 m -1.5,0 a1.5,1.5 0 1,0 3,0 a1.5,1.5 0 1,0 -3,0 M 28,15 m -1.5,0 a1.5,1.5 0 1,0 3,0 a1.5,1.5 0 1,0 -3,0"
+    },
+    {
+      "type": "Device",
+      "title": "Device",
+      "group": "Technology",
+      "tkDisplayOrder": 5,
+      "cornerRadius": 10,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 12,7 H 24 V 17 H 12 V 7 M 12,7 L 16,3 H 28 V 13 L 24,17 M 24,7 L 28,3"
+    },
+    {
+      "type": "DistributionNetwork",
+      "title": "Distribution Network",
+      "group": "Technology",
+      "tkDisplayOrder": 6,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,6 H 29 M 11,10 H 29 M 11,14 H 29 M 15,4 V 8 M 22,8 V 12 M 18,12 V 16"
+    },
+    {
+      "type": "Equipment",
+      "title": "Equipment",
+      "group": "Technology",
+      "tkDisplayOrder": 7,
+      "cornerRadius": 10,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 20,10 m -5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 M 20,3 V 5 M 20,15 V 17 M 13,10 H 11 M 29,10 H 27 M 15,5 L 13.5,3.5 M 25,5 L 26.5,3.5 M 15,15 L 13.5,16.5 M 25,15 L 26.5,16.5"
+    },
+    {
+      "type": "Facility",
+      "title": "Facility",
+      "group": "Technology",
+      "tkDisplayOrder": 8,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 12,18 V 8 L 20,3 L 28,8 V 18 H 12 M 17,18 V 12 H 23 V 18"
+    },
+    {
+      "type": "Material",
+      "title": "Material",
+      "group": "Technology",
+      "tkDisplayOrder": 9,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,7 H 29 V 18 H 11 V 7 M 11,7 L 20,2 L 29,7 M 20,2 V 7"
+    },
+    {
+      "type": "Node",
+      "title": "Node",
+      "group": "Technology",
+      "tkDisplayOrder": 10,
+      "cornerRadius": 10,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 12,8 H 24 V 18 H 12 V 8 M 12,8 L 16,4 H 28 V 14 L 24,18 M 24,8 L 28,4"
+    },
+    {
+      "type": "Path",
+      "title": "Path",
+      "group": "Technology",
+      "tkDisplayOrder": 11,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,16 L 14,14.5 M 16,13.5 L 19,12 M 21,11 L 24,9.5 M 26,8.5 L 29,7"
+    },
+    {
+      "type": "SystemSoftware",
+      "title": "System Software",
+      "group": "Technology",
+      "tkDisplayOrder": 12,
+      "cornerRadius": 10,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,6 H 27 V 16 H 11 V 6 M 24,4 m -2,0 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0"
+    },
+    {
+      "type": "TechnologyEvent",
+      "title": "Technology Event",
+      "group": "Technology",
+      "tkDisplayOrder": 13,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 15,3 L 22,3 L 17,10 L 24,10 L 14,19 L 17,11 L 11,11 Z"
+    },
+    {
+      "type": "TechnologyInteraction",
+      "title": "Technology Interaction",
+      "group": "Technology",
+      "tkDisplayOrder": 14,
+      "cornerRadius": 10,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 15,10 m -4,0 a 4,4 0 1,0 8,0 a 4,4 0 1,0 -8,0 M 25,10 m -4,0 a 4,4 0 1,0 8,0 a 4,4 0 1,0 -8,0 M 19,10 H 21"
+    },
+    {
+      "type": "TechnologyInterface",
+      "title": "Technology Interface",
+      "group": "Technology",
+      "tkDisplayOrder": 15,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 8,10 h 8 a 2 2 0 1 0 16 0 a 2 2 0 1 0 -16 0"
+    },
+    {
+      "type": "Deliverable",
+      "title": "Deliverable",
+      "group": "ImplementationMigration",
+      "tkDisplayOrder": 0,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 12,4 H 28 V 16 H 12 V 4 M 12,4 L 20,10 L 28,4 M 16,13 L 19,16 L 24,10"
+    },
+    {
+      "type": "Gap",
+      "title": "Gap",
+      "group": "ImplementationMigration",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 12,6 V 14 M 28,6 V 14 M 12,10 H 17 M 23,10 H 28"
+    },
+    {
+      "type": "ImplementationEvent",
+      "title": "Implementation Event",
+      "group": "ImplementationMigration",
+      "tkDisplayOrder": 2,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 15,3 L 22,3 L 17,10 L 24,10 L 14,19 L 17,11 L 11,11 Z"
+    },
+    {
+      "type": "Plateau",
+      "title": "Plateau",
+      "group": "ImplementationMigration",
+      "tkDisplayOrder": 3,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,17 H 17 V 12 H 23 V 7 H 29 V 3"
+    },
+    {
+      "type": "WorkPackage",
+      "title": "Work Package",
+      "group": "ImplementationMigration",
+      "tkDisplayOrder": 4,
+      "cornerRadius": 10,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,4 H 26 V 16 H 11 V 4 M 20,7 L 24,10 L 20,13"
+    },
+    {
+      "type": "Grouping",
+      "title": "Grouping",
+      "group": "General",
+      "tkDisplayOrder": 4,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 12,3 H 17 M 20,3 H 25 M 28,3 H 29 M 29,3 V 8 M 29,11 V 16 M 29,17 H 24 M 21,17 H 16 M 13,17 H 11 M 11,17 V 12 M 11,9 V 4"
+    },
+    {
+      "type": "Location",
+      "title": "Location",
+      "group": "General",
+      "tkDisplayOrder": 5,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 20,18 C 20,18 12,11 12,7 A 8 8 0 1 1 28 7 C 28,11 20,18 20,18 Z M 20,7 m -2.5,0 a2.5,2.5 0 1,0 5,0 a2.5,2.5 0 1,0 -5,0"
+    }
+  ],
+  "streamTemplates": [
+    {
+      "name": "Enterprise",
+      "pattern": "fce",
+      "capabilityNameBegin": "GeneralActor",
+      "entityNameBegin": "DataDataEntity",
+      "value": [
+        "GeneralActor",
+        "BusinessService",
+        "BusinessCapability",
+        "BusinessProcess",
+        "ApplicationService",
+        "ApplicationCapability",
+        "ApplicationProcess",
+        "ApplicationLogicalComponent",
+        "ApplicationPhysicalComponent",
+        "DataDataEntity"
+      ],
+      "passive": [
+        {
+          "from": "BusinessFunction",
+          "to": "BusinessProcess"
+        }
+      ]
+    },
+    {
+      "name": "Enterprise Full",
+      "pattern": "fce",
+      "capabilityNameBegin": "GeneralActor",
+      "entityNameBegin": "TechnologyLogicalComponent",
+      "value": [
+        "GeneralActor",
+        "GeneralCapability",
+        "BusinessService",
+        "BusinessCapability",
+        "BusinessProcess",
+        "ApplicationService",
+        "ApplicationCapability",
+        "ApplicationProcess",
+        "ApplicationLogicalComponent",
+        "ApplicationPhysicalComponent",
+        "TechnologyService",
+        "TechnologyCapability",
+        "TechnologyProcess",
+        "TechnologyLogicalComponent",
+        "TechnologyPhysicalComponent",
+        "DataDataEntity",
+        "DataPhysicalComponent",
+        "DataLogicalComponent"
+      ],
+      "passive": [
+        {
+          "from": "BusinessFunction",
+          "to": "BusinessProcess"
+        },
+        {
+          "from": "ApplicationFunction",
+          "to": "ApplicationProcess"
+        },
+        {
+          "from": "TechnologyFunction",
+          "to": "TechnologyProcess"
+        }
+      ]
+    },
+    {
+      "name": "Data",
+      "pattern": "tbd",
+      "capabilityNameBegin": "BusinessServicetbd",
+      "entityNameBegin": "TechnologyLogicalComponenttbd",
+      "value": [
+        "GeneralActor",
+        "GeneralCapability",
+        "BusinessCapability",
+        "ApplicationCapability",
+        "TechnologyCapability",
+        "DataDataEntity"
+      ]
+    },
+    {
+      "name": "Test",
+      "pattern": "fce",
+      "capabilityNameBegin": "BusinessService",
+      "entityNameBegin": "DataDataEntity",
+      "value": [
+        "BusinessService",
+        "BusinessCapability",
+        "BusinessProcess",
+        "thingamajack",
+        "DataDataEntity"
+      ],
+      "passive": [
+        {
+          "from": "BusinessFunction",
+          "to": "BusinessProcess"
+        },
+        {
+          "from": "BusinessCapability",
+          "to": "metaDataRegistry"
+        },
+        {
+          "from": "GeneralActor",
+          "to": "thingamajig"
+        }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "viewType": "sec",
+      "sectionId": "title",
+      "order": 0,
+      "name": "blah blah blah",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": [
+        "*"
+      ]
+    },
+    {
+      "viewType": "sec",
+      "sectionId": "one",
+      "order": 1,
+      "name": "Section One",
+      "rowCount": 10,
+      "columnCount": 10,
+      "elementTypes": []
+    },
+    {
+      "viewType": "org",
+      "sectionId": "title",
+      "order": 0,
+      "name": "Enterprise Functions",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": []
+    },
+    {
+      "viewType": "org",
+      "sectionId": "esf",
+      "order": 1,
+      "name": "Enterprise Scope Functions",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org",
+      "sectionId": "mof",
+      "order": 2,
+      "name": "Mainstream Operational Functions",
+      "rowCount": 2,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org",
+      "sectionId": "cof",
+      "order": 3,
+      "name": "Centralized Operational Functions (Economies of Scale)",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org",
+      "sectionId": "ssf",
+      "order": 4,
+      "name": "Staff Specialist Functions",
+      "rowCount": 2,
+      "columnCount": 5,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org",
+      "sectionId": "cif",
+      "order": 5,
+      "name": "Continuous Improvement Functions",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org",
+      "sectionId": "rsf",
+      "order": 6,
+      "name": "Resources Sustainment Functions",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org",
+      "sectionId": "fcf",
+      "order": 7,
+      "name": "Finance Control Functions",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org4lob",
+      "sectionId": "title",
+      "order": 0,
+      "name": "Enterprise Functions 4 LOB",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": []
+    },
+    {
+      "viewType": "org4lob",
+      "sectionId": "esf",
+      "order": 1,
+      "name": "Enterprise Scope Functions",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org4lob",
+      "sectionId": "mof",
+      "order": 2,
+      "name": "Mainstream Operational Functions - LOB1",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org4lob",
+      "sectionId": "mof2",
+      "order": 3,
+      "name": "Mainstream Operational Functions - LOB2",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org4lob",
+      "sectionId": "mof3",
+      "order": 4,
+      "name": "Mainstream Operational Functions - LOB3",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org4lob",
+      "sectionId": "mof4",
+      "order": 5,
+      "name": "Mainstream Operational Functions - LOB4",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org4lob",
+      "sectionId": "cof",
+      "order": 6,
+      "name": "Centralized Operational Functions (Economies of Scale)",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org4lob",
+      "sectionId": "ssf",
+      "order": 7,
+      "name": "Staff Specialist Functions",
+      "rowCount": 2,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org4lob",
+      "sectionId": "cif",
+      "order": 8,
+      "name": "Continuous Improvement Functions",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org4lob",
+      "sectionId": "rsf",
+      "order": 9,
+      "name": "Resources Sustainment Functions",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    },
+    {
+      "viewType": "org4lob",
+      "sectionId": "fcf",
+      "order": 10,
+      "name": "Finance Control Functions",
+      "rowCount": 1,
+      "columnCount": 20,
+      "elementTypes": [
+        "BusinessFunction"
+      ]
+    }
+  ],
+  "templates": [
+    {
+      "name": "Enterprise Functions",
+      "viewTypes": [
+        "ff",
+        "org"
+      ],
+      "parts": [
+        {
+          "id": "1",
+          "label": "New Bus. Development",
+          "type": "BusinessFunction",
+          "x": 0,
+          "y": 0,
+          "sectionId": "esf",
+          "xIds": "busdev",
+          "note": ""
+        },
+        {
+          "id": "2",
+          "label": "Audit",
+          "type": "BusinessFunction",
+          "x": 1,
+          "y": 0,
+          "sectionId": "esf",
+          "xIds": "audit",
+          "note": ""
+        },
+        {
+          "id": "3",
+          "label": "ESG",
+          "type": "BusinessFunction",
+          "x": 2,
+          "y": 0,
+          "sectionId": "esf",
+          "xIds": "esg",
+          "note": ""
+        },
+        {
+          "id": "4",
+          "label": "GRC",
+          "type": "BusinessFunction",
+          "x": 3,
+          "y": 0,
+          "sectionId": "esf",
+          "xIds": "grc",
+          "note": ""
+        },
+        {
+          "id": "5",
+          "label": "EHS",
+          "type": "BusinessFunction",
+          "x": 4,
+          "y": 0,
+          "sectionId": "esf",
+          "xIds": "ehs",
+          "note": ""
+        },
+        {
+          "id": "6",
+          "label": "Product Improvement & Development",
+          "type": "BusinessFunction",
+          "x": 0,
+          "y": 0,
+          "sectionId": "mof",
+          "xIds": "proddev",
+          "note": ""
+        },
+        {
+          "id": "7",
+          "label": "Production",
+          "type": "BusinessFunction",
+          "x": 1,
+          "y": 0,
+          "sectionId": "mof",
+          "xIds": "prod",
+          "note": ""
+        },
+        {
+          "id": "8",
+          "label": "Selling",
+          "type": "BusinessFunction",
+          "x": 2,
+          "y": 0,
+          "sectionId": "mof",
+          "xIds": "selling",
+          "note": ""
+        },
+        {
+          "id": "9",
+          "label": "Marketing",
+          "type": "BusinessFunction",
+          "x": 3,
+          "y": 0,
+          "sectionId": "mof",
+          "xIds": "marketing",
+          "note": ""
+        },
+        {
+          "id": "10",
+          "label": "Delivery",
+          "type": "BusinessFunction",
+          "x": 4,
+          "y": 0,
+          "sectionId": "mof",
+          "xIds": "delivery",
+          "note": ""
+        },
+        {
+          "id": "11",
+          "label": "Customer Relations",
+          "type": "BusinessFunction",
+          "x": 5,
+          "y": 0,
+          "sectionId": "mof",
+          "xIds": "customerrelations",
+          "note": ""
+        },
+        {
+          "id": "12",
+          "label": "Data Management",
+          "type": "BusinessFunction",
+          "x": 6,
+          "y": 0,
+          "sectionId": "mof",
+          "xIds": "datamgmt",
+          "note": "datamanagement"
+        },
+        {
+          "id": "13",
+          "label": "Procurement",
+          "type": "BusinessFunction",
+          "x": 0,
+          "y": 0,
+          "sectionId": "cof",
+          "xIds": "procurement",
+          "note": ""
+        },
+        {
+          "id": "14",
+          "label": "Data Admin",
+          "type": "BusinessFunction",
+          "x": 2,
+          "y": 0,
+          "sectionId": "cof",
+          "xIds": "datadmin",
+          "note": ""
+        },
+        {
+          "id": "15",
+          "label": "Human Resourcing",
+          "type": "BusinessFunction",
+          "x": 0,
+          "y": 0,
+          "sectionId": "ssf",
+          "xIds": "hr",
+          "note": ""
+        },
+        {
+          "id": "16",
+          "label": "IT/S Work Methods (Technology, Systems)",
+          "type": "BusinessFunction",
+          "x": 1,
+          "y": 0,
+          "sectionId": "ssf",
+          "xIds": "its",
+          "note": ""
+        },
+        {
+          "id": "17",
+          "label": "Public Affairs",
+          "type": "BusinessFunction",
+          "x": 2,
+          "y": 0,
+          "sectionId": "ssf",
+          "xIds": "publicaffairs",
+          "note": ""
+        },
+        {
+          "id": "18",
+          "label": "Legal Policies",
+          "type": "BusinessFunction",
+          "x": 3,
+          "y": 0,
+          "sectionId": "ssf",
+          "xIds": "legal",
+          "note": ""
+        },
+        {
+          "id": "19",
+          "label": "Data Support (Analytics, Support, Policies)",
+          "type": "BusinessFunction",
+          "x": 4,
+          "y": 0,
+          "sectionId": "ssf",
+          "xIds": "datasupport",
+          "note": ""
+        },
+        {
+          "id": "20",
+          "label": "Financial Support (Policies and Priorities)",
+          "type": "BusinessFunction",
+          "x": 5,
+          "y": 0,
+          "sectionId": "ssf",
+          "xIds": "financesupport",
+          "note": ""
+        },
+        {
+          "id": "21",
+          "label": "Op Support (Priorities in Flows: Scheduling, Resourcing, Business Analysis)",
+          "type": "BusinessFunction",
+          "x": 6,
+          "y": 0,
+          "sectionId": "ssf",
+          "xIds": "opsupport",
+          "note": ""
+        },
+        {
+          "id": "22",
+          "label": "Ad hoc/ Enhancement Projects",
+          "type": "BusinessFunction",
+          "x": 0,
+          "y": 0,
+          "sectionId": "cif",
+          "xIds": "projects",
+          "note": ""
+        },
+        {
+          "id": "23",
+          "label": "Digital Transformation, Modernization, Refresh",
+          "type": "BusinessFunction",
+          "x": 3,
+          "y": 0,
+          "sectionId": "cif",
+          "xIds": "dt",
+          "note": ""
+        },
+        {
+          "id": "24",
+          "label": "Accounting",
+          "type": "BusinessFunction",
+          "x": 0,
+          "y": 0,
+          "sectionId": "rsf",
+          "xIds": "accounting",
+          "note": ""
+        },
+        {
+          "id": "25",
+          "label": "Personnel",
+          "type": "BusinessFunction",
+          "x": 1,
+          "y": 0,
+          "sectionId": "rsf",
+          "xIds": "personnel",
+          "note": ""
+        },
+        {
+          "id": "26",
+          "label": "Data Governance",
+          "type": "BusinessFunction",
+          "x": 2,
+          "y": 0,
+          "sectionId": "rsf",
+          "xIds": "datagovernance",
+          "note": ""
+        },
+        {
+          "id": "27",
+          "label": "Finance",
+          "type": "BusinessFunction",
+          "x": 0,
+          "y": 0,
+          "sectionId": "fcf",
+          "xIds": "finance",
+          "note": ""
+        },
+        {
+          "id": "28",
+          "label": "Controller",
+          "type": "BusinessFunction",
+          "x": 1,
+          "y": 0,
+          "sectionId": "fcf",
+          "xIds": "controller",
+          "note": ""
+        },
+        {
+          "id": "29",
+          "label": "Budgeting",
+          "type": "BusinessFunction",
+          "x": 2,
+          "y": 0,
+          "sectionId": "fcf",
+          "xIds": "budget",
+          "note": ""
+        }
+      ],
+      "connectors": []
+    },
+    {
+      "name": "test no sections, with connectors",
+      "viewTypes": [
+        "ff"
+      ],
+      "parts": [
+        {
+          "id": "1",
+          "label": "part1label",
+          "type": "Tester",
+          "x": 0,
+          "y": 0,
+          "xIds": "",
+          "note": "part1 note"
+        },
+        {
+          "id": "2",
+          "label": "part2label",
+          "type": "BusinessCapability",
+          "x": 1,
+          "y": 0,
+          "xIds": "",
+          "note": "Business capability high level"
+        },
+        {
+          "id": "3",
+          "label": "bus function",
+          "type": "BusinessFunction",
+          "x": 2,
+          "y": 0,
+          "xIds": "",
+          "note": "Business function delivers Business capability"
+        },
+        {
+          "id": "4",
+          "label": "bus process",
+          "type": "BusinessProcess",
+          "x": 3,
+          "y": 0,
+          "xIds": "",
+          "note": "Business process delivers Business function"
+        }
+      ],
+      "connectors": [
+        {
+          "id": "c1",
+          "frompartid": "2",
+          "topartid": "3",
+          "relationship": "flow",
+          "note": "delivers"
+        },
+        {
+          "id": "c2",
+          "frompartid": "3",
+          "topartid": "4",
+          "relationship": "flow",
+          "note": "delivers"
+        }
+      ]
+    }
+  ]
+}

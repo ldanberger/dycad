@@ -1,0 +1,105 @@
+{
+  "version": "0.2",
+  "readme": { "note": "Right-side badge + response chain demo. A generates a random number each tick and sends it to B; A shows whatever B responds with in its own right-side badge. B receives A's number, appends a random letter, and forwards the combined value to C; B also acknowledges A's number with a response, and shows whatever C responds with in its own right-side badge. C receives B's value, shows it in its right-side badge, and responds to B with a random number. Turn on both 'Show Simulation Values' and 'Show Script Badge' on this view (already on by default here) to see the normal left badge (last value sent) alongside the script-controlled right badge (last thing received back) on every node. Step Simulation a few times to watch values and responses ripple through." },
+  "defaultModel": "Reference",
+  "currentView": "right-badge-chain-demo",
+  "models": [{ "modelName": "Reference" }],
+  "views": [
+    {
+      "id": "right-badge-chain-demo",
+      "viewName": "right-badge-chain-demo",
+      "viewType": "ff",
+      "chkShowConnectorType": true,
+      "chkShowStreamType": false,
+      "chkShowKeys": false,
+      "chkShowElementTypes": true,
+      "chkShowDescription": true,
+      "chkShowOnPageCatalogs": false,
+      "chkShowSimValues": true,
+      "chkShowScriptBadge": true,
+      "margin": 50,
+      "sections": [],
+      "nodeWidth": 160,
+      "nodeHeight": 60,
+      "remapSortKeys": null,
+      "spacingScale": 1
+    }
+  ],
+  "parts": [
+    {
+      "id": "part-a",
+      "type": "Unknown",
+      "label": "A - Generator",
+      "rawLabel": "A - Generator",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "Generates a new random number each tick and sends it to B. Shows whatever B responds with in the right-side badge (blue).",
+      "scriptEnabled": true,
+      "script": "// generate a fresh number every tick and forward it to B\nconst num = Math.floor(Math.random() * 100);\nctx.log('generated ' + num);\n\n// ctx.responses holds whatever B sent BACK last tick (one tick behind, per the\n// engine's response-packet rule) - show it in the right-side badge if present\nlet badge = null;\nif (ctx.responses.length > 0) {\n  const resp = ctx.responses[0];\n  ctx.log('B responded: ' + resp.value + ' (from ' + resp.fromLabel + ')');\n  badge = { text: String(resp.value), color: '#2f6fed' };\n}\n\nreturn { value: num, state: {}, badge };"
+    },
+    {
+      "id": "part-b",
+      "type": "Unknown",
+      "label": "B - Processor",
+      "rawLabel": "B - Processor",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "Receives A's number, appends a random letter, and forwards the combined value to C. Acknowledges A with a response. Shows whatever C responds with in the right-side badge (purple).",
+      "scriptEnabled": true,
+      "script": "// receive A's number\nif (ctx.inputs.length === 0 || ctx.inputs[0].value === undefined) return { value: null, state: {} };\nconst received = ctx.inputs[0].value;\n\n// append a random letter and forward the combined value to C\nconst letters = 'abcdefghijklmnopqrstuvwxyz';\nconst letter = letters[Math.floor(Math.random() * letters.length)];\nconst combined = String(received) + letter;\nctx.log('received ' + received + ' from ' + ctx.inputs[0].fromLabel + ', forwarding ' + combined);\n\n// acknowledge A's number with a response (broadcasts back to whoever sent this part\n// forward data this tick - just A here)\nconst responseToA = 'ack:' + combined;\n\n// show whatever C sent back last tick in the right-side badge\nlet badge = null;\nif (ctx.responses.length > 0) {\n  const resp = ctx.responses[0];\n  ctx.log('C responded: ' + resp.value + ' (from ' + resp.fromLabel + ')');\n  badge = { text: String(resp.value), color: '#8e44ad' };\n}\n\nreturn { value: combined, state: {}, response: responseToA, badge };"
+    },
+    {
+      "id": "part-c",
+      "type": "Unknown",
+      "label": "C - Receiver",
+      "rawLabel": "C - Receiver",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "Receives B's combined value, shows it in the right-side badge (green), and responds to B with a random number.",
+      "scriptEnabled": true,
+      "script": "// receive B's value\nif (ctx.inputs.length === 0 || ctx.inputs[0].value === undefined) return { value: null, state: {} };\nconst received = ctx.inputs[0].value;\nctx.log('received ' + received + ' from ' + ctx.inputs[0].fromLabel);\n\n// respond to B with a random number (broadcasts back to whoever sent this part\n// forward data this tick - just B here)\nconst randomResponse = Math.floor(Math.random() * 1000);\nctx.log('responding with ' + randomResponse);\n\nreturn {\n  value: received,\n  state: {},\n  response: randomResponse,\n  badge: { text: String(received), color: '#16a34a' },\n};"
+    }
+  ],
+  "connectors": [
+    {
+      "id": "conn-a-b",
+      "from": "part-a",
+      "to": "part-b",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "connectorType": "c",
+      "relationship": "Association"
+    },
+    {
+      "id": "conn-b-c",
+      "from": "part-b",
+      "to": "part-c",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "connectorType": "c",
+      "relationship": "Association"
+    }
+  ],
+  "viewMembers": [
+    { "id": "vm-a", "view": "right-badge-chain-demo", "objectType": "part", "objectId": "part-a", "x": 60, "y": 120, "fillColor": "#ff5e61", "order": 0, "note": "", "linkedViewName": "", "isExternal": false, "sectionId": "" },
+    { "id": "vm-b", "view": "right-badge-chain-demo", "objectType": "part", "objectId": "part-b", "x": 320, "y": 120, "fillColor": "#ff5e61", "order": 0, "note": "", "linkedViewName": "", "isExternal": false, "sectionId": "" },
+    { "id": "vm-c", "view": "right-badge-chain-demo", "objectType": "part", "objectId": "part-c", "x": 580, "y": 120, "fillColor": "#ff5e61", "order": 0, "note": "", "linkedViewName": "", "isExternal": false, "sectionId": "" },
+    { "id": "vm-conn-a-b", "view": "right-badge-chain-demo", "objectType": "connector", "objectId": "conn-a-b", "order": 0, "note": "", "fromVmId": "vm-a", "toVmId": "vm-b" },
+    { "id": "vm-conn-b-c", "view": "right-badge-chain-demo", "objectType": "connector", "objectId": "conn-b-c", "order": 0, "note": "", "fromVmId": "vm-b", "toVmId": "vm-c" }
+  ],
+  "settingsUser": { "relationshipPairs": [] }
+}

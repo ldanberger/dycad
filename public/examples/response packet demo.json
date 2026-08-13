@@ -1,0 +1,77 @@
+{
+  "version": "0.2",
+  "readme": { "note": "Response packet demo. Every connector supports a backward-flowing 'response' alongside its forward value. Requester sends a fresh request each tick and logs whatever comes back via ctx.responses. Responder echoes what it receives and sends a response the first time it sees a new value (tracking state.lastAcked so it doesn't re-react to the same input twice — good practice, even though the engine itself never resends a response you don't explicitly set again). Step Simulation a few times and watch the Message Log: each response is delivered exactly once, one tick after it was set." },
+  "defaultModel": "Reference",
+  "currentView": "response-packet-demo",
+  "models": [{ "modelName": "Reference" }],
+  "views": [
+    {
+      "id": "response-packet-demo",
+      "viewName": "response-packet-demo",
+      "viewType": "ff",
+      "chkShowConnectorType": true,
+      "chkShowStreamType": false,
+      "chkShowKeys": false,
+      "chkShowElementTypes": true,
+      "chkShowDescription": true,
+      "chkShowOnPageCatalogs": false,
+      "chkShowSimValues": true,
+      "margin": 50,
+      "sections": [],
+      "nodeWidth": 150,
+      "nodeHeight": 56,
+      "remapSortKeys": null,
+      "spacingScale": 1
+    }
+  ],
+  "parts": [
+    {
+      "id": "part-requester",
+      "type": "Unknown",
+      "label": "Requester",
+      "rawLabel": "Requester",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "Sends a new request every tick; reads Responder's ack back via ctx.responses. fromLabel identifies who responded, so this script never hardcodes Responder's identity.",
+      "scriptEnabled": true,
+      "script": "// ctx.responses is an array — one entry per outgoing connector whose target sent a\n// response last tick. Empty most ticks; has an entry the one tick after Responder sets one.\nif (ctx.responses.length > 0) {\n  ctx.log('received response \"' + ctx.responses[0].value + '\" from ' + ctx.responses[0].fromLabel);\n}\nreturn { value: 'request-' + ctx.tick, state: {} };"
+    },
+    {
+      "id": "part-responder",
+      "type": "Unknown",
+      "label": "Responder",
+      "rawLabel": "Responder",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "Echoes whatever it receives on ctx.inputs, and sends a `response` back the first time it sees a given value — the response broadcasts to every node that sent this part forward data (just Requester here), delivered one tick later.",
+      "scriptEnabled": true,
+      "script": "// ctx.inputs[0].value is undefined until Requester's first tick has committed.\nif (ctx.inputs.length === 0 || ctx.inputs[0].value === undefined) return { value: null, state: {} };\nconst received = ctx.inputs[0].value;\n\n// Only send a response the FIRST time we see this particular value — the `response`\n// field is a single slot (not a queue), and the engine already guarantees it's never\n// auto-resent, but tracking lastAcked here is still good practice: it stops THIS\n// script's own logic from re-triggering on a value it's already handled.\nif (ctx.state.lastAcked === received) {\n  return { value: received, state: ctx.state };\n}\nreturn { value: received, state: { lastAcked: received }, response: 'ack:' + received };"
+    }
+  ],
+  "connectors": [
+    {
+      "id": "conn-requester-responder",
+      "from": "part-requester",
+      "to": "part-responder",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "connectorType": "c",
+      "relationship": "Association"
+    }
+  ],
+  "viewMembers": [
+    { "id": "vm-requester", "view": "response-packet-demo", "objectType": "part", "objectId": "part-requester", "x": 80, "y": 100, "fillColor": "#ff5e61", "order": 0, "note": "", "linkedViewName": "", "isExternal": false, "sectionId": "" },
+    { "id": "vm-responder", "view": "response-packet-demo", "objectType": "part", "objectId": "part-responder", "x": 340, "y": 100, "fillColor": "#ff5e61", "order": 0, "note": "", "linkedViewName": "", "isExternal": false, "sectionId": "" },
+    { "id": "vm-conn-requester-responder", "view": "response-packet-demo", "objectType": "connector", "objectId": "conn-requester-responder", "order": 0, "note": "", "fromVmId": "vm-requester", "toVmId": "vm-responder" }
+  ],
+  "settingsUser": { "relationshipPairs": [] }
+}

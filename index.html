@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FlowRun - Workflow modeling and simulation</title>
+<link rel="stylesheet" href="css/styles.css" />
+</head>
+<body data-theme="light">
+
+<div id="app">
+
+  <!-- ============ HEADER ============ -->
+  <header id="app-header">
+    <div id="menu-bar" class="menu-bar">
+      <div class="menu-item-wrap">
+        <button class="menu-btn" id="file-menu-btn">File</button>
+        <div id="file-menu" class="dropdown-menu hidden"></div>
+      </div>
+      <div class="menu-item-wrap">
+        <button class="menu-btn" id="catalogs-menu-btn">Catalogs</button>
+        <div id="catalogs-menu" class="dropdown-menu hidden"></div>
+      </div>
+      <div class="menu-item-wrap">
+        <button class="menu-btn" id="advanced-menu-btn">Advanced</button>
+        <div id="advanced-menu" class="dropdown-menu hidden"></div>
+      </div>
+      <div class="menu-item-wrap">
+        <button class="menu-btn" id="simulation-menu-btn">Simulation</button>
+        <div id="simulation-menu" class="dropdown-menu hidden"></div>
+      </div>
+      <div class="menu-bar-spacer"></div>
+      <div class="menu-bar-center-group">
+        <select id="sim-model-select" class="tb-select" title="Simulation model (independent of Default Model)"></select>
+        <button id="sim-run-btn" class="tb-btn" title="Run Simulation">Run</button>
+        <button id="sim-pause-btn" class="tb-btn" title="Pause Simulation">Pause</button>
+        <button id="sim-step-btn" class="tb-btn" title="Step Simulation">Step</button>
+        <button id="sim-stop-btn" class="tb-btn" title="Stop Simulation">Stop</button>
+        <button id="sim-reset-btn" class="tb-btn" title="Reset Simulation">Reset</button>
+      </div>
+      <div class="menu-bar-spacer"></div>
+      <button id="save-json-btn" class="tb-btn">Save JSON</button>
+      <button id="load-json-btn" class="tb-btn">Load JSON</button>
+      <input type="file" id="load-json-input" accept="application/json" class="hidden" />
+      <input type="file" id="load-sim-snapshot-input" accept="application/json" class="hidden" />
+      <input type="file" id="load-local-settings-input" accept="application/json" class="hidden" />
+      <input type="file" id="import-archimate-input" accept=".xml,application/xml,text/xml" class="hidden" />
+      <button id="theme-toggle-btn" class="icon-btn" title="Toggle theme">🌓</button>
+      <button id="help-btn" class="icon-btn" title="Instructions">❓</button>
+      <span id="app-version" class="app-version"></span>
+      <span id="loaded-file-name" class="loaded-file-name"></span>
+    </div>
+    <div id="tabs-row" class="tabs-row">
+      <div id="tabs-list" class="tabs-list"></div>
+      <div class="tabs-spacer"></div>
+      <div class="restore-closed-wrap">
+        <button id="restore-closed-btn" class="icon-btn" title="Restore closed tab">⟲</button>
+        <div id="restore-closed-menu" class="dropdown-menu hidden"></div>
+      </div>
+    </div>
+    <div id="toolbar-row" class="toolbar-row">
+      <div class="toolbar-group" style="position:relative;">
+        <label class="tb-label" for="stream-filter-btn">Stream</label>
+        <button id="stream-filter-btn" class="tb-select" style="text-align:left;">All streams</button>
+        <div id="stream-filter-menu" class="dropdown-menu hidden"></div>
+      </div>
+      <div class="toolbar-group" style="position:relative;">
+        <label class="tb-label" for="element-type-filter-btn">Types</label>
+        <button id="element-type-filter-btn" class="tb-select" style="text-align:left;">All types</button>
+        <div id="element-type-filter-menu" class="dropdown-menu hidden"></div>
+      </div>
+      <div class="toolbar-group">
+        <label class="tb-label" for="connector-levels-input">Levels</label>
+        <input type="number" id="connector-levels-input" class="tb-select" style="width:60px;" min="0" step="1" placeholder="All" title="Connector levels: how many hops of connected nodes/connectors to also show beyond the matching ones (blank = unlimited). Only applies while Stream or Types is filtering." />
+      </div>
+      <div class="toolbar-group">
+        <button id="undo-btn" class="tb-btn" title="Undo (Ctrl+Z)">↶ Undo</button>
+        <button id="redo-btn" class="tb-btn" title="Redo (Ctrl+Shift+Z)">↷ Redo</button>
+      </div>
+      <div class="toolbar-group toolbar-spacer"></div>
+      <div class="toolbar-group">
+        <label class="tb-label" for="view-select">Current View</label>
+        <select id="view-select" class="tb-select"></select>
+        <button id="view-add-btn" class="icon-btn small" title="Add view">+</button>
+        <button id="view-remove-btn" class="icon-btn small" title="Remove view">−</button>
+      </div>
+      <div class="toolbar-group">
+        <label class="tb-label" for="model-select">Default Model</label>
+        <select id="model-select" class="tb-select"></select>
+        <button id="model-add-btn" class="icon-btn small" title="Add model">+</button>
+        <button id="model-remove-btn" class="icon-btn small" title="Remove model">−</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ BODY: 3 columns ============ -->
+  <div id="app-body">
+
+    <!-- LEFT: Toolbox -->
+    <aside id="left-panel" class="side-panel">
+      <div class="panel-section collapsible" data-panel-id="toolkit">
+        <h3 class="panel-title"><button class="panel-toggle" title="Expand/collapse">▾</button>Elements</h3>
+        <div class="panel-body">
+          <div class="lib-filters" id="lib-filters"></div>
+          <div class="lib-filters" id="group-filters"></div>
+          <div id="elements-grid" class="elements-grid"></div>
+        </div>
+      </div>
+      <div class="panel-section collapsible" data-panel-id="selection">
+        <h3 class="panel-title"><button class="panel-toggle" title="Expand/collapse">▾</button>Selection</h3>
+        <div class="panel-body">
+          <div id="selection-info" class="selection-info">Nothing selected</div>
+          <ul id="selection-list" class="selection-list"></ul>
+        </div>
+      </div>
+      <div class="panel-section collapsible" data-panel-id="commands">
+        <h3 class="panel-title"><button class="panel-toggle" title="Expand/collapse">▾</button>Commands</h3>
+        <div class="panel-body">
+          <div id="commands-list" class="commands-list"></div>
+        </div>
+      </div>
+      <div class="panel-section">
+        <h3 class="panel-title">Position</h3>
+        <div id="mouse-position" class="mouse-position">x: —, y: —</div>
+      </div>
+      <div class="panel-section">
+        <div class="panel-title" style="justify-content:space-between;">
+          <span class="dbl-edit-label" id="message-log-header" title="Double-click to open in a larger read-only view">Message Log</span>
+          <span style="display:flex; gap:4px;">
+            <button class="icon-btn" id="message-log-copy-btn" title="Copy Message Log content">📋</button>
+            <button class="icon-btn" id="message-log-clear-btn" title="Clear Message Log content">🗑</button>
+          </span>
+        </div>
+        <textarea id="message-log" class="message-log" readonly></textarea>
+      </div>
+    </aside>
+
+    <div id="left-resizer" class="panel-resizer"></div>
+
+    <!-- CENTER: Pages -->
+    <main id="center-panel">
+      <div id="pages-container"></div>
+    </main>
+
+    <div id="right-resizer" class="panel-resizer"></div>
+
+    <!-- RIGHT: Properties -->
+    <aside id="right-panel" class="side-panel">
+      <div class="panel-section collapsible" data-panel-id="properties">
+        <h3 class="panel-title"><button class="panel-toggle" title="Expand/collapse">▾</button>Properties</h3>
+        <div class="panel-body">
+          <div id="properties-body">
+            <div class="empty-hint">Select a node or edge to edit its properties.</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

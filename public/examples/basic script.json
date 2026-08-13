@@ -1,0 +1,120 @@
+{
+  "version": "0.2",
+  "readme": {
+    "note": "Simulation demo: Counter -> Summer. Step or Run Simulation to see it tick."
+  },
+  "defaultModel": "Reference",
+  "currentView": "sim-demo",
+  "models": [
+    {
+      "modelName": "Reference"
+    }
+  ],
+  "views": [
+    {
+      "id": "sim-demo",
+      "viewName": "sim-demo",
+      "viewType": "ff",
+      "chkShowConnectorType": true,
+      "chkShowStreamType": false,
+      "chkShowKeys": false,
+      "chkShowElementTypes": true,
+      "chkShowDescription": true,
+      "chkShowOnPageCatalogs": false,
+      "chkShowSimValues": true,
+      "margin": 50,
+      "sections": [],
+      "nodeWidth": 130,
+      "nodeHeight": 46,
+      "remapSortKeys": null,
+      "spacingScale": 1
+    }
+  ],
+  "parts": [
+    {
+      "id": "part-counter",
+      "type": "Unknown",
+      "label": "Counter",
+      "rawLabel": "Counter",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "Increments by 1 every tick.",
+      "scriptEnabled": true,
+      "script": "let count = ctx.state.count || 0;\n\nif (ctx.tick === 0) {\n  count = 0;\n  ctx.log('starting counter at 0');\n} else {\n  count += 1;\n  ctx.log(`incremented to ${count}`);\n}\n\nreturn {\n  value: count,\n  state: { count },\n};"
+    },
+    {
+      "id": "part-summer",
+      "type": "Unknown",
+      "label": "Summer",
+      "rawLabel": "Summer",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "Sums whatever's coming in from upstream.",
+      "scriptEnabled": true,
+      "script": "let sum = 0;\nfor (const inp of ctx.inputs) {\n  const v = Number(inp.value) || 0;\n  sum += v;\n  ctx.log(`received ${v} from ${inp.fromLabel || 'unknown'}`);\n}\n\nctx.log(`sum = ${sum}`);\n\nreturn {\n  value: sum,\n  state: {},\n};"
+    }
+  ],
+  "connectors": [
+    {
+      "id": "conn-counter-summer",
+      "from": "part-counter",
+      "to": "part-summer",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "connectorType": "c",
+      "relationship": "Association"
+    }
+  ],
+  "viewMembers": [
+    {
+      "id": "vm-counter",
+      "view": "sim-demo",
+      "objectType": "part",
+      "objectId": "part-counter",
+      "x": 100,
+      "y": 120,
+      "fillColor": "#ff5e61",
+      "order": 0,
+      "note": "",
+      "linkedViewName": "",
+      "isExternal": false,
+      "sectionId": ""
+    },
+    {
+      "id": "vm-summer",
+      "view": "sim-demo",
+      "objectType": "part",
+      "objectId": "part-summer",
+      "x": 320,
+      "y": 120,
+      "fillColor": "#ff5e61",
+      "order": 0,
+      "note": "",
+      "linkedViewName": "",
+      "isExternal": false,
+      "sectionId": ""
+    },
+    {
+      "id": "vm-conn-counter-summer",
+      "view": "sim-demo",
+      "objectType": "connector",
+      "objectId": "conn-counter-summer",
+      "order": 0,
+      "note": "",
+      "fromVmId": "vm-counter",
+      "toVmId": "vm-summer"
+    }
+  ],
+  "settingsUser": {
+    "relationshipPairs": []
+  }
+}
