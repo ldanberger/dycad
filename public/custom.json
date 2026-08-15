@@ -1922,7 +1922,6 @@
         "BusinessService",
         "BusinessCapability",
         "BusinessProcess",
-        "ApplicationService",
         "ApplicationCapability",
         "ApplicationProcess",
         "ApplicationLogicalComponent",
@@ -1933,6 +1932,10 @@
         {
           "from": "BusinessFunction",
           "to": "BusinessProcess"
+        },
+        {
+          "from": "ApplicationApplication",
+          "to": "ApplicationPhysicalComponent"
         }
       ]
     },
