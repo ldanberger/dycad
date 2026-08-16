@@ -610,9 +610,25 @@ function redrawNodeSizes(app, tab) {
   measureHost.style.top = '0';
   document.body.appendChild(measureHost);
 
-  let maxW = 100, maxH = 40;
+  // Index parts by id once (O(total parts)) instead of calling app.store.findPart(...)
+  // — an uncached ciEq-based linear scan over doc.parts — once per node below. That scan,
+  // repeated once per node in the view, was a second confirmed O(m²) cost here (found via
+  // CPU profile, same investigation as the DOM-batching fix below): a large generated
+  // view's Redraw call was re-scanning the whole, similarly-large parts array for every
+  // single one of its own nodes.
+  const partById = new Map();
+  for (const p of app.store.doc.parts) partById.set(p.id, p);
+
+  // Batch every node's measurement element into the DOM in one pass, THEN read all their
+  // rects, THEN remove them all — not append/read/remove one node at a time. Each
+  // getBoundingClientRect() forces a synchronous layout reflow if anything dirtied
+  // layout since the last read; interleaving writes and reads per-node was forcing a
+  // full reflow per node, which dominated wall-clock time on a large generated view
+  // (thousands of nodes). Batched, only the first read below pays for a reflow — every
+  // read after that is free since nothing changes layout in between.
+  const measured = [];
   for (const vm of partVms) {
-    const part = app.store.findPart(vm.objectId);
+    const part = partById.get(vm.objectId);
     if (!part) continue;
     const el = buildNodeEl(app, tab, vm, part);
     el.style.position = 'static';
@@ -622,10 +638,14 @@ function redrawNodeSizes(app, tab) {
     const labelEl = el.querySelector('.fnode-label');
     if (labelEl) { labelEl.style.webkitLineClamp = 'unset'; labelEl.style.display = 'block'; labelEl.style.overflow = 'visible'; }
     measureHost.appendChild(el);
+    measured.push(el);
+  }
+
+  let maxW = 100, maxH = 40;
+  for (const el of measured) {
     const rect = el.getBoundingClientRect();
     maxW = Math.max(maxW, Math.ceil(rect.width) + 4);
     maxH = Math.max(maxH, Math.ceil(rect.height) + 4);
-    measureHost.removeChild(el);
   }
   document.body.removeChild(measureHost);
 
@@ -655,14 +675,40 @@ function resolveOverlapsForView(app, tab) {
   if (!view) return;
   const { w, h } = getNodeSize(view);
   const partVms = app.store.viewMembersForView(tab.viewId).filter((vm) => vm.objectType === 'part');
-  const placed = [];
+
+  // Spatial grid index instead of a linear "placed.some(...)" scan against every
+  // already-placed node — that was O(m²) in view size, a real bottleneck after a bulk
+  // generation into a large view (thousands of nodes). Cell size matches the overlap
+  // test's own reach (w+4, h+4), so two nodes can only possibly overlap if they land in
+  // the same or an adjacent cell — checking just that 3x3 neighborhood instead of every
+  // prior node makes this ~O(m) amortized. Overlap condition itself is unchanged.
+  const cellW = w + 4, cellH = h + 4;
+  const grid = new Map(); // "cellX,cellY" -> array of already-placed vms in that cell
+  const overlapsAny = (vm) => {
+    const cx = Math.floor(vm.x / cellW), cy = Math.floor(vm.y / cellH);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const bucket = grid.get(`${cx + dx},${cy + dy}`);
+        if (!bucket) continue;
+        for (const p of bucket) {
+          if (Math.abs(p.x - vm.x) < cellW && Math.abs(p.y - vm.y) < cellH) return true;
+        }
+      }
+    }
+    return false;
+  };
+  const addToGrid = (vm) => {
+    const key = `${Math.floor(vm.x / cellW)},${Math.floor(vm.y / cellH)}`;
+    if (!grid.has(key)) grid.set(key, []);
+    grid.get(key).push(vm);
+  };
+
   for (const vm of partVms) {
-    const overlapsPlaced = placed.some((p) => Math.abs(p.x - vm.x) < w + 4 && Math.abs(p.y - vm.y) < h + 4);
-    if (overlapsPlaced) {
+    if (overlapsAny(vm)) {
       const free = app.store.findNonOverlappingPosition(tab.viewId, vm.x, vm.y, vm.id, w, h);
       vm.x = free.x; vm.y = free.y;
     }
-    placed.push(vm);
+    addToGrid(vm);
   }
 }
 
@@ -1003,11 +1049,13 @@ function renderTablePage(app, tab, container) {
     cols = tab.tableCols || (rows[0] ? Object.keys(rows[0]) : []);
   }
 
-  // Filter — catalog tabs only, case-insensitive substring match against ANY column's
-  // formatted cell value, so searching "risk" finds it whether it's in the label, a note,
-  // or anywhere else in the row.
+  // Filter — catalog tabs AND the SFCE industry-data preview (Catalogs > SFCE, reviewing
+  // a large dataset before Generate Industry is exactly when this matters most) — case-
+  // insensitive substring match against ANY column's formatted cell value, so searching
+  // "risk" finds it whether it's in the label, a note, or anywhere else in the row.
+  const isFilterable = !!(tab.catalogType || tab.sfceIndustryKey);
   const totalCount = rows.length;
-  if (tab.catalogType) {
+  if (isFilterable) {
     const filterText = (tab.catalogFilterText || '').trim().toLowerCase();
     if (filterText) rows = rows.filter((r) => cols.some((c) => fmtCell(r[c]).toLowerCase().includes(filterText)));
   }
@@ -1021,7 +1069,7 @@ function renderTablePage(app, tab, container) {
   }
 
   const arrow = (c) => (tab.sortColumn === c ? (tab.sortDir === 'desc' ? ' ▾' : ' ▴') : '');
-  const searchBarHtml = tab.catalogType
+  const searchBarHtml = isFilterable
     ? `<div class="table-search-bar"><input type="text" class="table-filter-input" placeholder="Filter rows…" value="${escapeHtml(tab.catalogFilterText || '')}" /><span class="table-search-count">${rows.length} / ${totalCount}</span></div>`
     : '';
   wrap.innerHTML = `${searchBarHtml}<table><thead><tr>${cols.map((c) => `<th class="sortable-col" data-col="${escapeHtml(c)}">${escapeHtml(c)}${arrow(c)}</th>`).join('')}</tr></thead>
@@ -1044,6 +1092,8 @@ function renderTablePage(app, tab, container) {
         app.render();
       });
     });
+  }
+  if (isFilterable) {
     const filterInput = wrap.querySelector('.table-filter-input');
     filterInput.addEventListener('input', () => {
       tab.catalogFilterText = filterInput.value;

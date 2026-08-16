@@ -1,6 +1,6 @@
 // commands.js — Duplicate Stream, Split Node, Level Up, Level Down, Generate (createStream)
 import { ciEq } from './state.js';
-import { elementByType } from './rules.js';
+import { elementByType, findRelationshipPair } from './rules.js';
 import { isSectionViewType, createSectionPlacer, computeSectionLayout, isTypeAllowedInSection, findFreeCellInSection, duplicateSectionDefinition, BASE_X, BASE_Y, SECTION_GAP, NODE_INSET_X, NODE_INSET_Y } from './sections.js';
 import { redrawNodeSizes, redrawAndResolveLayout, getNodeSize } from './canvas.js';
 import { computeClusteredGridLayout } from './layout.js';
@@ -35,6 +35,12 @@ function createBulkLookupCache(store) {
     partsByXid: new Map(),         // `${xIds}|${model}`.toLowerCase() -> part
     partsById: new Map(),          // id -> part
     vmsByPartView: new Map(),      // `${partId}|${viewId}` -> viewMember
+    // viewId -> array of every part-viewMember in that view — lets
+    // Store.findNonOverlappingPosition skip re-scanning the whole (possibly huge,
+    // still-growing) doc.viewMembers array on every single call; see that method's own
+    // comment for why this mattered. Kept correct incrementally by cacheRegisterVm below,
+    // same as every other map here.
+    partVmsByView: new Map(),
     connsByFromToModel: new Map(), // `${fromId}|${toId}|${model}`.toLowerCase() -> connector (connectorType 's' only)
     connVmsByConnView: new Map(),  // `${connId}|${viewId}` -> viewMember
   };
@@ -53,6 +59,8 @@ function cacheRegisterPart(cache, part) {
 }
 function cacheRegisterVm(cache, vm) {
   cache.vmsByPartView.set(`${vm.objectId}|${vm.view}`, vm);
+  if (!cache.partVmsByView.has(vm.view)) cache.partVmsByView.set(vm.view, []);
+  cache.partVmsByView.get(vm.view).push(vm);
 }
 function cacheRegisterStreamConn(cache, conn) {
   cache.connsByFromToModel.set(`${conn.from}|${conn.to}|${conn.model}`.toLowerCase(), conn);
@@ -66,7 +74,7 @@ function createStream(app, {
   functionDescription = '', functionxIds = '', functionSection = '',
   capabilityDescription = '', capabilityxIds = '',
   entityDescription = '', entityxIds = '',
-  silent = false, lookupCache = null,
+  silent = false, lookupCache = null, placeInView = true,
 }) {
   const { store } = app;
   const template = (store.settings.streamTemplates || []).find((t) => ciEq(t.name, templateName));
@@ -84,28 +92,39 @@ function createStream(app, {
     return null;
   }
 
-  const view = store.findView(viewName) || store.addView(viewName);
-  const tab = store.findTabByView(view.id) || app.openOrSwitchView(view.id, { silent: true });
-  view.chkShowStreamType = true; // otherwise the stream connectors this command creates would be invisible
+  // placeInView=false (Generate Industry's "Place on current view" checkbox, unchecked):
+  // build the underlying Parts/Connectors only — no view, no tab, no viewMembers, no
+  // positions computed at all. Skips essentially every cost a large bulk run pays for
+  // placement (findNonOverlappingPosition, redrawNodeSizes/resolveOverlapsForView after
+  // the loop, every createViewMember call) — for reviewing/staging a large dataset before
+  // selectively bringing chosen parts into a view via Add Existing, not dumping tens of
+  // thousands of nodes onto one canvas view none of which is usable at that size anyway.
+  const view = placeInView ? (store.findView(viewName) || store.addView(viewName)) : null;
+  const tab = placeInView ? (store.findTabByView(view.id) || app.openOrSwitchView(view.id, { silent: true })) : null;
+  if (placeInView) view.chkShowStreamType = true; // otherwise the stream connectors this command creates would be invisible
 
   const capBeginIdx = template.value.findIndex((v) => ciEq(v, template.capabilityNameBegin));
   const entBeginIdx = template.value.findIndex((v) => ciEq(v, template.entityNameBegin));
 
   // Default anchor (no explicit right-click position): stack below whatever's already
   // in this view instead of always resetting to a fixed spot, which was causing repeated
-  // Generate calls to land exactly on top of each other.
-  let defaultBaseX = 60, defaultBaseY = 60;
-  if (anchorX == null || anchorY == null) {
-    const existingPartVms = store.viewMembersForView(view.id).filter((vm) => vm.objectType === 'part');
-    if (existingPartVms.length > 0) {
-      const { h: existingNodeH } = getNodeSize(view);
-      const maxBottom = Math.max(...existingPartVms.map((vm) => (vm.y ?? 0) + existingNodeH));
-      defaultBaseY = maxBottom + 60;
+  // Generate calls to land exactly on top of each other. None of this matters at all
+  // without a view.
+  let baseX = 0, baseY = 0, stepX = 0, stepY = 0, genSpacing = 1;
+  if (placeInView) {
+    let defaultBaseX = 60, defaultBaseY = 60;
+    if (anchorX == null || anchorY == null) {
+      const existingPartVms = store.viewMembersForView(view.id).filter((vm) => vm.objectType === 'part');
+      if (existingPartVms.length > 0) {
+        const { h: existingNodeH } = getNodeSize(view);
+        const maxBottom = Math.max(...existingPartVms.map((vm) => (vm.y ?? 0) + existingNodeH));
+        defaultBaseY = maxBottom + 60;
+      }
     }
+    genSpacing = view.spacingScale || 1;
+    const { w: genNodeW, h: genNodeH } = getNodeSize(view);
+    baseX = anchorX ?? defaultBaseX; baseY = anchorY ?? defaultBaseY; stepX = genNodeW + 40 * genSpacing; stepY = genNodeH + 44 * genSpacing;
   }
-  const genSpacing = view.spacingScale || 1;
-  const { w: genNodeW, h: genNodeH } = getNodeSize(view);
-  const baseX = anchorX ?? defaultBaseX, baseY = anchorY ?? defaultBaseY, stepX = genNodeW + 40 * genSpacing, stepY = genNodeH + 44 * genSpacing;
   const createdVms = [];
   // Tracked directly as VMs are actually created below, rather than diffing
   // viewMembersForView(view.id) before/after — that diff needed two full scans of the
@@ -113,7 +132,7 @@ function createStream(app, {
   // caller that invokes createStream many times into a view (generateIndustry) into
   // O(n²) work as the view grows. Same output, no scan needed either way.
   const newlyCreatedVmIds = [];
-  const placer = isSectionViewType(view.viewType) ? (store.ensureViewSections(view), createSectionPlacer(store, view)) : null;
+  const placer = (placeInView && isSectionViewType(view.viewType)) ? (store.ensureViewSections(view), createSectionPlacer(store, view)) : null;
   let step = 0;
 
   for (let i = 0; i < template.value.length; i++) {
@@ -186,24 +205,30 @@ function createStream(app, {
 
     // find-or-create the ViewMember: reuse one already in this exact view for the reused
     // part, if any — otherwise this would create a duplicate node for the same entity.
-    let vm = existingPart
-      ? (lookupCache ? lookupCache.vmsByPartView.get(`${part.id}|${view.id}`) : store.doc.viewMembers.find((v) => v.objectType === 'part' && ciEq(v.objectId, part.id) && ciEq(v.view, view.id)))
-      : null;
-    if (!vm) {
-      const pos = placer ? placer(resolvedType) : { x: baseX + i * stepX, y: baseY, sectionId: '' };
-      vm = store.createViewMember({
-        view: view.id, objectType: 'part', objectId: part.id,
-        x: pos.x, y: pos.y, sectionId: pos.sectionId, fillColor: elementGroupFill(store, resolvedType), note: noteText,
-      });
-      newlyCreatedVmIds.push(vm.id);
-      if (lookupCache) cacheRegisterVm(lookupCache, vm);
+    // No view at all -> no viewMember, period; vm stays null throughout.
+    let vm = null;
+    if (placeInView) {
+      vm = existingPart
+        ? (lookupCache ? lookupCache.vmsByPartView.get(`${part.id}|${view.id}`) : store.doc.viewMembers.find((v) => v.objectType === 'part' && ciEq(v.objectId, part.id) && ciEq(v.view, view.id)))
+        : null;
+      if (!vm) {
+        const pos = placer ? placer(resolvedType) : { x: baseX + i * stepX, y: baseY, sectionId: '' };
+        vm = store.createViewMember({
+          view: view.id, objectType: 'part', objectId: part.id,
+          x: pos.x, y: pos.y, sectionId: pos.sectionId, fillColor: elementGroupFill(store, resolvedType), note: noteText,
+        });
+        newlyCreatedVmIds.push(vm.id);
+        if (lookupCache) cacheRegisterVm(lookupCache, vm);
+      }
     }
     createdVms.push({ vm, part });
 
     if (i > 0) {
       const prev = createdVms[i - 1];
-      if (prev.vm.id !== vm.id) { // skip a self-loop if two chain positions reused the same node
-        findOrCreateStreamConnector(store, view, prev.part, part, prev.vm, vm, modelName, streamName, 'Stream', undefined, lookupCache);
+      // Compare Part identity, not vm identity (vm is null without a view) — equivalent
+      // either way, since a viewMember only ever gets reused when it's the same part.
+      if (prev.part.id !== part.id) {
+        findOrCreateStreamConnector(store, view, prev.part, part, prev.vm, vm, modelName, streamName, 'Stream', undefined, lookupCache, placeInView);
       }
     }
   }
@@ -213,7 +238,7 @@ function createStream(app, {
   const passivePos = (col) => {
     const desired = { x: baseX + col * stepX, y: baseY + stepY * (passiveRow), sectionId: '' };
     const { w: freeNodeW, h: freeNodeH } = getNodeSize(view);
-    const free = store.findNonOverlappingPosition(view.id, desired.x, desired.y, undefined, freeNodeW, freeNodeH, view.spacingScale || 1);
+    const free = store.findNonOverlappingPosition(view.id, desired.x, desired.y, undefined, freeNodeW, freeNodeH, view.spacingScale || 1, lookupCache);
     return { x: free.x, y: free.y, sectionId: '' };
   };
   const expectedPassiveLabel = (type) => {
@@ -223,29 +248,31 @@ function createStream(app, {
   };
   for (const p of template.passive || []) {
     passiveRow += 1;
-    const fromMatch = createdVms.find((c) => ciEq(c.part.type, p.from)) || findExistingStreamNode(store, view.id, streamName, p.from, expectedPassiveLabel(p.from), modelName, lookupCache);
-    const toMatch = createdVms.find((c) => ciEq(c.part.type, p.to)) || findExistingStreamNode(store, view.id, streamName, p.to, expectedPassiveLabel(p.to), modelName, lookupCache);
+    const fromMatch = createdVms.find((c) => ciEq(c.part.type, p.from)) || findExistingStreamNode(store, view?.id, streamName, p.from, expectedPassiveLabel(p.from), modelName, lookupCache, placeInView);
+    const toMatch = createdVms.find((c) => ciEq(c.part.type, p.to)) || findExistingStreamNode(store, view?.id, streamName, p.to, expectedPassiveLabel(p.to), modelName, lookupCache, placeInView);
 
     let fromEntry = fromMatch, toEntry = toMatch;
     if (!fromEntry && !toEntry) {
-      fromEntry = createPassiveNode(app, view.id, p.from, streamName, modelName, functionName, capabilityName, entityName, placer ? placer(p.from) : passivePos(0), `p${passiveRow}a`, functionDescription, functionxIds, lookupCache, functionSection);
-      toEntry = createPassiveNode(app, view.id, p.to, streamName, modelName, functionName, capabilityName, entityName, placer ? placer(p.to) : passivePos(1), `p${passiveRow}b`, functionDescription, functionxIds, lookupCache, functionSection);
+      fromEntry = createPassiveNode(app, view?.id, p.from, streamName, modelName, functionName, capabilityName, entityName, placer ? placer(p.from) : (placeInView ? passivePos(0) : null), `p${passiveRow}a`, functionDescription, functionxIds, lookupCache, functionSection, placeInView);
+      toEntry = createPassiveNode(app, view?.id, p.to, streamName, modelName, functionName, capabilityName, entityName, placer ? placer(p.to) : (placeInView ? passivePos(1) : null), `p${passiveRow}b`, functionDescription, functionxIds, lookupCache, functionSection, placeInView);
       createdVms.push(fromEntry, toEntry);
     } else if (!fromEntry) {
-      fromEntry = createPassiveNode(app, view.id, p.from, streamName, modelName, functionName, capabilityName, entityName, placer ? placer(p.from) : passivePos(0), `p${passiveRow}a`, functionDescription, functionxIds, lookupCache, functionSection);
+      fromEntry = createPassiveNode(app, view?.id, p.from, streamName, modelName, functionName, capabilityName, entityName, placer ? placer(p.from) : (placeInView ? passivePos(0) : null), `p${passiveRow}a`, functionDescription, functionxIds, lookupCache, functionSection, placeInView);
       createdVms.push(fromEntry);
     } else if (!toEntry) {
-      toEntry = createPassiveNode(app, view.id, p.to, streamName, modelName, functionName, capabilityName, entityName, placer ? placer(p.to) : passivePos(1), `p${passiveRow}b`, functionDescription, functionxIds, lookupCache, functionSection);
+      toEntry = createPassiveNode(app, view?.id, p.to, streamName, modelName, functionName, capabilityName, entityName, placer ? placer(p.to) : (placeInView ? passivePos(1) : null), `p${passiveRow}b`, functionDescription, functionxIds, lookupCache, functionSection, placeInView);
       createdVms.push(toEntry);
     }
     for (const entry of [fromEntry, toEntry]) if (entry.wasNew) newlyCreatedVmIds.push(entry.vm.id);
 
-    const conn = findOrCreateStreamConnector(store, view, fromEntry.part, toEntry.part, fromEntry.vm, toEntry.vm, modelName, streamName, 'Passive', `p${passiveRow}c`, lookupCache);
+    const conn = findOrCreateStreamConnector(store, view, fromEntry.part, toEntry.part, fromEntry.vm, toEntry.vm, modelName, streamName, 'Passive', `p${passiveRow}c`, lookupCache, placeInView);
   }
 
-  const newVmIds = newlyCreatedVmIds;
-  const genTab = store.findTabByView(view.id);
-  if (genTab) { genTab.selection.clear(); for (const id of newVmIds) genTab.selection.add(id); }
+  if (placeInView) {
+    const newVmIds = newlyCreatedVmIds;
+    const genTab = store.findTabByView(view.id);
+    if (genTab) { genTab.selection.clear(); for (const id of newVmIds) genTab.selection.add(id); }
+  }
 
   if (!silent) {
     app.recordAndRender();
@@ -261,18 +288,18 @@ function createStream(app, {
  * the pair travels together (e.g. through Duplicate Stream). Creates the companion's
  * viewMember alongside the stream connector's, in the same view with the same endpoints.
  */
-function createCompanionConnector(store, streamConn, viewId, fromVmId, toVmId, lookupCache = null) {
+function createCompanionConnector(store, streamConn, viewId, fromVmId, toVmId, lookupCache = null, placeInView = true) {
   const fromPart = lookupCache ? lookupCache.partsById.get(streamConn.from) : store.findPart(streamConn.from);
   const toPart = lookupCache ? lookupCache.partsById.get(streamConn.to) : store.findPart(streamConn.to);
   if (!fromPart || !toPart) return null;
-  const pair = store.mergedRelationshipPairs.find((p) => ciEq(p.typeA, fromPart.type) && ciEq(p.typeB, toPart.type));
+  const pair = findRelationshipPair(store, fromPart.type, toPart.type);
   const defaultKey = pair?.default;
   const relation = defaultKey ? (store.settings.relations || []).find((r) => r.key === defaultKey) : null;
   const companion = store.createConnector({
     from: streamConn.from, to: streamConn.to, model: streamConn.model,
     connectorType: 'c', relationship: relation?.name || 'Association', streams: [...(streamConn.streams || [])],
   });
-  store.createViewMember({ view: viewId, objectType: 'connector', objectId: companion.id, fromVmId, toVmId });
+  if (placeInView) store.createViewMember({ view: viewId, objectType: 'connector', objectId: companion.id, fromVmId, toVmId });
   return companion;
 }
 
@@ -288,23 +315,34 @@ function elementLookupExact(store, type) {
  * generation touches the same two parts again. Creates the viewMember (+ companion 'c'
  * connector) for THIS view if one doesn't already exist there.
  */
-function findOrCreateStreamConnector(store, view, fromPart, toPart, fromVm, toVm, modelName, streamName, relationship, note, lookupCache = null) {
+function findOrCreateStreamConnector(store, view, fromPart, toPart, fromVm, toVm, modelName, streamName, relationship, note, lookupCache = null, placeInView = true) {
   let conn = lookupCache
     ? lookupCache.connsByFromToModel.get(`${fromPart.id}|${toPart.id}|${modelName}`.toLowerCase())
     : store.doc.connectors.find((c) => ciEq(c.from, fromPart.id) && ciEq(c.to, toPart.id) && ciEq(c.model, modelName) && ciEq(c.connectorType, 's'));
+  let isNewConn = false;
   if (conn) {
     if (!(conn.streams || []).includes(streamName)) conn.streams = [...(conn.streams || []), streamName];
   } else {
     conn = store.createConnector({ from: fromPart.id, to: toPart.id, model: modelName, connectorType: 's', relationship, streams: [streamName] });
     if (note !== undefined) conn.note = note;
     if (lookupCache) cacheRegisterStreamConn(lookupCache, conn);
+    isNewConn = true;
   }
+
+  if (!placeInView) {
+    // No view -> no per-view connVm concept at all, so "companion once per (streamConn,
+    // view)" (below) has no meaning here; the natural equivalent without a view is
+    // "companion once per stream connector", i.e. only when conn itself is newly created.
+    if (isNewConn) createCompanionConnector(store, conn, null, null, null, lookupCache, false);
+    return conn;
+  }
+
   let connVm = lookupCache
     ? lookupCache.connVmsByConnView.get(`${conn.id}|${view.id}`)
     : store.doc.viewMembers.find((v) => v.objectType === 'connector' && ciEq(v.objectId, conn.id) && ciEq(v.view, view.id));
   if (!connVm) {
     connVm = store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn.id, fromVmId: fromVm.id, toVmId: toVm.id });
-    createCompanionConnector(store, conn, view.id, fromVm.id, toVm.id, lookupCache);
+    createCompanionConnector(store, conn, view.id, fromVm.id, toVm.id, lookupCache, true);
     if (lookupCache) cacheRegisterConnVm(lookupCache, connVm);
   }
   return conn;
@@ -324,7 +362,7 @@ function joinLabel(el, name) {
  * genuinely different function/capability, silently merging two things that should
  * have stayed separate.
  */
-function findExistingStreamNode(store, viewId, streamName, type, expectedLabel, modelName, lookupCache = null) {
+function findExistingStreamNode(store, viewId, streamName, type, expectedLabel, modelName, lookupCache = null, placeInView = true) {
   // O(1) via the same partsByKey index createStream's main loop already uses — label+
   // type+model is how a part's identity is determined throughout this file, so this
   // is exactly the right key, and avoids the alternative of scanning every same-type
@@ -335,12 +373,15 @@ function findExistingStreamNode(store, viewId, streamName, type, expectedLabel, 
     ? lookupCache.partsByKey.get(`${expectedLabel}|${type}|${modelName}`.toLowerCase())
     : store.doc.parts.find((p) => ciEq(p.label, expectedLabel) && ciEq(p.type, type) && ciEq(p.model, modelName));
   if (!part || !(part.streams || []).includes(streamName)) return null;
+  // Without a view there's no per-view viewMember to require — the part matching by
+  // identity+stream membership above is already the whole answer in that mode.
+  if (!placeInView) return { vm: null, part };
   const vm = lookupCache
     ? lookupCache.vmsByPartView.get(`${part.id}|${viewId}`)
     : store.doc.viewMembers.find((v) => v.objectType === 'part' && ciEq(v.objectId, part.id) && ciEq(v.view, viewId));
   return vm ? { vm, part } : null;
 }
-function createPassiveNode(app, viewId, type, streamName, modelName, functionName, capabilityName, entityName, pos, note, functionDescription, functionxIds, lookupCache = null, functionSection = '') {
+function createPassiveNode(app, viewId, type, streamName, modelName, functionName, capabilityName, entityName, pos, note, functionDescription, functionxIds, lookupCache = null, functionSection = '', placeInView = true) {
   const { store } = app;
   let el = elementByType(store, type);
   const resolvedType = el?.type || 'Unknown';
@@ -374,14 +415,17 @@ function createPassiveNode(app, viewId, type, streamName, modelName, functionNam
     if (lookupCache) cacheRegisterPart(lookupCache, part);
   }
 
-  let vm = existingPart
-    ? (lookupCache ? lookupCache.vmsByPartView.get(`${part.id}|${viewId}`) : store.doc.viewMembers.find((v) => v.objectType === 'part' && ciEq(v.objectId, part.id) && ciEq(v.view, viewId)))
-    : null;
+  let vm = null;
   let wasNew = false;
-  if (!vm) {
-    vm = store.createViewMember({ view: viewId, objectType: 'part', objectId: part.id, x: pos.x, y: pos.y, sectionId: pos.sectionId || '', fillColor: elementGroupFill(store, resolvedType), note: fullNote });
-    wasNew = true;
-    if (lookupCache) cacheRegisterVm(lookupCache, vm);
+  if (placeInView) {
+    vm = existingPart
+      ? (lookupCache ? lookupCache.vmsByPartView.get(`${part.id}|${viewId}`) : store.doc.viewMembers.find((v) => v.objectType === 'part' && ciEq(v.objectId, part.id) && ciEq(v.view, viewId)))
+      : null;
+    if (!vm) {
+      vm = store.createViewMember({ view: viewId, objectType: 'part', objectId: part.id, x: pos.x, y: pos.y, sectionId: pos.sectionId || '', fillColor: elementGroupFill(store, resolvedType), note: fullNote });
+      wasNew = true;
+      if (lookupCache) cacheRegisterVm(lookupCache, vm);
+    }
   }
   return { vm, part, wasNew };
 }
@@ -526,7 +570,7 @@ function levelUp(app, tab, newViewName) {
       view: view.id, objectType: 'part', objectId: part.id,
       x: 900, y: 60 + i * 90, fillColor: vm.fillColor, isExternal: true,
     });
-    const pair = store.mergedRelationshipPairs.find((p) => ciEq(p.typeA, part.type) && ciEq(p.typeB, newPart.type));
+    const pair = findRelationshipPair(store, part.type, newPart.type);
     const defaultKey = pair?.default;
     const relation = defaultKey ? (store.settings.relations || []).find((r) => r.key === defaultKey) : null;
     const conn = store.createConnector({ from: part.id, to: newPart.id, model: store.defaultModel, connectorType: 'c', relationship: relation?.name || 'Association', streams: [] });
@@ -1103,7 +1147,7 @@ function smartCheckView(app, tab, options = {}) {
  * caller can show real progress instead of a frozen page.
  */
 const GENERATE_INDUSTRY_CHUNK_SIZE = 40;
-async function generateIndustry(app, industryKey, onProgress) {
+async function generateIndustry(app, industryKey, onProgress, placeInView = true) {
   const { store } = app;
   const data = store.industryData?.[industryKey];
   if (!data) { app.toast(`Industry data "${industryKey}" not found.`, true); return; }
@@ -1116,23 +1160,34 @@ async function generateIndustry(app, industryKey, onProgress) {
   const lookupCache = createBulkLookupCache(store);
   const findEntityPart = (entityxIds) => entityxIds ? lookupCache.partsByXid.get(`${entityxIds}|${store.defaultModel}`.toLowerCase()) : null;
 
-  // Explicit, locally-incremented anchor instead of leaving it to createStream's own
-  // default-position logic, which (with no anchor given) scans the view's accumulated
-  // viewMembers on every call to find "the bottom" — again fine once, expensive
-  // repeated hundreds of times into the same growing view.
-  const view = store.findView(store.currentView) || store.addView(store.currentView);
-  const { h: genNodeH } = getNodeSize(view);
-  const existingPartVms = store.viewMembersForView(view.id).filter((vm) => vm.objectType === 'part');
-  let nextAnchorY = existingPartVms.length > 0 ? Math.max(...existingPartVms.map((vm) => (vm.y ?? 0) + genNodeH)) + 60 : 60;
-  // A single row isn't enough space per job — the "Enterprise" template's passive
-  // entries place additional nodes on rows BELOW the main chain's row (passiveRow 1, 2,
-  // 3, ...), so without accounting for that, the next job's row started overlapping the
-  // previous job's passive-node rows (confirmed: real duplicate-position collisions in
-  // testing). Reserving (1 + passive.length) rows per job is the same worst-case space
-  // createStream's own passivePos() layout can actually use.
-  const enterpriseTemplate = (store.settings.streamTemplates || []).find((t) => ciEq(t.name, 'Enterprise'));
-  const rowsPerJob = 1 + (enterpriseTemplate?.passive?.length || 0);
-  const anchorStepY = (genNodeH + 44 * (view.spacingScale || 1)) * rowsPerJob;
+  // placeInView=false ("Place on current view" unchecked in the Generate Industry
+  // prompt): build Parts/Connectors only, skip every view/position concern below —
+  // there's no anchor to walk, no view to resize/resolve-overlaps for afterward, and
+  // createStream itself (given placeInView=false) never touches a view or viewMember at
+  // all. This is what makes a large dataset dramatically cheaper to generate: everything
+  // that scales with view SIZE (positioning, redrawNodeSizes, resolveOverlapsForView)
+  // simply doesn't run. Review what's generated via Catalogs > Parts (with its own
+  // search/filter) or Add Existing into a view afterward, selectively.
+  let nextAnchorY = 60, anchorStepY = 0;
+  if (placeInView) {
+    // Explicit, locally-incremented anchor instead of leaving it to createStream's own
+    // default-position logic, which (with no anchor given) scans the view's accumulated
+    // viewMembers on every call to find "the bottom" — again fine once, expensive
+    // repeated hundreds of times into the same growing view.
+    const view = store.findView(store.currentView) || store.addView(store.currentView);
+    const { h: genNodeH } = getNodeSize(view);
+    const existingPartVms = store.viewMembersForView(view.id).filter((vm) => vm.objectType === 'part');
+    nextAnchorY = existingPartVms.length > 0 ? Math.max(...existingPartVms.map((vm) => (vm.y ?? 0) + genNodeH)) + 60 : 60;
+    // A single row isn't enough space per job — the "Enterprise" template's passive
+    // entries place additional nodes on rows BELOW the main chain's row (passiveRow 1, 2,
+    // 3, ...), so without accounting for that, the next job's row started overlapping the
+    // previous job's passive-node rows (confirmed: real duplicate-position collisions in
+    // testing). Reserving (1 + passive.length) rows per job is the same worst-case space
+    // createStream's own passivePos() layout can actually use.
+    const enterpriseTemplate = (store.settings.streamTemplates || []).find((t) => ciEq(t.name, 'Enterprise'));
+    const rowsPerJob = 1 + (enterpriseTemplate?.passive?.length || 0);
+    anchorStepY = (genNodeH + 44 * (view.spacingScale || 1)) * rowsPerJob;
+  }
 
   // Flattened up front so progress can be reported as a simple "done / total" — the
   // work itself is identical to walking func -> cap -> entityLevelNodes directly.
@@ -1164,7 +1219,7 @@ async function generateIndustry(app, industryKey, onProgress) {
         entityName: ent.nodeName, entityDescription: ent.nodeDescription, entityxIds: ent.nodeId,
         modelName: store.defaultModel, viewName: store.currentView,
         anchorX: 60, anchorY: nextAnchorY,
-        silent: true, lookupCache,
+        silent: true, lookupCache, placeInView,
       });
       nextAnchorY += anchorStepY;
       entityCount += 1;
@@ -1183,23 +1238,26 @@ async function generateIndustry(app, industryKey, onProgress) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
   }
-  // Each createStream call above sets the tab's selection to just its own newly-added
-  // nodes, so by the time the loop ends, whatever's selected is only the LAST stream's
-  // handful of nodes — but for a large run that's still a misleading, small-looking
-  // selection that doesn't represent the actual (possibly huge) amount of work just
-  // done. Past a real size threshold, clearing it entirely is more honest than leaving
-  // an arbitrary partial selection, and avoids any rendering cost from highlighting a
-  // very large selection. Done before the resize/redraw step below (not after), so
-  // it's unaffected by anything that step does.
-  const genTabForSelection = store.findTabByView(store.currentView);
-  if (genTabForSelection && entityCount > 100) genTabForSelection.selection.clear();
-  // Newly-generated content may not fit whatever size this view's nodes already were —
-  // resize (and nudge apart anything that now overlaps) before rendering, matching what
-  // Remap already does internally, so the result looks right immediately instead of
-  // requiring a manual Redraw/Remap afterward.
-  if (entityCount > 0) redrawAndResolveLayout(app, { viewId: store.currentView, selection: new Set() });
+  if (placeInView) {
+    // Each createStream call above sets the tab's selection to just its own newly-added
+    // nodes, so by the time the loop ends, whatever's selected is only the LAST stream's
+    // handful of nodes — but for a large run that's still a misleading, small-looking
+    // selection that doesn't represent the actual (possibly huge) amount of work just
+    // done. Past a real size threshold, clearing it entirely is more honest than leaving
+    // an arbitrary partial selection, and avoids any rendering cost from highlighting a
+    // very large selection. Done before the resize/redraw step below (not after), so
+    // it's unaffected by anything that step does.
+    const genTabForSelection = store.findTabByView(store.currentView);
+    if (genTabForSelection && entityCount > 100) genTabForSelection.selection.clear();
+    // Newly-generated content may not fit whatever size this view's nodes already were —
+    // resize (and nudge apart anything that now overlaps) before rendering, matching what
+    // Remap already does internally, so the result looks right immediately instead of
+    // requiring a manual Redraw/Remap afterward.
+    if (entityCount > 0) redrawAndResolveLayout(app, { viewId: store.currentView, selection: new Set() });
+  }
   app.recordAndRender();
-  app.toast(`Generated ${entityCount} stream${entityCount === 1 ? '' : 's'} from industry "${industryKey}"${skippedCount ? ` (${skippedCount} already existed, skipped)` : ''}.`);
+  const placementNote = placeInView ? '' : ' — not placed on any view; see Catalogs > Parts or Add Existing';
+  app.toast(`Generated ${entityCount} stream${entityCount === 1 ? '' : 's'} from industry "${industryKey}"${skippedCount ? ` (${skippedCount} already existed, skipped)` : ''}${placementNote}.`);
 }
 
 // ===================== GENERATE INVENTORY VIEW =====================
@@ -1383,7 +1441,7 @@ function populateFromTemplate(app, tab, templateName) {
     const fromEntry = resolved.get(tc.frompartid);
     const toEntry = resolved.get(tc.topartid);
     if (!fromEntry || !toEntry) continue;
-    const pair = store.mergedRelationshipPairs.find((p) => ciEq(p.typeA, fromEntry.part.type) && ciEq(p.typeB, toEntry.part.type));
+    const pair = findRelationshipPair(store, fromEntry.part.type, toEntry.part.type);
     const defaultKey = pair?.default;
     const relation = defaultKey ? (store.settings.relations || []).find((r) => r.key === defaultKey) : null;
     // Step 33: reuse an existing 'c' connector between these two parts in this model,

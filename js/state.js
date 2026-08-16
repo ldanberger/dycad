@@ -264,11 +264,30 @@ class Store {
    * free) whose node-sized bounding box doesn't overlap any existing node in the view.
    * Uses the view's current node size (defaults to 130x46 if not provided/redrawn).
    * Searches outward on a grid matching the node size + a small margin.
+   *
+   * `lookupCache` (optional, shape: { partVmsByView: Map<viewId, vm[]> } — see
+   * createBulkLookupCache in commands.js) skips the O(current-viewMembers-count)
+   * viewMembersForView() scan below in favor of an O(1) lookup into an already-indexed,
+   * incrementally-maintained array. Without it (the default, for the many one-off
+   * interactive callers of this method — dragging a single node, etc.), a single scan is
+   * cheap and not worth the caller having to build/thread a cache for. WITH it, this
+   * turns what was a confirmed real bottleneck for generateIndustry (this function is
+   * called once per passive-node placement, once per stream job — re-scanning the WHOLE,
+   * still-growing viewMembers array from scratch every single time, genuinely O(n²) —
+   * into O(1) amortized per call. Found via a CPU profile after the earlier
+   * createBulkLookupCache fix (which covers createStream's find-or-reuse lookups, not
+   * this positioning call) turned out NOT to be the dominant cost it was assumed to be.
    */
-  findNonOverlappingPosition(viewId, desiredX, desiredY, excludeVmId, nodeW = 130, nodeH = 46, spacingScale = 1) {
+  findNonOverlappingPosition(viewId, desiredX, desiredY, excludeVmId, nodeW = 130, nodeH = 46, spacingScale = 1, lookupCache = null) {
     const MARGIN = 8 * (spacingScale || 1);
     const stepX = nodeW + MARGIN, stepY = nodeH + MARGIN;
-    const existing = this.viewMembersForView(viewId).filter((vm) => vm.objectType === 'part' && vm.id !== excludeVmId);
+    let existing;
+    if (lookupCache) {
+      const cached = lookupCache.partVmsByView.get(viewId) || [];
+      existing = excludeVmId ? cached.filter((vm) => vm.id !== excludeVmId) : cached;
+    } else {
+      existing = this.viewMembersForView(viewId).filter((vm) => vm.objectType === 'part' && vm.id !== excludeVmId);
+    }
     const overlaps = (x, y) => existing.some((vm) => Math.abs(vm.x - x) < nodeW + MARGIN / 2 && Math.abs(vm.y - y) < nodeH + MARGIN / 2);
 
     if (!overlaps(desiredX, desiredY)) return { x: desiredX, y: desiredY };

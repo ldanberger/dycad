@@ -652,15 +652,35 @@ class App {
     });
   }
 
+  /** Bespoke (not the generic promptModal) so it can carry the "Place on current view"
+   * checkbox alongside the industry picker. To review a dataset before generating, use
+   * Catalogs > SFCE first, separately — this dialog is a modal overlay (like every
+   * other modal in the app; see CLAUDE.md's "no click-outside-to-close" convention),
+   * so nothing behind it is reachable while it's open, which ruled out a "preview"
+   * button that would open the catalog in another tab the person still couldn't see. */
   promptGenerateIndustry() {
     const industries = Object.keys(this.store.industryData || {});
     if (industries.length === 0) { this.toast('No industry data loaded.', true); return; }
-    this.promptModal({
-      title: 'Generate Industry',
-      fields: [
-        { key: 'industry', label: 'Industry', type: 'select', options: industries, value: industries[0] },
-      ],
-      onSubmit: (vals) => this.runGenerateIndustryWithProgress(vals.industry),
+
+    const root = document.getElementById('modal-root');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal-box';
+    box.innerHTML = `<h3>Generate Industry</h3>
+      <div class="prop-row"><label>Industry</label><select id="gi-industry">${industries.map((i) => `<option value="${escapeHtml(i)}">${escapeHtml(i)}</option>`).join('')}</select></div>
+      <div class="prop-row checkbox"><input type="checkbox" id="gi-place-view" checked /><label for="gi-place-view">Place on current view</label></div>
+      <div style="font-size:11px;color:var(--text-muted);margin:-4px 0 12px 0;">Unchecked: creates the parts/connectors only — much faster for a large dataset, but nothing is placed on any view. Review via Catalogs &gt; Parts, then Add Existing to bring chosen ones into a view.</div>
+      <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Generate</button></div>`;
+    overlay.appendChild(box);
+    root.appendChild(overlay);
+
+    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+    box.querySelector('.submit').addEventListener('click', () => {
+      const industry = box.querySelector('#gi-industry').value;
+      const placeInView = box.querySelector('#gi-place-view').checked;
+      overlay.remove();
+      this.runGenerateIndustryWithProgress(industry, placeInView);
     });
   }
 
@@ -668,7 +688,7 @@ class App {
    * imported dataset (see Load SFCE) — generateIndustry is async and yields
    * periodically specifically so this can show real progress instead of the tab
    * appearing to freeze for however long the whole operation takes. */
-  async runGenerateIndustryWithProgress(industryKey) {
+  async runGenerateIndustryWithProgress(industryKey, placeInView = true) {
     const root = document.getElementById('modal-root');
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -681,13 +701,13 @@ class App {
     try {
       await generateIndustry(this, industryKey, (done, total) => {
         progressText.textContent = `${done} / ${total} capabilities processed…`;
-      });
+      }, placeInView);
     } finally {
       overlay.remove();
     }
   }
 
-  /** Advanced > SFCE Catalog: a read-only, flattened table of one industryData
+  /** Catalogs > SFCE: a read-only, flattened table of one industryData
    * collection's Section/Function/Capability/Entity hierarchy — works for both a
    * Load SFCE import and the built-in "general" data (fce-generalnodes.json), since
    * flattenIndustryTree supports both shapes. Read-only for now; the request notes
@@ -2474,7 +2494,6 @@ function wireGlobalEvents(app) {
     { separator: true },
     { label: 'Generate Inventory View', action: 'generateInventoryView' },
     { label: 'Generate Industry', action: 'generateIndustry' },
-    { label: 'SFCE Catalog', action: 'sfceCatalog' },
     { label: 'Smart Check View', action: 'smartCheckView' },
   ];
   const advancedMenu = document.getElementById('advanced-menu');
@@ -2485,8 +2504,6 @@ function wireGlobalEvents(app) {
         generateInventoryView(app);
       } else if (item.dataset.action === 'generateIndustry') {
         app.promptGenerateIndustry();
-      } else if (item.dataset.action === 'sfceCatalog') {
-        app.promptSfceCatalog();
       } else if (item.dataset.action === 'smartCheckView') {
         app.promptSmartCheckView();
       } else if (item.dataset.url) {
@@ -2527,9 +2544,11 @@ function wireGlobalEvents(app) {
     { label: 'ViewMembers', type: 'viewMembers' },
   ];
   const catalogsMenu = document.getElementById('catalogs-menu');
-  catalogsMenu.innerHTML = CATALOGS.map((c) => `<div class="dd-item" data-type="${c.type}" data-label="${c.label}">${c.label}</div>`).join('');
+  catalogsMenu.innerHTML = CATALOGS.map((c) => `<div class="dd-item" data-type="${c.type}" data-label="${c.label}">${c.label}</div>`).join('')
+    + '<div class="dd-separator"></div><div class="dd-item" data-action="sfce">SFCE</div>';
   catalogsMenu.querySelectorAll('.dd-item').forEach((item) => {
     item.addEventListener('click', () => {
+      if (item.dataset.action === 'sfce') { app.promptSfceCatalog(); catalogsMenu.classList.add('hidden'); return; }
       app.openOrSwitchCatalog(item.dataset.type, `${item.dataset.label} Catalog`);
       catalogsMenu.classList.add('hidden');
     });

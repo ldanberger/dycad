@@ -1008,7 +1008,7 @@ def check_dropdown_scrollable(page):
 
 
 def check_sfce_catalog_page(page):
-    """Regression guard: Advanced > SFCE Catalog should open a read-only table of the
+    """Regression guard: Catalogs > SFCE should open a read-only table of the
     Section/Function/Capability/Entity hierarchy, with id and description at every
     level, working for the built-in "general" data (no section concept) as well as a
     Load SFCE import."""
