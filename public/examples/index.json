@@ -5,5 +5,6 @@
   "response packet demo.json",
   "right badge chain demo.json",
   "findParts demo.json",
-  "createPart demo.json"
+  "createPart demo.json",
+  "pipeline demo.json"
 ]

@@ -219,8 +219,43 @@ Enabled" in Root Properties, then write the script body in the Script field.</p>
     should never end up saved into a shared model file.</td></tr>
     <tr><td><code>ctx.setState(patch)</code></td><td>For asynchronous work (e.g. a fetch whose result arrives
     later) — merges into this part's state at the start of the <em>next</em> tick rather than immediately.</td></tr>
+    <tr><td><code>ctx.loadedFileName</code></td><td>The filename of the last file that fully replaced the model
+    (Load JSON / File &gt; Load / File &gt; Load Example) — <code>null</code> if nothing's been loaded that way
+    yet this session. Not set by Import Data, which merges rather than replaces.</td></tr>
+    <tr><td><code>ctx.currentView</code></td><td>The view id currently shown in the main view selector, as of
+    the moment this tick started.</td></tr>
+    <tr><td><code>ctx.defaultModel</code></td><td>The model new parts/connectors get created into by default —
+    not necessarily the same as <code>ctx.part.model</code> (a part can live in any model).</td></tr>
+    <tr><td><code>ctx.findParts({ type, model })</code></td><td>Read-only lookup across the <em>whole</em>
+    document, not just this part's own inputs/graph — returns every Part matching the given type and/or model
+    (both optional). e.g. <code>ctx.findParts({ type: 'BusinessCapability', model: ctx.part.model })</code> to
+    list every capability in this part's own model. Treat the result as read-only.</td></tr>
+    <tr><td><code>ctx.createPart({ type, label, model, ... })</code></td><td>Creates and returns a brand-new
+    Part. <code>model</code> defaults to <code>ctx.part.model</code> if omitted — pass a different model string
+    to create in a different model. The new part takes effect starting the <em>next</em> tick, same "one tick
+    later" rule as <code>response</code>; it isn't placed on any view automatically. Throws if <code>type</code>
+    is missing, or if the parts+connectors cap would be exceeded (see below).</td></tr>
+    <tr><td><code>ctx.createConnector({ from, to, model, connectorType, relationship, ... })</code></td><td>
+    Creates and returns a brand-new Connector between two <em>existing</em> part ids. <code>model</code>
+    defaults to <code>ctx.part.model</code> if omitted. Throws if <code>from</code>/<code>to</code> don't
+    resolve to real parts, or the cap below would be exceeded.</td></tr>
   </tbody>
 </table>
+
+<p><code>ctx.createPart</code>/<code>ctx.createConnector</code> are capped by <strong>Max Script Entities</strong>
+(default 5000) — the total <code>parts.length + connectors.length</code> a script is allowed to grow the document
+to. Hitting the cap throws an error (same as any other script error, visible on that node) rather than silently
+doing nothing — a script that creates something every tick with no guard will hit it fast under continuous Run.
+Configurable via File &gt; Load Local Settings.</p>
+
+<h3>Script Console</h3>
+<p>Simulation &gt; Script Console opens a REPL-style debugging tool, separate from any one part's script — for
+poking at live simulation/document state interactively (e.g. checking what <code>findParts(...)</code> would
+return) rather than round-tripping through a node's script field. It has full <code>app</code>/<code>store</code>
+access (more powerful than a part's sandboxed <code>ctx</code>, since it's an explicit debugging tool, not
+something a saved document runs unattended) via the bindings <code>app</code>, <code>store</code>,
+<code>model</code> (the currently-selected simulation model), <code>findParts</code>, and <code>log(...)</code>.
+Enter an expression directly, or full statements ending in your own <code>return</code>; Ctrl+Enter runs it.</p>
 
 <h3>What a script must return</h3>
 <p>A script must return an object <code>{ value, state, response, badge }</code> — <code>response</code> and

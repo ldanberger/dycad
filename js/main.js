@@ -1,8 +1,8 @@
 import { loadAllData } from './data.js';
 import { Store, ciEq, newId } from './state.js';
 import { parseArchimateXml } from './archimate.js';
-import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
-import { renderPages, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel } from './canvas.js';
+import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
+import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
 import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection as duplicateSectionCommand, smartCheckView } from './commands.js';
 import { APP_VERSION } from './version.js';
@@ -1238,222 +1238,120 @@ class App {
     });
   }
 
+  /** File > Print. Earlier version hand-rolled a SECOND SVG renderer (manual path/marker/
+   * text-wrap string-building) that duplicated canvas.js's own logic — slow (one giant
+   * string built per view) and prone to silently drifting from what the canvas actually
+   * shows. This version instead reuses the REAL renderer: renderCanvasPage (canvas.js) —
+   * the exact function that draws every on-screen view — building each view into a fully
+   * detached, throwaway tab/container (never touching store.tabs, undo history, or the
+   * visible page), then cloning the resulting .canvas-surface DOM straight into the print
+   * iframe. Guaranteed pixel-identical to the canvas, and no per-node string building at
+   * all — just clone + crop-to-content-bounds CSS. */
   printViews(viewIds) {
     try {
-      const htmlParts = ['<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Print</title><style>'];
-      htmlParts.push(`
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: sans-serif; }
-        .print-page { page-break-after: always; padding: 20px; }
-        .print-page:last-child { page-break-after: avoid; }
-        .print-title { font-size: 18px; font-weight: bold; margin-bottom: 20px; }
-        svg { max-width: 100%; height: auto; display: block; border: 1px solid #ddd; }
-      `);
-      htmlParts.push('</style></head><body>');
-
-      // Marker sizes match buildMarkerDefs in canvas.js (small/medium/large).
-      const markerSizes = { small: 7, medium: 9, large: 13 };
+      const PADDING = 30;
+      const markerDefsEl = document.getElementById('global-marker-defs'); // arrowhead <marker> defs live OUTSIDE .canvas-surface (see buildMarkerDefs, canvas.js) — must be cloned in separately or connector line-ends silently vanish
+      const pages = [];
 
       for (const viewId of viewIds) {
         const view = this.store.findView(viewId);
         if (!view) continue;
-
-        const vms = this.store.viewMembersForView(viewId);
-        const partVms = vms.filter((vm) => vm.objectType === 'part');
+        const partVms = this.store.viewMembersForView(viewId).filter((vm) => vm.objectType === 'part');
         if (partVms.length === 0) continue;
 
-        const { w: nodeW, h: nodeH } = getNodeSize(view);
-        const halfW = nodeW / 2, halfH = nodeH / 2;
-        const showTypes = view?.chkShowElementTypes;
-        const showDescription = view?.chkShowDescription;
+        // Throwaway tab: matches store.createTab's shape for the fields renderCanvasPage
+        // and its callees actually read, but deliberately NOT created via store.createTab
+        // (which would push it into store.tabs, polluting the tab bar/undo history, and
+        // pay for a full document snapshot() per view for no reason). No active filters,
+        // no selection, zoom 1:1 — a clean "as designed" render regardless of whatever
+        // zoom/pan/selection the user currently has on screen.
+        const fakeTab = {
+          id: `print-${view.id}`, type: 'canvas', viewId: view.id,
+          viewport: { x: 0, y: 0, zoom: 1 }, selection: new Set(),
+          activeStreams: [], activeElementTypes: null, connectorLevels: 0, selectedSectionId: null,
+        };
+        const offscreen = document.createElement('div'); // never attached to the document — absolute-positioned content needs no live layout to build correctly
+        renderCanvasPage(this, fakeTab, offscreen);
+        const surface = offscreen.querySelector('.canvas-surface');
+        if (!surface) continue;
 
+        const { w: nodeW, h: nodeH } = getNodeSize(view);
         const minX = Math.min(...partVms.map((vm) => vm.x));
         const minY = Math.min(...partVms.map((vm) => vm.y));
         const maxX = Math.max(...partVms.map((vm) => vm.x + nodeW));
         const maxY = Math.max(...partVms.map((vm) => vm.y + nodeH));
-        const width = maxX - minX + 40;
-        const height = maxY - minY + 40;
 
-        htmlParts.push(`<div class="print-page"><div class="print-title">${escapeHtml(view.viewName)}</div>`);
-        htmlParts.push(`<svg viewBox="${minX - 20} ${minY - 20} ${width} ${height}" xmlns="http://www.w3.org/2000/svg"><defs>`);
+        const clone = surface.cloneNode(true); // strips all interactive listeners for free — clones simply have none
+        clone.style.background = 'none'; // no background image/dots, per the original request
+        clone.style.marginLeft = `${-(minX - PADDING)}px`; // shifts content so the crop window below starts exactly at the content's own top-left
+        clone.style.marginTop = `${-(minY - PADDING)}px`;
 
-        // Marker defs for line ends — matches buildMarkerDefs (canvas.js) exactly: keyed
-        // by the lineEnds object's own key (not a nonexistent .type field), with the same
-        // viewBox/refX/refY/orient/rotate-90 wrapper so arrowheads point the right way.
-        const lineEnds = this.store.settings.lineEnds || {};
-        for (const [name, le] of Object.entries(lineEnds)) {
-          if (!le.path) continue;
-          for (const [sizeName, px] of Object.entries(markerSizes)) {
-            htmlParts.push(`<marker id="marker-${name}-${sizeName}" viewBox="-12 -2 24 24" markerWidth="${px}" markerHeight="${px}" refX="0" refY="10" orient="auto-start-reverse"><g transform="rotate(90 0 10)"><path d="${le.path}" fill="${le.fill || 'none'}" stroke="${le.stroke || 'black'}"/></g></marker>`);
-          }
-        }
-        htmlParts.push('</defs>');
-
-        // Draw connectors first (so they appear behind nodes)
-        const connVms = vms.filter((vm) => vm.objectType === 'connector');
-        for (const cvm of connVms) {
-          const conn = this.store.findConnector(cvm.objectId);
-          const fromVm = this.store.findViewMember(cvm.fromVmId);
-          const toVm = this.store.findViewMember(cvm.toVmId);
-          if (!conn || !fromVm || !toVm) continue;
-
-          // Calculate edge endpoints (node edge to node edge, with marker clearance margin)
-          const fCenter = { x: fromVm.x + halfW, y: fromVm.y + halfH };
-          const tCenter = { x: toVm.x + halfW, y: toVm.y + halfH };
-          const dx = tCenter.x - fCenter.x, dy = tCenter.y - fCenter.y;
-          const margin = 11;
-          const fc = this.clipToRectEdge(fCenter.x, fCenter.y, dx, dy, halfW + margin, halfH + margin);
-          const tc = this.clipToRectEdge(tCenter.x, tCenter.y, -dx, -dy, halfW + margin, halfH + margin);
-
-          // Relationship line style, same lookup as drawEdge in canvas.js
-          const style = (this.store.settings.relationshipStyles || []).find((s) => ciEq(s.type, conn.relationship));
-          const stroke = style?.stroke ?? conn.stroke ?? '#333';
-          const strokeWidth = style?.strokeWidth ?? conn.strokeWidth ?? 2;
-          const dash = style?.dash ?? conn.dash ?? [];
-          const endSize = conn.endSize || 'medium';
-
-          // Curved line for regular ('c') connectors, straight for stream ('s') connectors
-          let d;
-          if (conn.connectorType === 'c') {
-            const midX = (fc.x + tc.x) / 2, midY = (fc.y + tc.y) / 2;
-            const cdx = tc.x - fc.x, cdy = tc.y - fc.y;
-            const len = Math.sqrt(cdx * cdx + cdy * cdy) || 1;
-            const curveOffset = 30;
-            const ctrlX = midX + (-cdy / len) * curveOffset, ctrlY = midY + (cdx / len) * curveOffset;
-            d = `M ${fc.x} ${fc.y} Q ${ctrlX} ${ctrlY} ${tc.x} ${tc.y}`;
-          } else {
-            d = `M ${fc.x} ${fc.y} L ${tc.x} ${tc.y}`;
-          }
-
-          let pathHtml = `<path d="${d}" stroke="${stroke}" stroke-width="${strokeWidth}" fill="none"`;
-          if (dash.length) pathHtml += ` stroke-dasharray="${dash.join(',')}"`;
-          if (style?.toLineEndSettingType && lineEnds[style.toLineEndSettingType]?.path) {
-            pathHtml += ` marker-end="url(#marker-${style.toLineEndSettingType}-${endSize})"`;
-          }
-          if (style?.fromLineEndSettingType && lineEnds[style.fromLineEndSettingType]?.path) {
-            pathHtml += ` marker-start="url(#marker-${style.fromLineEndSettingType}-${endSize})"`;
-          }
-          pathHtml += '/>';
-          htmlParts.push(pathHtml);
-        }
-
-        // Draw nodes
-        for (const vm of partVms) {
-          const part = this.store.findPart(vm.objectId);
-          if (!part) continue;
-          const elDef = elementByType(this.store, part.type);
-          const fillColor = vm.fillColor || groupFill(this, elDef);
-          const cornerRadius = elDef?.cornerRadius ?? 7;
-
-          // Node background
-          htmlParts.push(`<rect x="${vm.x}" y="${vm.y}" width="${nodeW}" height="${nodeH}" rx="${cornerRadius}" fill="${fillColor}" stroke="rgba(0,0,0,0.4)" stroke-width="1.5"/>`);
-
-          const padX = 8, padY = 6;
-          let cursorY = vm.y + padY;
-
-          // Top row: type label (left) + element icon (right) — mirrors .fnode-toprow
-          if (showTypes || elDef) {
-            const iconW = 26, iconH = 13;
-            if (showTypes) {
-              const typeText = elDef?.title || part.type;
-              htmlParts.push(`<text x="${vm.x + padX}" y="${cursorY + 6}" text-anchor="start" font-size="9" letter-spacing="0.3" fill="#333" opacity="0.7">${escapeHtml(typeText.toUpperCase())}</text>`);
-            }
-            // Element icon: reuse iconSvgFor's own path/rect + fill logic, nested at fixed size (natural viewBox 0 0 40 20)
-            const iconFill = groupFill(this, elDef);
-            const iconX = vm.x + nodeW - padX - iconW;
-            if (elDef && elDef.path) {
-              htmlParts.push(`<svg x="${iconX}" y="${cursorY}" width="${iconW}" height="${iconH}" viewBox="0 0 40 20"><path d="${elDef.path}" stroke="black" stroke-width="1.5" fill="${iconFill}"/></svg>`);
-            } else {
-              const r = Math.min(elDef?.cornerRadius ?? 6, 8);
-              htmlParts.push(`<svg x="${iconX}" y="${cursorY}" width="${iconW}" height="${iconH}" viewBox="0 0 40 20"><rect x="4" y="1" width="32" height="18" rx="${r}" stroke="black" stroke-width="1.5" fill="${iconFill}"/></svg>`);
-            }
-            cursorY += iconH + 4;
-          }
-
-          // Label (bold), wrapped to at most 2 lines like .fnode-label's line-clamp
-          const labelLines = this.wrapTextForPrint(part.label, nodeW - padX * 2, 12, 2);
-          for (const line of labelLines) {
-            cursorY += 12;
-            htmlParts.push(`<text x="${vm.x + padX}" y="${cursorY}" text-anchor="start" font-size="12" font-weight="600" fill="#1c2128">${escapeHtml(line)}</text>`);
-          }
-
-          // Description, wrapped to at most 2 lines, matching chkShowDescription toggle
-          if (showDescription && part.description) {
-            const descLines = this.wrapTextForPrint(part.description, nodeW - padX * 2, 10, 2);
-            for (const line of descLines) {
-              cursorY += 11;
-              htmlParts.push(`<text x="${vm.x + padX}" y="${cursorY}" text-anchor="start" font-size="10" fill="#1c2128" opacity="0.8">${escapeHtml(line)}</text>`);
-            }
-          }
-        }
-
-        htmlParts.push('</svg></div>');
+        pages.push({ viewName: view.viewName, contentW: maxX - minX + PADDING * 2, contentH: maxY - minY + PADDING * 2, surfaceClone: clone });
       }
 
-      htmlParts.push('</body></html>');
-      const html = htmlParts.join('');
+      if (pages.length === 0) { this.toast('Nothing to print — no views with placed nodes.', true); return; }
 
-      // A hidden iframe with srcdoc, not window.open()+document.write() — the latter is
-      // blocked or silently no-ops in some browsers (popup managers, Safari's XSS
-      // protections on about:blank), which was producing a blank print window/preview
-      // even though this same HTML string was being built correctly.
+      // A hidden iframe with a minimal srcdoc skeleton (not window.open()+document.write()
+      // — the latter is blocked or silently no-ops in some browsers, which previously
+      // produced a blank print window even when the content itself was built correctly).
+      // Content is added via real DOM APIs after load, not baked into srcdoc — importNode
+      // + append, no HTML string round-trip for the (potentially large) cloned surfaces.
       const iframe = document.createElement('iframe');
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
-      iframe.style.border = '0';
+      iframe.style.cssText = 'position:fixed; right:0; bottom:0; width:0; height:0; border:0;';
       iframe.addEventListener('load', () => {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-        // Cleanup after the print dialog is dismissed; 'afterprint' doesn't fire in every
-        // browser for iframe content, so this is backed up by a generous fallback timeout.
-        const cleanup = () => iframe.remove();
-        iframe.contentWindow.addEventListener('afterprint', cleanup);
-        setTimeout(cleanup, 60000);
+        const idoc = iframe.contentDocument;
+
+        const style = idoc.createElement('style');
+        style.textContent = `
+          * { box-sizing: border-box; }
+          body { margin: 0; font-family: sans-serif; }
+          .print-page { page-break-after: always; padding: 20px; }
+          .print-page:last-child { page-break-after: avoid; }
+          .print-title { font-size: 18px; font-weight: bold; margin-bottom: 16px; }
+          .print-frame { overflow: hidden; position: relative; border: 1px solid #ddd; }
+        `;
+        idoc.head.appendChild(style);
+
+        if (markerDefsEl) idoc.body.appendChild(idoc.importNode(markerDefsEl, true)); // once, shared by every page's connectors
+
+        for (const p of pages) {
+          const pageEl = idoc.createElement('div');
+          pageEl.className = 'print-page';
+          const titleEl = idoc.createElement('div');
+          titleEl.className = 'print-title';
+          titleEl.textContent = p.viewName;
+          const frameEl = idoc.createElement('div');
+          frameEl.className = 'print-frame';
+          frameEl.style.width = `${p.contentW}px`;
+          frameEl.style.height = `${p.contentH}px`;
+          frameEl.appendChild(idoc.importNode(p.surfaceClone, true));
+          pageEl.appendChild(titleEl);
+          pageEl.appendChild(frameEl);
+          idoc.body.appendChild(pageEl);
+        }
+
+        const link = idoc.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = new URL('css/styles.css', window.location.href).href;
+        const doPrint = () => {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          // Cleanup after the print dialog is dismissed; 'afterprint' doesn't fire in every
+          // browser for iframe content, so this is backed up by a generous fallback timeout.
+          const cleanup = () => iframe.remove();
+          iframe.contentWindow.addEventListener('afterprint', cleanup);
+          setTimeout(cleanup, 60000);
+        };
+        link.addEventListener('load', doPrint);
+        link.addEventListener('error', doPrint); // still print (just possibly unstyled) rather than hang forever on a failed stylesheet fetch
+        idoc.head.appendChild(link);
       });
-      iframe.srcdoc = html;
+      iframe.srcdoc = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Print</title></head><body></body></html>';
       document.body.appendChild(iframe);
     } catch (err) {
       this.toast(`Print error: ${err.message}`, true);
       console.error('Print error:', err);
     }
-  }
-
-  clipToRectEdge(cx, cy, dx, dy, halfW, halfH) {
-    if (dx === 0 && dy === 0) return { x: cx, y: cy };
-    const scaleX = dx !== 0 ? halfW / Math.abs(dx) : Infinity;
-    const scaleY = dy !== 0 ? halfH / Math.abs(dy) : Infinity;
-    const scale = Math.min(scaleX, scaleY);
-    return { x: cx + dx * scale, y: cy + dy * scale };
-  }
-
-  /** Rough character-count word-wrap for the SVG print output (no live layout available
-   * there) — approximates each font's average glyph width well enough to keep the node
-   * card text from overflowing, capped at `maxLines` like the canvas's own line-clamp. */
-  wrapTextForPrint(text, maxWidthPx, fontSize, maxLines) {
-    const avgCharWidth = fontSize * 0.55;
-    const maxChars = Math.max(4, Math.floor(maxWidthPx / avgCharWidth));
-    const words = String(text ?? '').split(/\s+/).filter(Boolean);
-    const lines = [];
-    let current = '';
-    for (const word of words) {
-      const candidate = current ? `${current} ${word}` : word;
-      if (candidate.length > maxChars && current) {
-        lines.push(current);
-        current = word;
-        if (lines.length === maxLines - 1) break;
-      } else {
-        current = candidate;
-      }
-    }
-    if (current && lines.length < maxLines) lines.push(current);
-    if (lines.length === maxLines) {
-      const last = lines[maxLines - 1];
-      if (last.length > maxChars) lines[maxLines - 1] = `${last.slice(0, maxChars - 1)}…`;
-    }
-    return lines;
   }
 
   /** File > Load Example: lists public/examples/index.json's entries, same unsaved-
