@@ -1,7 +1,7 @@
 import { loadAllData } from './data.js';
 import { Store, ciEq, newId } from './state.js';
 import { parseArchimateXml } from './archimate.js';
-import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
+import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
 import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection as duplicateSectionCommand, smartCheckView } from './commands.js';
@@ -17,6 +17,79 @@ function stringifyForConsole(v) {
   if (v === undefined) return 'undefined';
   if (v === null) return 'null';
   try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+}
+
+/** Projects a point outward from a rectangle's center toward (dx,dy) to the rectangle's
+ * edge — used only by buildViewSvgString's connector-endpoint math. */
+function clipToRectEdgeForExport(cx, cy, dx, dy, halfW, halfH) {
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+  const scaleX = dx !== 0 ? halfW / Math.abs(dx) : Infinity;
+  const scaleY = dy !== 0 ? halfH / Math.abs(dy) : Infinity;
+  const scale = Math.min(scaleX, scaleY);
+  return { x: cx + dx * scale, y: cy + dy * scale };
+}
+
+/** Rough character-count word-wrap for buildViewSvgString's plain-SVG text — no real CSS
+ * layout available there, so this approximates each font's average glyph width well
+ * enough to keep node-card text from overflowing, capped at `maxLines`. */
+function wrapTextForExport(text, maxWidthPx, fontSize, maxLines) {
+  const avgCharWidth = fontSize * 0.55;
+  const maxChars = Math.max(4, Math.floor(maxWidthPx / avgCharWidth));
+  const words = String(text ?? '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let current = '';
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > maxChars && current) {
+      lines.push(current);
+      current = word;
+      if (lines.length === maxLines - 1) break;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current && lines.length < maxLines) lines.push(current);
+  if (lines.length === maxLines) {
+    const last = lines[maxLines - 1];
+    if (last.length > maxChars) lines[maxLines - 1] = `${last.slice(0, maxChars - 1)}…`;
+  }
+  return lines;
+}
+
+// ===================== RECENTLY OPENED FILES =====================
+// A browser can't silently re-read a local file the user picked earlier (no persisted
+// file handle without the newer, Chromium-only File System Access API) — so "recently
+// opened" here means caching each file's own JSON TEXT in localStorage at load/save
+// time, and re-loading straight from that cache. Purely a convenience cache, not
+// critical data: capped in count and per-entry size, and any localStorage failure
+// (quota, privacy mode) is swallowed rather than surfaced, since losing this list just
+// means falling back to the ordinary file picker.
+const RECENT_FILES_KEY = 'dycad-recent-files';
+const RECENT_FILES_MAX = 8;
+const RECENT_FILE_MAX_BYTES = 3 * 1024 * 1024; // stay well under typical 5-10MB localStorage quota even with several cached
+
+function getRecentFiles() {
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENT_FILES_KEY) || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function addRecentFile(name, content) {
+  if (!name || content.length > RECENT_FILE_MAX_BYTES) return; // too big to cache locally — Load still works normally via the file picker
+  let list = getRecentFiles().filter((f) => f.name !== name); // de-dupe by name, most-recent-first
+  list.unshift({ name, content, savedAt: Date.now() });
+  list = list.slice(0, RECENT_FILES_MAX);
+  try {
+    localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(list));
+  } catch {
+    // Quota exceeded (e.g. several large files already cached) — halve the list and
+    // retry once rather than losing the ability to cache anything at all.
+    list = list.slice(0, Math.max(1, Math.floor(list.length / 2)));
+    try { localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(list)); } catch { /* give up silently */ }
+  }
 }
 
 class App {
@@ -1114,8 +1187,8 @@ class App {
 
   // ===================== SAVE / LOAD =====================
   saveJson() {
-    const data = this.store.toJSON();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const jsonText = JSON.stringify(this.store.toJSON(), null, 2);
+    const blob = new Blob([jsonText], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -1123,6 +1196,10 @@ class App {
     a.click();
     URL.revokeObjectURL(url);
     this.store.dirty = false;
+    // Cache under the file's own working name (what the user thinks of this session as),
+    // not the fixed 'dycad-model.json' download filename — matches what File > Recently
+    // Opened should show for a "loaded X, edited, saved" session.
+    addRecentFile(this.store.loadedFileName || 'dycad-model.json', jsonText);
     this.render(); // clears the Save button's unsaved-changes color immediately
   }
 
@@ -1157,6 +1234,7 @@ class App {
       this.store.activeTabId = null;
       this.store.dirty = false;
       this.store.loadedFileName = file.name;
+      addRecentFile(file.name, text);
       const homeView = this.store.findView(this.store.currentView) || this.store.doc.views[0];
       const tab = this.createCanvasTab(homeView);
       this.switchToTab(tab.id);
@@ -1354,6 +1432,195 @@ class App {
     }
   }
 
+  /** File > Export View as Image: choose SVG or PNG for the current view. */
+  promptExportViewAsImage() {
+    const tab = this.store.activeTab();
+    if (!tab || tab.type !== 'canvas') { this.toast('No view open to export.', true); return; }
+    const view = this.store.findView(tab.viewId);
+    if (!view) return;
+
+    this.promptModal({
+      title: 'Export View as Image',
+      fields: [{ key: 'format', label: 'Format', type: 'select', options: ['SVG', 'PNG'], value: 'SVG' }],
+      onSubmit: (vals) => {
+        if (vals.format === 'PNG') this.exportViewAsPng(view);
+        else this.exportViewAsSvg(view);
+      },
+    });
+  }
+
+  /** Builds a standalone, portable SVG for one view — deliberately a SEPARATE, purpose-
+   * built native-SVG renderer (rect/text/path only, no <foreignObject>), NOT a reuse of
+   * renderCanvasPage the way Print is. Two different jobs: Print needs pixel-perfect
+   * on-screen fidelity, where reusing the real DOM+CSS renderer is exactly right; this
+   * needs a portable file other tools can open — and critically, an SVG containing
+   * <foreignObject>-embedded HTML TAINTS a <canvas> on rasterization (verified directly:
+   * browsers refuse toDataURL/toBlob afterward, even same-origin, even via a blob URL),
+   * which would make PNG export outright impossible. Plain SVG primitives don't have
+   * that restriction, so this is what actually makes PNG export achievable at all — the
+   * approximate text-wrapping below (no real CSS layout available here) is the accepted
+   * tradeoff for that. Returns null if the view has no placed nodes. */
+  buildViewSvgString(view) {
+    const PADDING = 30;
+    const { w: nodeW, h: nodeH } = getNodeSize(view);
+    const vms = this.store.viewMembersForView(view.id);
+    const partVms = vms.filter((vm) => vm.objectType === 'part');
+    if (partVms.length === 0) return null;
+
+    const showTypes = view?.chkShowElementTypes;
+    const showDescription = view?.chkShowDescription;
+    const minX = Math.min(...partVms.map((vm) => vm.x));
+    const minY = Math.min(...partVms.map((vm) => vm.y));
+    const maxX = Math.max(...partVms.map((vm) => vm.x + nodeW));
+    const maxY = Math.max(...partVms.map((vm) => vm.y + nodeH));
+    const width = maxX - minX + PADDING * 2;
+    const height = maxY - minY + PADDING * 2;
+    const ox = minX - PADDING, oy = minY - PADDING; // shift so content starts at (0,0)
+
+    const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" font-family="sans-serif"><defs>`];
+
+    const markerSizes = { small: 7, medium: 9, large: 13 };
+    const lineEnds = this.store.settings.lineEnds || {};
+    for (const [name, le] of Object.entries(lineEnds)) {
+      if (!le.path) continue;
+      for (const [sizeName, px] of Object.entries(markerSizes)) {
+        parts.push(`<marker id="marker-${name}-${sizeName}" viewBox="-12 -2 24 24" markerWidth="${px}" markerHeight="${px}" refX="0" refY="10" orient="auto-start-reverse"><g transform="rotate(90 0 10)"><path d="${le.path}" fill="${le.fill || 'none'}" stroke="${le.stroke || 'black'}"/></g></marker>`);
+      }
+    }
+    parts.push('</defs>');
+    parts.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"/>`);
+
+    const halfW = nodeW / 2, halfH = nodeH / 2;
+    for (const cvm of vms.filter((vm) => vm.objectType === 'connector')) {
+      const conn = this.store.findConnector(cvm.objectId);
+      const fromVm = this.store.findViewMember(cvm.fromVmId);
+      const toVm = this.store.findViewMember(cvm.toVmId);
+      if (!conn || !fromVm || !toVm) continue;
+      const fCenter = { x: fromVm.x - ox + halfW, y: fromVm.y - oy + halfH };
+      const tCenter = { x: toVm.x - ox + halfW, y: toVm.y - oy + halfH };
+      const dx = tCenter.x - fCenter.x, dy = tCenter.y - fCenter.y;
+      const margin = 11;
+      const fc = clipToRectEdgeForExport(fCenter.x, fCenter.y, dx, dy, halfW + margin, halfH + margin);
+      const tc = clipToRectEdgeForExport(tCenter.x, tCenter.y, -dx, -dy, halfW + margin, halfH + margin);
+
+      const style = (this.store.settings.relationshipStyles || []).find((s) => ciEq(s.type, conn.relationship));
+      const stroke = style?.stroke ?? conn.stroke ?? '#333';
+      const strokeWidth = style?.strokeWidth ?? conn.strokeWidth ?? 2;
+      const dash = style?.dash ?? conn.dash ?? [];
+      const endSize = conn.endSize || 'medium';
+
+      let d;
+      if (conn.connectorType === 'c') {
+        const midX = (fc.x + tc.x) / 2, midY = (fc.y + tc.y) / 2;
+        const cdx = tc.x - fc.x, cdy = tc.y - fc.y;
+        const len = Math.sqrt(cdx * cdx + cdy * cdy) || 1;
+        const curveOffset = 30;
+        const ctrlX = midX + (-cdy / len) * curveOffset, ctrlY = midY + (cdx / len) * curveOffset;
+        d = `M ${fc.x} ${fc.y} Q ${ctrlX} ${ctrlY} ${tc.x} ${tc.y}`;
+      } else {
+        d = `M ${fc.x} ${fc.y} L ${tc.x} ${tc.y}`;
+      }
+      let pathHtml = `<path d="${d}" stroke="${stroke}" stroke-width="${strokeWidth}" fill="none"`;
+      if (dash.length) pathHtml += ` stroke-dasharray="${dash.join(',')}"`;
+      if (style?.toLineEndSettingType && lineEnds[style.toLineEndSettingType]?.path) pathHtml += ` marker-end="url(#marker-${style.toLineEndSettingType}-${endSize})"`;
+      if (style?.fromLineEndSettingType && lineEnds[style.fromLineEndSettingType]?.path) pathHtml += ` marker-start="url(#marker-${style.fromLineEndSettingType}-${endSize})"`;
+      pathHtml += '/>';
+      parts.push(pathHtml);
+    }
+
+    for (const vm of partVms) {
+      const part = this.store.findPart(vm.objectId);
+      if (!part) continue;
+      const elDef = elementByType(this.store, part.type);
+      const fillColor = vm.fillColor || groupFill(this, elDef);
+      const cornerRadius = elDef?.cornerRadius ?? 7;
+      const x = vm.x - ox, y = vm.y - oy;
+
+      parts.push(`<rect x="${x}" y="${y}" width="${nodeW}" height="${nodeH}" rx="${cornerRadius}" fill="${fillColor}" stroke="rgba(0,0,0,0.4)" stroke-width="1.5"/>`);
+
+      const padX = 8, padY = 6;
+      let cursorY = y + padY;
+      if (showTypes || elDef) {
+        const iconW = 26, iconH = 13;
+        if (showTypes) {
+          const typeText = (elDef?.title || part.type).toUpperCase();
+          parts.push(`<text x="${x + padX}" y="${cursorY + 6}" font-size="9" letter-spacing="0.3" fill="#333" opacity="0.7">${escapeHtml(typeText)}</text>`);
+        }
+        const iconFill = groupFill(this, elDef);
+        const iconX = x + nodeW - padX - iconW;
+        if (elDef && elDef.path) {
+          parts.push(`<svg x="${iconX}" y="${cursorY}" width="${iconW}" height="${iconH}" viewBox="0 0 40 20"><path d="${elDef.path}" stroke="black" stroke-width="1.5" fill="${iconFill}"/></svg>`);
+        } else {
+          const r = Math.min(elDef?.cornerRadius ?? 6, 8);
+          parts.push(`<svg x="${iconX}" y="${cursorY}" width="${iconW}" height="${iconH}" viewBox="0 0 40 20"><rect x="4" y="1" width="32" height="18" rx="${r}" stroke="black" stroke-width="1.5" fill="${iconFill}"/></svg>`);
+        }
+        cursorY += iconH + 4;
+      }
+
+      const labelLines = wrapTextForExport(part.label, nodeW - padX * 2, 12, 2);
+      for (const line of labelLines) {
+        cursorY += 12;
+        parts.push(`<text x="${x + padX}" y="${cursorY}" font-size="12" font-weight="600" fill="#1c2128">${escapeHtml(line)}</text>`);
+      }
+      if (showDescription && part.description) {
+        const descLines = wrapTextForExport(part.description, nodeW - padX * 2, 10, 2);
+        for (const line of descLines) {
+          cursorY += 11;
+          parts.push(`<text x="${x + padX}" y="${cursorY}" font-size="10" fill="#1c2128" opacity="0.8">${escapeHtml(line)}</text>`);
+        }
+      }
+    }
+
+    parts.push('</svg>');
+    return { svgString: parts.join(''), width, height };
+  }
+
+  exportViewAsSvg(view) {
+    const built = this.buildViewSvgString(view);
+    if (!built) { this.toast('Nothing to export — no nodes in this view.', true); return; }
+    const blob = new Blob([built.svgString], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${view.viewName || 'view'}.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
+    this.toast(`Exported "${view.viewName}" as SVG.`);
+  }
+
+  exportViewAsPng(view, scale = 2) {
+    const built = this.buildViewSvgString(view);
+    if (!built) { this.toast('Nothing to export — no nodes in this view.', true); return; }
+    const { svgString, width, height } = built;
+    const blob = new Blob([svgString], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.addEventListener('load', () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      canvas.toBlob((pngBlob) => {
+        if (!pngBlob) { this.toast('PNG export failed.', true); return; }
+        const pngUrl = URL.createObjectURL(pngBlob);
+        const a = document.createElement('a');
+        a.href = pngUrl;
+        a.download = `${view.viewName || 'view'}.png`;
+        a.click();
+        URL.revokeObjectURL(pngUrl);
+        this.toast(`Exported "${view.viewName}" as PNG.`);
+      }, 'image/png');
+    });
+    img.addEventListener('error', () => {
+      URL.revokeObjectURL(url);
+      this.toast('PNG export failed to render.', true);
+    });
+    img.src = url;
+  }
+
   /** File > Load Example: lists public/examples/index.json's entries, same unsaved-
    * changes gate as promptFileMenuLoad, then fetches and loads the chosen file through
    * the same loadFromJSON path (full replace = erase existing data). */
@@ -1396,6 +1663,47 @@ class App {
           this.toast(`Loaded example "${vals.file}".`);
         } catch (err) {
           this.toast(`Failed to load example: ${err.message}`, true);
+        }
+      },
+    });
+  }
+
+  /** File > Recently Opened: the last few files loaded (or saved) in THIS browser,
+   * cached locally as plain JSON text — see addRecentFile's own comment for why. Loads
+   * straight from that cached text, no file picker, same unsaved-changes gate and
+   * full-replace semantics as Load/Load Example. */
+  async promptLoadRecent() {
+    const recent = getRecentFiles();
+    if (recent.length === 0) { this.toast('No recently opened files in this browser yet.', true); return; }
+
+    const choice = await this.confirmUnsavedChanges();
+    if (choice === 'cancel') return;
+    if (choice === 'save') this.saveJson();
+
+    const labelFor = (f) => `${f.name} — ${new Date(f.savedAt).toLocaleString()}`;
+    this.promptModal({
+      title: 'Recently Opened',
+      fields: [{
+        key: 'file', label: 'File', type: 'select',
+        options: recent.map(labelFor), value: labelFor(recent[0]),
+      }],
+      onSubmit: (vals) => {
+        const entry = recent.find((f) => labelFor(f) === vals.file);
+        if (!entry) { this.toast('That entry is no longer available.', true); return; }
+        try {
+          const obj = JSON.parse(entry.content);
+          this.store.loadFromJSON(obj);
+          this.store.tabs = [];
+          this.store.closedTabs = [];
+          this.store.activeTabId = null;
+          this.store.dirty = false;
+          this.store.loadedFileName = entry.name;
+          const homeView = this.store.findView(this.store.currentView) || this.store.doc.views[0];
+          const tab = this.createCanvasTab(homeView);
+          this.switchToTab(tab.id);
+          this.toast(`Loaded "${entry.name}" from Recently Opened.`);
+        } catch (err) {
+          this.toast(`Failed to load "${entry.name}": ${err.message}`, true);
         }
       },
     });
@@ -1856,6 +2164,16 @@ async function bootstrapApp() {
 function wireGlobalEvents(app) {
   const { store } = app;
 
+  // ===== Warn before closing/navigating away with unsaved changes — this app has no
+  // auto-save, so losing store.dirty work silently on an accidental tab close was a real
+  // gap. Browsers ignore any custom message text and show their own generic prompt; the
+  // (e.returnValue = '') assignment is the old-but-still-required way to trigger it. =====
+  window.addEventListener('beforeunload', (e) => {
+    if (!store.dirty) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
+
   // ===== Message Log header: double-click opens the full log in the generic read-only
   // text-edit modal (Step 33) =====
   document.getElementById('message-log-header').addEventListener('dblclick', () => {
@@ -2033,7 +2351,9 @@ function wireGlobalEvents(app) {
   fileMenu.innerHTML = `
     <div class="dd-item" data-action="save">Save</div>
     <div class="dd-item" data-action="load">Load</div>
+    <div class="dd-item" data-action="loadRecent">Recently Opened</div>
     <div class="dd-item" data-action="print">Print...</div>
+    <div class="dd-item" data-action="exportImage">Export View as Image...</div>
     <div class="dd-separator"></div>
     <div class="dd-item" data-action="loadExample">Load Example</div>
     <div class="dd-item" data-action="loadSFCE">Load SFCE</div>
@@ -2042,20 +2362,20 @@ function wireGlobalEvents(app) {
     <div class="dd-separator"></div>
     <div class="dd-item" data-action="importData">Import Data</div>
     <div class="dd-item" data-action="importArchimate">Import ArchiMate</div>
-    <div class="dd-item" data-action="exportData">Export Data</div>
   `;
   fileMenu.querySelectorAll('.dd-item').forEach((item) => {
     item.addEventListener('click', () => {
       if (item.dataset.action === 'save') app.saveJson();
       else if (item.dataset.action === 'load') app.promptFileMenuLoad();
+      else if (item.dataset.action === 'loadRecent') app.promptLoadRecent();
       else if (item.dataset.action === 'print') app.promptPrint();
+      else if (item.dataset.action === 'exportImage') app.promptExportViewAsImage();
       else if (item.dataset.action === 'loadExample') app.promptLoadExample();
       else if (item.dataset.action === 'loadSFCE') app.promptLoadSFCE();
       else if (item.dataset.action === 'loadLocalSettings') document.getElementById('load-local-settings-input').click();
       else if (item.dataset.action === 'saveLocalSettings') app.saveLocalSettings();
       else if (item.dataset.action === 'importData') app.promptImportData();
       else if (item.dataset.action === 'importArchimate') document.getElementById('import-archimate-input').click();
-      else if (item.dataset.action === 'exportData') app.toast('Export Data: behavior will be defined in a later step.');
       fileMenu.classList.add('hidden');
     });
   });

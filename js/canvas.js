@@ -971,6 +971,14 @@ function renderTablePage(app, tab, container) {
   // app.render() always snapped the view back to the top of the table (Step 28 fix).
   const prevWrap = container.querySelector('.table-page');
   const savedScrollTop = prevWrap ? prevWrap.scrollTop : 0;
+  // Same problem applies to the filter input below: it's a real <input>, torn down and
+  // recreated on every keystroke (since typing calls app.render(), same as a sort click)
+  // — without explicitly restoring focus/cursor position, each keystroke would knock
+  // focus out of the field entirely.
+  const prevFilterInput = prevWrap ? prevWrap.querySelector('.table-filter-input') : null;
+  const restoreFilterFocus = !!prevFilterInput && document.activeElement === prevFilterInput;
+  const savedSelStart = restoreFilterFocus ? prevFilterInput.selectionStart : null;
+  const savedSelEnd = restoreFilterFocus ? prevFilterInput.selectionEnd : null;
 
   container.innerHTML = '';
   const wrap = document.createElement('div');
@@ -995,6 +1003,15 @@ function renderTablePage(app, tab, container) {
     cols = tab.tableCols || (rows[0] ? Object.keys(rows[0]) : []);
   }
 
+  // Filter — catalog tabs only, case-insensitive substring match against ANY column's
+  // formatted cell value, so searching "risk" finds it whether it's in the label, a note,
+  // or anywhere else in the row.
+  const totalCount = rows.length;
+  if (tab.catalogType) {
+    const filterText = (tab.catalogFilterText || '').trim().toLowerCase();
+    if (filterText) rows = rows.filter((r) => cols.some((c) => fmtCell(r[c]).toLowerCase().includes(filterText)));
+  }
+
   if (tab.sortColumn && cols.includes(tab.sortColumn)) {
     const dir = tab.sortDir === 'desc' ? -1 : 1;
     rows.sort((a, b) => {
@@ -1004,7 +1021,10 @@ function renderTablePage(app, tab, container) {
   }
 
   const arrow = (c) => (tab.sortColumn === c ? (tab.sortDir === 'desc' ? ' ▾' : ' ▴') : '');
-  wrap.innerHTML = `<table><thead><tr>${cols.map((c) => `<th class="sortable-col" data-col="${escapeHtml(c)}">${escapeHtml(c)}${arrow(c)}</th>`).join('')}</tr></thead>
+  const searchBarHtml = tab.catalogType
+    ? `<div class="table-search-bar"><input type="text" class="table-filter-input" placeholder="Filter rows…" value="${escapeHtml(tab.catalogFilterText || '')}" /><span class="table-search-count">${rows.length} / ${totalCount}</span></div>`
+    : '';
+  wrap.innerHTML = `${searchBarHtml}<table><thead><tr>${cols.map((c) => `<th class="sortable-col" data-col="${escapeHtml(c)}">${escapeHtml(c)}${arrow(c)}</th>`).join('')}</tr></thead>
     <tbody>${rows.map((r) => `<tr class="catalog-row${tab.selectedCatalogRow?.id === r.id ? ' selected' : ''}" data-id="${escapeHtml(r.id)}">${cols.map((c) => `<td>${escapeHtml(fmtCell(r[c]))}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${cols.length}" style="text-align:center;color:var(--text-muted);">No rows</td></tr>`}</tbody></table>`;
   container.appendChild(wrap);
   wrap.scrollTop = savedScrollTop;
@@ -1024,6 +1044,15 @@ function renderTablePage(app, tab, container) {
         app.render();
       });
     });
+    const filterInput = wrap.querySelector('.table-filter-input');
+    filterInput.addEventListener('input', () => {
+      tab.catalogFilterText = filterInput.value;
+      app.render();
+    });
+    if (restoreFilterFocus) {
+      filterInput.focus();
+      filterInput.setSelectionRange(savedSelStart, savedSelEnd);
+    }
   }
 }
 function renderPdfPage(app, tab, container) {

@@ -365,6 +365,12 @@ button, select, input { font-family: inherit; font-size: inherit; color: inherit
 }
 
 .table-page { padding: 14px; overflow: auto; height: 100%; }
+.table-search-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.table-search-bar input {
+  flex: 1; min-width: 0; border: 1px solid var(--border-strong); border-radius: 5px;
+  padding: 6px 9px; background: var(--bg); color: var(--text); font-size: 12.5px;
+}
+.table-search-count { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .table-page table { border-collapse: collapse; width: 100%; font-size: 12px; }
 .table-page th, .table-page td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
 .table-page th { background: var(--panel-bg); position: sticky; top: 0; }
