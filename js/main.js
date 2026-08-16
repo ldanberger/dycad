@@ -1126,16 +1126,17 @@ class App {
     this.render(); // clears the Save button's unsaved-changes color immediately
   }
 
-  /** File > Save Local Settings: bundles the two things that deliberately live OUTSIDE
-   * the main save file — store.localSettings (secrets, e.g. API keys — see ctx.secrets
-   * in simulation.js) and the pinned-fields config (a UI preference, otherwise stuck in
-   * this one browser's localStorage) — into a single downloadable file, so both travel
-   * together between browsers/machines. Wrapped under `secrets`/`pinnedFields` keys
-   * rather than the old flat {key:value} shape Load Local Settings originally used;
-   * loadLocalSettings below stays backward-compatible with those older, secrets-only
-   * files (see its own comment). */
+  /** File > Save Local Settings: bundles the things that deliberately live OUTSIDE the
+   * main save file — store.localSettings (secrets, e.g. API keys — see ctx.secrets in
+   * simulation.js), the pinned-fields config (a UI preference, otherwise stuck in this
+   * one browser's localStorage), and maxScriptEntities (the ctx.createPart/
+   * ctx.createConnector safety cap, see simulation.js) — into a single downloadable
+   * file, so all of it travels together between browsers/machines. Wrapped under
+   * `secrets`/`pinnedFields`/`maxScriptEntities` keys rather than the old flat
+   * {key:value} shape Load Local Settings originally used; loadLocalSettings below stays
+   * backward-compatible with those older, secrets-only files (see its own comment). */
   saveLocalSettings() {
-    const data = { secrets: this.store.localSettings || {}, pinnedFields: getAllPinnedFields() };
+    const data = { secrets: this.store.localSettings || {}, pinnedFields: getAllPinnedFields(), maxScriptEntities: this.store.maxScriptEntities };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2103,16 +2104,22 @@ function wireGlobalEvents(app) {
       const text = await file.text();
       const obj = JSON.parse(text);
       if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('Expected a JSON object.');
-      // File > Save Local Settings (added alongside pinned fields) writes the new
-      // { secrets, pinnedFields } wrapped shape. Files saved before that — a flat
-      // {key: value} object of secrets only, with neither key present — still load the
-      // same as always, straight into store.localSettings, so nobody's older file breaks.
-      if ('secrets' in obj || 'pinnedFields' in obj) {
+      // File > Save Local Settings (added alongside pinned fields / the script-entity
+      // cap) writes the new { secrets, pinnedFields, maxScriptEntities } wrapped shape.
+      // Files saved before that — a flat {key: value} object of secrets only, with none
+      // of those keys present — still load the same as always, straight into
+      // store.localSettings, so nobody's older file breaks.
+      if ('secrets' in obj || 'pinnedFields' in obj || 'maxScriptEntities' in obj) {
         const secrets = (obj.secrets && typeof obj.secrets === 'object' && !Array.isArray(obj.secrets)) ? obj.secrets : {};
         app.store.localSettings = secrets;
         if (obj.pinnedFields) setAllPinnedFields(obj.pinnedFields);
+        const capNum = Number(obj.maxScriptEntities);
+        if (Number.isFinite(capNum) && capNum > 0) app.store.maxScriptEntities = Math.floor(capNum);
         app.render(); // picks up the new pin config immediately if a property panel is open
-        app.toast(`Local settings loaded (${Object.keys(secrets).length} secret key${Object.keys(secrets).length === 1 ? '' : 's'}${obj.pinnedFields ? ', pinned fields' : ''}).`);
+        const parts = [`${Object.keys(secrets).length} secret key${Object.keys(secrets).length === 1 ? '' : 's'}`];
+        if (obj.pinnedFields) parts.push('pinned fields');
+        if (Number.isFinite(capNum) && capNum > 0) parts.push(`max script entities: ${app.store.maxScriptEntities}`);
+        app.toast(`Local settings loaded (${parts.join(', ')}).`);
       } else {
         app.store.localSettings = obj;
         app.toast(`Local settings loaded (${Object.keys(obj).length} key${Object.keys(obj).length === 1 ? '' : 's'}).`);

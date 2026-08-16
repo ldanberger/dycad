@@ -22,7 +22,7 @@ import { ciEq } from './state.js';
 //
 // Script contract: a Part's `script` field is the BODY of a function, invoked as
 // `new Function('ctx', part.script)`, where:
-//   ctx = { part, inputs, responses, state, tick, log, secrets, setState, loadedFileName, findParts, currentView, defaultModel }
+//   ctx = { part, inputs, responses, state, tick, log, secrets, setState, loadedFileName, findParts, currentView, defaultModel, createPart, createConnector }
 //     - part: the Part record itself (id, type, label, ...)
 //     - inputs: one entry per incoming connector (within this part's model) this tick —
 //         { fromPartId, fromLabel, connector: { relationship, streams }, value }
@@ -77,6 +77,29 @@ import { ciEq } from './state.js';
 //       ctx.part.model (a part can live in any model) or the model this simulation run is
 //       currently scoped to (store.simSelectedModel, not exposed here — a script only
 //       ever sees its own part's model via ctx.part.model).
+//     - createPart({ type, label, model, streams, note, order, other, xIds, description,
+//       script, scriptEnabled, section }): creates and returns a brand-new Part — same
+//       fields/defaults as Store.createPart (state.js). `model` defaults to ctx.part.model
+//       if omitted, so a script that doesn't care creates alongside itself; pass a
+//       DIFFERENT model string to create cross-model (the new part just needs no
+//       placement anywhere — it isn't added to any view/viewMember, same as any
+//       programmatically-created Part). UNLIKE findParts, this mutates the shared
+//       document — but safely with respect to THIS tick's determinism: runTick snapshots
+//       parts/incoming/outgoing once at tick start, so a part created mid-tick can't
+//       retroactively change this tick's own evaluation order; it simply starts
+//       participating from the NEXT tick onward, same "one tick later" rule `response`
+//       already follows. Throws if `type` is missing, or if store.maxScriptEntities would
+//       be exceeded (doc.parts.length + doc.connectors.length combined, default 5000,
+//       user-configurable via File > Load Local Settings) — a script that creates
+//       something every tick with no guard will hit this fast under continuous Run, by
+//       design; guard with ctx.state (see the example script below) if that's not wanted.
+//     - createConnector({ from, to, model, connectorType, relationship, streams, note }):
+//       creates and returns a brand-new Connector between two EXISTING part ids (from a
+//       prior createPart call, or ctx.findParts, or hand-known ids) — same
+//       fields/defaults as Store.createConnector. `model` defaults to ctx.part.model if
+//       omitted. Throws if `from`/`to` don't resolve to real parts, or the
+//       maxScriptEntities cap is hit. Same "takes effect next tick, not this one" rule as
+//       createPart.
 //   Must return { value, state, response, badge } — response and badge are both
 //   optional (see below), or the
 //   whole call may throw — caught per-node, see below.
@@ -140,6 +163,40 @@ function pushMessageLog(store, message) {
 function findPartsForScript(store, query) {
   const { type, model } = query || {};
   return store.doc.parts.filter((p) => (!type || ciEq(p.type, type)) && (!model || ciEq(p.model, model)));
+}
+
+/** Shared guard for ctx.createPart/ctx.createConnector — see the script-contract comment
+ * at the top of this file for the reasoning. Throws (caught by the same per-node
+ * try/catch that already handles any other script error) rather than silently no-op'ing,
+ * so hitting the cap is as visible as any other script failure. */
+function assertUnderScriptEntityCap(store, whichFn) {
+  const cap = store.maxScriptEntities;
+  const count = store.doc.parts.length + store.doc.connectors.length;
+  if (count >= cap) {
+    throw new Error(`${whichFn}: at the parts+connectors cap (${cap}, doc currently has ${count}) — refusing to create more. Raise maxScriptEntities via File > Load Local Settings if this is intentional.`);
+  }
+}
+
+function createPartForScript(store, part, spec) {
+  assertUnderScriptEntityCap(store, 'ctx.createPart');
+  if (!spec || !spec.type) throw new Error('ctx.createPart: "type" is required.');
+  return store.createPart({
+    type: spec.type, label: spec.label, model: spec.model || part.model,
+    streams: spec.streams, note: spec.note, order: spec.order, other: spec.other,
+    xIds: spec.xIds, description: spec.description, script: spec.script,
+    scriptEnabled: spec.scriptEnabled, section: spec.section,
+  });
+}
+
+function createConnectorForScript(store, part, spec) {
+  assertUnderScriptEntityCap(store, 'ctx.createConnector');
+  if (!spec || !spec.from || !store.findPart(spec.from)) throw new Error(`ctx.createConnector: no part found for "from" id "${spec?.from}".`);
+  if (!spec.to || !store.findPart(spec.to)) throw new Error(`ctx.createConnector: no part found for "to" id "${spec.to}".`);
+  return store.createConnector({
+    from: spec.from, to: spec.to, model: spec.model || part.model,
+    connectorType: spec.connectorType, relationship: spec.relationship,
+    streams: spec.streams, note: spec.note,
+  });
 }
 
 /** modelName -> { parts, incoming: Map<partId, [{fromPartId, connector}]>,
@@ -232,6 +289,8 @@ function runTick(app, modelName) {
           findParts: (query) => findPartsForScript(store, query),
           currentView: store.currentView,
           defaultModel: store.defaultModel,
+          createPart: (spec) => createPartForScript(store, part, spec),
+          createConnector: (spec) => createConnectorForScript(store, part, spec),
         }) || {};
         resultValue = out.value;
         resultState = out.state || {};

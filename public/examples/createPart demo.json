@@ -1,0 +1,69 @@
+{
+  "version": "0.2",
+  "readme": {
+    "note": "Simulation demo: ctx.createPart() and ctx.createConnector(). 'Node Factory' has no incoming connectors — on its first tick it creates two new BusinessCapability parts in its OWN model (each wired to it with a new connector), plus a third BusinessCapability part in a DIFFERENT model ('Generated'), then guards itself with ctx.state so it only ever does this once. Step or Run Simulation, then check the Message Log (left sidebar) for what it created. None of the newly-created parts get a viewMember automatically — createPart/createConnector only touch the Part/Connector tables, not any view placement — so look for them via Catalogs > Parts, or the Simulation menu's Script Console: findParts({ model: 'Reference' }) / findParts({ model: 'Generated' })."
+  },
+  "defaultModel": "Reference",
+  "currentView": "createpart-demo",
+  "models": [
+    { "modelName": "Reference" },
+    { "modelName": "Generated" }
+  ],
+  "views": [
+    {
+      "id": "createpart-demo",
+      "viewName": "createpart-demo",
+      "viewType": "ff",
+      "chkShowConnectorType": true,
+      "chkShowStreamType": false,
+      "chkShowKeys": false,
+      "chkShowElementTypes": true,
+      "chkShowDescription": true,
+      "chkShowOnPageCatalogs": false,
+      "chkShowSimValues": true,
+      "margin": 50,
+      "sections": [],
+      "nodeWidth": 150,
+      "nodeHeight": 46,
+      "remapSortKeys": null,
+      "spacingScale": 1
+    }
+  ],
+  "parts": [
+    {
+      "id": "part-factory",
+      "type": "Unknown",
+      "label": "Node Factory",
+      "rawLabel": "Node Factory",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "No incoming connectors — creates new parts/connectors via script instead of reacting to inputs.",
+      "scriptEnabled": true,
+      "script": "if (ctx.state.done) {\n  ctx.log(`Already created ${ctx.state.count} part(s) earlier — guarded by ctx.state.done so this only runs once. (Without a guard, creating something every tick would hit the parts+connectors cap fast under continuous Run.)`);\n  return { value: ctx.state.count, state: ctx.state };\n}\n\n// Same model as this node: create two capabilities and wire them to this node.\nconst capA = ctx.createPart({ type: 'BusinessCapability', label: 'Generated Capability A', model: ctx.part.model });\nctx.createConnector({ from: ctx.part.id, to: capA.id, connectorType: 'c', relationship: 'Association' });\n\nconst capB = ctx.createPart({ type: 'BusinessCapability', label: 'Generated Capability B', model: ctx.part.model });\nctx.createConnector({ from: ctx.part.id, to: capB.id, connectorType: 'c', relationship: 'Association' });\n\n// A DIFFERENT model: no connector here — a connector needs both ends in the same\n// model to make sense on any view, so cross-model creation is create-only.\nconst capC = ctx.createPart({ type: 'BusinessCapability', label: 'Generated Capability C (other model)', model: 'Generated' });\n\nctx.log(`Created \"${capA.label}\" and \"${capB.label}\" in this node's own model (\"${ctx.part.model}\"), each wired to this node with a new connector.`);\nctx.log(`Created \"${capC.label}\" in a DIFFERENT model (\"${capC.model}\") — cross-model creation.`);\nctx.log('None of these have a viewMember yet — check Catalogs > Parts, or the Script Console.');\n\nreturn {\n  value: 3,\n  state: { done: true, count: 3, capAId: capA.id, capBId: capB.id, capCId: capC.id },\n};"
+    }
+  ],
+  "connectors": [],
+  "viewMembers": [
+    {
+      "id": "vm-factory",
+      "view": "createpart-demo",
+      "objectType": "part",
+      "objectId": "part-factory",
+      "x": 150,
+      "y": 120,
+      "fillColor": "#ff5e61",
+      "order": 0,
+      "note": "",
+      "linkedViewName": "",
+      "isExternal": false,
+      "sectionId": ""
+    }
+  ],
+  "settingsUser": {
+    "relationshipPairs": []
+  }
+}

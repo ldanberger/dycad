@@ -84,6 +84,13 @@ class Store {
     // page refresh (must be re-loaded each session); does survive closing/reopening
     // DyCAD's own tabs/views, since it's unrelated to tab lifecycle.
     this.localSettings = {};
+    // Cap on doc.parts.length + doc.connectors.length that ctx.createPart/
+    // ctx.createConnector (simulation.js) will allow before refusing further creation —
+    // the one guardrail against a buggy/runaway script (especially under continuous Run)
+    // unboundedly growing the document. Same file/load path as localSettings above
+    // (File > Load Local Settings), also memory-only. Default matches what ships with a
+    // fresh session; a person only ever raises or lowers it via that file.
+    this.maxScriptEntities = 5000;
     // Filename of the last file that fully replaced store.doc (Save/Load JSON's own
     // "Load JSON" button, File > Load, File > Load Example) — NOT set by Import Data,
     // which merges additively into whatever's already loaded rather than replacing it.
