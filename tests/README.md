@@ -51,6 +51,9 @@ if anything failed.
 | `check_routing_style_per_connector_type` | 'c' and 's' connectors sharing one routing setting instead of independent ones, or "straight line" not producing a genuinely straight (uncurved) path |
 | `check_auto_complete_streams_ui` | Smart Check View's Auto-Complete Streams review dialog letting a node be created without its underlying part (Part/View checkbox dependency broken), Proceed creating/skipping the wrong rows, or a skipped middle position getting its two neighbors wrongly bridged with a direct connector |
 | `check_streams_field_editable` | Part/Connector's Streams property-panel field silently no-op'ing edits instead of persisting them (access is now "w", parsed as a trimmed comma-separated list) |
+| `check_pinned_field_dblclick_not_stolen_by_pin_icon` | A pinned field's 📌 icon being nested inside its label, so a real double-click aimed at the label text lands its second click on the icon instead — toggling the pin and unpinning the row mid-gesture, silently breaking the "double-click to open the larger editor" affordance |
+| `check_local_secrets_settings_split` | Local Secrets (API keys) getting cached to localStorage and leaking across a page reload — they must reset every session; or Local Settings' Max Script Entities failing to auto-apply from its localStorage cache after a reload, with no file re-selection needed |
+| `check_instructions_closed_persists_across_reload` | Closing the Instructions tab not sticking across a page reload (reopening every session instead of respecting "don't show this again"), or the Help button losing the ability to reopen it on demand |
 
 ## Fixtures
 

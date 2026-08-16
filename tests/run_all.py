@@ -1225,6 +1225,168 @@ def check_streams_field_editable(page):
     return True, "part.streams and connector.streams are now editable via the property panel, parsed as trimmed comma-separated lists"
 
 
+def check_pinned_field_dblclick_not_stolen_by_pin_icon(page):
+    """Regression guard: the pin icon used to be nested INSIDE the field label in the
+    Pinned section. A real double-click aimed at the label text could have its second
+    click land on the pin icon instead (the icon's own click handler toggles the pin and
+    triggers a full re-render mid-gesture), un-pinning the row out from under the second
+    click and silently breaking the "double-click to open the larger editor" gesture.
+    Repeats a real double-click on a pinned field's label several times and checks the
+    editor opens every time and the row never disappears from Pinned; then confirms a
+    single click directly on the icon still unpins normally."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.addView('RegrPinDbl_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const part = store.createPart({ type: 'Unknown', label: 'PinDblNode', model: store.defaultModel, streams: ['x'] });
+      const vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: 0, y: 0 });
+      app.render();
+      return { vmId: vm.id };
+    }
+    """)
+    node_el = page.locator(f'[data-vm-id="{result["vmId"]}"]').first
+    node_el.click()
+    page.wait_for_timeout(100)
+
+    opens = []
+    for _ in range(3):
+        label = page.locator('.pinned-section label[data-field="streams"]')
+        if label.count() == 0:
+            return False, "pinned 'streams' row disappeared mid-test (got unpinned unexpectedly)"
+        box = label.bounding_box()
+        page.mouse.dblclick(box["x"] + box["width"] - 3, box["y"] + box["height"] / 2)
+        page.wait_for_timeout(100)
+        opened = page.locator('#text-edit-area').count() > 0
+        opens.append(opened)
+        if opened:
+            page.locator('.modal-box .cancel').click()
+            page.wait_for_timeout(80)
+
+    if not all(opens):
+        return False, f"double-clicking the pinned label didn't reliably open the larger editor: {opens}"
+
+    pin_btn = page.locator('.pinned-section [data-pin-field="streams"]')
+    if pin_btn.count() == 0:
+        return False, "pin icon not found after the double-click round"
+    pin_btn.click()
+    page.wait_for_timeout(100)
+    still_in_pinned = page.locator('.pinned-section label[data-field="streams"]').count() > 0
+    if still_in_pinned:
+        return False, "clicking the pin icon directly did not unpin the field"
+    if page.locator('#sf-part-streams').count() == 0:
+        return False, "field should still be editable in Root Properties after unpinning"
+
+    return True, "double-clicking a pinned field's label reliably opens the larger editor without accidentally unpinning, and the pin icon alone still unpins correctly"
+
+
+def check_local_secrets_settings_split(page):
+    """Regression guard for the Local Secrets / Local Settings split: secrets (API keys,
+    File > Load Local Secrets) must stay memory-only and reset on every page reload —
+    never cached to localStorage — while settings (pinned fields, Max Script Entities,
+    File > Load Local Settings) must survive a reload via localStorage, auto-applying on
+    the very next boot with no file re-selection needed. That auto-apply-on-start behavior
+    is the whole point of the split (a user explicitly asked for it) — this proves secrets
+    didn't get swept up in it by mistake, and that settings actually deliver it."""
+    def load_file(input_id, obj):
+        js(page, f"""
+        async () => {{
+          const text = {json.dumps(json.dumps(obj))};
+          const blob = new Blob([text], {{ type: 'application/json' }});
+          const file = new File([blob], 'test.json', {{ type: 'application/json' }});
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          const input = document.getElementById('{input_id}');
+          input.files = dt.files;
+          input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+          await new Promise(r => setTimeout(r, 150));
+        }}
+        """)
+
+    load_file('load-local-secrets-input', {'TEST_API_KEY': 'shh-secret-123'})
+    load_file('load-local-settings-input', {'maxScriptEntities': 777})
+
+    before = js(page, """
+    async () => ({
+      secrets: window.dycadApp.store.localSecrets,
+      cap: window.dycadApp.store.maxScriptEntities,
+      cached: localStorage.getItem('dycad-local-settings-cache'),
+    })
+    """)
+    if before["secrets"].get("TEST_API_KEY") != "shh-secret-123":
+        return False, f"secrets didn't load correctly: {before}"
+    if before["cap"] != 777:
+        return False, f"maxScriptEntities didn't load correctly: {before}"
+    if not before["cached"] or json.loads(before["cached"]).get("maxScriptEntities") != 777:
+        return False, f"maxScriptEntities wasn't cached to localStorage on load: {before}"
+
+    page.reload()
+    page.wait_for_timeout(1200)
+
+    after = js(page, """
+    async () => ({
+      secrets: window.dycadApp.store.localSecrets,
+      cap: window.dycadApp.store.maxScriptEntities,
+    })
+    """)
+    if after["secrets"] and len(after["secrets"]) > 0:
+        return False, f"secrets leaked across a page reload — should be memory-only, reset to {{}}: {after}"
+    if after["cap"] != 777:
+        return False, f"maxScriptEntities did not auto-apply from its localStorage cache after reload (expected 777): {after}"
+
+    return True, "Local Secrets reset on reload (memory-only); Local Settings' maxScriptEntities auto-loads from localStorage after a reload with no file re-selection"
+
+
+def check_instructions_closed_persists_across_reload(page):
+    """Regression guard: closing the Instructions tab should be a real "don't show this
+    again" — cached to localStorage (the same LOCAL_SETTINGS_CACHE_KEY blob
+    maxScriptEntities uses, read-modify-write merged so the two never clobber each
+    other), so bootstrapApp does NOT reopen it on the next page load. The Help button
+    must still open it regardless of the cached flag."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const out = {};
+      out.docsPresentInitially = store.tabs.some(t => t.type === 'docs');
+      const closeBtn = [...document.querySelectorAll('.tab-item')]
+        .find(el => el.textContent.includes('Instructions'))?.querySelector('.tab-close');
+      closeBtn?.click();
+      await new Promise(r => setTimeout(r, 100));
+      out.cachedClosed = JSON.parse(localStorage.getItem('dycad-local-settings-cache') || '{}').instructionsClosed === true;
+      return out;
+    }
+    """)
+    if not result["docsPresentInitially"]:
+        return False, "Instructions tab wasn't open on first load — can't test closing it"
+    if not result["cachedClosed"]:
+        return False, f"closing Instructions didn't cache instructionsClosed=true: {result}"
+
+    page.reload()
+    page.wait_for_timeout(1200)
+    result2 = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const out = {};
+      out.docsPresentAfterReload = store.tabs.some(t => t.type === 'docs');
+      out.activeIsCanvas = store.activeTab()?.type === 'canvas';
+      document.getElementById('help-btn').click();
+      await new Promise(r => setTimeout(r, 300));
+      out.docsPresentAfterHelpClick = store.tabs.some(t => t.type === 'docs');
+      return out;
+    }
+    """)
+    if result2["docsPresentAfterReload"]:
+        return False, f"Instructions tab reopened on reload despite being closed previously: {result2}"
+    if not result2["activeIsCanvas"]:
+        return False, f"expected the home canvas tab to be active when Instructions doesn't auto-open: {result2}"
+    if not result2["docsPresentAfterHelpClick"]:
+        return False, f"Help button failed to reopen Instructions even though the user can still do so manually: {result2}"
+
+    return True, "closing Instructions sticks across a reload (no auto-reopen), while the Help button still opens it on demand"
+
+
 CHECKS = [
     check_boots_clean,
     check_example_simulates,
@@ -1257,6 +1419,9 @@ CHECKS = [
     check_routing_style_per_connector_type,
     check_auto_complete_streams_ui,
     check_streams_field_editable,
+    check_pinned_field_dblclick_not_stolen_by_pin_icon,
+    check_local_secrets_settings_split,
+    check_instructions_closed_persists_across_reload,
 ]
 
 

@@ -572,22 +572,22 @@ function renderShowFieldsPanel(app, tab, entityKeyOrSpec, accessors, buttonHandl
       continue;
     }
     if (def.access === 'r') {
-      html.push(row(label, `<input type="text" value="${escapeHtml(formatFieldValue(val))}" readonly />`, fieldName, pinBtn));
+      html.push(row(label, `<input type="text" id="${id}" value="${escapeHtml(formatFieldValue(val))}" readonly />`, fieldName, pinBtn, id));
       continue;
     }
     // access === 'w'
     if (def.show === 'y') {
       html.push(`<div class="prop-row checkbox">${pinBtn}<input type="checkbox" id="${id}" ${val ? 'checked' : ''} /><label for="${id}">${escapeHtml(label)}</label></div>`);
     } else if (def.show === 'n') {
-      html.push(row(label, `<input type="number" id="${id}" value="${val ?? 0}" />`, fieldName, pinBtn));
+      html.push(row(label, `<input type="number" id="${id}" value="${val ?? 0}" />`, fieldName, pinBtn, id));
     } else if (def.show === 'c') {
-      html.push(row(label, `<input type="color" id="${id}" value="${toHexColor(val)}" />`, fieldName, pinBtn));
+      html.push(row(label, `<input type="color" id="${id}" value="${toHexColor(val)}" />`, fieldName, pinBtn, id));
     } else if (def.show === 'm') {
-      html.push(row(label, `<textarea id="${id}">${escapeHtml(val ?? '')}</textarea>`, fieldName, pinBtn));
+      html.push(row(label, `<textarea id="${id}">${escapeHtml(val ?? '')}</textarea>`, fieldName, pinBtn, id));
     } else if (def.show === 's') {
-      html.push(row(label, `<select id="${id}">${selectOptionsFor(app, sourceEntityKey, fieldName, val, ctx)}</select>`, fieldName, pinBtn));
+      html.push(row(label, `<select id="${id}">${selectOptionsFor(app, sourceEntityKey, fieldName, val, ctx)}</select>`, fieldName, pinBtn, id));
     } else { // 't' or unrecognized -> plain text
-      html.push(row(label, `<input type="text" id="${id}" value="${escapeHtml(formatFieldValue(val))}" />`, fieldName, pinBtn));
+      html.push(row(label, `<input type="text" id="${id}" value="${escapeHtml(formatFieldValue(val))}" />`, fieldName, pinBtn, id));
     }
   }
   container.innerHTML = html.join('') || '<div class="empty-hint">No fields configured.</div>';
@@ -720,8 +720,19 @@ function renderViewProperties(app, tab) {
   renderShowFieldsPanel(app, tab, 'view', accessors, {}, document.getElementById('sf-view-fields'));
 }
 
-function row(labelText, inputHtml, fieldName, pinBtnHtml = '') {
-  return `<div class="prop-row"><label${fieldName ? ` data-field="${fieldName}"` : ''}>${pinBtnHtml}${escapeHtml(labelText)}</label>${inputHtml}</div>`;
+/**
+ * The pin button is a SIBLING of the label, not nested inside it (Step: fixed a real bug
+ * where it was nested — a real double-click aimed at the label text was landing on the
+ * button between the two clicks of the gesture, since clicking it toggles the pin and
+ * triggers a full re-render mid-gesture, which un-pins the row out from under the second
+ * click entirely). Keeping them as separate elements with their own hit areas means a
+ * click can only ever land on one or the other. `inputId`, when given, sets the label's
+ * `for` attribute so a single click on the label also focuses/selects the field, the same
+ * native behavior checkbox rows already got via their own hand-built `<label for>` markup.
+ */
+function row(labelText, inputHtml, fieldName, pinBtnHtml = '', inputId = '') {
+  const forAttr = inputId ? ` for="${inputId}"` : '';
+  return `<div class="prop-row">${pinBtnHtml}<label${forAttr}${fieldName ? ` data-field="${fieldName}"` : ''}>${escapeHtml(labelText)}</label>${inputHtml}</div>`;
 }
 
 // Node panel — spec entity 'viewMember' (a Part's specific placement on this view).

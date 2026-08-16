@@ -78,18 +78,23 @@ class Store {
     // messages here via ctx.log(...) during a tick, independent of any one view — a
     // running session console rather than a per-view record. Capped at 500 entries.
     this.messageLog = [];
-    // Local Settings (File > Load Local Settings): a flat key/value object read from a
+    // Local Secrets (File > Load Local Secrets): a flat key/value object read from a
     // user-loaded JSON file, for secrets (API keys etc.) that must never end up in a
-    // save file. Exposed to scripts as ctx.secrets. Memory-only — does NOT survive a
-    // page refresh (must be re-loaded each session); does survive closing/reopening
-    // DyCAD's own tabs/views, since it's unrelated to tab lifecycle.
-    this.localSettings = {};
+    // save file AND must never be cached to localStorage (unlike Local Settings below) —
+    // exposed to scripts as ctx.secrets. Memory-only by design — does NOT survive a page
+    // refresh (must be re-loaded each session, deliberately, so a secret never lingers
+    // anywhere on disk this app controls); does survive closing/reopening DyCAD's own
+    // tabs/views, since it's unrelated to tab lifecycle.
+    this.localSecrets = {};
     // Cap on doc.parts.length + doc.connectors.length that ctx.createPart/
     // ctx.createConnector (simulation.js) will allow before refusing further creation —
     // the one guardrail against a buggy/runaway script (especially under continuous Run)
-    // unboundedly growing the document. Same file/load path as localSettings above
-    // (File > Load Local Settings), also memory-only. Default matches what ships with a
-    // fresh session; a person only ever raises or lowers it via that file.
+    // unboundedly growing the document. Part of Local Settings (File > Load/Save Local
+    // Settings) — unlike Local Secrets above, this one IS cached to localStorage by
+    // main.js's bootstrap/load-handler code (kept out of this Node-testable class itself,
+    // same reason theme/pinned-fields localStorage access lives in render.js/main.js, not
+    // here), so it survives a refresh without re-loading the file. Default here is just
+    // the fresh-session fallback before any cached or loaded value is applied.
     this.maxScriptEntities = 5000;
     // Filename of the last file that fully replaced store.doc (Save/Load JSON's own
     // "Load JSON" button, File > Load, File > Load Example) — NOT set by Import Data,

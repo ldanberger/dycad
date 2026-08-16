@@ -234,8 +234,11 @@ Enabled" in Root Properties, then write the script body in the Script field.</p>
     <tr><td><code>ctx.tick</code></td><td>The current tick number, starting at 0.</td></tr>
     <tr><td><code>ctx.log(message)</code></td><td>Writes a line to the Message Log panel — use freely for
     narration or debugging while building a script.</td></tr>
-    <tr><td><code>ctx.secrets</code></td><td>Read-only access to locally-loaded settings (e.g. an API key) that
-    should never end up saved into a shared model file.</td></tr>
+    <tr><td><code>ctx.secrets</code></td><td>Read-only access to your Local Secrets (File &gt; Load Local
+    Secrets — e.g. an API key) that should never end up saved into a shared model file. Deliberately
+    memory-only — never cached to localStorage either, so it must be re-loaded each browser session, unlike
+    File &gt; Load/Save Local Settings (pinned fields, Max Script Entities) which IS cached and auto-applies
+    on startup.</td></tr>
     <tr><td><code>ctx.setState(patch)</code></td><td>For asynchronous work (e.g. a fetch whose result arrives
     later) — merges into this part's state at the start of the <em>next</em> tick rather than immediately.</td></tr>
     <tr><td><code>ctx.loadedFileName</code></td><td>The filename of the last file that fully replaced the model
@@ -258,6 +261,24 @@ Enabled" in Root Properties, then write the script body in the Script field.</p>
     Creates and returns a brand-new Connector between two <em>existing</em> part ids. <code>model</code>
     defaults to <code>ctx.part.model</code> if omitted. Throws if <code>from</code>/<code>to</code> don't
     resolve to real parts, or the cap below would be exceeded.</td></tr>
+    <tr><td><code>ctx.createNode({ objectId, view, x, y, fillColor, note, order })</code></td><td>
+    Places an <em>existing</em> Part (from <code>createPart</code>, <code>findParts</code>, or a known id) onto
+    a view as a visible node — a Part on its own has no viewMember, so it never shows up on any canvas until
+    something places it. <code>view</code> defaults to <code>ctx.currentView</code> if omitted; throws if
+    neither resolves to a real view. Find-or-create: calling it again for a part already placed on that view
+    returns the existing node unchanged rather than adding a duplicate, so it's safe to call every tick.
+    <code>x</code>/<code>y</code> are a desired position only (default 0,0) — placed via the same
+    overlap-avoiding search every other placement path in the app uses, and ignored on a section-based view,
+    which places into its own grid instead. Doesn't create connector edges — use <code>createConnector</code>
+    for the relationship itself, and <code>createNodeConnector</code> to show it on a view.</td></tr>
+    <tr><td><code>ctx.createNodeConnector({ objectId, view, note, order })</code></td><td>
+    Places an <em>existing</em> Connector (from <code>createConnector</code> or a known id) onto a view as a
+    visible edge between its two endpoint parts' <em>current</em> nodes there — a Connector on its own has no
+    viewMember, so it never draws a line until something places it. <code>view</code> defaults to
+    <code>ctx.currentView</code> if omitted, same as <code>createNode</code>. Both endpoint parts must already
+    have a node on that view (place them first with <code>createNode</code>) — throws naming whichever endpoint
+    is missing one rather than guessing or skipping it. Find-or-create: returns the existing edge unchanged if
+    this connector already has one on this view.</td></tr>
   </tbody>
 </table>
 
@@ -265,7 +286,8 @@ Enabled" in Root Properties, then write the script body in the Script field.</p>
 (default 5000) — the total <code>parts.length + connectors.length</code> a script is allowed to grow the document
 to. Hitting the cap throws an error (same as any other script error, visible on that node) rather than silently
 doing nothing — a script that creates something every tick with no guard will hit it fast under continuous Run.
-Configurable via File &gt; Load Local Settings.</p>
+Configurable via File &gt; Load Local Settings, which caches it to this browser's localStorage so it stays in
+effect across page refreshes without re-loading the file.</p>
 
 <h3>Script Console</h3>
 <p>Simulation &gt; Script Console opens a REPL-style debugging tool, separate from any one part's script — for

@@ -1,4 +1,5 @@
 import { ciEq } from './state.js';
+import { isSectionViewType, createSectionPlacer } from './sections.js';
 
 // ===================== NODE SCRIPTING / SIMULATION =====================
 // Tick-based simulation engine, scoped to a MODEL (not a view). Every scripted Part in a
@@ -22,7 +23,7 @@ import { ciEq } from './state.js';
 //
 // Script contract: a Part's `script` field is the BODY of a function, invoked as
 // `new Function('ctx', part.script)`, where:
-//   ctx = { part, inputs, responses, state, tick, log, secrets, setState, loadedFileName, findParts, currentView, defaultModel, createPart, createConnector }
+//   ctx = { part, inputs, responses, state, tick, log, secrets, setState, loadedFileName, findParts, currentView, defaultModel, createPart, createConnector, createNode, createNodeConnector }
 //     - part: the Part record itself (id, type, label, ...)
 //     - inputs: one entry per incoming connector (within this part's model) this tick —
 //         { fromPartId, fromLabel, connector: { relationship, streams }, value }
@@ -43,8 +44,9 @@ import { ciEq } from './state.js';
 //       (left sidebar, below Position) — independent of the per-node/per-tick
 //       Simulation Log, for whatever free-form narration a script author wants. Safe to
 //       call any number of times per tick; capped at 500 total entries.
-//     - secrets: read-only mirror of store.localSettings (File > Load Local Settings) —
-//       for API keys etc. that should never end up in a save file. e.g.
+//     - secrets: read-only mirror of store.localSecrets (File > Load Local Secrets) —
+//       for API keys etc. that should never end up in a save file, and deliberately never
+//       cached to localStorage either — must be re-loaded each session. e.g.
 //       ctx.secrets.OPENAI_API_KEY.
 //     - setState(patch): for ASYNC work (e.g. a fetch(...) whose response arrives after
 //       this tick's synchronous script call has already returned). Does NOT apply
@@ -100,6 +102,39 @@ import { ciEq } from './state.js';
 //       omitted. Throws if `from`/`to` don't resolve to real parts, or the
 //       maxScriptEntities cap is hit. Same "takes effect next tick, not this one" rule as
 //       createPart.
+//     - createNode({ objectId, view, x, y, fillColor, note, order }): places an EXISTING
+//       Part (from a prior createPart call, ctx.findParts, or a hand-known id) onto a
+//       view as a visible node — a Part on its own (as createPart makes it) has no
+//       viewMember and so never appears on any canvas until something places it, same as
+//       any programmatically-created Part elsewhere in the app. `view` defaults to
+//       ctx.currentView if omitted; throws if neither resolves to a real view (e.g. no
+//       view is open and none was passed). Find-or-create: if the part already has a
+//       node on that view, returns the EXISTING viewMember unchanged rather than adding a
+//       duplicate — safe to call every tick with the same (objectId, view) pair. `x`/`y`
+//       are a DESIRED position only (default 0,0) — actually placed via the same
+//       overlap-avoiding search every other placement path in this app uses, so it won't
+//       land exactly there if something's already occupying that spot; ignored entirely
+//       on a section-based view, which places into its own grid instead (matching
+//       Generate Stream's own section-view placement). Does NOT create connector edges —
+//       use createConnector for the underlying relationship and createNodeConnector to
+//       show it on a view. No entity-count cap of its own (unlike createPart/
+//       createConnector) — find-or-create already makes repeated calls for the same
+//       part/view a no-op, and the worst case (placing many distinct pre-existing parts
+//       in one pass) is bounded by how many parts already exist, not runaway per-tick
+//       growth.
+//     - createNodeConnector({ objectId, view, note, order }): places an EXISTING
+//       Connector (from a prior createConnector call, or a hand-known id) onto a view as
+//       a visible edge between its two endpoint parts' CURRENT nodes on that view — a
+//       Connector on its own (as createConnector makes it) has no viewMember and so never
+//       draws a line on any canvas until something places it. `view` defaults to
+//       ctx.currentView if omitted, same rule as createNode. Both endpoint parts MUST
+//       already have a node on that view (place them first with createNode) — throws
+//       naming whichever endpoint ("from", "to", or both) is missing one, rather than
+//       silently skipping or drawing a misleading edge to the wrong place; this mirrors
+//       Auto-Complete Streams' own fix (a connector should only ever exist between
+//       positions that genuinely both resolved, never bridged/guessed). Find-or-create:
+//       returns the EXISTING edge unchanged if this connector already has one on this
+//       view, same as createNode.
 //   Must return { value, state, response, badge } — response and badge are both
 //   optional (see below), or the
 //   whole call may throw — caught per-node, see below.
@@ -199,6 +234,65 @@ function createConnectorForScript(store, part, spec) {
   });
 }
 
+/** Exposed to scripts as ctx.createNode(spec) — see the script-contract comment at the
+ * top of this file. `currentView` is store.currentView at tick start, threaded through
+ * the same way `part` is for createPart/createConnector's own default-model behavior. */
+function createNodeForScript(store, currentView, spec) {
+  if (!spec || !spec.objectId) throw new Error('ctx.createNode: "objectId" is required (the id of an existing Part to place).');
+  const target = store.findPart(spec.objectId);
+  if (!target) throw new Error(`ctx.createNode: no Part found for "objectId" "${spec.objectId}" — only Parts can be placed via ctx.createNode.`);
+  const viewId = spec.view || currentView;
+  if (!viewId) throw new Error('ctx.createNode: no "view" given and no view is currently open — pass "view" explicitly.');
+  const view = store.findView(viewId);
+  if (!view) throw new Error(`ctx.createNode: view "${viewId}" not found.`);
+
+  const existing = store.viewMembersForView(view.id).find((v) => v.objectType === 'part' && v.objectId === target.id);
+  if (existing) return existing; // already placed here -> reuse, same rule createStream's own node placement follows
+
+  let pos;
+  if (isSectionViewType(view.viewType)) {
+    store.ensureViewSections(view);
+    pos = createSectionPlacer(store, view)(target.type);
+  } else {
+    const nodeW = view.nodeWidth || 130, nodeH = view.nodeHeight || 46;
+    const free = store.findNonOverlappingPosition(view.id, spec.x ?? 0, spec.y ?? 0, undefined, nodeW, nodeH, view.spacingScale || 1);
+    pos = { x: free.x, y: free.y, sectionId: '' };
+  }
+  return store.createViewMember({
+    view: view.id, objectType: 'part', objectId: target.id,
+    x: pos.x, y: pos.y, sectionId: pos.sectionId || '',
+    fillColor: spec.fillColor, note: spec.note, order: spec.order,
+  });
+}
+
+/** Exposed to scripts as ctx.createNodeConnector(spec) — see the script-contract comment
+ * at the top of this file. Same `currentView` threading as createNodeForScript. */
+function createNodeConnectorForScript(store, currentView, spec) {
+  if (!spec || !spec.objectId) throw new Error('ctx.createNodeConnector: "objectId" is required (the id of an existing Connector to place).');
+  const conn = store.findConnector(spec.objectId);
+  if (!conn) throw new Error(`ctx.createNodeConnector: no Connector found for "objectId" "${spec.objectId}" — only Connectors can be placed via ctx.createNodeConnector.`);
+  const viewId = spec.view || currentView;
+  if (!viewId) throw new Error('ctx.createNodeConnector: no "view" given and no view is currently open — pass "view" explicitly.');
+  const view = store.findView(viewId);
+  if (!view) throw new Error(`ctx.createNodeConnector: view "${viewId}" not found.`);
+
+  const existing = store.viewMembersForView(view.id).find((v) => v.objectType === 'connector' && v.objectId === conn.id);
+  if (existing) return existing; // already placed here -> reuse, same find-or-create rule as createNode
+
+  const partVms = store.viewMembersForView(view.id).filter((v) => v.objectType === 'part');
+  const fromVm = partVms.find((v) => v.objectId === conn.from);
+  const toVm = partVms.find((v) => v.objectId === conn.to);
+  if (!fromVm || !toVm) {
+    const both = !fromVm && !toVm;
+    const which = both ? '"from" and "to" parts have' : `"${!fromVm ? 'from' : 'to'}" part has`;
+    throw new Error(`ctx.createNodeConnector: the connector's ${which} no node on view "${view.id}" yet — place it first with ctx.createNode before adding this edge.`);
+  }
+  return store.createViewMember({
+    view: view.id, objectType: 'connector', objectId: conn.id, fromVmId: fromVm.id, toVmId: toVm.id,
+    note: spec.note, order: spec.order,
+  });
+}
+
 /** modelName -> { parts, incoming: Map<partId, [{fromPartId, connector}]>,
  * outgoing: Map<partId, [{toPartId, connector}]> } for the CURRENT graph of that model —
  * every connector belonging to that model (both 'c' and 's' types) counts as a
@@ -280,7 +374,7 @@ function runTick(app, modelName) {
         const out = fn({
           part, inputs, responses, state: prevState, tick: runtime.tick,
           log: (message) => pushMessageLog(store, `[${part.label}] ${message}`),
-          secrets: { ...(store.localSettings || {}) },
+          secrets: { ...(store.localSecrets || {}) },
           setState: (patch) => {
             const existing = pendingStateUpdates.get(part.id) || {};
             pendingStateUpdates.set(part.id, { ...existing, ...(patch || {}) });
@@ -291,6 +385,8 @@ function runTick(app, modelName) {
           defaultModel: store.defaultModel,
           createPart: (spec) => createPartForScript(store, part, spec),
           createConnector: (spec) => createConnectorForScript(store, part, spec),
+          createNode: (spec) => createNodeForScript(store, store.currentView, spec),
+          createNodeConnector: (spec) => createNodeConnectorForScript(store, store.currentView, spec),
         }) || {};
         resultValue = out.value;
         resultState = out.state || {};

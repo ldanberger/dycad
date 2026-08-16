@@ -406,7 +406,7 @@ button, select, input { font-family: inherit; font-size: inherit; color: inherit
 
 /* ===================== PROPERTIES PANEL ===================== */
 .prop-row { margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
-.prop-row label { flex: 0 0 84px; font-size: 11px; color: var(--text-muted); margin-bottom: 0; display: flex; align-items: center; gap: 3px; }
+.prop-row label { flex: 0 0 84px; font-size: 11px; color: var(--text-muted); margin-bottom: 0; cursor: pointer; }
 .prop-row input[type="text"], .prop-row input[type="number"], .prop-row select, .prop-row textarea {
   flex: 1; min-width: 0; border: 1px solid var(--border-strong); border-radius: 5px; padding: 5px 7px;
   background: var(--bg); color: var(--text);

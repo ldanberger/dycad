@@ -1167,4 +1167,95 @@
 // verifying no connector was created directly between BusinessService and
 // BusinessProcess — verified the check fails with the expected message against the old
 // bridging behavior before confirming it passes with the fix. Full suite still 31/31.
-export const APP_VERSION = '0.89';
+// Bug fix: a pinned field's 📌 icon was nested INSIDE its <label> element (render.js's
+// row() helper). A real double-click aimed at the label text could land its second click
+// on the icon instead — the icon's own click handler toggles the pin and calls
+// app.render(), which rebuilds the whole panel and removes the row from Pinned mid-
+// gesture, so the "double-click to open the larger editor" affordance would silently stop
+// working (and repeated attempts kept failing since the row kept disappearing). Root
+// cause confirmed empirically, not guessed: instrumented real click/dblclick events during
+// a Playwright double-click and watched the second click land on the pin button, not the
+// label, even though both clicks targeted the identical on-screen coordinate — the DOM
+// under that coordinate had changed between the two clicks because the first click's
+// side effect (the re-render) had already fired.
+// Fixed by making the pin button a SIBLING of the label instead of a child (own hit area,
+// can never be "hit while aiming for the label" again), and giving the label a `for`
+// attribute pointing at its field's input id, so a single click on the label now also
+// focuses the field — the same native behavior checkbox rows already had via their own
+// hand-built markup, extended here to every other field type via row()'s new `inputId`
+// parameter. New permanent regression check
+// (check_pinned_field_dblclick_not_stolen_by_pin_icon): repeats a real double-click on a
+// pinned label 3 times checking the editor opens every time and the row survives, then
+// confirms a direct click on the icon still unpins normally — verified it fails with the
+// expected message against the old nested-icon markup before confirming it passes with
+// the fix. Full suite now 32/32.
+// Added ctx.createNode(spec) to the simulation script contract (simulation.js) — no
+// prior way for a script to place an existing Part onto a view as a visible node;
+// ctx.createPart/ctx.createConnector only ever touched the Part/Connector tables, never
+// any viewMember. Find-or-create (same part+view -> returns the existing node, no
+// duplicate), places into a section-based view's own grid via sections.js's
+// createSectionPlacer when the view is one (imported fresh — verified this doesn't
+// create a circular dependency: sections.js only imports from state.js, and canvas.js,
+// which already imports FROM simulation.js, is untouched). New example file
+// "createNode demo.json" (registered in examples/index.json): a script-driven node that
+// creates a part, wires it, places it on the view, then calls createNode a second time
+// to demonstrate the find-or-create no-duplicate guarantee. instructions.html's ctx
+// reference table updated. Verified via plain-Node runTick harnesses (no permanent
+// Playwright check added — matches how ctx.createPart/ctx.createConnector themselves
+// shipped, verified the same way): freeform placement, section-view placement lands
+// inside a real section not raw x/y, idempotency across ticks, and all four error paths
+// (missing objectId, unknown objectId, no view open, unknown explicit view id) all throw
+// the expected message. Full suite still 32/32.
+// Added ctx.createNodeConnector(spec) alongside ctx.createNode — a Connector (from
+// ctx.createConnector) has no viewMember any more than a Part does, so it never draws a
+// line on any canvas until something places it; this is that placement call for edges.
+// Requires both endpoint parts to already have a node on the target view (looked up via
+// their CURRENT viewMember there, not passed explicitly) — throws naming whichever
+// endpoint ("from", "to", or both) is missing one rather than guessing/bridging, the same
+// philosophy behind the recent Auto-Complete Streams bridging fix. Find-or-create, same
+// as createNode. Extended the "createNode demo.json" example (rather than adding a
+// separate file) to chain all four calls in the natural order a real script would use:
+// createPart -> createConnector -> createNode -> createNodeConnector, then repeats the
+// last two to demonstrate neither creates a duplicate. instructions.html's ctx reference
+// table updated. Verified via plain-Node runTick harnesses: happy path + idempotency,
+// missing-"to"-endpoint error, missing-both-endpoints error (correct singular/plural
+// wording), unknown objectId error, and a section-based view (both endpoints placed via
+// createNode into real sections, edge still connects the two correctly) — plus the same
+// full loadFromJSON+runTick integration test on the actual updated example file used for
+// createNode itself. Full suite still 32/32.
+// Split File > Load/Save Local Settings into two independently-scoped features, per a
+// direct request: "is it possible to autoload local settings on start" led to separating
+// what should and shouldn't ever touch localStorage. File > Load/Save Local Secrets (API
+// keys, exposed as ctx.secrets — store.localSettings renamed to store.localSecrets
+// throughout state.js/simulation.js/main.js) stays exactly as security-conscious as
+// before: memory-only, must be re-loaded every browser session, NEVER cached anywhere.
+// File > Load/Save Local Settings now covers only pinned fields + Max Script Entities —
+// genuine user preferences with nothing sensitive in them — and Max Script Entities is
+// now cached to a new localStorage key (LOCAL_SETTINGS_CACHE_KEY, main.js) the moment
+// it's loaded, auto-applied on every future boot via bootstrapApp() reading the cache
+// right after constructing the Store, with no file re-selection needed; pinnedFields
+// already had its own independent localStorage persistence (render.js) and needed no
+// change. Both file loaders still accept the OLD pre-split combined
+// {secrets,pinnedFields,maxScriptEntities} shape and pull out only what's relevant to
+// each, so files saved before this split still load correctly on either side. New
+// permanent regression check (check_local_secrets_settings_split): loads both files
+// through the real file inputs, reloads the page, and confirms secrets reset to {}
+// (proven to fail against a version where the cache-write line was removed) while
+// maxScriptEntities survives via its cache. Full suite now 33/33.
+// Closing the Instructions tab now sticks across sessions — a real "don't show this
+// again" instead of reopening every time the app boots. Added to the SAME
+// LOCAL_SETTINGS_CACHE_KEY localStorage blob maxScriptEntities already uses
+// (instructionsClosed: true), which required refactoring that cache from a single
+// blind-overwrite setter into general getLocalSettingsCache/setLocalSettingsCache
+// read-modify-write helpers first — the old setCachedMaxScriptEntities wrote
+// `{maxScriptEntities: n}` directly, which would have silently wiped out
+// instructionsClosed (or vice versa) the next time either was set. App.closeTab now
+// checks whether the tab being closed is type 'docs' and caches the flag; bootstrapApp
+// checks it before calling openOrSwitchDocs (the Help button's own click handler is
+// unconditional, so it still opens Instructions on demand regardless of the cached flag).
+// New permanent regression check (check_instructions_closed_persists_across_reload):
+// closes Instructions, reloads the page, confirms it does NOT reopen and the home canvas
+// tab is active instead, then confirms the Help button still works — verified it fails
+// with the expected message against a version with the boot-time check removed before
+// confirming it passes with the fix. Full suite now 34/34.
+export const APP_VERSION = '0.94';

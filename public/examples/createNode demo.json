@@ -1,0 +1,68 @@
+{
+  "version": "0.2",
+  "readme": {
+    "note": "Simulation demo: ctx.createNode() and ctx.createNodeConnector(). 'Node Factory' has no incoming connectors — on its first tick it creates a new BusinessCapability part (ctx.createPart), wires this node to it (ctx.createConnector), PLACES the new part on this view as a visible node (ctx.createNode), then PLACES the connector as a visible edge between the two (ctx.createNodeConnector) — createPart/createConnector alone never touch any view, so without these two placement calls neither the node nor the line between them would ever appear on this canvas, only in Catalogs. It then calls both createNode and createNodeConnector a SECOND time to demonstrate find-or-create: neither adds a duplicate: the same node/edge is returned unchanged. Step or Run Simulation, then watch the new 'Generated & Placed Capability' node and its connecting line appear on this canvas."
+  },
+  "defaultModel": "Reference",
+  "currentView": "createnode-demo",
+  "models": [
+    { "modelName": "Reference" }
+  ],
+  "views": [
+    {
+      "id": "createnode-demo",
+      "viewName": "createnode-demo",
+      "viewType": "ff",
+      "chkShowConnectorType": true,
+      "chkShowStreamType": false,
+      "chkShowKeys": false,
+      "chkShowElementTypes": true,
+      "chkShowDescription": true,
+      "chkShowOnPageCatalogs": false,
+      "chkShowSimValues": true,
+      "margin": 50,
+      "sections": [],
+      "nodeWidth": 150,
+      "nodeHeight": 46,
+      "remapSortKeys": null,
+      "spacingScale": 1
+    }
+  ],
+  "parts": [
+    {
+      "id": "part-node-factory",
+      "type": "Unknown",
+      "label": "Node Factory",
+      "rawLabel": "Node Factory",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "No incoming connectors — creates a new part, wires it, and places it on this view via script instead of reacting to inputs.",
+      "scriptEnabled": true,
+      "script": "if (ctx.state.done) {\n  ctx.log(`Already created and placed node ${ctx.state.nodeId} + edge ${ctx.state.edgeId} earlier — guarded by ctx.state.done so this only runs once.`);\n  return { value: ctx.state.count, state: ctx.state };\n}\n\n// 1. Create the underlying Part and Connector — same as the createPart demo, no view\n//    placement yet for either one.\nconst cap = ctx.createPart({ type: 'BusinessCapability', label: 'Generated & Placed Capability', model: ctx.part.model });\nconst conn = ctx.createConnector({ from: ctx.part.id, to: cap.id, connectorType: 'c', relationship: 'Association' });\n\n// 2. Place the new part as a visible node on THIS view — createPart never does this.\nconst node = ctx.createNode({ objectId: cap.id, x: 380, y: 60 });\nctx.log(`Placed \"${cap.label}\" on view \"${ctx.currentView}\" at (${node.x}, ${node.y}).`);\n\n// 3. Place the connector as a visible edge — needs BOTH endpoints already placed on this\n//    view (this node already is, from the saved file; the new one just was, in step 2).\n//    createConnector never draws a line by itself, same reasoning as createNode/createPart.\nconst edge = ctx.createNodeConnector({ objectId: conn.id });\nctx.log(`Placed the edge between them (viewMember ${edge.id}).`);\n\n// 4. Calling createNode/createNodeConnector AGAIN for the same part/connector is a no-op\n//    (find-or-create) — proves neither creates a duplicate even if a script calls them\n//    every tick by mistake.\nconst nodeAgain = ctx.createNode({ objectId: cap.id, x: 900, y: 900 });\nconst edgeAgain = ctx.createNodeConnector({ objectId: conn.id });\nctx.log(`Repeat calls returned the SAME node/edge (id match: ${nodeAgain.id === node.id} / ${edgeAgain.id === edge.id}) — no duplicates, and the node did NOT move to (900, 900).`);\n\nreturn {\n  value: 1,\n  state: { done: true, count: 1, capId: cap.id, nodeId: node.id, edgeId: edge.id },\n};"
+    }
+  ],
+  "connectors": [],
+  "viewMembers": [
+    {
+      "id": "vm-node-factory",
+      "view": "createnode-demo",
+      "objectType": "part",
+      "objectId": "part-node-factory",
+      "x": 60,
+      "y": 60,
+      "fillColor": "#ff5e61",
+      "order": 0,
+      "note": "",
+      "linkedViewName": "",
+      "isExternal": false,
+      "sectionId": ""
+    }
+  ],
+  "settingsUser": {
+    "relationshipPairs": []
+  }
+}

@@ -68,6 +68,50 @@ const RECENT_FILES_KEY = 'dycad-recent-files';
 const RECENT_FILES_MAX = 8;
 const RECENT_FILE_MAX_BYTES = 3 * 1024 * 1024; // stay well under typical 5-10MB localStorage quota even with several cached
 
+// Local Settings cache: user PREFERENCES that auto-apply on every boot without any file
+// to (re)load, deliberately separate from Local Secrets (API keys etc., which must NEVER
+// be cached to localStorage — see saveLocalSecrets/the load-local-secrets-input handler
+// below). Two members today: maxScriptEntities (only ever set via File > Load Local
+// Settings — pinnedFields, the file's other member, already persists itself via its own
+// localStorage key in render.js's getPinnedFields/setPinnedFields, so it doesn't need a
+// slot here) and instructionsClosed (set purely from closing the Instructions tab in the
+// UI, nothing to do with the Local Settings file at all — this cache is really "auto-
+// persisted preferences" in general, not strictly a mirror of that one file's contents).
+const LOCAL_SETTINGS_CACHE_KEY = 'dycad-local-settings-cache';
+
+/** Read-modify-write helpers for LOCAL_SETTINGS_CACHE_KEY — every member is written via
+ * setLocalSettingsCache(patch) (merges into whatever's already cached) rather than each
+ * writer clobbering the whole object, so unrelated members never stomp on each other. */
+function getLocalSettingsCache() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(LOCAL_SETTINGS_CACHE_KEY) || '{}');
+    return (cached && typeof cached === 'object' && !Array.isArray(cached)) ? cached : {};
+  } catch { return {}; }
+}
+function setLocalSettingsCache(patch) {
+  try { localStorage.setItem(LOCAL_SETTINGS_CACHE_KEY, JSON.stringify({ ...getLocalSettingsCache(), ...patch })); } catch { /* quota/privacy mode — losing the cache just means falling back to defaults next session */ }
+}
+
+/** Reads the cached maxScriptEntities value (if any). Returns null if nothing valid is
+ * cached (fresh browser, cache cleared, or never loaded). */
+function getCachedMaxScriptEntities() {
+  const n = Number(getLocalSettingsCache().maxScriptEntities);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+}
+
+/** Writes maxScriptEntities to the localStorage cache so it survives a page refresh
+ * without re-loading the Local Settings file — called whenever it's set (today: only
+ * from the Load Local Settings file handler below). */
+function setCachedMaxScriptEntities(n) { setLocalSettingsCache({ maxScriptEntities: n }); }
+
+/** Whether the user has closed the Instructions tab before — once true, bootstrapApp
+ * stops auto-opening it on startup, so closing it is a real "don't show this again"
+ * rather than something to repeat every session. Only ever set true (see closeTab
+ * below); there's no UI to reset it back to auto-opening short of clearing browser data,
+ * matching how "closed" is meant to stick. */
+function getCachedInstructionsClosed() { return getLocalSettingsCache().instructionsClosed === true; }
+function setCachedInstructionsClosed() { setLocalSettingsCache({ instructionsClosed: true }); }
+
 function getRecentFiles() {
   try {
     const list = JSON.parse(localStorage.getItem(RECENT_FILES_KEY) || '[]');
@@ -151,6 +195,10 @@ class App {
   }
 
   closeTab(tabId) {
+    const tab = this.store.tabs.find((t) => t.id === tabId);
+    // Closing the Instructions tab is a "don't show this again" signal — cached so
+    // bootstrapApp stops auto-opening it on future startups. See getCachedInstructionsClosed.
+    if (tab && tab.type === 'docs') setCachedInstructionsClosed();
     this.store.closeTab(tabId);
     this.render();
   }
@@ -1327,17 +1375,34 @@ class App {
     this.render(); // clears the Save button's unsaved-changes color immediately
   }
 
-  /** File > Save Local Settings: bundles the things that deliberately live OUTSIDE the
-   * main save file — store.localSettings (secrets, e.g. API keys — see ctx.secrets in
-   * simulation.js), the pinned-fields config (a UI preference, otherwise stuck in this
-   * one browser's localStorage), and maxScriptEntities (the ctx.createPart/
-   * ctx.createConnector safety cap, see simulation.js) — into a single downloadable
-   * file, so all of it travels together between browsers/machines. Wrapped under
-   * `secrets`/`pinnedFields`/`maxScriptEntities` keys rather than the old flat
-   * {key:value} shape Load Local Settings originally used; loadLocalSettings below stays
-   * backward-compatible with those older, secrets-only files (see its own comment). */
+  /** File > Save Local Secrets: store.localSecrets (API keys etc. — see ctx.secrets in
+   * simulation.js) as a standalone downloadable file, kept entirely separate from Local
+   * Settings (below) since secrets must never be cached to localStorage or bundled with
+   * anything that is. Flat {key: value} shape, matching what Load Local Secrets expects
+   * back and what ctx.secrets exposes directly. */
+  saveLocalSecrets() {
+    const data = this.store.localSecrets || {};
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'dycad-local-secrets.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    this.toast('Local secrets saved.');
+  }
+
+  /** File > Save Local Settings: bundles user PREFERENCES that deliberately live outside
+   * the main save file — the pinned-fields config and maxScriptEntities (the
+   * ctx.createPart/ctx.createConnector safety cap, see simulation.js) — into a single
+   * downloadable file, so they travel together between browsers/machines. Deliberately
+   * excludes secrets (see saveLocalSecrets above) — these two were bundled together in an
+   * earlier version of this feature; split apart because secrets must never be cached to
+   * localStorage while these settings now deliberately ARE (see loadLocalSettings's
+   * handler), so bundling them would have meant either caching secrets too (unacceptable)
+   * or a settings load leaving secrets in some ambiguous state. */
   saveLocalSettings() {
-    const data = { secrets: this.store.localSettings || {}, pinnedFields: getAllPinnedFields(), maxScriptEntities: this.store.maxScriptEntities };
+    const data = { pinnedFields: getAllPinnedFields(), maxScriptEntities: this.store.maxScriptEntities };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2269,6 +2334,12 @@ async function bootstrapApp() {
 
   const store = new Store(data.settings, data.fce);
   store.mergedRelationshipPairs = data.mergedRelationshipPairs;
+  // Local Settings' maxScriptEntities auto-loads from its localStorage cache here — see
+  // LOCAL_SETTINGS_CACHE_KEY's comment for why this is safe to cache (unlike Local
+  // Secrets, which never is). Leaves the Store's own 5000 default in place if nothing's
+  // been cached yet (fresh browser, or the cache was cleared).
+  const cachedCap = getCachedMaxScriptEntities();
+  if (cachedCap !== null) store.maxScriptEntities = cachedCap;
 
   document.body.appendChild(buildMarkerDefs(store));
 
@@ -2278,7 +2349,10 @@ async function bootstrapApp() {
   const homeView = store.doc.views[0];
   const homeTab = app.createCanvasTab(homeView);
   store.activeTabId = homeTab.id;
-  app.openOrSwitchDocs(); // Instructions tab opens on startup, active by default — home tab stays open behind it
+  // Instructions tab opens on startup, active by default, home tab stays open behind it
+  // — UNLESS the user has closed it before (see getCachedInstructionsClosed/closeTab),
+  // in which case respect that and leave it closed rather than reopening it every session.
+  if (!getCachedInstructionsClosed()) app.openOrSwitchDocs();
 
   wireGlobalEvents(app);
   wireGlobalCanvasHandlers(app);
@@ -2481,6 +2555,8 @@ function wireGlobalEvents(app) {
     <div class="dd-separator"></div>
     <div class="dd-item" data-action="loadExample">Load Example</div>
     <div class="dd-item" data-action="loadSFCE">Load SFCE</div>
+    <div class="dd-item" data-action="loadLocalSecrets">Load Local Secrets</div>
+    <div class="dd-item" data-action="saveLocalSecrets">Save Local Secrets</div>
     <div class="dd-item" data-action="loadLocalSettings">Load Local Settings</div>
     <div class="dd-item" data-action="saveLocalSettings">Save Local Settings</div>
     <div class="dd-separator"></div>
@@ -2496,6 +2572,8 @@ function wireGlobalEvents(app) {
       else if (item.dataset.action === 'exportImage') app.promptExportViewAsImage();
       else if (item.dataset.action === 'loadExample') app.promptLoadExample();
       else if (item.dataset.action === 'loadSFCE') app.promptLoadSFCE();
+      else if (item.dataset.action === 'loadLocalSecrets') document.getElementById('load-local-secrets-input').click();
+      else if (item.dataset.action === 'saveLocalSecrets') app.saveLocalSecrets();
       else if (item.dataset.action === 'loadLocalSettings') document.getElementById('load-local-settings-input').click();
       else if (item.dataset.action === 'saveLocalSettings') app.saveLocalSettings();
       else if (item.dataset.action === 'importData') app.promptImportData();
@@ -2503,6 +2581,34 @@ function wireGlobalEvents(app) {
       fileMenu.classList.add('hidden');
     });
   });
+  // File > Load Local Secrets: secrets ONLY, memory-only, never cached to localStorage —
+  // deliberately re-required every session (see state.js's localSecrets comment for why).
+  // Accepts either a plain {key: value} file (what Save Local Secrets writes, and what
+  // Load Local Settings originally accepted before the two were split apart) or an old
+  // pre-split bundled { secrets, pinnedFields, maxScriptEntities } file, pulling out just
+  // .secrets and ignoring the rest — so a file saved before this split still loads here.
+  document.getElementById('load-local-secrets-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const obj = JSON.parse(text);
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('Expected a JSON object.');
+      const secrets = ('secrets' in obj || 'pinnedFields' in obj || 'maxScriptEntities' in obj)
+        ? ((obj.secrets && typeof obj.secrets === 'object' && !Array.isArray(obj.secrets)) ? obj.secrets : {})
+        : obj;
+      app.store.localSecrets = secrets;
+      app.toast(`Local secrets loaded (${Object.keys(secrets).length} key${Object.keys(secrets).length === 1 ? '' : 's'}).`);
+    } catch (err) {
+      app.toast(`Local secrets load failed: ${err.message}`, true);
+    }
+  });
+  // File > Load Local Settings: user PREFERENCES only (pinnedFields, maxScriptEntities) —
+  // separate from secrets above. Caches maxScriptEntities to localStorage (see
+  // setCachedMaxScriptEntities) so it survives a page refresh without re-loading this
+  // file; pinnedFields already caches itself the moment setAllPinnedFields runs. Same
+  // dual-shape acceptance as Load Local Secrets, for the same pre-split-file reason.
   document.getElementById('load-local-settings-input').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     e.target.value = '';
@@ -2511,26 +2617,18 @@ function wireGlobalEvents(app) {
       const text = await file.text();
       const obj = JSON.parse(text);
       if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('Expected a JSON object.');
-      // File > Save Local Settings (added alongside pinned fields / the script-entity
-      // cap) writes the new { secrets, pinnedFields, maxScriptEntities } wrapped shape.
-      // Files saved before that — a flat {key: value} object of secrets only, with none
-      // of those keys present — still load the same as always, straight into
-      // store.localSettings, so nobody's older file breaks.
-      if ('secrets' in obj || 'pinnedFields' in obj || 'maxScriptEntities' in obj) {
-        const secrets = (obj.secrets && typeof obj.secrets === 'object' && !Array.isArray(obj.secrets)) ? obj.secrets : {};
-        app.store.localSettings = secrets;
-        if (obj.pinnedFields) setAllPinnedFields(obj.pinnedFields);
-        const capNum = Number(obj.maxScriptEntities);
-        if (Number.isFinite(capNum) && capNum > 0) app.store.maxScriptEntities = Math.floor(capNum);
-        app.render(); // picks up the new pin config immediately if a property panel is open
-        const parts = [`${Object.keys(secrets).length} secret key${Object.keys(secrets).length === 1 ? '' : 's'}`];
-        if (obj.pinnedFields) parts.push('pinned fields');
-        if (Number.isFinite(capNum) && capNum > 0) parts.push(`max script entities: ${app.store.maxScriptEntities}`);
-        app.toast(`Local settings loaded (${parts.join(', ')}).`);
-      } else {
-        app.store.localSettings = obj;
-        app.toast(`Local settings loaded (${Object.keys(obj).length} key${Object.keys(obj).length === 1 ? '' : 's'}).`);
+      if (obj.pinnedFields) setAllPinnedFields(obj.pinnedFields);
+      const capNum = Number(obj.maxScriptEntities);
+      const hasCap = Number.isFinite(capNum) && capNum > 0;
+      if (hasCap) {
+        app.store.maxScriptEntities = Math.floor(capNum);
+        setCachedMaxScriptEntities(app.store.maxScriptEntities);
       }
+      app.render(); // picks up the new pin config immediately if a property panel is open
+      const parts = [];
+      if (obj.pinnedFields) parts.push('pinned fields');
+      if (hasCap) parts.push(`max script entities: ${app.store.maxScriptEntities}`);
+      app.toast(parts.length ? `Local settings loaded (${parts.join(', ')}).` : 'Local settings file had nothing recognized to load.');
     } catch (err) {
       app.toast(`Local settings load failed: ${err.message}`, true);
     }
