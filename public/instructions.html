@@ -153,7 +153,11 @@ canvas. Availability depends on what's selected — greyed out means the current
     underlying model: adds any connector that should exist between two nodes already on the view, and
     optionally pulls in nodes connected to what's already there (with a Levels setting for how many hops to
     follow). Every change it makes is written to the Message Log, and it notes what it created directly on the
-    connector.</td></tr>
+    connector. A third option, <strong>Auto-complete streams in model</strong>, instead finds every stream name
+    already tagged on a part in the current model and checks each one against a chosen stream template — it
+    shows a review list of every missing (stream, type, label) position with checkboxes for Part and View (a
+    node can't be created without its part, so unchecking Part also unchecks and disables View); nothing is
+    created until you click Proceed.</td></tr>
     <tr><td><strong>Generate Industry / Generate Inventory View</strong></td><td>(Advanced menu) Bulk-generate
     a starter set of parts/connectors for a named industry, or a summary inventory view of everything in the
     model.</td></tr>

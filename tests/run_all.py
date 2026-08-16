@@ -1087,6 +1087,144 @@ def check_routing_style_per_connector_type(page):
     return True, "'c' and 's' connectors have independent routing settings, and 'straight' produces a genuinely straight line distinct from 'default'"
 
 
+def check_auto_complete_streams_ui(page):
+    """Regression guard for Smart Check View's 'Auto-complete streams in model' option:
+    exercises the real DOM review dialog end-to-end — the Part/View checkbox dependency
+    (unchecking Part must auto-uncheck+disable View, since a node can't exist without its
+    part), that Proceed's creation call respects a left-unchecked row (it stays a gap)
+    while completing the rest, and — the actual bug this check was written for — that
+    leaving a MIDDLE chain position unchecked does NOT create a connector directly
+    bridging its two neighbors together, skipping over the gap. A connector should only
+    ever be created between positions that are both resolved AND immediately adjacent in
+    the template."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const streamName = 'RegrACS_' + Date.now();
+      // A lone, otherwise-unrelated part tagged with a fresh stream name -> every
+      // Enterprise template position for this stream comes back as a gap.
+      store.createPart({ type: 'Unknown', label: 'seed', model: store.defaultModel, streams: [streamName] });
+
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      app.promptSmartCheckView();
+      await new Promise(r => setTimeout(r, 30));
+      document.getElementById('scv-missing-connectors').checked = false;
+      document.getElementById('scv-autocomplete').checked = true;
+      document.getElementById('scv-autocomplete').dispatchEvent(new Event('change', { bubbles: true }));
+      document.getElementById('scv-autocomplete-template').value = 'Enterprise';
+      await new Promise(r => setTimeout(r, 30));
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      const rowEls = [...document.querySelectorAll('.modal-box tbody tr')];
+      const ourRows = rowEls.filter(tr => tr.children[0].textContent === streamName);
+      if (!ourRows.length) return { error: 'no review rows found for our stream', rowCount: rowEls.length };
+
+      // Enterprise's template.value is [GeneralActor, BusinessService, BusinessCapability,
+      // BusinessProcess, ApplicationCapability, ApplicationProcess,
+      // ApplicationLogicalComponent, ApplicationPhysicalComponent, DataDataEntity] — pick
+      // the row for BusinessCapability (a genuine middle position with a real neighbor on
+      // each side: BusinessService before, BusinessProcess after) and leave it unchecked.
+      const targetRow = ourRows.find(tr => tr.children[1].textContent === 'BusinessCapability');
+      if (!targetRow) return { error: 'no BusinessCapability row found', rowCount: ourRows.length };
+
+      const partCb = targetRow.querySelector('.acs-part');
+      const viewCb = targetRow.querySelector('.acs-view');
+      const viewCheckedBefore = viewCb.checked;
+      partCb.checked = false;
+      partCb.dispatchEvent(new Event('change', { bubbles: true }));
+      const dependencyWorked = viewCb.checked === false && viewCb.disabled === true;
+
+      document.querySelector('.modal-box .submit').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      const commands = await import('./js/commands.js');
+      const remainingRows = commands.scanStreamsForAutoComplete(store, 'Enterprise', store.defaultModel, homeTab.viewId)
+        .filter(r => r.streamName === streamName);
+      const skippedStillGap = remainingRows.some(r => r.type === 'BusinessCapability');
+
+      const svcPart = store.doc.parts.find(p => p.type === 'BusinessService' && (p.streams || []).includes(streamName));
+      const procPart = store.doc.parts.find(p => p.type === 'BusinessProcess' && (p.streams || []).includes(streamName));
+      const bothNeighborsCreated = !!svcPart && !!procPart;
+      const bridgingConnectorExists = bothNeighborsCreated && store.doc.connectors.some(c =>
+        (c.from === svcPart.id && c.to === procPart.id) || (c.from === procPart.id && c.to === svcPart.id));
+
+      return {
+        rowCount: ourRows.length,
+        viewCheckedBefore,
+        dependencyWorked,
+        skippedStillGap,
+        remainingCount: remainingRows.length,
+        bothNeighborsCreated,
+        bridgingConnectorExists,
+      };
+    }
+    """)
+    if result.get("error"):
+        return False, f"setup failed: {result}"
+    if not result["viewCheckedBefore"]:
+        return False, "test precondition failed: View checkbox wasn't checked by default"
+    if not result["dependencyWorked"]:
+        return False, "unchecking Part did not auto-uncheck+disable View"
+    if not (result["remainingCount"] == 1 and result["skippedStillGap"]):
+        return False, f"unexpected post-creation state: {result}"
+    if not result["bothNeighborsCreated"]:
+        return False, f"test precondition failed: BusinessService/BusinessProcess neighbors weren't both created: {result}"
+    if result["bridgingConnectorExists"]:
+        return False, "unchecking a middle chain position's Part incorrectly created a connector directly bridging its two neighbors, skipping the gap"
+    return True, f"Auto-Complete Streams dialog: {result['rowCount']} rows found, Part/View checkbox dependency correct, creation respected the unchecked row (only it remains a gap), and no bridging connector was created across the gap"
+
+
+def check_streams_field_editable(page):
+    """Regression guard: showFields.part/connector 'streams' access was changed from
+    read-only to writable — confirms the property panel's Streams field actually persists
+    edits back to part.streams / connector.streams (parsed as a trimmed, comma-separated
+    list), not just silently no-op like it did before this change."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.addView('RegrStreams_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const partA = store.createPart({ type: 'Unknown', label: 'a', model: store.defaultModel, streams: [] });
+      const partB = store.createPart({ type: 'Unknown', label: 'b', model: store.defaultModel, streams: [] });
+      const vmA = store.createViewMember({ view: view.id, objectType: 'part', objectId: partA.id, x: 0, y: 0 });
+      const vmB = store.createViewMember({ view: view.id, objectType: 'part', objectId: partB.id, x: 200, y: 0 });
+      const conn = store.createConnector({ from: partA.id, to: partB.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      const connVm = store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn.id, fromVmId: vmA.id, toVmId: vmB.id });
+
+      app.selectOnly(vmA.id);
+      app.render();
+      await new Promise(r => setTimeout(r, 30));
+      const partInput = document.getElementById('sf-part-streams');
+      const partWasReadonly = partInput.readOnly;
+      partInput.value = ' S1 , S2 ,, S3 ';
+      partInput.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 30));
+
+      app.selectOnly(connVm.id);
+      app.render();
+      await new Promise(r => setTimeout(r, 30));
+      const connInput = document.getElementById('sf-connector-streams');
+      const connWasReadonly = connInput.readOnly;
+      connInput.value = 'S4, S5';
+      connInput.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 30));
+
+      return { partWasReadonly, connWasReadonly, partStreams: partA.streams, connStreams: conn.streams };
+    }
+    """)
+    if result["partWasReadonly"] or result["connWasReadonly"]:
+        return False, f"Streams field still rendered readonly despite access:'w': {result}"
+    if result["partStreams"] != ["S1", "S2", "S3"]:
+        return False, f"editing the part Streams field didn't persist correctly: {result['partStreams']}"
+    if result["connStreams"] != ["S4", "S5"]:
+        return False, f"editing the connector Streams field didn't persist correctly: {result['connStreams']}"
+    return True, "part.streams and connector.streams are now editable via the property panel, parsed as trimmed comma-separated lists"
+
+
 CHECKS = [
     check_boots_clean,
     check_example_simulates,
@@ -1117,6 +1255,8 @@ CHECKS = [
     check_dropdown_scrollable,
     check_sfce_catalog_page,
     check_routing_style_per_connector_type,
+    check_auto_complete_streams_ui,
+    check_streams_field_editable,
 ]
 
 

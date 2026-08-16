@@ -40,7 +40,7 @@
         },
         "streams": {
           "show": "t",
-          "access": "r",
+          "access": "w",
           "label": "Streams"
         },
         "note": {
@@ -203,7 +203,7 @@
         },
         "streams": {
           "show": "t",
-          "access": "r",
+          "access": "w",
           "label": "Streams"
         },
         "note": {

@@ -1122,4 +1122,49 @@
 // re-run after the window.flowrunApp -> window.dycadApp rename across all 27 references
 // in tests/run_all.py itself — 29/29 still passing, confirming the rename didn't silently
 // break the suite's own ability to reach the app.
-export const APP_VERSION = '0.86';
+// Smart Check View gained a third option, "Auto-complete streams in model": scans every
+// stream name already tagged on a part in the current default model, checks each one
+// against a chosen stream template using the same find-or-reuse logic Generate Stream
+// itself uses (label+type+model), and shows a review dialog listing every incomplete
+// (stream, type, label) position with independent Part/View checkboxes — View is
+// disabled+unchecked whenever Part is unchecked, since a node can't exist without its
+// underlying part. Nothing is created until Proceed. The bare name used for every
+// category (function/capability/entity) is the stream name itself, not a
+// reverse-engineered guess — a Part only stores its final prefixed/suffixed label, so
+// there's no reliable way to recover whatever name was originally typed into Generate
+// Stream's Function/Capability/Entity fields for a partially-built stream, and this
+// matches how Generate Industry already works (entityName === streamName there, always).
+// The creation function (autoCompleteStreams, commands.js) walks the template's main
+// chain and passive list exactly like createStream, but bridges over any position the
+// user left unchecked (and unresolvable) instead of breaking the chain there — the next
+// resolved position connects straight back to the last one that had a part. A position
+// with a part but no view placement in this view still gets its model-level connector
+// created/updated, just without a viewMember edge for it. New permanent regression check
+// (check_auto_complete_streams_ui) exercises the real dialog end-to-end: verified it
+// fails with the expected message when the Part/View checkbox dependency is broken,
+// before confirming it passes with the real code. Full suite now 30/30.
+// Part and Connector's "streams" showFields field changed from read-only ("r") to
+// writable ("w") in custom.json — the property panel's Streams field can now be edited
+// directly (comma-separated, trimmed, empty entries dropped), for both. The get/set
+// accessor pairs in render.js (part-only panel, connector-only panel, and the node/
+// connector canvas-selection panels — four spots total) previously had a no-op `set`
+// left over from when the field was read-only; wired to a real setter matching the same
+// split/trim/filter pattern renderSectionProperties' elementTypes field already used.
+// New permanent regression check (check_streams_field_editable): verified it fails with
+// the expected message against the old no-op setters before confirming it passes with
+// the real fix. Full suite now 31/31.
+// Bug fix: Auto-Complete Streams in Model was bridging over a skipped chain position —
+// if a middle position's Part was left unchecked in the review dialog, its two neighbors
+// still got connected DIRECTLY to each other, skipping the gap. A connector represents a
+// specific designed relationship between two ADJACENT template positions; bridging over a
+// missing one produces a relationship the template never actually specified. Fixed in
+// autoCompleteStreams (commands.js): the main-chain loop now only creates a connector
+// between the immediately-preceding position and the current one, and only when BOTH are
+// resolved — `prev` is reset to null (not carried forward) whenever a position isn't
+// resolved, so a gap breaks the chain there instead of being bridged. check_auto_complete_
+// streams_ui extended to catch exactly this: unchecking BusinessCapability (a genuine
+// middle position in the Enterprise template, with real neighbors on both sides) and
+// verifying no connector was created directly between BusinessService and
+// BusinessProcess — verified the check fails with the expected message against the old
+// bridging behavior before confirming it passes with the fix. Full suite still 31/31.
+export const APP_VERSION = '0.89';

@@ -4,7 +4,7 @@ import { parseArchimateXml } from './archimate.js';
 import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
-import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection as duplicateSectionCommand, smartCheckView } from './commands.js';
+import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection as duplicateSectionCommand, smartCheckView, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache } from './commands.js';
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
@@ -757,6 +757,7 @@ class App {
   promptSmartCheckView() {
     const tab = this.store.activeTab();
     if (!tab || tab.type !== 'canvas') { this.toast('Open a view to Smart Check first.', true); return; }
+    const templateNames = (this.store.settings.streamTemplates || []).map((t) => t.name);
     const root = document.getElementById('modal-root');
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -766,7 +767,8 @@ class App {
       <div class="prop-row checkbox"><input type="checkbox" id="scv-missing-connectors" checked /><label for="scv-missing-connectors">Missing connectors — add connectors between nodes already on this view</label></div>
       <div class="prop-row checkbox"><input type="checkbox" id="scv-missing-connectors-nodes" /><label for="scv-missing-connectors-nodes">Missing connectors and nodes — also pull in connected nodes not yet on this view</label></div>
       <div class="prop-row" id="scv-levels-row" style="margin-left:22px;"><label>Levels</label><input type="number" id="scv-levels-input" class="tb-select" style="width:60px;" min="0" step="1" value="" placeholder="All" title="How many hops of missing connected nodes to pull in. Blank = unlimited." /></div>
-      <div style="margin-top:8px; font-size:12px; color:var(--text-muted);">More checks will be added here in a later step.</div>
+      <div class="prop-row checkbox"><input type="checkbox" id="scv-autocomplete" /><label for="scv-autocomplete">Auto-complete streams in model — find existing stream names and fill in any missing parts/nodes for them, following a stream template</label></div>
+      <div class="prop-row" id="scv-autocomplete-template-row" style="margin-left:22px;"><label>Stream Template</label><select id="scv-autocomplete-template">${templateNames.map((n) => `<option value="${escapeHtml(n)}" ${n === (templateNames.includes('Enterprise') ? 'Enterprise' : templateNames[0]) ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></div>
       <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Check</button></div>`;
     overlay.appendChild(box);
     root.appendChild(overlay);
@@ -777,22 +779,124 @@ class App {
     nodesCheckbox.addEventListener('change', updateLevelsVisibility);
     updateLevelsVisibility();
 
+    const autoCompleteCheckbox = box.querySelector('#scv-autocomplete');
+    const autoCompleteTemplateRow = box.querySelector('#scv-autocomplete-template-row');
+    const updateAutoCompleteVisibility = () => autoCompleteTemplateRow.classList.toggle('hidden', !autoCompleteCheckbox.checked);
+    autoCompleteCheckbox.addEventListener('change', updateAutoCompleteVisibility);
+    updateAutoCompleteVisibility();
+
     box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
     box.querySelector('.submit').addEventListener('click', () => {
       const missingConnectors = box.querySelector('#scv-missing-connectors').checked;
       const missingConnectorsAndNodes = nodesCheckbox.checked;
       const rawLevels = box.querySelector('#scv-levels-input').value.trim();
       const levels = rawLevels === '' ? null : Math.max(0, Math.floor(Number(rawLevels)) || 0);
+      const doAutoComplete = autoCompleteCheckbox.checked;
+      const autoCompleteTemplate = box.querySelector('#scv-autocomplete-template').value;
       overlay.remove();
 
-      if (!missingConnectors && !missingConnectorsAndNodes) { this.toast('Nothing selected to check.'); return; }
-      const result = smartCheckView(this, tab, { missingConnectors, missingConnectorsAndNodes, levels });
-      if (!result) { this.toast('Smart Check failed — view not found.', true); return; }
+      if (!missingConnectors && !missingConnectorsAndNodes && !doAutoComplete) { this.toast('Nothing selected to check.'); return; }
+
+      if (missingConnectors || missingConnectorsAndNodes) {
+        const result = smartCheckView(this, tab, { missingConnectors, missingConnectorsAndNodes, levels });
+        if (!result) { this.toast('Smart Check failed — view not found.', true); return; }
+        this.recordAndRender();
+        const parts = [];
+        if (result.connectorsAdded) parts.push(`${result.connectorsAdded} connector${result.connectorsAdded === 1 ? '' : 's'}`);
+        if (result.nodesAdded) parts.push(`${result.nodesAdded} node${result.nodesAdded === 1 ? '' : 's'}`);
+        this.toast(parts.length ? `Smart Check added ${parts.join(' and ')}.` : 'Smart Check found nothing missing.');
+      }
+
+      if (doAutoComplete) this.promptAutoCompleteStreams(tab, autoCompleteTemplate);
+    });
+  }
+
+  /** Review dialog for Smart Check's "Auto-complete streams in model" option: scans every
+   * stream name tagged on a part in the current default model, reports which template
+   * positions (per `templateName`) are missing their Part and/or this-view node, and lets
+   * the user selectively check/uncheck Part and View per row before creating anything —
+   * nothing is created until Proceed is clicked. */
+  promptAutoCompleteStreams(tab, templateName) {
+    const modelName = this.store.defaultModel;
+    const rows = scanStreamsForAutoComplete(this.store, templateName, modelName, tab.viewId);
+    if (!rows.length) { this.toast('Auto-Complete Streams: every tagged stream in this model is already complete.'); return; }
+
+    const root = document.getElementById('modal-root');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal-box modal-box-textedit';
+    box.innerHTML = `<h3>Auto-Complete Streams in Model</h3>
+      <div style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">Found ${rows.length} incomplete position${rows.length === 1 ? '' : 's'} across the streams tagged in "${escapeHtml(modelName)}", checked against the "${escapeHtml(templateName)}" template. A node can't be created without its part — unchecking Part also unchecks and disables View.</div>
+      <div style="max-height:50vh; overflow-y:auto; border:1px solid var(--border); border-radius:5px;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead><tr style="position:sticky; top:0; background:var(--bg-alt);">
+            <th style="text-align:left; padding:5px 8px;">Stream</th>
+            <th style="text-align:left; padding:5px 8px;">Type</th>
+            <th style="text-align:left; padding:5px 8px;">Label</th>
+            <th style="text-align:center; padding:5px 8px;">Part</th>
+            <th style="text-align:center; padding:5px 8px;">View</th>
+          </tr></thead>
+          <tbody>
+            ${rows.map((r, i) => `<tr style="border-top:1px solid var(--border);">
+              <td style="padding:4px 8px;">${escapeHtml(r.streamName)}</td>
+              <td style="padding:4px 8px;">${escapeHtml(r.type)}</td>
+              <td style="padding:4px 8px;">${escapeHtml(r.label)}</td>
+              <td style="text-align:center;"><input type="checkbox" class="acs-part" data-idx="${i}" ${r.partExists ? 'checked disabled' : 'checked'} /></td>
+              <td style="text-align:center;"><input type="checkbox" class="acs-view" data-idx="${i}" ${r.viewExists ? 'checked disabled' : 'checked'} /></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Proceed</button></div>`;
+    overlay.appendChild(box);
+    root.appendChild(overlay);
+
+    const partBoxes = [...box.querySelectorAll('.acs-part')];
+    const viewBoxes = [...box.querySelectorAll('.acs-view')];
+    partBoxes.forEach((cb, i) => {
+      if (cb.disabled) return; // part already exists — always available, unchecking makes no sense
+      cb.addEventListener('change', () => {
+        const vcb = viewBoxes[i];
+        if (!cb.checked) { vcb.checked = false; vcb.disabled = true; }
+        else if (!rows[i].viewExists) { vcb.disabled = false; }
+      });
+    });
+
+    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+    box.querySelector('.submit').addEventListener('click', () => {
+      // Group decisions by streamName — autoCompleteStreams operates on one stream at a
+      // time (same scope createStream itself works in), so a multi-stream scan batches
+      // into one call per distinct stream name, sharing one lookupCache across all of them
+      // for the same reason bulk callers elsewhere in this codebase do (see
+      // createBulkLookupCache's own doc comment).
+      const decisionsByStream = new Map();
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        const createPart = partBoxes[i].checked;
+        const createView = viewBoxes[i].checked;
+        if (!createPart && !createView) continue; // fully unchecked row -> nothing to do
+        if (!decisionsByStream.has(r.streamName)) decisionsByStream.set(r.streamName, new Map());
+        decisionsByStream.get(r.streamName).set(`${r.type}|${r.label}`.toLowerCase(), { createPart, createView });
+      }
+      overlay.remove();
+      if (!decisionsByStream.size) { this.toast('Nothing checked — no changes made.'); return; }
+
+      const template = (this.store.settings.streamTemplates || []).find((t) => t.name === templateName);
+      const lookupCache = createBulkLookupCache(this.store);
+      let totalParts = 0, totalVms = 0, totalStreams = 0;
+      for (const [streamName, decisions] of decisionsByStream) {
+        const result = autoCompleteStreams(this, template, streamName, modelName, tab.viewId, decisions, lookupCache, true);
+        if (!result) continue;
+        totalParts += result.newPartsCount;
+        totalVms += result.newVmIds.length;
+        totalStreams += 1;
+      }
       this.recordAndRender();
-      const parts = [];
-      if (result.connectorsAdded) parts.push(`${result.connectorsAdded} connector${result.connectorsAdded === 1 ? '' : 's'}`);
-      if (result.nodesAdded) parts.push(`${result.nodesAdded} node${result.nodesAdded === 1 ? '' : 's'}`);
-      this.toast(parts.length ? `Smart Check added ${parts.join(' and ')}.` : 'Smart Check found nothing missing.');
+      const summary = [];
+      if (totalParts) summary.push(`${totalParts} part${totalParts === 1 ? '' : 's'}`);
+      if (totalVms) summary.push(`${totalVms} node${totalVms === 1 ? '' : 's'}`);
+      this.toast(summary.length ? `Auto-completed ${totalStreams} stream${totalStreams === 1 ? '' : 's'}: added ${summary.join(' and ')}.` : 'No changes made.');
     });
   }
 

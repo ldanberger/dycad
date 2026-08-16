@@ -281,6 +281,195 @@ function createStream(app, {
   return { view, createdVms };
 }
 
+// ===================== AUTO-COMPLETE STREAMS IN MODEL =====================
+// Smart Check's other mode: rather than filling gaps between a view and its underlying
+// model, this fills gaps between a stream's ACTUAL parts/placement and what generating it
+// with the given template would have produced. Deliberately uses the stream's own NAME as
+// the bare name for every category (function/capability/entity) — a stream tag on a part
+// is independent of whatever name was originally typed into Generate Stream's Function/
+// Capability/Entity Name fields (confirmed: those are free-form, unrelated to the stream
+// name field), and a Part only stores its FINAL prefixed/suffixed label, not that
+// original bare name — so there's no reliable way to recover "the" name a partially-built
+// stream was meant to use. Using the stream name itself matches how Generate Industry
+// already works today (there, entityName IS streamName, always), and needs no inference.
+
+/** For one (streamName, template) pair, enumerates every position the template's main
+ * chain + passive list would produce (same category/label logic as createStream itself),
+ * de-duplicated by (type, label) since more than one position can coincide, and reports
+ * whether the Part and a this-view ViewMember already exist for each — read-only, creates
+ * nothing. `origins` records which template slot(s) map to each row, kept only for
+ * potential debugging; not used by the UI. */
+function analyzeStreamCompleteness(store, template, streamName, modelName, viewId) {
+  const capBeginIdx = template.value.findIndex((v) => ciEq(v, template.capabilityNameBegin));
+  const entBeginIdx = template.value.findIndex((v) => ciEq(v, template.entityNameBegin));
+
+  const slots = []; // { resolvedType, label, origin }
+  for (let i = 0; i < template.value.length; i++) {
+    const rawType = template.value[i];
+    let el = elementByType(store, rawType);
+    if (!ciEq(el?.type, rawType) && !elementLookupExact(store, rawType)) el = elementByType(store, 'Unknown');
+    const resolvedType = el?.type || 'Unknown';
+    // category doesn't affect the label here (name is always streamName regardless of
+    // function/capability/entity), only which real createStream run would use which name
+    // — kept out of this dry-run since it's a non-issue under the "name = streamName"
+    // rule, but the prefix/suffix (via joinLabel) still varies per resolvedType.
+    slots.push({ resolvedType, label: joinLabel(el, streamName), origin: { kind: 'chain', index: i } });
+  }
+  for (let p = 0; p < (template.passive || []).length; p++) {
+    const pair = template.passive[p];
+    for (const side of ['from', 'to']) {
+      const type = pair[side];
+      const el = elementByType(store, type);
+      const resolvedType = el?.type || 'Unknown';
+      slots.push({ resolvedType, label: joinLabel(el, streamName), origin: { kind: 'passive', index: p, side } });
+    }
+  }
+
+  const rowByKey = new Map();
+  for (const slot of slots) {
+    const key = `${slot.resolvedType}|${slot.label}`.toLowerCase();
+    let row = rowByKey.get(key);
+    if (!row) {
+      // Same reuse rule createStream itself uses for the main chain/passive nodes: match
+      // by label+type+model, independent of that part's OWN current streams tags (a part
+      // already shared by another stream is still the right part to reuse/complete here).
+      const part = store.doc.parts.find((p) => ciEq(p.label, slot.label) && ciEq(p.type, slot.resolvedType) && ciEq(p.model, modelName));
+      const vm = part ? store.doc.viewMembers.find((v) => v.objectType === 'part' && ciEq(v.objectId, part.id) && ciEq(v.view, viewId)) : null;
+      row = {
+        streamName, type: slot.resolvedType, label: slot.label,
+        partExists: !!part, viewExists: !!vm, partId: part ? part.id : null,
+        origins: [],
+      };
+      rowByKey.set(key, row);
+    }
+    row.origins.push(slot.origin);
+  }
+  return [...rowByKey.values()];
+}
+
+/** Every stream name tagged on any part in `modelName`, each analyzed against `template`
+ * — returns only rows with something missing (part and/or this-view placement), sorted
+ * (stream, type, label) as the review dialog wants. Fully-complete positions (part AND
+ * view both already present) are omitted; there's nothing to check for those. */
+function scanStreamsForAutoComplete(store, templateName, modelName, viewId) {
+  const template = (store.settings.streamTemplates || []).find((t) => ciEq(t.name, templateName));
+  if (!template) return [];
+  const streamNames = new Set();
+  for (const p of store.doc.parts) {
+    if (!ciEq(p.model, modelName)) continue;
+    for (const s of p.streams || []) streamNames.add(s);
+  }
+  const rows = [];
+  for (const streamName of streamNames) {
+    for (const row of analyzeStreamCompleteness(store, template, streamName, modelName, viewId)) {
+      if (!row.partExists || !row.viewExists) rows.push(row);
+    }
+  }
+  rows.sort((a, b) => a.streamName.localeCompare(b.streamName) || a.type.localeCompare(b.type) || a.label.localeCompare(b.label));
+  return rows;
+}
+
+/**
+ * Creation half of Auto-Complete Streams in Model. `decisions` is a Map keyed by
+ * `${type}|${label}`.toLowerCase() (matching analyzeStreamCompleteness's row identity)
+ * to `{ createPart, createView }`, reflecting the review dialog's checkboxes — a
+ * position with no entry (row was already complete, so the dialog never showed it) is
+ * still looked up and reused normally, just never created.
+ *
+ * Walks template.value[] then template.passive[], exactly like createStream, resolving
+ * each position by the same label+type+model reuse rule (bare name = streamName for
+ * every category, per the design note above analyzeStreamCompleteness). Unlike
+ * createStream, a position can come back with no part at all (existing part absent AND
+ * its row's createPart left unchecked) — a connector is only ever created between two
+ * positions that are BOTH resolved AND immediately adjacent in the template; a skipped
+ * position breaks the chain there rather than being bridged over, since the relationship
+ * pair a connector represents is only meaningful between the template's own designated
+ * adjacent types, not between whatever two parts happen to exist on either side of a
+ * gap. A resolved position that has a part but no view placement (row's createView left
+ * unchecked, or existing part never placed in this view) still participates in connector
+ * creation at the model level, just without a viewMember edge for it in this view —
+ * matches createStream's own placeInView=false connector semantics (see
+ * findOrCreateStreamConnector).
+ */
+function autoCompleteStreams(app, template, streamName, modelName, viewId, decisions, lookupCache = null, silent = false) {
+  const { store } = app;
+  const view = store.findView(viewId);
+  if (!view) { if (!silent) app.toast('Auto-Complete Streams: view not found.', true); return null; }
+  store.ensureViewSections(view);
+  const placer = isSectionViewType(view.viewType) ? createSectionPlacer(store, view) : null;
+
+  const { w: nodeW, h: nodeH } = getNodeSize(view);
+  const existingPartVms = store.viewMembersForView(view.id).filter((vm) => vm.objectType === 'part');
+  const baseY = existingPartVms.length > 0 ? Math.max(...existingPartVms.map((vm) => (vm.y ?? 0) + nodeH)) + 60 : 60;
+  const baseX = 60, stepX = nodeW + 40 * (view.spacingScale || 1);
+  let col = 0;
+  const nextPos = () => {
+    const desired = { x: baseX + (col++) * stepX, y: baseY };
+    return store.findNonOverlappingPosition(view.id, desired.x, desired.y, undefined, nodeW, nodeH, view.spacingScale || 1, lookupCache);
+  };
+
+  const newVmIds = [];
+  let newPartsCount = 0;
+  const resolve = (rawType) => {
+    // Must match analyzeStreamCompleteness's type-resolution fallback exactly, or the
+    // resolvedType computed here can diverge from the row identity the decisions Map
+    // was keyed by, silently dropping the user's checkbox choice for that position.
+    let el = elementByType(store, rawType);
+    if (!ciEq(el?.type, rawType) && !elementLookupExact(store, rawType)) el = elementByType(store, 'Unknown');
+    const resolvedType = el?.type || 'Unknown';
+    const label = joinLabel(el, streamName);
+    const decision = decisions.get(`${resolvedType}|${label}`.toLowerCase()) || { createPart: false, createView: false };
+
+    let part = lookupCache
+      ? lookupCache.partsByKey.get(`${label}|${resolvedType}|${modelName}`.toLowerCase())
+      : store.doc.parts.find((p) => ciEq(p.label, label) && ciEq(p.type, resolvedType) && ciEq(p.model, modelName));
+    if (!part) {
+      if (!decision.createPart) return null;
+      part = store.createPart({ type: resolvedType, label, model: modelName, streams: [streamName], note: 'ac', other: { src: rawType } });
+      if (lookupCache) cacheRegisterPart(lookupCache, part);
+      newPartsCount += 1;
+    } else if (!(part.streams || []).includes(streamName)) {
+      part.streams = [...(part.streams || []), streamName];
+    }
+
+    let vm = lookupCache
+      ? lookupCache.vmsByPartView.get(`${part.id}|${view.id}`)
+      : store.doc.viewMembers.find((v) => v.objectType === 'part' && ciEq(v.objectId, part.id) && ciEq(v.view, view.id));
+    if (!vm && decision.createView) {
+      const pos = placer ? placer(resolvedType) : nextPos();
+      vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: pos.x, y: pos.y, sectionId: pos.sectionId || '', fillColor: elementGroupFill(store, resolvedType), note: 'ac' });
+      if (lookupCache) cacheRegisterVm(lookupCache, vm);
+      newVmIds.push(vm.id);
+    }
+    return { part, vm };
+  };
+
+  let prev = null; // immediately-preceding position's resolved entry, or null if that position was skipped — never reaches further back than one position, so a gap breaks the chain instead of being bridged over
+  for (const rawType of template.value) {
+    const entry = resolve(rawType);
+    if (prev && entry && prev.part.id !== entry.part.id) {
+      findOrCreateStreamConnector(store, view, prev.part, entry.part, prev.vm, entry.vm, modelName, streamName, 'Stream', undefined, lookupCache, !!(prev.vm && entry.vm));
+    }
+    prev = entry;
+  }
+
+  for (const p of template.passive || []) {
+    const fromEntry = resolve(p.from);
+    const toEntry = resolve(p.to);
+    if (!fromEntry || !toEntry) continue;
+    findOrCreateStreamConnector(store, view, fromEntry.part, toEntry.part, fromEntry.vm, toEntry.vm, modelName, streamName, 'Passive', undefined, lookupCache, !!(fromEntry.vm && toEntry.vm));
+  }
+
+  const tab = store.findTabByView(view.id);
+  if (tab && newVmIds.length) { tab.selection.clear(); for (const id of newVmIds) tab.selection.add(id); }
+
+  if (!silent) {
+    app.recordAndRender();
+    app.toast(`Auto-completed stream "${streamName}".`);
+  }
+  return { view, newVmIds, newPartsCount };
+}
+
 /**
  * Whenever a connectorType 's' (stream) connector is created, also create a companion
  * connectorType 'c' (connector) between the same parts, using relationshipPairs.default
@@ -1998,4 +2187,4 @@ function duplicateSection(app, tab, sectionInstanceId) {
   app.toast(`Duplicated section "${originalName}" as "${newSection.name}" (${oldVmToNewVm.size} node${oldVmToNewVm.size === 1 ? '' : 's'}, ${connDupCount} connector${connDupCount === 1 ? '' : 's'}).`);
 }
 
-export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection, smartCheckView, createBulkLookupCache };
+export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection, smartCheckView, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams };

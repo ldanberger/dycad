@@ -49,6 +49,8 @@ if anything failed.
 | `check_dropdown_scrollable` | A dropdown menu growing unbounded instead of being capped with scrolling for a long list |
 | `check_sfce_catalog_page` | The SFCE Catalog page failing to open, or missing rows/columns for the Section/Function/Capability/Entity hierarchy |
 | `check_routing_style_per_connector_type` | 'c' and 's' connectors sharing one routing setting instead of independent ones, or "straight line" not producing a genuinely straight (uncurved) path |
+| `check_auto_complete_streams_ui` | Smart Check View's Auto-Complete Streams review dialog letting a node be created without its underlying part (Part/View checkbox dependency broken), Proceed creating/skipping the wrong rows, or a skipped middle position getting its two neighbors wrongly bridged with a direct connector |
+| `check_streams_field_editable` | Part/Connector's Streams property-panel field silently no-op'ing edits instead of persisting them (access is now "w", parsed as a trimmed comma-separated list) |
 
 ## Fixtures
 
