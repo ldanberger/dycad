@@ -98,7 +98,7 @@ function renderToolbar(app) {
 
   const viewSel = document.getElementById('view-select');
   viewSel.innerHTML = store.doc.views.map((v) => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.viewName)}</option>`).join('');
-  viewSel.value = store.currentView;
+  viewSel.value = store.currentView || '';
 
   const streamBtn = document.getElementById('stream-filter-btn');
   const activeStreams = tab && tab.type === 'canvas' ? (tab.activeStreams || []) : [];
@@ -323,7 +323,7 @@ function getCommandDefs(app) {
     { key: 'paste', label: 'Paste', hint: 'Paste — paste copied nodes into this view', enabled: isCanvas && !!app.clipboard },
     { key: 'remap', label: 'Remap', hint: 'Remap — reorganize this view by stream template', enabled: isCanvas },
     { key: 'merge', label: 'Merge', hint: 'Merge — combine 2+ selected nodes into one', enabled: nodeSelectionCount >= 2 },
-    { key: 'redraw', label: 'Redraw', hint: 'Redraw — recalculate best node size for this view', enabled: isCanvas },
+    { key: 'redraw', label: 'Redraw', hint: 'Redraw — recalculate best node size and normalize coordinates for this view', enabled: isCanvas },
     { key: 'addExisting', label: 'Add Existing', hint: 'Add Existing — bring existing parts (and optionally their connectors) into this view', enabled: isCanvas },
     { key: 'populateFromTemplate', label: 'Populate From Template', hint: 'Populate From Template — add parts/connectors from a page template matching this view type', enabled: isCanvas },
   ];
@@ -427,6 +427,103 @@ function selectOptionsFor(app, entityKey, fieldName, currentValue, ctx) {
   return `<option value="${escapeHtml(currentValue ?? '')}">${escapeHtml(currentValue ?? '')}</option>`;
 }
 
+// ===================== PINNED FIELDS =====================
+// Cross-document, cross-model UI preference (like the theme or the Root Properties
+// collapse state) — deliberately stored in localStorage, not settings.showFields or
+// store.doc, so pinning a field is a per-browser habit, not something that round-trips
+// through Save/Load JSON or varies per view/model. Three independent groups:
+//   'node'      — Part fields, wherever a node's combined viewMember+part panel shows
+//                 (canvas selection AND the ViewMembers catalog's part rows, since both
+//                 render through renderPartProperties).
+//   'connector' — Connector fields, same deal via renderConnectorProperties.
+//   'table'     — the three catalog-row-only panels that show a single entity with no
+//                 viewMember context: the Parts, Connectors, and Views catalog tabs.
+const PINNED_FIELDS_KEY = 'dycad-pinned-fields';
+const DEFAULT_PINNED_FIELDS = ['view', 'type', 'label', 'model', 'streams'];
+
+function getPinnedFields(group) {
+  try {
+    const all = JSON.parse(localStorage.getItem(PINNED_FIELDS_KEY) || '{}');
+    return Array.isArray(all[group]) ? all[group] : [...DEFAULT_PINNED_FIELDS];
+  } catch {
+    return [...DEFAULT_PINNED_FIELDS];
+  }
+}
+
+function setPinnedFields(group, fields) {
+  let all = {};
+  try { all = JSON.parse(localStorage.getItem(PINNED_FIELDS_KEY) || '{}'); } catch { /* start fresh */ }
+  all[group] = fields;
+  localStorage.setItem(PINNED_FIELDS_KEY, JSON.stringify(all));
+}
+
+function isFieldPinned(group, fieldName) {
+  return getPinnedFields(group).includes(fieldName);
+}
+
+function togglePinnedField(group, fieldName) {
+  const fields = getPinnedFields(group);
+  const idx = fields.indexOf(fieldName);
+  if (idx === -1) fields.push(fieldName); else fields.splice(idx, 1);
+  setPinnedFields(group, fields);
+}
+
+/** Whole-config read/write, used by File > Save/Load Local Settings so pin choices can
+ * travel with a person between browsers/machines instead of being stuck in one browser's
+ * localStorage. Always returns/accepts all three groups, backfilling any missing one with
+ * the documented defaults, so a save always produces a complete file and a load from a
+ * partial/malformed one still leaves every group in a valid state. */
+function getAllPinnedFields() {
+  let all = {};
+  try { all = JSON.parse(localStorage.getItem(PINNED_FIELDS_KEY) || '{}'); } catch { /* ignore */ }
+  return {
+    node: Array.isArray(all.node) ? all.node : [...DEFAULT_PINNED_FIELDS],
+    connector: Array.isArray(all.connector) ? all.connector : [...DEFAULT_PINNED_FIELDS],
+    table: Array.isArray(all.table) ? all.table : [...DEFAULT_PINNED_FIELDS],
+  };
+}
+
+function setAllPinnedFields(config) {
+  setPinnedFields('node', Array.isArray(config?.node) ? config.node : [...DEFAULT_PINNED_FIELDS]);
+  setPinnedFields('connector', Array.isArray(config?.connector) ? config.connector : [...DEFAULT_PINNED_FIELDS]);
+  setPinnedFields('table', Array.isArray(config?.table) ? config.table : [...DEFAULT_PINNED_FIELDS]);
+}
+
+/** Builds and appends the "Pinned" section above a property panel's normal content —
+ * one field row per pinned name that actually exists in one of `sources` (in pin order),
+ * reusing renderShowFieldsPanel's own per-field rendering/wiring so pinned fields stay
+ * fully live (editable, same dbl-click-to-expand, same pin-toggle button) rather than a
+ * separate read-only summary. Pinned fields are ADDED at the top, not moved — they still
+ * render in their normal spot below too, same as a pinned Slack message stays in the
+ * channel. `sources` is [{ entityKey, accessors, ctx? }, ...]; the first source (in
+ * array order) that defines a given pinned field name wins if more than one does. */
+function renderPinnedSection(app, tab, pinGroup, sources, body) {
+  const pinnedNames = getPinnedFields(pinGroup);
+  if (!pinnedNames.length) return;
+
+  const mergedSpec = {};
+  const mergedAccessors = {};
+  let mergedCtx = {};
+  for (const name of pinnedNames) {
+    for (const src of sources) {
+      const spec = app.store.settings.showFields?.[src.entityKey]?.fields || {};
+      if (spec[name] && src.accessors[name]) {
+        mergedSpec[name] = { ...spec[name], __sourceEntityKey: src.entityKey };
+        mergedAccessors[name] = src.accessors[name];
+        if (src.ctx) mergedCtx = { ...mergedCtx, ...src.ctx };
+        break;
+      }
+    }
+  }
+  if (!Object.keys(mergedAccessors).length) return;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'panel-section pinned-section';
+  wrap.innerHTML = `<h3 class="panel-title">📌 Pinned</h3><div class="panel-body"></div>`;
+  body.appendChild(wrap);
+  renderShowFieldsPanel(app, tab, mergedSpec, mergedAccessors, {}, wrap.querySelector('.panel-body'), mergedCtx, { pinGroup, idNamespace: `pinned-${pinGroup}` });
+}
+
 /**
  * Renders a properties panel driven entirely by settings.showFields[entityKey].fields.
  * Two independent axes per field: `show` = widget type ('y' checkbox, 'n' numeric,
@@ -435,6 +532,11 @@ function selectOptionsFor(app, entityKey, fieldName, currentValue, ctx) {
  * of `show` (a readonly selector has nothing to select). `accessors` maps field name ->
  * { get(), set(value) }; fields listed in showFields with no matching accessor are
  * skipped, so this stays safe even if the data file lists a field this view doesn't have.
+ * `entityKeyOrSpec` is normally the settings.showFields key (a string); a caller that has
+ * already assembled a merged multi-entity spec object (renderPinnedSection) may pass that
+ * object directly instead — `options.idNamespace` is then required, since there's no
+ * single entity-key string to derive DOM ids from. `options.pinGroup`, if set, adds a 📌
+ * toggle button next to each field's label (skipped for button-type fields).
  */
 /** Formats a field value for display as plain text — arrays join with ", ", booleans
  * become "true"/"false", plain objects (e.g. a connector's fromLineEndSettings, a
@@ -447,38 +549,45 @@ function formatFieldValue(val) {
   return String(val ?? '');
 }
 
-function renderShowFieldsPanel(app, tab, entityKey, accessors, buttonHandlers, container, ctx) {
-  const spec = app.store.settings.showFields?.[entityKey]?.fields || {};
+function renderShowFieldsPanel(app, tab, entityKeyOrSpec, accessors, buttonHandlers, container, ctx, options = {}) {
+  const isMergedSpec = typeof entityKeyOrSpec === 'object' && entityKeyOrSpec !== null;
+  const spec = isMergedSpec ? entityKeyOrSpec : (app.store.settings.showFields?.[entityKeyOrSpec]?.fields || {});
+  const idNs = options.idNamespace || (isMergedSpec ? 'custom' : entityKeyOrSpec);
+  const pinGroup = options.pinGroup;
   const html = [];
   for (const [fieldName, def] of Object.entries(spec)) {
     if (def.show === 'h') continue;
     const acc = accessors[fieldName];
     if (!acc) continue;
     const label = def.label || fieldName;
-    const id = `sf-${entityKey}-${fieldName}`;
+    const id = `sf-${idNs}-${fieldName}`;
     const val = acc.get();
+    const sourceEntityKey = def.__sourceEntityKey || entityKeyOrSpec;
+    const pinBtn = (pinGroup && def.show !== 'b')
+      ? `<button type="button" class="field-pin-btn${isFieldPinned(pinGroup, fieldName) ? ' pinned' : ''}" data-pin-field="${fieldName}" title="${isFieldPinned(pinGroup, fieldName) ? 'Unpin from top' : 'Pin to top'}">📌</button>`
+      : '';
 
     if (def.show === 'b') {
       html.push(`<div class="modal-actions" style="justify-content:flex-start;"><button class="primary" id="${id}">${escapeHtml(label)}</button></div>`);
       continue;
     }
     if (def.access === 'r') {
-      html.push(row(label, `<input type="text" value="${escapeHtml(formatFieldValue(val))}" readonly />`, fieldName));
+      html.push(row(label, `<input type="text" value="${escapeHtml(formatFieldValue(val))}" readonly />`, fieldName, pinBtn));
       continue;
     }
     // access === 'w'
     if (def.show === 'y') {
-      html.push(`<div class="prop-row checkbox"><input type="checkbox" id="${id}" ${val ? 'checked' : ''} /><label for="${id}">${escapeHtml(label)}</label></div>`);
+      html.push(`<div class="prop-row checkbox">${pinBtn}<input type="checkbox" id="${id}" ${val ? 'checked' : ''} /><label for="${id}">${escapeHtml(label)}</label></div>`);
     } else if (def.show === 'n') {
-      html.push(row(label, `<input type="number" id="${id}" value="${val ?? 0}" />`, fieldName));
+      html.push(row(label, `<input type="number" id="${id}" value="${val ?? 0}" />`, fieldName, pinBtn));
     } else if (def.show === 'c') {
-      html.push(row(label, `<input type="color" id="${id}" value="${toHexColor(val)}" />`, fieldName));
+      html.push(row(label, `<input type="color" id="${id}" value="${toHexColor(val)}" />`, fieldName, pinBtn));
     } else if (def.show === 'm') {
-      html.push(row(label, `<textarea id="${id}">${escapeHtml(val ?? '')}</textarea>`, fieldName));
+      html.push(row(label, `<textarea id="${id}">${escapeHtml(val ?? '')}</textarea>`, fieldName, pinBtn));
     } else if (def.show === 's') {
-      html.push(row(label, `<select id="${id}">${selectOptionsFor(app, entityKey, fieldName, val, ctx)}</select>`, fieldName));
+      html.push(row(label, `<select id="${id}">${selectOptionsFor(app, sourceEntityKey, fieldName, val, ctx)}</select>`, fieldName, pinBtn));
     } else { // 't' or unrecognized -> plain text
-      html.push(row(label, `<input type="text" id="${id}" value="${escapeHtml(formatFieldValue(val))}" />`, fieldName));
+      html.push(row(label, `<input type="text" id="${id}" value="${escapeHtml(formatFieldValue(val))}" />`, fieldName, pinBtn));
     }
   }
   container.innerHTML = html.join('') || '<div class="empty-hint">No fields configured.</div>';
@@ -506,8 +615,19 @@ function renderShowFieldsPanel(app, tab, entityKey, accessors, buttonHandlers, c
       }
     }
 
+    if (pinGroup && def.show !== 'b') {
+      const pinBtnEl = container.querySelector(`[data-pin-field="${fieldName}"]`);
+      if (pinBtnEl) {
+        pinBtnEl.addEventListener('click', (e) => {
+          e.stopPropagation();
+          togglePinnedField(pinGroup, fieldName);
+          app.render();
+        });
+      }
+    }
+
     if (def.access === 'r') continue; // nothing else to wire for readonly fields
-    const el = document.getElementById(`sf-${entityKey}-${fieldName}`);
+    const el = document.getElementById(`sf-${idNs}-${fieldName}`);
     if (!el) continue;
     if (def.show === 'b') {
       if (buttonHandlers[fieldName]) el.addEventListener('click', () => buttonHandlers[fieldName]());
@@ -600,8 +720,8 @@ function renderViewProperties(app, tab) {
   renderShowFieldsPanel(app, tab, 'view', accessors, {}, document.getElementById('sf-view-fields'));
 }
 
-function row(labelText, inputHtml, fieldName) {
-  return `<div class="prop-row"><label${fieldName ? ` data-field="${fieldName}"` : ''}>${escapeHtml(labelText)}</label>${inputHtml}</div>`;
+function row(labelText, inputHtml, fieldName, pinBtnHtml = '') {
+  return `<div class="prop-row"><label${fieldName ? ` data-field="${fieldName}"` : ''}>${pinBtnHtml}${escapeHtml(labelText)}</label>${inputHtml}</div>`;
 }
 
 // Node panel — spec entity 'viewMember' (a Part's specific placement on this view).
@@ -710,6 +830,7 @@ function addCatalogRowCopyButton(app, body, catalogType, id) {
 // context — visual overrides like fillColor live on ViewMember and don't apply here).
 function renderPartOnlyProperties(app, part) {
   const body = document.getElementById('properties-body');
+  body.innerHTML = '';
   const accessors = {
     id: { get: () => part.id, set: () => {} },
     type: { get: () => part.type, set: (v) => { part.type = v; app.store.touchPart(part); } },
@@ -728,11 +849,15 @@ function renderPartOnlyProperties(app, part) {
     createdAt: { get: () => part.createdAt, set: () => {} },
     updatedAt: { get: () => part.updatedAt, set: () => {} },
   };
-  renderShowFieldsPanel(app, null, 'part', accessors, {}, body);
+  renderPinnedSection(app, null, 'table', [{ entityKey: 'part', accessors }], body);
+  const container = document.createElement('div');
+  body.appendChild(container);
+  renderShowFieldsPanel(app, null, 'part', accessors, {}, container, undefined, { pinGroup: 'table' });
 }
 
 function renderConnectorOnlyProperties(app, conn) {
   const body = document.getElementById('properties-body');
+  body.innerHTML = '';
   const fromPart = app.store.findPart(conn.from);
   const toPart = app.store.findPart(conn.to);
   const accessors = {
@@ -755,11 +880,16 @@ function renderConnectorOnlyProperties(app, conn) {
     createdAt: { get: () => conn.createdAt, set: () => {} },
     updatedAt: { get: () => conn.updatedAt, set: () => {} },
   };
-  renderShowFieldsPanel(app, null, 'connector', accessors, {}, body, { fromType: fromPart?.type, toType: toPart?.type });
+  const relCtx = { fromType: fromPart?.type, toType: toPart?.type };
+  renderPinnedSection(app, null, 'table', [{ entityKey: 'connector', accessors, ctx: relCtx }], body);
+  const container = document.createElement('div');
+  body.appendChild(container);
+  renderShowFieldsPanel(app, null, 'connector', accessors, {}, container, relCtx, { pinGroup: 'table' });
 }
 
 function renderViewOnlyProperties(app, view) {
   const body = document.getElementById('properties-body');
+  body.innerHTML = '';
   const accessors = {
     id: { get: () => view.id, set: (v) => { if (v) app.store.renameView(view.id, v); } },
     viewName: { get: () => view.viewName, set: (v) => { if (v) app.store.renameView(view.id, v); } },
@@ -776,7 +906,10 @@ function renderViewOnlyProperties(app, view) {
     routingStyle: { get: () => view.routingStyle || 'default', set: (v) => { view.routingStyle = v; } },
     routingStyleStream: { get: () => view.routingStyleStream || 'default', set: (v) => { view.routingStyleStream = v; } },
   };
-  renderShowFieldsPanel(app, null, 'view', accessors, {}, body);
+  renderPinnedSection(app, null, 'table', [{ entityKey: 'view', accessors }], body);
+  const container = document.createElement('div');
+  body.appendChild(container);
+  renderShowFieldsPanel(app, null, 'view', accessors, {}, container, undefined, { pinGroup: 'table' });
 }
 
 /** Appends a "Root Properties" collapsible sub-section (same visual/behavioral pattern
@@ -787,7 +920,7 @@ function renderViewOnlyProperties(app, view) {
  * re-renders via localStorage, matching the sidebar sections' own persistence; wired
  * fresh on every call since this content is injected dynamically, unlike the sidebar's
  * own sections which are wired once at page load. */
-function renderRootPropertiesSection(app, entityKey, accessors, body, ctx) {
+function renderRootPropertiesSection(app, entityKey, accessors, body, ctx, options) {
   const collapsed = localStorage.getItem('dycad-root-properties-collapsed') === 'true';
   const wrap = document.createElement('div');
   wrap.className = 'panel-section collapsible root-properties-section' + (collapsed ? ' collapsed' : '');
@@ -797,7 +930,7 @@ function renderRootPropertiesSection(app, entityKey, accessors, body, ctx) {
     const nowCollapsed = wrap.classList.toggle('collapsed');
     localStorage.setItem('dycad-root-properties-collapsed', String(nowCollapsed));
   });
-  renderShowFieldsPanel(app, null, entityKey, accessors, {}, wrap.querySelector('.panel-body'), ctx);
+  renderShowFieldsPanel(app, null, entityKey, accessors, {}, wrap.querySelector('.panel-body'), ctx, options);
 }
 
 function renderPartProperties(app, vm) {
@@ -825,14 +958,12 @@ function renderPartProperties(app, vm) {
     isExternal: { get: () => vm.isExternal, set: (v) => { vm.isExternal = v; } },
     sectionId: { get: () => vm.sectionId, set: () => {} },
   };
-  const tab = app.store.activeTab();
-  const topContainer = document.createElement('div');
-  body.appendChild(topContainer);
-  renderShowFieldsPanel(app, tab, 'viewMember', vmAccessors, {}, topContainer);
 
   // Root Properties: TRUE Part fields — same side effects (type change recolors this
   // view's node; label change offers to rename a linked view) as before the split,
   // just relocated here since they're genuinely part-level concerns, not view-level.
+  // Defined here (rather than right before renderRootPropertiesSection below) so the
+  // Pinned section above can draw from both this and vmAccessors.
   const partAccessors = {
     id: { get: () => part.id, set: () => {} },
     type: {
@@ -870,7 +1001,20 @@ function renderPartProperties(app, vm) {
     createdAt: { get: () => part.createdAt, set: () => {} },
     updatedAt: { get: () => part.updatedAt, set: () => {} },
   };
-  renderRootPropertiesSection(app, 'part', partAccessors, body);
+
+  const tab = app.store.activeTab();
+
+  renderPinnedSection(app, tab, 'node', [
+    { entityKey: 'viewMember', accessors: vmAccessors },
+    { entityKey: 'part', accessors: partAccessors },
+  ], body);
+
+  const topContainer = document.createElement('div');
+  topContainer.className = 'vm-top-fields'; // stable hook for tests — the Pinned section above may or may not be present/first, so callers shouldn't rely on DOM position to find "the real viewMember-only panel"
+  body.appendChild(topContainer);
+  renderShowFieldsPanel(app, tab, 'viewMember', vmAccessors, {}, topContainer, undefined, { pinGroup: 'node' });
+
+  renderRootPropertiesSection(app, 'part', partAccessors, body, undefined, { pinGroup: 'node' });
 }
 
 function renderConnectorProperties(app, vm) {
@@ -899,14 +1043,12 @@ function renderConnectorProperties(app, vm) {
     fromVmId: { get: () => vm.fromVmId, set: () => {} },
     toVmId: { get: () => vm.toVmId, set: () => {} },
   };
-  const tab = app.store.activeTab();
-  const topContainer = document.createElement('div');
-  body.appendChild(topContainer);
-  renderShowFieldsPanel(app, tab, 'viewMember', vmAccessors, {}, topContainer, { fromType: fromPart?.type, toType: toPart?.type });
 
   // Root Properties: TRUE Connector fields — from/to show the actual id alongside the
   // resolved label for readability, since "all ids" was specifically asked for here,
-  // not just a friendly display.
+  // not just a friendly display. Defined here (rather than right before
+  // renderRootPropertiesSection below) so the Pinned section above can draw from both
+  // this and vmAccessors.
   const connAccessors = {
     id: { get: () => conn.id, set: () => {} },
     from: { get: () => fromPart ? `${conn.from} — ${fromPart.label} (${fromPart.type})` : conn.from, set: () => {} },
@@ -927,7 +1069,21 @@ function renderConnectorProperties(app, vm) {
     createdAt: { get: () => conn.createdAt, set: () => {} },
     updatedAt: { get: () => conn.updatedAt, set: () => {} },
   };
-  renderRootPropertiesSection(app, 'connector', connAccessors, body, { fromType: fromPart?.type, toType: toPart?.type });
+
+  const tab = app.store.activeTab();
+  const relCtx = { fromType: fromPart?.type, toType: toPart?.type };
+
+  renderPinnedSection(app, tab, 'connector', [
+    { entityKey: 'viewMember', accessors: vmAccessors },
+    { entityKey: 'connector', accessors: connAccessors, ctx: relCtx },
+  ], body);
+
+  const topContainer = document.createElement('div');
+  topContainer.className = 'vm-top-fields'; // stable hook for tests — the Pinned section above may or may not be present/first, so callers shouldn't rely on DOM position to find "the real viewMember-only panel"
+  body.appendChild(topContainer);
+  renderShowFieldsPanel(app, tab, 'viewMember', vmAccessors, {}, topContainer, relCtx, { pinGroup: 'connector' });
+
+  renderRootPropertiesSection(app, 'connector', connAccessors, body, relCtx, { pinGroup: 'connector' });
 }
 
 // ===================== MULTI-SELECT COMMON ATTRIBUTES =====================
@@ -1114,4 +1270,4 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, kindFromType, iconSvgFor, groupFill, getCommandDefs, CMD_ICONS };
+export { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, kindFromType, iconSvgFor, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields };

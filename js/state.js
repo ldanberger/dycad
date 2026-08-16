@@ -237,6 +237,15 @@ class Store {
     this.deleteConnector(id);
     this.doc.viewMembers = this.doc.viewMembers.filter((vm) => !(vm.objectType === 'connector' && ciEq(vm.objectId, id)));
   }
+  /** Delete a view outright: removes any remaining viewMembers still pointing at it
+   * (callers that already relocated them, e.g. a linked-view merge, pass an empty set
+   * here), plus any open/closed tab showing it, so nothing dangles. */
+  deleteView(id) {
+    this.doc.views = this.doc.views.filter((v) => !ciEq(v.id, id));
+    this.doc.viewMembers = this.doc.viewMembers.filter((vm) => !ciEq(vm.view, id));
+    this.tabs = this.tabs.filter((t) => !(t.type === 'canvas' && ciEq(t.viewId, id)));
+    this.closedTabs = this.closedTabs.filter((t) => !(t.type === 'canvas' && ciEq(t.viewId, id)));
+  }
 
   // ===================== VIEW MEMBERS (nodes) =====================
   viewMembersForView(viewId) {
@@ -255,17 +264,17 @@ class Store {
     const existing = this.viewMembersForView(viewId).filter((vm) => vm.objectType === 'part' && vm.id !== excludeVmId);
     const overlaps = (x, y) => existing.some((vm) => Math.abs(vm.x - x) < nodeW + MARGIN / 2 && Math.abs(vm.y - y) < nodeH + MARGIN / 2);
 
-    if (!overlaps(desiredX, desiredY)) return { x: Math.max(0, desiredX), y: Math.max(0, desiredY) };
+    if (!overlaps(desiredX, desiredY)) return { x: desiredX, y: desiredY };
     for (let ring = 1; ring <= 60; ring++) {
       for (let dx = -ring; dx <= ring; dx++) {
         for (let dy = -ring; dy <= ring; dy++) {
           if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue; // ring boundary only
-          const x = Math.max(0, desiredX + dx * stepX), y = Math.max(0, desiredY + dy * stepY);
+          const x = desiredX + dx * stepX, y = desiredY + dy * stepY;
           if (!overlaps(x, y)) return { x, y };
         }
       }
     }
-    return { x: Math.max(0, desiredX), y: Math.max(0, desiredY) }; // give up, better than nothing
+    return { x: desiredX, y: desiredY }; // give up, better than nothing
   }
 
   /**
@@ -311,6 +320,21 @@ class Store {
       }
     }
     view.spacingScale = clamped;
+  }
+
+  normalizeViewCoordinates(viewId) {
+    const partVms = this.viewMembersForView(viewId).filter((vm) => vm.objectType === 'part');
+    if (partVms.length === 0) return;
+    const minX = Math.min(...partVms.map((vm) => vm.x));
+    const minY = Math.min(...partVms.map((vm) => vm.y));
+    const shiftX = minX < 0 ? -minX : 0;
+    const shiftY = minY < 0 ? -minY : 0;
+    if (shiftX !== 0 || shiftY !== 0) {
+      for (const vm of partVms) {
+        vm.x += shiftX;
+        vm.y += shiftY;
+      }
+    }
   }
 
   createViewMember({ view, objectType, objectId, x = 0, y = 0, fillColor = '#cccccc', fontColor = '', fontSize = '', borderColor = '', order = 0, note = '', linkedViewName = '', isExternal = false, sectionId = '', fromVmId, toVmId }) {
@@ -367,6 +391,7 @@ class Store {
       const fallback = this.tabs[idx] || this.tabs[idx - 1] || this.tabs[0];
       this.activeTabId = fallback ? fallback.id : null;
       if (fallback && fallback.type === 'canvas') this.currentView = fallback.viewId;
+      else this.currentView = null;
     }
   }
 

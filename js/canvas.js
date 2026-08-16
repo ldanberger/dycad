@@ -748,8 +748,8 @@ function wireCanvasInteractions(app, tab, scroll, surface, svg, edgeLayer, nodeE
         for (const [id, pos] of startPositions) {
           const vm = app.store.findViewMember(id);
           if (!vm) continue;
-          vm.x = Math.max(0, pos.x + dx);
-          vm.y = Math.max(0, pos.y + dy);
+          vm.x = pos.x + dx;
+          vm.y = pos.y + dy;
           if (pos.el) { pos.el.style.left = `${vm.x}px`; pos.el.style.top = `${vm.y}px`; }
         }
         const freshVms = app.store.viewMembersForView(tab.viewId).filter((v) => v.objectType === 'part');

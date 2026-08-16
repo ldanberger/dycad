@@ -1,3 +1,5 @@
+import { ciEq } from './state.js';
+
 // ===================== NODE SCRIPTING / SIMULATION =====================
 // Tick-based simulation engine, scoped to a MODEL (not a view). Every scripted Part in a
 // model runs once per tick against a fully COMMITTED snapshot of last tick's outputs —
@@ -20,7 +22,7 @@
 //
 // Script contract: a Part's `script` field is the BODY of a function, invoked as
 // `new Function('ctx', part.script)`, where:
-//   ctx = { part, inputs, responses, state, tick, log, secrets, setState, loadedFileName }
+//   ctx = { part, inputs, responses, state, tick, log, secrets, setState, loadedFileName, findParts, currentView, defaultModel }
 //     - part: the Part record itself (id, type, label, ...)
 //     - inputs: one entry per incoming connector (within this part's model) this tick —
 //         { fromPartId, fromLabel, connector: { relationship, streams }, value }
@@ -57,6 +59,24 @@
 //       model (Load JSON / File > Load / File > Load Example) — null if nothing's been
 //       loaded that way yet this session. Not set by Import Data, which merges rather
 //       than replaces.
+//     - findParts({ type, model }): read-only lookup across the WHOLE document (not just
+//       this part's own model/graph) — returns every Part matching the given type and/or
+//       model (both optional; omit either to not filter on it), case-insensitive, same
+//       as every other type/model comparison in this codebase (ciEq). e.g.
+//       ctx.findParts({ type: 'BusinessCapability', model: ctx.part.model }) to list every
+//       capability in this part's own model. Returns the LIVE Part objects, not clones —
+//       treat the result as read-only; mutating fields directly bypasses the tick-commit
+//       model this whole engine is built on (see the top-of-file comment) and isn't part
+//       of the supported contract. This formalizes what was previously only reachable
+//       through the undocumented `window.dycadApp` global.
+//     - currentView: store.currentView at the moment this tick started — the view id
+//       currently shown in the main view selector. Read-only snapshot, same rationale as
+//       loadedFileName above.
+//     - defaultModel: store.defaultModel at the moment this tick started — the model new
+//       parts/connectors get created into by default. Not necessarily the same as
+//       ctx.part.model (a part can live in any model) or the model this simulation run is
+//       currently scoped to (store.simSelectedModel, not exposed here — a script only
+//       ever sees its own part's model via ctx.part.model).
 //   Must return { value, state, response, badge } — response and badge are both
 //   optional (see below), or the
 //   whole call may throw — caught per-node, see below.
@@ -112,6 +132,14 @@ function safeStringify(v) {
 function pushMessageLog(store, message) {
   store.messageLog.push({ ts: Date.now(), message: String(message) });
   if (store.messageLog.length > 500) store.messageLog.splice(0, store.messageLog.length - 500);
+}
+
+/** Exposed to scripts as ctx.findParts({ type, model }) — see the script-contract comment
+ * at the top of this file. Both filters optional; case-insensitive, matching every other
+ * type/model comparison in this codebase. */
+function findPartsForScript(store, query) {
+  const { type, model } = query || {};
+  return store.doc.parts.filter((p) => (!type || ciEq(p.type, type)) && (!model || ciEq(p.model, model)));
 }
 
 /** modelName -> { parts, incoming: Map<partId, [{fromPartId, connector}]>,
@@ -201,6 +229,9 @@ function runTick(app, modelName) {
             pendingStateUpdates.set(part.id, { ...existing, ...(patch || {}) });
           },
           loadedFileName: store.loadedFileName || null,
+          findParts: (query) => findPartsForScript(store, query),
+          currentView: store.currentView,
+          defaultModel: store.defaultModel,
         }) || {};
         resultValue = out.value;
         resultState = out.state || {};

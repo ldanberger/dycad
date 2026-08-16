@@ -1,0 +1,157 @@
+{
+  "version": "0.2",
+  "readme": {
+    "note": "Simulation demo: ctx.findParts(). 'Capability Lister' has no incoming connectors — it uses ctx.findParts({ type: 'BusinessCapability', model }) to look up the three BusinessCapability parts by type/model instead, logs each one, and returns the count as its value. Step or Run Simulation, then check the Message Log (left sidebar) or Show Simulation Log for the per-tick detail."
+  },
+  "defaultModel": "Reference",
+  "currentView": "findparts-demo",
+  "models": [
+    {
+      "modelName": "Reference"
+    }
+  ],
+  "views": [
+    {
+      "id": "findparts-demo",
+      "viewName": "findparts-demo",
+      "viewType": "ff",
+      "chkShowConnectorType": true,
+      "chkShowStreamType": false,
+      "chkShowKeys": false,
+      "chkShowElementTypes": true,
+      "chkShowDescription": true,
+      "chkShowOnPageCatalogs": false,
+      "chkShowSimValues": true,
+      "margin": 50,
+      "sections": [],
+      "nodeWidth": 150,
+      "nodeHeight": 46,
+      "remapSortKeys": null,
+      "spacingScale": 1
+    }
+  ],
+  "parts": [
+    {
+      "id": "part-cap-risk",
+      "type": "BusinessCapability",
+      "label": "Risk Assessment",
+      "rawLabel": "Risk Assessment",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "",
+      "scriptEnabled": false,
+      "script": ""
+    },
+    {
+      "id": "part-cap-claims",
+      "type": "BusinessCapability",
+      "label": "Claims Processing",
+      "rawLabel": "Claims Processing",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "",
+      "scriptEnabled": false,
+      "script": ""
+    },
+    {
+      "id": "part-cap-underwriting",
+      "type": "BusinessCapability",
+      "label": "Policy Underwriting",
+      "rawLabel": "Policy Underwriting",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "",
+      "scriptEnabled": false,
+      "script": ""
+    },
+    {
+      "id": "part-lister",
+      "type": "Unknown",
+      "label": "Capability Lister",
+      "rawLabel": "Capability Lister",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "No incoming connectors — reads the model via ctx.findParts instead.",
+      "scriptEnabled": true,
+      "script": "// ctx.findParts({ type, model }) looks up parts across the WHOLE document, not\n// just this node's own inputs/graph — both filters are optional. Here we scope it\n// to this part's own model so the demo still works if copied into a bigger doc.\nconst capabilities = ctx.findParts({ type: 'BusinessCapability', model: ctx.part.model })\n  .map((p) => ({ id: p.id, label: p.label }));\n\nctx.log(`Found ${capabilities.length} BusinessCapability part(s) in model \"${ctx.part.model}\":`);\nfor (const c of capabilities) {\n  ctx.log(`  - ${c.label} (${c.id})`);\n}\n\nreturn {\n  value: capabilities.length,\n  state: { capabilities },\n};"
+    }
+  ],
+  "connectors": [],
+  "viewMembers": [
+    {
+      "id": "vm-cap-risk",
+      "view": "findparts-demo",
+      "objectType": "part",
+      "objectId": "part-cap-risk",
+      "x": 60,
+      "y": 40,
+      "fillColor": "#8ec6ff",
+      "order": 0,
+      "note": "",
+      "linkedViewName": "",
+      "isExternal": false,
+      "sectionId": ""
+    },
+    {
+      "id": "vm-cap-claims",
+      "view": "findparts-demo",
+      "objectType": "part",
+      "objectId": "part-cap-claims",
+      "x": 60,
+      "y": 120,
+      "fillColor": "#8ec6ff",
+      "order": 0,
+      "note": "",
+      "linkedViewName": "",
+      "isExternal": false,
+      "sectionId": ""
+    },
+    {
+      "id": "vm-cap-underwriting",
+      "view": "findparts-demo",
+      "objectType": "part",
+      "objectId": "part-cap-underwriting",
+      "x": 60,
+      "y": 200,
+      "fillColor": "#8ec6ff",
+      "order": 0,
+      "note": "",
+      "linkedViewName": "",
+      "isExternal": false,
+      "sectionId": ""
+    },
+    {
+      "id": "vm-lister",
+      "view": "findparts-demo",
+      "objectType": "part",
+      "objectId": "part-lister",
+      "x": 340,
+      "y": 120,
+      "fillColor": "#ff5e61",
+      "order": 0,
+      "note": "",
+      "linkedViewName": "",
+      "isExternal": false,
+      "sectionId": ""
+    }
+  ],
+  "settingsUser": {
+    "relationshipPairs": []
+  }
+}

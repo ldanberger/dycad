@@ -1,14 +1,23 @@
 import { loadAllData } from './data.js';
 import { Store, ciEq, newId } from './state.js';
 import { parseArchimateXml } from './archimate.js';
-import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, getCommandDefs, CMD_ICONS } from './render.js';
+import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
 import { renderPages, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
-import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection as duplicateSectionCommand, smartCheckView } from './commands.js';
+import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection as duplicateSectionCommand, smartCheckView } from './commands.js';
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
 import { flattenJsonRecords, buildRowsFromRecords, detectSharedFunctions, resolveSharedFunctions, buildIndustryTree, flattenIndustryTree } from './sfce.js';
+
+/** Pretty-prints a Script Console result. JSON.stringify covers plain data (the common
+ * case — arrays of parts, objects, etc.); falls back to String() for anything it can't
+ * serialize (functions, DOM nodes, circular structures). */
+function stringifyForConsole(v) {
+  if (v === undefined) return 'undefined';
+  if (v === null) return 'null';
+  try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+}
 
 class App {
   constructor(store) {
@@ -177,6 +186,92 @@ class App {
     }
     this.switchToTab(tab.id);
     return tab;
+  }
+
+  /** Simulation > Script Console: a REPL-style debugging aid, separate from any one
+   * Part's script — for poking at live simulation/document state interactively rather
+   * than round-tripping through a node's script field. Deliberately more powerful than
+   * the sandboxed ctx a Part's script receives (full `app`/`store` access, not just
+   * read-only findParts) since this is an explicit, opt-in debugging tool, not something
+   * a saved document can carry and re-execute unattended. Each entry is evaluated as an
+   * expression first (auto-wrapped in `return (...)`) so one-liners like
+   * `findParts({ type: 'BusinessCapability', model }).map(p => p.label)` don't need an
+   * explicit return; falls back to raw statement execution (the same contract node
+   * scripts use) if that doesn't parse, so multi-statement snippets still work. */
+  promptScriptConsole() {
+    const modelName = this.store.simSelectedModel;
+    const root = document.getElementById('modal-root');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal-box modal-box-textedit';
+    box.innerHTML = `<h3>Script Console${modelName ? ` — ${escapeHtml(modelName)}` : ''}</h3>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
+        Bindings: <code>app</code>, <code>store</code>, <code>model</code>
+        ${modelName ? '' : ' <span style="color:#c0392b;">(no simulation model selected — model will be null)</span>'},
+        <code>findParts({type, model})</code>, <code>log(...)</code>. Enter an expression, or full
+        statements ending in your own <code>return</code>. Ctrl+Enter (or the Run button) to execute.
+      </div>
+      <div id="console-output" style="height:220px;overflow-y:auto;background:var(--bg);border:1px solid var(--border-strong);border-radius:5px;padding:8px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;margin-bottom:8px;"></div>
+      <textarea id="console-input" spellcheck="false" placeholder="e.g. findParts({ type: 'BusinessCapability', model }).map(p => ({ id: p.id, label: p.label }))" style="width:100%;height:70px;font-family:var(--mono);font-size:12px;box-sizing:border-box;border:1px solid var(--border-strong);border-radius:5px;padding:8px;background:var(--bg);color:var(--text);resize:vertical;"></textarea>
+      <div class="modal-actions"><button class="cancel">Close</button><button class="primary run">Run (Ctrl+Enter)</button></div>`;
+    overlay.appendChild(box);
+    root.appendChild(overlay);
+
+    const outputEl = box.querySelector('#console-output');
+    const inputEl = box.querySelector('#console-input');
+    inputEl.focus();
+
+    const appendOutput = (text, color) => {
+      const line = document.createElement('div');
+      if (color) line.style.color = color;
+      line.textContent = text;
+      outputEl.appendChild(line);
+      outputEl.scrollTop = outputEl.scrollHeight;
+    };
+
+    const findPartsForConsole = (query) => {
+      const { type, model } = query || {};
+      return this.store.doc.parts.filter((p) => (!type || ciEq(p.type, type)) && (!model || ciEq(p.model, model)));
+    };
+
+    const run = () => {
+      const code = inputEl.value;
+      if (!code.trim()) return;
+      appendOutput(`> ${code}`, 'var(--accent)');
+
+      const bindingNames = ['app', 'store', 'model', 'findParts', 'log'];
+      const bindingValues = [
+        this, this.store, this.store.simSelectedModel || null,
+        findPartsForConsole,
+        (...args) => appendOutput(args.map((a) => (typeof a === 'string' ? a : stringifyForConsole(a))).join(' ')),
+      ];
+
+      let result, threw = false, errMessage = '';
+      try {
+        result = new Function(...bindingNames, `return (\n${code}\n)`)(...bindingValues);
+      } catch (exprErr) {
+        try {
+          result = new Function(...bindingNames, code)(...bindingValues);
+        } catch (stmtErr) {
+          threw = true;
+          errMessage = (stmtErr && stmtErr.message) ? stmtErr.message : String(stmtErr);
+        }
+      }
+      if (threw) {
+        appendOutput(`Error: ${errMessage}`, '#c0392b');
+      } else if (result !== undefined) {
+        appendOutput(stringifyForConsole(result));
+      }
+      inputEl.value = '';
+      inputEl.focus();
+    };
+
+    box.querySelector('.run').addEventListener('click', run);
+    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+    inputEl.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
+    });
   }
 
   // ===================== SELECTION =====================
@@ -457,7 +552,11 @@ class App {
       // used). This still only nudges genuinely-overlapping nodes to the nearest free
       // spot — it does not reposition everything the way Remap does.
       const did = redrawAndResolveLayout(this, tab);
-      if (did) { this.recordAndRender(); this.toast('Node sizes redrawn for this view.'); }
+      if (did) {
+        this.store.normalizeViewCoordinates(tab.viewId);
+        this.recordAndRender();
+        this.toast('Node sizes redrawn and coordinates normalized for this view.');
+      }
       else this.toast('No nodes in this view to measure.', true);
     } else if (key === 'addExisting') {
       this.promptAddExisting(tab);
@@ -836,8 +935,68 @@ class App {
     const box = document.createElement('div');
     box.className = 'modal-box';
     box.innerHTML = `<h3>Merge ${nodeVmIds.length} nodes</h3>
+      <div style="margin-bottom:12px;font-size:12px;color:var(--text-muted);">Choose merge scope:</div>
+      <button id="merge-parts-and-view" class="primary" style="width:100%;margin-bottom:8px;padding:8px;border:1px solid var(--border);border-radius:5px;background:var(--primary-bg);color:var(--text);cursor:pointer;">Merge Parts and View</button>
+      <button id="merge-view-only" class="primary" style="width:100%;margin-bottom:12px;padding:8px;border:1px solid var(--border);border-radius:5px;background:var(--primary-bg);color:var(--text);cursor:pointer;">Merge View Only</button>
+      <div class="modal-actions"><button class="cancel">Cancel</button></div>`;
+    overlay.appendChild(box);
+    root.appendChild(overlay);
+    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+    box.querySelector('#merge-parts-and-view').addEventListener('click', () => {
+      overlay.remove();
+      this.promptMergeDetails(tab, nodeVmIds, true);
+    });
+    box.querySelector('#merge-view-only').addEventListener('click', () => {
+      overlay.remove();
+      this.promptMergeDetails(tab, nodeVmIds, false);
+    });
+  }
+
+  promptMergeDetails(tab, nodeVmIds, mergeParts) {
+    const firstPart = this.store.findPart(this.store.findViewMember(nodeVmIds[0]).objectId);
+
+    // For "merge parts" mode, check for cross-view usage first
+    if (mergeParts) {
+      const vms = nodeVmIds.map((id) => this.store.findViewMember(id)).filter((vm) => vm && vm.objectType === 'part');
+      const restVms = vms.slice(1);
+      const restParts = restVms.map((vm) => this.store.findPart(vm.objectId)).filter(Boolean);
+      const restPartIds = new Set(restParts.map((p) => p.id));
+
+      const usedViews = new Set();
+      for (const p of restParts) {
+        for (const vm of this.store.doc.viewMembers) {
+          if (vm.objectType === 'part' && p.id === vm.objectId && vm.view !== tab.viewId) {
+            usedViews.add(vm.view);
+          }
+        }
+      }
+
+      if (usedViews.size > 0) {
+        const viewNames = Array.from(usedViews)
+          .map((viewId) => this.store.findView(viewId)?.viewName || viewId)
+          .join(', ');
+        this.confirmModal(
+          `Parts being merged are used in other views: ${viewNames}. This merge will affect those views. Continue?`
+        ).then((confirmed) => {
+          if (confirmed) {
+            this.promptMergeNameDialog(tab, nodeVmIds, mergeParts, firstPart);
+          }
+        });
+        return;
+      }
+    }
+
+    this.promptMergeNameDialog(tab, nodeVmIds, mergeParts, firstPart);
+  }
+
+  promptMergeNameDialog(tab, nodeVmIds, mergeParts, firstPart) {
+    const root = document.getElementById('modal-root');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal-box';
+    box.innerHTML = `<h3>Merge ${nodeVmIds.length} nodes</h3>
       <div class="prop-row"><label>New name</label><input type="text" id="merge-name" value="${escapeHtml(firstPart?.label || '')}" /></div>
-      <div class="prop-row checkbox"><input type="checkbox" id="merge-parts" /><label for="merge-parts">Also merge related parts</label></div>
       <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Merge</button></div>`;
     overlay.appendChild(box);
     root.appendChild(overlay);
@@ -845,9 +1004,12 @@ class App {
     box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
     box.querySelector('.submit').addEventListener('click', () => {
       const newName = box.querySelector('#merge-name').value || firstPart?.label || 'Merged';
-      const mergeParts = box.querySelector('#merge-parts').checked;
       overlay.remove();
-      mergeNodes(this, tab, nodeVmIds, newName, mergeParts);
+      if (mergeParts) {
+        mergePartsAndView(this, tab, nodeVmIds, newName);
+      } else {
+        mergeViewOnly(this, tab, nodeVmIds, newName);
+      }
     });
   }
 
@@ -964,6 +1126,26 @@ class App {
     this.render(); // clears the Save button's unsaved-changes color immediately
   }
 
+  /** File > Save Local Settings: bundles the two things that deliberately live OUTSIDE
+   * the main save file — store.localSettings (secrets, e.g. API keys — see ctx.secrets
+   * in simulation.js) and the pinned-fields config (a UI preference, otherwise stuck in
+   * this one browser's localStorage) — into a single downloadable file, so both travel
+   * together between browsers/machines. Wrapped under `secrets`/`pinnedFields` keys
+   * rather than the old flat {key:value} shape Load Local Settings originally used;
+   * loadLocalSettings below stays backward-compatible with those older, secrets-only
+   * files (see its own comment). */
+  saveLocalSettings() {
+    const data = { secrets: this.store.localSettings || {}, pinnedFields: getAllPinnedFields() };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'dycad-local-settings.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    this.toast('Local settings saved.');
+  }
+
   async loadJson(file) {
     try {
       const text = await file.text();
@@ -1018,6 +1200,259 @@ class App {
     if (choice === 'cancel') return;
     if (choice === 'save') this.saveJson();
     document.getElementById('load-json-input').click();
+  }
+
+  promptPrint() {
+    const tab = this.store.activeTab();
+    if (!tab || tab.type !== 'canvas') { this.toast('No view open to print.', true); return; }
+
+    const root = document.getElementById('modal-root');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal-box';
+    box.innerHTML = `<h3>Print</h3>
+      <div style="margin-bottom:12px;font-size:12px;color:var(--text-muted);">Choose what to print:</div>
+      <button id="print-current" class="primary" style="width:100%;margin-bottom:8px;padding:8px;border:1px solid var(--border);border-radius:5px;background:var(--primary-bg);color:var(--text);cursor:pointer;">Current View</button>
+      <button id="print-open" class="primary" style="width:100%;margin-bottom:8px;padding:8px;border:1px solid var(--border);border-radius:5px;background:var(--primary-bg);color:var(--text);cursor:pointer;">All Open Views</button>
+      <button id="print-all" class="primary" style="width:100%;margin-bottom:12px;padding:8px;border:1px solid var(--border);border-radius:5px;background:var(--primary-bg);color:var(--text);cursor:pointer;">All Views</button>
+      <div class="modal-actions"><button class="cancel">Cancel</button></div>`;
+    overlay.appendChild(box);
+    root.appendChild(overlay);
+
+    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+    box.querySelector('#print-current').addEventListener('click', () => {
+      overlay.remove();
+      this.printViews([tab.viewId]);
+    });
+    box.querySelector('#print-open').addEventListener('click', () => {
+      overlay.remove();
+      const openViewIds = [...new Set(this.store.tabs.filter((t) => t.type === 'canvas').map((t) => t.viewId))];
+      this.printViews(openViewIds);
+    });
+    box.querySelector('#print-all').addEventListener('click', () => {
+      overlay.remove();
+      const allViewIds = this.store.doc.views.map((v) => v.id);
+      this.printViews(allViewIds);
+    });
+  }
+
+  printViews(viewIds) {
+    try {
+      const htmlParts = ['<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Print</title><style>'];
+      htmlParts.push(`
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: sans-serif; }
+        .print-page { page-break-after: always; padding: 20px; }
+        .print-page:last-child { page-break-after: avoid; }
+        .print-title { font-size: 18px; font-weight: bold; margin-bottom: 20px; }
+        svg { max-width: 100%; height: auto; display: block; border: 1px solid #ddd; }
+      `);
+      htmlParts.push('</style></head><body>');
+
+      // Marker sizes match buildMarkerDefs in canvas.js (small/medium/large).
+      const markerSizes = { small: 7, medium: 9, large: 13 };
+
+      for (const viewId of viewIds) {
+        const view = this.store.findView(viewId);
+        if (!view) continue;
+
+        const vms = this.store.viewMembersForView(viewId);
+        const partVms = vms.filter((vm) => vm.objectType === 'part');
+        if (partVms.length === 0) continue;
+
+        const { w: nodeW, h: nodeH } = getNodeSize(view);
+        const halfW = nodeW / 2, halfH = nodeH / 2;
+        const showTypes = view?.chkShowElementTypes;
+        const showDescription = view?.chkShowDescription;
+
+        const minX = Math.min(...partVms.map((vm) => vm.x));
+        const minY = Math.min(...partVms.map((vm) => vm.y));
+        const maxX = Math.max(...partVms.map((vm) => vm.x + nodeW));
+        const maxY = Math.max(...partVms.map((vm) => vm.y + nodeH));
+        const width = maxX - minX + 40;
+        const height = maxY - minY + 40;
+
+        htmlParts.push(`<div class="print-page"><div class="print-title">${escapeHtml(view.viewName)}</div>`);
+        htmlParts.push(`<svg viewBox="${minX - 20} ${minY - 20} ${width} ${height}" xmlns="http://www.w3.org/2000/svg"><defs>`);
+
+        // Marker defs for line ends — matches buildMarkerDefs (canvas.js) exactly: keyed
+        // by the lineEnds object's own key (not a nonexistent .type field), with the same
+        // viewBox/refX/refY/orient/rotate-90 wrapper so arrowheads point the right way.
+        const lineEnds = this.store.settings.lineEnds || {};
+        for (const [name, le] of Object.entries(lineEnds)) {
+          if (!le.path) continue;
+          for (const [sizeName, px] of Object.entries(markerSizes)) {
+            htmlParts.push(`<marker id="marker-${name}-${sizeName}" viewBox="-12 -2 24 24" markerWidth="${px}" markerHeight="${px}" refX="0" refY="10" orient="auto-start-reverse"><g transform="rotate(90 0 10)"><path d="${le.path}" fill="${le.fill || 'none'}" stroke="${le.stroke || 'black'}"/></g></marker>`);
+          }
+        }
+        htmlParts.push('</defs>');
+
+        // Draw connectors first (so they appear behind nodes)
+        const connVms = vms.filter((vm) => vm.objectType === 'connector');
+        for (const cvm of connVms) {
+          const conn = this.store.findConnector(cvm.objectId);
+          const fromVm = this.store.findViewMember(cvm.fromVmId);
+          const toVm = this.store.findViewMember(cvm.toVmId);
+          if (!conn || !fromVm || !toVm) continue;
+
+          // Calculate edge endpoints (node edge to node edge, with marker clearance margin)
+          const fCenter = { x: fromVm.x + halfW, y: fromVm.y + halfH };
+          const tCenter = { x: toVm.x + halfW, y: toVm.y + halfH };
+          const dx = tCenter.x - fCenter.x, dy = tCenter.y - fCenter.y;
+          const margin = 11;
+          const fc = this.clipToRectEdge(fCenter.x, fCenter.y, dx, dy, halfW + margin, halfH + margin);
+          const tc = this.clipToRectEdge(tCenter.x, tCenter.y, -dx, -dy, halfW + margin, halfH + margin);
+
+          // Relationship line style, same lookup as drawEdge in canvas.js
+          const style = (this.store.settings.relationshipStyles || []).find((s) => ciEq(s.type, conn.relationship));
+          const stroke = style?.stroke ?? conn.stroke ?? '#333';
+          const strokeWidth = style?.strokeWidth ?? conn.strokeWidth ?? 2;
+          const dash = style?.dash ?? conn.dash ?? [];
+          const endSize = conn.endSize || 'medium';
+
+          // Curved line for regular ('c') connectors, straight for stream ('s') connectors
+          let d;
+          if (conn.connectorType === 'c') {
+            const midX = (fc.x + tc.x) / 2, midY = (fc.y + tc.y) / 2;
+            const cdx = tc.x - fc.x, cdy = tc.y - fc.y;
+            const len = Math.sqrt(cdx * cdx + cdy * cdy) || 1;
+            const curveOffset = 30;
+            const ctrlX = midX + (-cdy / len) * curveOffset, ctrlY = midY + (cdx / len) * curveOffset;
+            d = `M ${fc.x} ${fc.y} Q ${ctrlX} ${ctrlY} ${tc.x} ${tc.y}`;
+          } else {
+            d = `M ${fc.x} ${fc.y} L ${tc.x} ${tc.y}`;
+          }
+
+          let pathHtml = `<path d="${d}" stroke="${stroke}" stroke-width="${strokeWidth}" fill="none"`;
+          if (dash.length) pathHtml += ` stroke-dasharray="${dash.join(',')}"`;
+          if (style?.toLineEndSettingType && lineEnds[style.toLineEndSettingType]?.path) {
+            pathHtml += ` marker-end="url(#marker-${style.toLineEndSettingType}-${endSize})"`;
+          }
+          if (style?.fromLineEndSettingType && lineEnds[style.fromLineEndSettingType]?.path) {
+            pathHtml += ` marker-start="url(#marker-${style.fromLineEndSettingType}-${endSize})"`;
+          }
+          pathHtml += '/>';
+          htmlParts.push(pathHtml);
+        }
+
+        // Draw nodes
+        for (const vm of partVms) {
+          const part = this.store.findPart(vm.objectId);
+          if (!part) continue;
+          const elDef = elementByType(this.store, part.type);
+          const fillColor = vm.fillColor || groupFill(this, elDef);
+          const cornerRadius = elDef?.cornerRadius ?? 7;
+
+          // Node background
+          htmlParts.push(`<rect x="${vm.x}" y="${vm.y}" width="${nodeW}" height="${nodeH}" rx="${cornerRadius}" fill="${fillColor}" stroke="rgba(0,0,0,0.4)" stroke-width="1.5"/>`);
+
+          const padX = 8, padY = 6;
+          let cursorY = vm.y + padY;
+
+          // Top row: type label (left) + element icon (right) — mirrors .fnode-toprow
+          if (showTypes || elDef) {
+            const iconW = 26, iconH = 13;
+            if (showTypes) {
+              const typeText = elDef?.title || part.type;
+              htmlParts.push(`<text x="${vm.x + padX}" y="${cursorY + 6}" text-anchor="start" font-size="9" letter-spacing="0.3" fill="#333" opacity="0.7">${escapeHtml(typeText.toUpperCase())}</text>`);
+            }
+            // Element icon: reuse iconSvgFor's own path/rect + fill logic, nested at fixed size (natural viewBox 0 0 40 20)
+            const iconFill = groupFill(this, elDef);
+            const iconX = vm.x + nodeW - padX - iconW;
+            if (elDef && elDef.path) {
+              htmlParts.push(`<svg x="${iconX}" y="${cursorY}" width="${iconW}" height="${iconH}" viewBox="0 0 40 20"><path d="${elDef.path}" stroke="black" stroke-width="1.5" fill="${iconFill}"/></svg>`);
+            } else {
+              const r = Math.min(elDef?.cornerRadius ?? 6, 8);
+              htmlParts.push(`<svg x="${iconX}" y="${cursorY}" width="${iconW}" height="${iconH}" viewBox="0 0 40 20"><rect x="4" y="1" width="32" height="18" rx="${r}" stroke="black" stroke-width="1.5" fill="${iconFill}"/></svg>`);
+            }
+            cursorY += iconH + 4;
+          }
+
+          // Label (bold), wrapped to at most 2 lines like .fnode-label's line-clamp
+          const labelLines = this.wrapTextForPrint(part.label, nodeW - padX * 2, 12, 2);
+          for (const line of labelLines) {
+            cursorY += 12;
+            htmlParts.push(`<text x="${vm.x + padX}" y="${cursorY}" text-anchor="start" font-size="12" font-weight="600" fill="#1c2128">${escapeHtml(line)}</text>`);
+          }
+
+          // Description, wrapped to at most 2 lines, matching chkShowDescription toggle
+          if (showDescription && part.description) {
+            const descLines = this.wrapTextForPrint(part.description, nodeW - padX * 2, 10, 2);
+            for (const line of descLines) {
+              cursorY += 11;
+              htmlParts.push(`<text x="${vm.x + padX}" y="${cursorY}" text-anchor="start" font-size="10" fill="#1c2128" opacity="0.8">${escapeHtml(line)}</text>`);
+            }
+          }
+        }
+
+        htmlParts.push('</svg></div>');
+      }
+
+      htmlParts.push('</body></html>');
+      const html = htmlParts.join('');
+
+      // A hidden iframe with srcdoc, not window.open()+document.write() — the latter is
+      // blocked or silently no-ops in some browsers (popup managers, Safari's XSS
+      // protections on about:blank), which was producing a blank print window/preview
+      // even though this same HTML string was being built correctly.
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.addEventListener('load', () => {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        // Cleanup after the print dialog is dismissed; 'afterprint' doesn't fire in every
+        // browser for iframe content, so this is backed up by a generous fallback timeout.
+        const cleanup = () => iframe.remove();
+        iframe.contentWindow.addEventListener('afterprint', cleanup);
+        setTimeout(cleanup, 60000);
+      });
+      iframe.srcdoc = html;
+      document.body.appendChild(iframe);
+    } catch (err) {
+      this.toast(`Print error: ${err.message}`, true);
+      console.error('Print error:', err);
+    }
+  }
+
+  clipToRectEdge(cx, cy, dx, dy, halfW, halfH) {
+    if (dx === 0 && dy === 0) return { x: cx, y: cy };
+    const scaleX = dx !== 0 ? halfW / Math.abs(dx) : Infinity;
+    const scaleY = dy !== 0 ? halfH / Math.abs(dy) : Infinity;
+    const scale = Math.min(scaleX, scaleY);
+    return { x: cx + dx * scale, y: cy + dy * scale };
+  }
+
+  /** Rough character-count word-wrap for the SVG print output (no live layout available
+   * there) — approximates each font's average glyph width well enough to keep the node
+   * card text from overflowing, capped at `maxLines` like the canvas's own line-clamp. */
+  wrapTextForPrint(text, maxWidthPx, fontSize, maxLines) {
+    const avgCharWidth = fontSize * 0.55;
+    const maxChars = Math.max(4, Math.floor(maxWidthPx / avgCharWidth));
+    const words = String(text ?? '').split(/\s+/).filter(Boolean);
+    const lines = [];
+    let current = '';
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length > maxChars && current) {
+        lines.push(current);
+        current = word;
+        if (lines.length === maxLines - 1) break;
+      } else {
+        current = candidate;
+      }
+    }
+    if (current && lines.length < maxLines) lines.push(current);
+    if (lines.length === maxLines) {
+      const last = lines[maxLines - 1];
+      if (last.length > maxChars) lines[maxLines - 1] = `${last.slice(0, maxChars - 1)}…`;
+    }
+    return lines;
   }
 
   /** File > Load Example: lists public/examples/index.json's entries, same unsaved-
@@ -1541,6 +1976,7 @@ function wireGlobalEvents(app) {
   // Simulation model selector, entirely independent of store.defaultModel (used only
   // when creating new nodes) — never on the active tab/view.
   function runSimAction(action) {
+    if (action === 'scriptConsole') { app.promptScriptConsole(); return; } // works with no model selected
     const modelName = app.store.simSelectedModel;
     if (!modelName) { app.toast('No model selected.', true); return; }
     if (action === 'stepSimulation') {
@@ -1633,10 +2069,12 @@ function wireGlobalEvents(app) {
   fileMenu.innerHTML = `
     <div class="dd-item" data-action="save">Save</div>
     <div class="dd-item" data-action="load">Load</div>
+    <div class="dd-item" data-action="print">Print...</div>
     <div class="dd-separator"></div>
     <div class="dd-item" data-action="loadExample">Load Example</div>
     <div class="dd-item" data-action="loadSFCE">Load SFCE</div>
     <div class="dd-item" data-action="loadLocalSettings">Load Local Settings</div>
+    <div class="dd-item" data-action="saveLocalSettings">Save Local Settings</div>
     <div class="dd-separator"></div>
     <div class="dd-item" data-action="importData">Import Data</div>
     <div class="dd-item" data-action="importArchimate">Import ArchiMate</div>
@@ -1646,9 +2084,11 @@ function wireGlobalEvents(app) {
     item.addEventListener('click', () => {
       if (item.dataset.action === 'save') app.saveJson();
       else if (item.dataset.action === 'load') app.promptFileMenuLoad();
+      else if (item.dataset.action === 'print') app.promptPrint();
       else if (item.dataset.action === 'loadExample') app.promptLoadExample();
       else if (item.dataset.action === 'loadSFCE') app.promptLoadSFCE();
       else if (item.dataset.action === 'loadLocalSettings') document.getElementById('load-local-settings-input').click();
+      else if (item.dataset.action === 'saveLocalSettings') app.saveLocalSettings();
       else if (item.dataset.action === 'importData') app.promptImportData();
       else if (item.dataset.action === 'importArchimate') document.getElementById('import-archimate-input').click();
       else if (item.dataset.action === 'exportData') app.toast('Export Data: behavior will be defined in a later step.');
@@ -1662,9 +2102,21 @@ function wireGlobalEvents(app) {
     try {
       const text = await file.text();
       const obj = JSON.parse(text);
-      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('Expected a flat {key: value} JSON object.');
-      app.store.localSettings = obj;
-      app.toast(`Local settings loaded (${Object.keys(obj).length} key${Object.keys(obj).length === 1 ? '' : 's'}).`);
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('Expected a JSON object.');
+      // File > Save Local Settings (added alongside pinned fields) writes the new
+      // { secrets, pinnedFields } wrapped shape. Files saved before that — a flat
+      // {key: value} object of secrets only, with neither key present — still load the
+      // same as always, straight into store.localSettings, so nobody's older file breaks.
+      if ('secrets' in obj || 'pinnedFields' in obj) {
+        const secrets = (obj.secrets && typeof obj.secrets === 'object' && !Array.isArray(obj.secrets)) ? obj.secrets : {};
+        app.store.localSettings = secrets;
+        if (obj.pinnedFields) setAllPinnedFields(obj.pinnedFields);
+        app.render(); // picks up the new pin config immediately if a property panel is open
+        app.toast(`Local settings loaded (${Object.keys(secrets).length} secret key${Object.keys(secrets).length === 1 ? '' : 's'}${obj.pinnedFields ? ', pinned fields' : ''}).`);
+      } else {
+        app.store.localSettings = obj;
+        app.toast(`Local settings loaded (${Object.keys(obj).length} key${Object.keys(obj).length === 1 ? '' : 's'}).`);
+      }
     } catch (err) {
       app.toast(`Local settings load failed: ${err.message}`, true);
     }
@@ -1766,6 +2218,7 @@ function wireGlobalEvents(app) {
     { label: 'Show Simulation Log', action: 'showSimLog' },
     { label: 'Save Simulation Snapshot', action: 'saveSimSnapshot' },
     { label: 'Load Simulation Snapshot', action: 'loadSimSnapshot' },
+    { label: 'Script Console...', action: 'scriptConsole' },
   ];
   const simulationMenu = document.getElementById('simulation-menu');
   simulationMenu.innerHTML = SIMULATION_LINKS.map((l) => `<div class="dd-item" data-action="${l.action}">${l.label}</div>`).join('');

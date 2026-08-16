@@ -465,7 +465,7 @@ function splitNode(app, tab, vmId) {
 
   const vmsInView = store.viewMembersForView(vm.view);
 
-  // incoming edges (connector.to === part.id): sibling INHERITS them -> duplicate pointing to sibling
+  // incoming edges (connector.to === part.id): duplicate pointing to both original and split node
   const incoming = store.doc.connectors.filter((c) => ciEq(c.to, part.id));
   for (const c of incoming) {
     const newConn = store.createConnector({ from: c.from, to: newPart.id, model: c.model, connectorType: c.connectorType, relationship: c.relationship, streams: [...(c.streams || [])] });
@@ -475,12 +475,14 @@ function splitNode(app, tab, vmId) {
     }
   }
 
-  // outgoing edges (connector.from === part.id): REWIRED to the new node (moved, not duplicated)
+  // outgoing edges (connector.from === part.id): duplicate pointing from both original and split node
   const outgoing = store.doc.connectors.filter((c) => ciEq(c.from, part.id));
   for (const c of outgoing) {
-    c.from = newPart.id;
+    const newConn = store.createConnector({ from: newPart.id, to: c.to, model: c.model, connectorType: c.connectorType, relationship: c.relationship, streams: [...(c.streams || [])] });
     const cvms = vmsInView.filter((x) => x.objectType === 'connector' && x.objectId === c.id && x.fromVmId === vm.id);
-    for (const cvm of cvms) cvm.fromVmId = newVm.id;
+    for (const cvm of cvms) {
+      store.createViewMember({ view: cvm.view, objectType: 'connector', objectId: newConn.id, fromVmId: newVm.id, toVmId: cvm.toVmId });
+    }
   }
 
   app.recordAndRender();
@@ -1712,18 +1714,7 @@ function remap(app, tab, options = {}) {
 }
 
 // ===================== MERGE =====================
-/**
- * Merges 2+ selected nodes into one. The first selected node survives (its Part keeps
- * its id/type/etc, relabeled to `newName`); the rest are removed from this view.
- * Connectors that referenced any of the merged parts are rewired to the survivor;
- * resulting duplicate connectors (same from+to+connectorType) are de-duplicated, keeping
- * whichever is encountered first (so the survivor's own original connectors, created
- * earliest, are favored — this is an approximation of "use the first selected node's
- * relationship" since a connector doesn't retain which merge input it originated from).
- * If `mergeParts` is true, also deletes the other parts outright (only if none of them
- * has a viewMember in any OTHER view — otherwise the whole merge is cancelled).
- */
-function mergeNodes(app, tab, selectedVmIds, newName, mergeParts) {
+function mergePartsAndView(app, tab, selectedVmIds, newName) {
   const { store } = app;
   const vms = selectedVmIds.map((id) => store.findViewMember(id)).filter((vm) => vm && vm.objectType === 'part');
   if (vms.length < 2) { app.toast('Select 2 or more nodes to merge.', true); return; }
@@ -1733,46 +1724,39 @@ function mergeNodes(app, tab, selectedVmIds, newName, mergeParts) {
   const restParts = restVms.map((vm) => store.findPart(vm.objectId)).filter(Boolean);
   if (!firstPart) return;
 
-  if (mergeParts) {
-    for (const p of restParts) {
-      const usedElsewhere = store.doc.viewMembers.some((vm) => vm.objectType === 'part' && ciEq(vm.objectId, p.id) && !ciEq(vm.view, tab.viewId));
-      if (usedElsewhere) {
-        app.toast(`Cannot merge: "${p.label}" is used in another view. Merge cancelled.`, true);
-        return;
-      }
-    }
-  }
+  const restPartIds = new Set(restParts.map((p) => p.id));
 
+  // Update name and streams
   firstPart.label = newName;
   firstPart.rawLabel = newName;
-  // Step 33 fix: also merge the streams field — union every merged part's streams onto
-  // the surviving part (deduplicated), since its connectors now represent all of them
-  // regardless of whether mergeParts deletes the underlying old Part records.
   const mergedStreams = new Set(firstPart.streams || []);
   for (const p of restParts) {
     for (const s of (p.streams || [])) mergedStreams.add(s);
   }
   firstPart.streams = [...mergedStreams];
 
-  // rewire connectors that referenced any of the merged-away parts
-  const restPartIds = new Set(restParts.map((p) => p.id));
+  // Add note about merge
+  const mergedIds = restParts.map((p) => p.id).join(', ');
+  firstPart.note = (firstPart.note || '') + (firstPart.note ? '\n' : '') + `Merged with part(s): ${mergedIds}`;
+
+  // Rewire all connectors globally (across all views)
   for (const conn of store.doc.connectors) {
     if (restPartIds.has(conn.from)) conn.from = firstPart.id;
     if (restPartIds.has(conn.to)) conn.to = firstPart.id;
   }
 
-  // rewire this view's connector viewMembers off the soon-to-be-removed node viewMembers
+  // Rewire connector viewMembers in all views
   const restVmIds = new Set(restVms.map((vm) => vm.id));
-  for (const cvm of store.viewMembersForView(tab.viewId)) {
+  for (const cvm of store.doc.viewMembers) {
     if (cvm.objectType !== 'connector') continue;
     if (restVmIds.has(cvm.fromVmId)) cvm.fromVmId = firstVm.id;
     if (restVmIds.has(cvm.toVmId)) cvm.toVmId = firstVm.id;
   }
 
-  // remove the merged-away node viewMembers from this view
+  // Remove merged-away viewMembers from all views
   for (const vm of restVms) store.deleteViewMember(vm.id);
 
-  // de-duplicate connectors: same from + to + connectorType
+  // De-duplicate connectors globally: same from + to + connectorType
   const seenKey = new Map();
   for (const conn of [...store.doc.connectors]) {
     const key = `${conn.from}|${conn.to}|${conn.connectorType}`;
@@ -1783,14 +1767,89 @@ function mergeNodes(app, tab, selectedVmIds, newName, mergeParts) {
     }
   }
 
-  if (mergeParts) {
-    for (const p of restParts) store.deletePart(p.id);
-  }
+  // Delete the merged parts
+  for (const p of restParts) store.deletePart(p.id);
 
   tab.selection.clear();
   tab.selection.add(firstVm.id);
   app.recordAndRender();
-  app.toast(`Merged ${vms.length} nodes into "${newName}".`);
+  app.toast(`Merged ${vms.length} parts into "${newName}" across all views.`);
+}
+
+function mergeViewOnly(app, tab, selectedVmIds, newName) {
+  const { store } = app;
+  const vms = selectedVmIds.map((id) => store.findViewMember(id)).filter((vm) => vm && vm.objectType === 'part');
+  if (vms.length < 2) { app.toast('Select 2 or more nodes to merge.', true); return; }
+
+  const [firstVm, ...restVms] = vms;
+  const firstPart = store.findPart(firstVm.objectId);
+  if (!firstPart) return;
+
+  // Update first part's name in current view only (affects the viewMember's visual representation)
+  firstPart.label = newName;
+  firstPart.rawLabel = newName;
+
+  const restVmIds = new Set(restVms.map((vm) => vm.id));
+
+  // Rewire connector viewMembers in current view only
+  for (const cvm of store.viewMembersForView(tab.viewId)) {
+    if (cvm.objectType !== 'connector') continue;
+    if (restVmIds.has(cvm.fromVmId)) cvm.fromVmId = firstVm.id;
+    if (restVmIds.has(cvm.toVmId)) cvm.toVmId = firstVm.id;
+  }
+
+  // De-duplicate connector viewMembers in this view only: same from + to + relationship
+  const connVms = store.viewMembersForView(tab.viewId).filter((vm) => vm.objectType === 'connector');
+  const seenKey = new Map();
+  for (const cvm of [...connVms]) {
+    const conn = store.findConnector(cvm.objectId);
+    if (!conn) continue;
+    const key = `${cvm.fromVmId}|${cvm.toVmId}|${conn.connectorType}`;
+    if (seenKey.has(key)) {
+      store.deleteViewMember(cvm.id);
+    } else {
+      seenKey.set(key, cvm.id);
+    }
+  }
+
+  // Handle linked views: if only one has a linked view, set it on firstVm; if both do, merge them
+  const firstLinkedViewName = firstVm.linkedViewName;
+  for (const restVm of restVms) {
+    if (restVm.linkedViewName && !firstLinkedViewName) {
+      firstVm.linkedViewName = restVm.linkedViewName;
+    } else if (restVm.linkedViewName && firstLinkedViewName && restVm.linkedViewName !== firstLinkedViewName) {
+      // Merge the two linked views: move all objects from restVm's linked view to firstVm's linked view
+      const restLinkedView = store.findView(restVm.linkedViewName);
+      const firstLinkedView = store.findView(firstLinkedViewName);
+      if (restLinkedView && firstLinkedView) {
+        const restViewMembers = store.viewMembersForView(restLinkedView.id);
+        for (const vm of restViewMembers) {
+          vm.view = firstLinkedView.id;
+        }
+      }
+      // Delete the merged-away linked view
+      if (restLinkedView) store.deleteView(restLinkedView.id);
+    }
+  }
+
+  // Remove merged-away viewMembers from this view
+  for (const vm of restVms) store.deleteViewMember(vm.id);
+
+  tab.selection.clear();
+  tab.selection.add(firstVm.id);
+  app.recordAndRender();
+  app.toast(`Merged ${vms.length} nodes into "${newName}" in this view.`);
+}
+
+/**
+ * Legacy: kept for backwards compatibility. Use mergePartsAndView or mergeViewOnly instead.
+ */
+function mergeNodes(app, tab, selectedVmIds, newName, mergeParts) {
+  if (mergeParts) {
+    mergePartsAndView(app, tab, selectedVmIds, newName);
+  } else {
+    mergeViewOnly(app, tab, selectedVmIds, newName);
+  }
 }
 
 // ===================== DUPLICATE SECTION =====================
@@ -1881,4 +1940,4 @@ function duplicateSection(app, tab, sectionInstanceId) {
   app.toast(`Duplicated section "${originalName}" as "${newSection.name}" (${oldVmToNewVm.size} node${oldVmToNewVm.size === 1 ? '' : 's'}, ${connDupCount} connector${connDupCount === 1 ? '' : 's'}).`);
 }
 
-export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection, smartCheckView, createBulkLookupCache };
+export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection, smartCheckView, createBulkLookupCache };

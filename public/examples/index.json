@@ -3,5 +3,6 @@
   "variable reference demo.json",
   "api call with secrets demo.json",
   "response packet demo.json",
-  "right badge chain demo.json"
+  "right badge chain demo.json",
+  "findParts demo.json"
 ]

@@ -213,7 +213,7 @@ def check_property_panel_field_split(page):
       app.selectOnly(vm.id);
       app.render();
       await new Promise(r => setTimeout(r, 30));
-      const topLabels = [...document.querySelectorAll('#properties-body > div:first-child label[data-field]')].map(l => l.dataset.field);
+      const topLabels = [...document.querySelectorAll('.vm-top-fields label[data-field]')].map(l => l.dataset.field);
       const rootSection = document.querySelector('.root-properties-section');
       const rootLabels = rootSection ? [...rootSection.querySelectorAll('label[data-field]')].map(l => l.dataset.field) : [];
       return {
