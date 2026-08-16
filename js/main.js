@@ -1858,7 +1858,72 @@ function showAbortScreen() {
   document.getElementById('app').innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#888;font-family:sans-serif;">Program aborted — required data could not be loaded.</div>`;
 }
 
+// Below this width the toolbox + canvas + properties three-panel layout, drag/drop node
+// editing, etc. aren't usable — rather than let someone land on a broken-looking app,
+// show a plain message (plus the Instructions content, so they still get something
+// useful) instead of booting the real app at all. "Continue Anyway" exists so nobody's
+// ever hard-locked out — a deliberately narrow browser window, a foldable device, etc.
+const SMALL_SCREEN_MAX_WIDTH = 800;
+
+function isSmallScreen() {
+  return window.innerWidth < SMALL_SCREEN_MAX_WIDTH;
+}
+
+function showSmallScreenScreen(onContinueAnyway) {
+  // A sibling overlay, NOT an overwrite of #app's innerHTML — #app is the real app's
+  // entire static layout (header, panels, canvas, ...) from index.html; destroying it
+  // here would leave nothing for bootstrapApp() to render into if "Continue anyway" is
+  // clicked. Hide #app behind this overlay instead, and simply remove the overlay (never
+  // touching #app's own content) once the real app is ready to take over.
+  document.getElementById('app').style.display = 'none';
+  const overlay = document.createElement('div');
+  overlay.id = 'small-screen-overlay';
+  overlay.style.cssText = 'position:fixed; inset:0; display:flex; flex-direction:column; background:var(--bg); color:var(--text); z-index:1000;';
+  overlay.innerHTML = `
+    <div style="padding:20px 20px 14px; border-bottom:1px solid var(--border); flex:0 0 auto;">
+      <h2 style="margin:0 0 6px 0;">DyCAD needs a larger screen</h2>
+      <p style="margin:0; color:var(--text-muted); font-size:13px; line-height:1.5;">
+        This is a canvas-based diagramming tool with several side panels — it isn't usable comfortably at this
+        width. Try a laptop or desktop browser, or widen this window. In the meantime, here are the Instructions.
+        <a href="#" id="small-screen-continue" style="margin-left:6px; white-space:nowrap;">Continue anyway →</a>
+      </p>
+    </div>
+    <div id="small-screen-docs" style="flex:1; min-height:0; overflow:auto;"><div class="docs-content"><p>Loading…</p></div></div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('#small-screen-continue').addEventListener('click', (e) => {
+    e.preventDefault();
+    overlay.remove();
+    document.getElementById('app').style.display = '';
+    onContinueAnyway();
+  });
+  fetch('public/instructions.html', { cache: 'no-store' })
+    .then((res) => res.text())
+    .then((html) => {
+      const docsEl = overlay.querySelector('#small-screen-docs');
+      if (docsEl) docsEl.innerHTML = html; // guard: overlay may already be removed ("Continue anyway") before this resolves
+    })
+    .catch(() => {
+      const docsEl = overlay.querySelector('#small-screen-docs');
+      if (docsEl) docsEl.innerHTML = '<div class="docs-content"><p>Could not load the instructions page.</p></div>';
+    });
+}
+
 async function bootstrap() {
+  if (isSmallScreen()) {
+    let proceeded = false;
+    showSmallScreenScreen(() => {
+      if (proceeded) return; // ignore a stray double-click
+      proceeded = true;
+      bootstrapApp();
+    });
+    return;
+  }
+  await bootstrapApp();
+}
+
+async function bootstrapApp() {
   document.body.dataset.theme = localStorage.getItem('dycad-theme') || 'light';
   const versionEl = document.getElementById('app-version');
   versionEl.textContent = `v${APP_VERSION}`;
