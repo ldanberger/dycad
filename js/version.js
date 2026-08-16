@@ -1122,4 +1122,4 @@
 // re-run after the window.flowrunApp -> window.dycadApp rename across all 27 references
 // in tests/run_all.py itself — 29/29 still passing, confirming the rename didn't silently
 // break the suite's own ability to reach the app.
-export const APP_VERSION = '0.85';
+export const APP_VERSION = '0.86';

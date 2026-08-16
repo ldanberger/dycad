@@ -2107,7 +2107,7 @@ function showSmallScreenScreen(onContinueAnyway) {
   overlay.style.cssText = 'position:fixed; inset:0; display:flex; flex-direction:column; background:var(--bg); color:var(--text); z-index:1000;';
   overlay.innerHTML = `
     <div style="padding:20px 20px 14px; border-bottom:1px solid var(--border); flex:0 0 auto;">
-      <h2 style="margin:0 0 6px 0;">DyCAD needs a larger screen</h2>
+      <h2 style="margin:0 0 6px 0;">DyCAD needs a larger screen <span style="font-size:12px; font-weight:400; color:var(--text-muted);">v${escapeHtml(APP_VERSION)}</span></h2>
       <p style="margin:0; color:var(--text-muted); font-size:13px; line-height:1.5;">
         This is a canvas-based diagramming tool with several side panels — it isn't usable comfortably at this
         width. Try a laptop or desktop browser, or widen this window. In the meantime, here are the Instructions.
