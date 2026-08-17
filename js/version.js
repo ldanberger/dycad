@@ -1469,4 +1469,24 @@
 // reload already reflects a cached custom multiplier, and by temporarily reintroducing
 // the wrong order (apply-after-construction) and confirming the expected failure before
 // restoring the fix. Full suite 39/39.
-export const APP_VERSION = '0.801';
+// 0.802: Added Advanced > Smart Check Node (also right-click a single node) — the
+// single-node analog of Smart Check View, sharing its exact "missing connectors" /
+// "missing connectors and nodes, N levels" mechanics (commands.js: new smartCheckNode,
+// modeled closely on smartCheckView, not a refactor of it — smartCheckView's own tests
+// stay untouched/unaffected). Two extra filters this scope needed: Upstream/Downstream
+// (direction relative to the selected node) and By Stream (only follow connectors
+// carrying the node's own stream(s), pre-checked from that node's actual streams,
+// multi-select if it has more than one). The stream filter is fixed for the whole run
+// from the ORIGINALLY selected node — pulling in a node that also happens to carry a
+// different stream does not widen the search to that stream too (verified via a
+// permanent check with a small real graph, and by temporarily reintroducing the widening
+// bug and confirming the expected failure before restoring the fix). New render.js
+// getCommandDefs entry (singlePart-gated, so it's usable via the left Commands panel
+// too, not just right-click) and CMD_ICONS entry. Full suite 40/40.
+// 0.803: Instructions tab's Industry_to_SFCCE prompt was missing the Entity level
+// entirely — added it (nested under Application Capabilities, or directly under
+// Capabilities when that level is omitted), with guidance/examples ("Sales Order,"
+// "Customer Profile," "Bill of Materials") pulled from the actual DataDataEntity
+// examples in DyCAD's own built-in "general" industry dataset (fce-generalnodes.json),
+// per the user's pointer to look there. Content-only change, no code touched.
+export const APP_VERSION = '0.803';

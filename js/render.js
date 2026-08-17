@@ -302,6 +302,7 @@ const CMD_ICONS = {
   redraw: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="14" height="9" rx="1.5"/><path d="M14 2.5l2 2-2 2M16 4.5H10"/></svg>',
   addExisting: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="10" height="12" rx="1.5"/><path d="M5.5 7.5h4M5.5 10.5h4M5.5 13.5h2.5"/><circle cx="15.5" cy="14.5" r="3.2"/><path d="M15.5 13v3M14 14.5h3"/></svg>',
   populateFromTemplate: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="6" height="6" rx="1"/><rect x="11.5" y="2.5" width="6" height="6" rx="1"/><rect x="2.5" y="11.5" width="6" height="6" rx="1"/><path d="M14.5 12v6M11.5 15h6"/></svg>',
+  smartCheckNode: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="10" height="8" rx="1.5"/><circle cx="15.5" cy="14.5" r="3.2"/><path d="M14 14.5l1 1 2-2"/></svg>',
 };
 
 function getCommandDefs(app) {
@@ -326,6 +327,7 @@ function getCommandDefs(app) {
     { key: 'redraw', label: 'Redraw', hint: 'Redraw — recalculate best node size and normalize coordinates for this view', enabled: isCanvas },
     { key: 'addExisting', label: 'Add Existing', hint: 'Add Existing — bring existing parts (and optionally their connectors) into this view', enabled: isCanvas },
     { key: 'populateFromTemplate', label: 'Populate From Template', hint: 'Populate From Template — add parts/connectors from a page template matching this view type', enabled: isCanvas },
+    { key: 'smartCheckNode', label: 'Smart Check Node', hint: 'Smart Check Node — repair gaps reachable from this one node', enabled: !!singlePart },
   ];
 }
 

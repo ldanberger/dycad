@@ -1390,6 +1390,164 @@ function smartCheckView(app, tab, options = {}) {
 }
 
 /**
+ * Smart Check Node (Advanced menu, and right-click on a single node): the single-node
+ * analog of smartCheckView above — repairs gaps reachable from ONE specific part instead
+ * of everything already on the view. Reuses smartCheckView's exact "missing connectors" /
+ * "missing connectors and nodes, N hops" mechanics (same checkbox meanings, same
+ * placeNearAnchor/log/note pattern), with two filters neither of those needs at
+ * whole-view scope:
+ *   - direction (upstream: follow connectors INTO an already-present node, tracing what
+ *     feeds it; downstream: follow connectors OUT of an already-present node, tracing
+ *     what it feeds). smartCheckView treats a connector's two ends symmetrically since
+ *     it isn't walking outward from one specific point.
+ *   - streams: when byStream is true, only connectors carrying at least one of `streams`
+ *     qualify. `streams` is FIXED for the whole run — the caller derives it once, from
+ *     the ORIGINAL selected node's own streams, at dialog-submit time. It is NEVER
+ *     recomputed from a newly-discovered node's own streams, so pulling in a node that
+ *     happens to also carry other stream tags does not silently widen the search to
+ *     those streams too.
+ * The BFS seeds its frontier with JUST {partId}, not every part already on the view (the
+ * key structural difference from smartCheckView) — but "on-view" membership (used to
+ * decide whether an end already has a place, same check smartCheckView makes) still
+ * looks at the WHOLE view, since a connector to some unrelated already-placed node is
+ * still legitimately "already present"; only the EXPANSION FRONTIER is scoped to this
+ * one node's own reachable neighborhood.
+ *
+ * Direction filtering applies to: checkbox 1 (relative to the seed node itself — an
+ * unambiguous "does this run FROM or INTO the seed" question) and BFS phase 1 (relative
+ * to whichever frontier member is the connector's already-present end). It deliberately
+ * does NOT apply to the BFS's phase 2 (backfilling connectors between nodes that are now
+ * BOTH mutually visible after this hop's additions) — phase 2 isn't "walking" in a
+ * direction from the seed, it's tidying up edges between two nodes that both just became
+ * visible, neither of which is uniquely "the reference point" a direction could be
+ * relative to. Stream filtering DOES still apply to phase 2, same as everywhere else.
+ */
+function smartCheckNode(app, tab, partId, options = {}) {
+  const { missingConnectors = true, missingConnectorsAndNodes = false, levels = null, upstream = true, downstream = true, byStream = false, streams = [] } = options;
+  const { store } = app;
+  const viewId = tab.viewId;
+  const view = store.findView(viewId);
+  if (!view) return null;
+  const seedPart = store.findPart(partId);
+  if (!seedPart) return null;
+
+  let connectorsAdded = 0, nodesAdded = 0;
+  const log = (msg) => pushMessageLog(store, `[Smart Check Node: ${seedPart.label}] ${msg}`);
+  const describePart = (id) => { const p = store.findPart(id); return p ? `"${p.label}" (${p.type})` : id; };
+  const SMART_CHECK_NOTE = 'Smart Check created.';
+  const appendNote = (obj, text) => { obj.note = obj.note ? `${obj.note}\n${text}` : text; };
+
+  const vms = store.viewMembersForView(viewId);
+  const partVms = vms.filter((vm) => vm.objectType === 'part');
+  const connVms = vms.filter((vm) => vm.objectType === 'connector');
+  const partIdToVmId = new Map(partVms.map((vm) => [vm.objectId, vm.id]));
+  const placedConnectorIds = new Set(connVms.map((vm) => vm.objectId));
+  if (!partIdToVmId.has(partId)) return null; // selected node isn't actually placed on this view
+
+  const passesStream = (conn) => !byStream || (conn.streams || []).some((s) => streams.includes(s));
+  const passesDirection = (edgeIsDownstream) => (edgeIsDownstream ? downstream : upstream);
+
+  if (missingConnectors) {
+    for (const conn of store.doc.connectors) {
+      if (placedConnectorIds.has(conn.id)) continue;
+      if (conn.from !== partId && conn.to !== partId) continue;
+      const otherId = conn.from === partId ? conn.to : conn.from;
+      if (!partIdToVmId.has(otherId)) continue;
+      const edgeIsDownstream = conn.from === partId; // seed is the source -> this edge runs downstream of the seed
+      if (!passesDirection(edgeIsDownstream)) continue;
+      if (!passesStream(conn)) continue;
+      store.createViewMember({
+        view: viewId, objectType: 'connector', objectId: conn.id,
+        fromVmId: partIdToVmId.get(conn.from), toVmId: partIdToVmId.get(conn.to),
+      });
+      appendNote(conn, SMART_CHECK_NOTE);
+      store.touchConnector(conn);
+      placedConnectorIds.add(conn.id);
+      connectorsAdded += 1;
+      log(`Added missing connector: ${describePart(conn.from)} -> ${describePart(conn.to)} (${conn.relationship || conn.connectorType}).`);
+    }
+  }
+
+  if (missingConnectorsAndNodes) {
+    const typeToFill = new Map();
+    for (const def of store.settings.elements || []) {
+      const fill = (store.settings.elementGroups || []).find((g) => ciEq(g.group, def.group))?.fill;
+      typeToFill.set(def.type, fill || '#cccccc');
+    }
+    let autoPlacedCount = 0;
+    const placeNearAnchor = (part, anchorVmId) => {
+      const anchor = store.findViewMember(anchorVmId);
+      const fillColor = typeToFill.get(part.type) || '#cccccc';
+      autoPlacedCount += 1;
+      const vm = store.createViewMember({
+        view: viewId, objectType: 'part', objectId: part.id,
+        x: (anchor ? anchor.x : 60) + 200, y: (anchor ? anchor.y : 40) + (autoPlacedCount * 70),
+        fillColor,
+      });
+      partIdToVmId.set(part.id, vm.id);
+      nodesAdded += 1;
+      const anchorPart = anchor ? store.findPart(anchor.objectId) : null;
+      log(`Added missing node: ${describePart(part.id)}, pulled in near ${anchorPart ? `"${anchorPart.label}" (${anchorPart.type})` : 'an existing node'}.`);
+      return vm.id;
+    };
+
+    let frontier = new Set([partId]);
+    let hop = 0;
+    while (frontier.size > 0 && (levels == null || hop < levels)) {
+      const toAdd = [];
+      for (const conn of store.doc.connectors) {
+        const fromOnView = partIdToVmId.has(conn.from), toOnView = partIdToVmId.has(conn.to);
+        if (fromOnView === toOnView) continue; // both or neither present — not this hop's concern
+        const presentId = fromOnView ? conn.from : conn.to;
+        if (!frontier.has(presentId)) continue;
+        const edgeIsDownstream = fromOnView; // present end is the source -> edge runs downstream of it
+        if (!passesDirection(edgeIsDownstream)) continue;
+        if (!passesStream(conn)) continue;
+        const missingId = fromOnView ? conn.to : conn.from;
+        const missingPart = store.findPart(missingId);
+        if (!missingPart) continue;
+        toAdd.push({ missingPart, anchorPartId: presentId });
+      }
+      if (toAdd.length === 0) break;
+
+      const nextFrontier = new Set();
+      for (const { missingPart, anchorPartId } of toAdd) {
+        if (partIdToVmId.has(missingPart.id)) continue; // already placed earlier in this same hop
+        placeNearAnchor(missingPart, partIdToVmId.get(anchorPartId));
+        nextFrontier.add(missingPart.id);
+      }
+
+      // phase 2: connect up anything now mutually visible that touches this hop's new
+      // arrivals — stream-filtered, deliberately NOT direction-filtered (see this
+      // function's own doc comment for why).
+      for (const conn of store.doc.connectors) {
+        if (placedConnectorIds.has(conn.id)) continue;
+        if (!partIdToVmId.has(conn.from) || !partIdToVmId.has(conn.to)) continue;
+        if (!nextFrontier.has(conn.from) && !nextFrontier.has(conn.to)) continue;
+        if (!passesStream(conn)) continue;
+        store.createViewMember({
+          view: viewId, objectType: 'connector', objectId: conn.id,
+          fromVmId: partIdToVmId.get(conn.from), toVmId: partIdToVmId.get(conn.to),
+        });
+        appendNote(conn, SMART_CHECK_NOTE);
+        store.touchConnector(conn);
+        placedConnectorIds.add(conn.id);
+        connectorsAdded += 1;
+        log(`Added missing connector: ${describePart(conn.from)} -> ${describePart(conn.to)} (${conn.relationship || conn.connectorType}).`);
+      }
+
+      frontier = nextFrontier;
+      hop += 1;
+    }
+  }
+
+  if (connectorsAdded === 0 && nodesAdded === 0) log('No missing connectors or nodes found.');
+  else log(`Done: ${connectorsAdded} connector${connectorsAdded === 1 ? '' : 's'} added, ${nodesAdded} node${nodesAdded === 1 ? '' : 's'} added.`);
+
+  return { connectorsAdded, nodesAdded };
+}
+
+/**
  * Async and chunked, not just for correctness at scale (see createBulkLookupCache's
  * doc comment for the O(n²) fix) but because even with that fixed, a genuinely large
  * imported dataset is a lot of individual createStream calls run back to back — each
@@ -2280,4 +2438,4 @@ function duplicateSection(app, tab, sectionInstanceId) {
   app.toast(`Duplicated section "${originalName}" as "${newSection.name}" (${oldVmToNewVm.size} node${oldVmToNewVm.size === 1 ? '' : 's'}, ${connDupCount} connector${connDupCount === 1 ? '' : 's'}).`);
 }
 
-export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection, smartCheckView, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames };
+export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames };

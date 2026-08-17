@@ -1691,6 +1691,109 @@ def check_node_size_multiplier(page):
     return True, "new views default to 156x55 (130x46 * 1.2), and a custom nodeSizeMultiplier loaded via Local Settings is cached and reaches the Store before its very first view is built, surviving a reload"
 
 
+def check_smart_check_node(page):
+    """Regression guard for Advanced > Smart Check Node / right-click on a single node —
+    the single-node analog of Smart Check View (commands.js's smartCheckNode). Builds a
+    small realistic graph: Z -> A -> B -> C (all tagged stream S1), B -> D (stream S2,
+    a different stream B ALSO happens to carry), C -> E (untagged). Only A starts on the
+    view. Confirms: (1) the right-click context menu actually opens this dialog and its
+    "Smart Check Node" item is enabled only for a single node selection; (2) checkbox
+    defaults — By Stream checked with A's own stream(s) pre-checked, both direction
+    checkboxes checked, Missing Connectors checked, Missing Connectors And Nodes
+    unchecked (so the Levels row starts hidden); (3) the core "stays filtered to the
+    originally selected stream" behavior — with Downstream-only + By Stream=S1, pulls in
+    B and C (both reachable via S1 edges) but NOT D (a different stream, even though B
+    itself carries it — the filter must stay fixed to what was picked from the ORIGINAL
+    node, not widen to include a newly-discovered node's own extra streams) and NOT E
+    (untagged edge) and NOT Z (wrong direction)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.addView('RegrSmartCheckNode_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const mk = (label, streams) => store.createPart({ type: 'Unknown', label, model: store.defaultModel, streams });
+      const conn = (from, to, streams) => store.createConnector({ from: from.id, to: to.id, model: store.defaultModel, connectorType: 's', relationship: 'Association', streams });
+      const A = mk('RegrSCN_A', ['S1']);
+      const B = mk('RegrSCN_B', ['S1', 'S2']);
+      const C = mk('RegrSCN_C', ['S1']);
+      const D = mk('RegrSCN_D', ['S2']);
+      const E = mk('RegrSCN_E', []);
+      const Z = mk('RegrSCN_Z', ['S1']);
+      conn(A, B, ['S1']); conn(B, C, ['S1']); conn(Z, A, ['S1']); conn(B, D, ['S2']); conn(C, E, []);
+
+      const vmA = store.createViewMember({ view: view.id, objectType: 'part', objectId: A.id, x: 100, y: 100 });
+      tab.selection.clear();
+      app.render();
+
+      // Advanced menu path should refuse with nothing selected.
+      document.getElementById('advanced-menu-btn').click();
+      await new Promise(r => setTimeout(r, 50));
+      document.querySelector('#advanced-menu .dd-item[data-action=\"smartCheckNode\"]').click();
+      await new Promise(r => setTimeout(r, 50));
+      const noSelectionDialogOpened = !!document.querySelector('.modal-overlay h3');
+
+      // Right-click path: select the node, then dispatch a real contextmenu event on its DOM element.
+      tab.selection.add(vmA.id);
+      app.render();
+      await new Promise(r => setTimeout(r, 50));
+      const nodeEl = document.querySelector(`[data-vm-id=\"${vmA.id}\"]`);
+      const rect = nodeEl.getBoundingClientRect();
+      nodeEl.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: rect.left + 10, clientY: rect.top + 10 }));
+      await new Promise(r => setTimeout(r, 50));
+      const menuItem = document.querySelector('.canvas-context-menu .cmd-context-item[data-key=\"smartCheckNode\"]');
+      const menuItemEnabled = menuItem && !menuItem.classList.contains('disabled');
+      menuItem.click();
+      await new Promise(r => setTimeout(r, 50));
+
+      const title = document.querySelector('.modal-overlay h3')?.textContent || '';
+      const defaults = {
+        byStreamChecked: document.getElementById('scn-by-stream').checked,
+        streamCbCount: document.querySelectorAll('.scn-stream-cb').length,
+        streamCbChecked: document.querySelector('.scn-stream-cb[data-stream=\"S1\"]')?.checked,
+        upstreamChecked: document.getElementById('scn-upstream').checked,
+        downstreamChecked: document.getElementById('scn-downstream').checked,
+        missingConnectorsChecked: document.getElementById('scn-missing-connectors').checked,
+        missingConnectorsAndNodesChecked: document.getElementById('scn-missing-connectors-nodes').checked,
+        levelsRowHidden: document.getElementById('scn-levels-row').classList.contains('hidden'),
+      };
+
+      // Downstream-only, By Stream=S1 (leave default checked), unlimited levels.
+      document.getElementById('scn-upstream').click();
+      document.getElementById('scn-missing-connectors-nodes').click();
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 80));
+
+      const onViewLabels = store.viewMembersForView(view.id).filter(vm => vm.objectType === 'part').map(vm => store.findPart(vm.objectId).label).sort();
+
+      return { noSelectionDialogOpened, menuItemEnabled, title, defaults, onViewLabels };
+    }
+    """)
+    if result["noSelectionDialogOpened"]:
+        return False, f"Advanced > Smart Check Node should refuse (toast, no dialog) with nothing selected: {result}"
+    if not result["menuItemEnabled"]:
+        return False, f"right-click's 'Smart Check Node' item should be enabled for a single selected node: {result}"
+    if result["title"] != "Smart Check Node":
+        return False, f"right-click didn't open the Smart Check Node dialog: {result}"
+    d = result["defaults"]
+    problems = []
+    if not d["byStreamChecked"]: problems.append("'By Stream' should default checked (the node has streams)")
+    if d["streamCbCount"] != 1: problems.append(f"expected exactly 1 stream checkbox (node A only carries 'S1'), got {d['streamCbCount']}")
+    if not d["streamCbChecked"]: problems.append("the 'S1' stream checkbox should default checked")
+    if not d["upstreamChecked"] or not d["downstreamChecked"]: problems.append("both direction checkboxes should default checked")
+    if not d["missingConnectorsChecked"]: problems.append("'Missing connectors' should default checked")
+    if d["missingConnectorsAndNodesChecked"]: problems.append("'Missing connectors and nodes' should default unchecked")
+    if not d["levelsRowHidden"]: problems.append("the Levels row should start hidden (Missing connectors and nodes starts unchecked)")
+    expected = ["RegrSCN_A", "RegrSCN_B", "RegrSCN_C"]
+    if result["onViewLabels"] != expected:
+        problems.append(f"downstream-only + By Stream=S1 should pull in exactly A, B, C (not D — different stream despite B carrying it; not E — untagged edge; not Z — wrong direction), got {result['onViewLabels']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "right-click opened Smart Check Node with correct defaults, and downstream-only + fixed-to-the-original-node's-stream traversal pulled in exactly the reachable same-stream nodes"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
@@ -1876,6 +1979,7 @@ CHECKS = [
     check_remap_options_persist_across_views,
     check_generate_stream_prepopulates_from_existing,
     check_node_size_multiplier,
+    check_smart_check_node,
 ]
 
 

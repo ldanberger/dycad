@@ -4,7 +4,7 @@ import { parseArchimateXml } from './archimate.js';
 import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
-import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection as duplicateSectionCommand, smartCheckView, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames } from './commands.js';
+import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames } from './commands.js';
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
@@ -718,6 +718,8 @@ class App {
       this.promptAddExisting(tab);
     } else if (key === 'populateFromTemplate') {
       this.promptPopulateFromTemplate(tab);
+    } else if (key === 'smartCheckNode') {
+      this.promptSmartCheckNode(tab);
     }
   }
 
@@ -985,6 +987,83 @@ class App {
       }
 
       if (doAutoComplete) { setCachedStreamTemplate(autoCompleteTemplate); this.promptAutoCompleteStreams(tab, autoCompleteTemplate); }
+    });
+  }
+
+  /** Smart Check Node (Advanced menu, and right-click on a single node): the single-node
+   * analog of Smart Check View — same "missing connectors" / "missing connectors and
+   * nodes, N hops" mechanics (see commands.js's smartCheckNode), but starting from just
+   * the one selected node, with two extra filters that only make sense at that scope:
+   * direction (Upstream/Downstream, relative to the selected node) and an optional
+   * Stream filter. The stream checkbox list is built from the selected node's OWN
+   * streams (checked by default) — not every stream in the model — and stays fixed for
+   * the whole run: a newly-discovered node that happens to carry other streams doesn't
+   * widen the search to those. Bespoke modal for the same reason Smart Check View's is:
+   * several rows show/hide based on other checkboxes' state. */
+  promptSmartCheckNode(tab) {
+    if (!tab || tab.type !== 'canvas') { this.toast('Open a view to Smart Check a node first.', true); return; }
+    const selIds = [...tab.selection];
+    if (selIds.length !== 1) { this.toast('Select a single node to Smart Check.', true); return; }
+    const vm = this.store.findViewMember(selIds[0]);
+    if (!vm || vm.objectType !== 'part') { this.toast('Select a single node (not a connector) to Smart Check.', true); return; }
+    const part = this.store.findPart(vm.objectId);
+    if (!part) { this.toast('Selected node not found.', true); return; }
+
+    const nodeStreams = part.streams || [];
+    const hasStreams = nodeStreams.length > 0;
+
+    const root = document.getElementById('modal-root');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal-box';
+    box.innerHTML = `<h3>Smart Check Node</h3>
+      <div style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">Checking "${escapeHtml(part.label)}" (${escapeHtml(part.type)})</div>
+      <div class="prop-row checkbox"><input type="checkbox" id="scn-by-stream" ${hasStreams ? 'checked' : ''} ${hasStreams ? '' : 'disabled'} /><label for="scn-by-stream">By Stream — only follow connectors tagged with the selected stream(s) below${hasStreams ? '' : ' (this node has no streams)'}</label></div>
+      <div id="scn-streams-row" style="margin-left:22px;">${nodeStreams.map((s) => `<div class="prop-row checkbox"><input type="checkbox" class="scn-stream-cb" data-stream="${escapeHtml(s)}" checked /><label>${escapeHtml(s)}</label></div>`).join('')}</div>
+      <div class="prop-row checkbox"><input type="checkbox" id="scn-upstream" checked /><label for="scn-upstream">Upstream — follow connectors into this node</label></div>
+      <div class="prop-row checkbox"><input type="checkbox" id="scn-downstream" checked /><label for="scn-downstream">Downstream — follow connectors out of this node</label></div>
+      <div class="prop-row checkbox"><input type="checkbox" id="scn-missing-connectors" checked /><label for="scn-missing-connectors">Missing connectors — add connectors between nodes already on this view</label></div>
+      <div class="prop-row checkbox"><input type="checkbox" id="scn-missing-connectors-nodes" /><label for="scn-missing-connectors-nodes">Missing connectors and nodes — also pull in connected nodes not yet on this view</label></div>
+      <div class="prop-row" id="scn-levels-row" style="margin-left:22px;"><label>Levels</label><input type="number" id="scn-levels-input" class="tb-select" style="width:60px;" min="0" step="1" value="" placeholder="All" title="How many hops of missing connected nodes to pull in. Blank = unlimited." /></div>
+      <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Check</button></div>`;
+    overlay.appendChild(box);
+    root.appendChild(overlay);
+
+    const byStreamCheckbox = box.querySelector('#scn-by-stream');
+    const streamsRow = box.querySelector('#scn-streams-row');
+    const updateStreamsVisibility = () => streamsRow.classList.toggle('hidden', !byStreamCheckbox.checked);
+    byStreamCheckbox.addEventListener('change', updateStreamsVisibility);
+    updateStreamsVisibility();
+
+    const nodesCheckbox = box.querySelector('#scn-missing-connectors-nodes');
+    const levelsRow = box.querySelector('#scn-levels-row');
+    const updateLevelsVisibility = () => levelsRow.classList.toggle('hidden', !nodesCheckbox.checked);
+    nodesCheckbox.addEventListener('change', updateLevelsVisibility);
+    updateLevelsVisibility();
+
+    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+    box.querySelector('.submit').addEventListener('click', () => {
+      const missingConnectors = box.querySelector('#scn-missing-connectors').checked;
+      const missingConnectorsAndNodes = nodesCheckbox.checked;
+      if (!missingConnectors && !missingConnectorsAndNodes) { this.toast('Nothing selected to check.'); return; }
+      const upstream = box.querySelector('#scn-upstream').checked;
+      const downstream = box.querySelector('#scn-downstream').checked;
+      if (!upstream && !downstream) { this.toast('Select at least one direction (Upstream/Downstream).', true); return; }
+      const byStream = byStreamCheckbox.checked;
+      const streams = [...box.querySelectorAll('.scn-stream-cb')].filter((cb) => cb.checked).map((cb) => cb.dataset.stream);
+      if (byStream && streams.length === 0) { this.toast("Select at least one stream, or uncheck 'By Stream'.", true); return; }
+      const rawLevels = box.querySelector('#scn-levels-input').value.trim();
+      const levels = rawLevels === '' ? null : Math.max(0, Math.floor(Number(rawLevels)) || 0);
+      overlay.remove();
+
+      const result = smartCheckNode(this, tab, part.id, { missingConnectors, missingConnectorsAndNodes, levels, upstream, downstream, byStream, streams });
+      if (!result) { this.toast('Smart Check Node failed — node not found on this view.', true); return; }
+      this.recordAndRender();
+      const parts = [];
+      if (result.connectorsAdded) parts.push(`${result.connectorsAdded} connector${result.connectorsAdded === 1 ? '' : 's'}`);
+      if (result.nodesAdded) parts.push(`${result.nodesAdded} node${result.nodesAdded === 1 ? '' : 's'}`);
+      this.toast(parts.length ? `Smart Check Node added ${parts.join(' and ')}.` : 'Smart Check Node found nothing missing.');
     });
   }
 
@@ -2895,6 +2974,7 @@ function wireGlobalEvents(app) {
     { label: 'Generate Inventory View', action: 'generateInventoryView' },
     { label: 'Generate Industry', action: 'generateIndustry' },
     { label: 'Smart Check View', action: 'smartCheckView' },
+    { label: 'Smart Check Node', action: 'smartCheckNode' },
   ];
   const advancedMenu = document.getElementById('advanced-menu');
   advancedMenu.innerHTML = ADVANCED_LINKS.map((l) => l.separator ? '<div class="dd-separator"></div>' : `<div class="dd-item" data-url="${l.url || ''}" data-action="${l.action || ''}">${l.label}</div>`).join('');
@@ -2906,6 +2986,8 @@ function wireGlobalEvents(app) {
         app.promptGenerateIndustry();
       } else if (item.dataset.action === 'smartCheckView') {
         app.promptSmartCheckView();
+      } else if (item.dataset.action === 'smartCheckNode') {
+        app.promptSmartCheckNode(app.store.activeTab());
       } else if (item.dataset.url) {
         window.open(item.dataset.url, '_blank', 'noopener');
       }
