@@ -1515,4 +1515,30 @@
 // clustering, a master cube-order fallback list, zoom-to-2D-detail, live simulation
 // overlay) recorded in DESIGN_DOCUMENT.md §9 so it doesn't need re-deriving later. Full
 // suite 41/41.
-export const APP_VERSION = '0.804';
+// 0.805: New top-level "Explore" menu (index.html, after Simulation) — for alternate,
+// whole-model visualizations, distinct from Catalogs' per-entity tables and Advanced's
+// one-shot commands. Moved 3D View there from Catalogs (its first and, for now, only
+// item). check_view3d_boots and the docs updated for the new menu location.
+// 0.806: Stage 1 of the 3D View (Explore menu): real data. Parts are grouped into one
+// THREE.InstancedMesh per element type (instancing from the start, not retrofitted
+// later), layered in Z by element group first (each group's first-seen position while
+// walking the active stream template's value[] — Enterprise's own chain visits General,
+// then Business, then Application, then Data, in that order; a group the template never
+// mentions is appended afterward in elementGroups' own declared order), then by type
+// within that group (the template's own value[] position, falling back to tkDisplayOrder
+// for a type outside it — Stage 3 will give that fallback case a real order). Reuses the
+// existing Stream/Type filters and element-group fill colors unchanged — main.js's
+// filter-menu handlers now branch on tab.type === '3d' to source their available-options
+// list from store.doc.parts directly (the whole model) instead of one view's
+// viewMembers, and the toolbar enables both filter buttons for this tab type too.
+// syncSceneData skips rebuilding entirely when a cheap signature (part ids, active
+// filters, stream-template preference, theme) hasn't changed since the last sync, so the
+// frequent app.render() calls that fire on nearly every store mutation don't pay for a
+// full InstancedMesh rebuild when nothing relevant changed — verified this actually
+// works (and that the layer ordering is actually correct) via a new permanent check,
+// each assertion confirmed to catch its own deliberately-reintroduced regression before
+// being trusted. Verified at real scale: 22,399 parts / 60,530 connectors generated and
+// rendered with zero console errors, nearly-instant no-op re-syncs (~7ms). Also: new
+// top-level Explore menu (after Simulation) — 3D View moved there from Catalogs, its
+// first and, for now, only item. Full suite 42/42.
+export const APP_VERSION = '0.806';

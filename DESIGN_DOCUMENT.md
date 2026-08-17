@@ -301,17 +301,30 @@ subsequent calls; `disposeView3D(tabId)` (called from `App.closeTab`) tears the 
 context and animation loop down explicitly, since browsers cap how many live contexts a
 page may hold.
 
-Staged build-out (Stage 0 shipped; this is the plan for what's still ahead, kept here so
-a future session doesn't have to re-derive it from scratch):
+Staged build-out (Stages 0-1 shipped; this is the plan for what's still ahead, kept here
+so a future session doesn't have to re-derive it from scratch):
 
 - **Stage 0 (done)** — plumbing only: persistent per-tab renderer/camera/`OrbitControls`,
   a placeholder cube, proof the vendored library loads and renders cleanly.
-- **Stage 1** — real data: group parts by element group (broad layer) then type (finer
-  sub-layer) within it, ordered by a stream template's `value[]`; render with
-  `THREE.InstancedMesh` from the start (not retrofitted later — the app needs to handle
-  thousands of parts, and switching a mesh-per-part scene to instancing after the fact
-  would mean redoing the renderer). Reuses the existing Stream/Type filters
-  (`passesStreamFilter`/`passesElementTypeFilter`) and element-group fill colors as-is.
+- **Stage 1 (done)** — real data: parts grouped into one `THREE.InstancedMesh` per
+  element TYPE (instancing from the start, not retrofitted later — verified at 22K real
+  parts/60K connectors with no console errors and near-instant no-op re-syncs), layered
+  in Z by element GROUP first (`resolveLayerOrder`'s `groupOrder`, each group's
+  first-seen position while walking the active stream template's `value[]`, a group the
+  template never mentions appended afterward in `elementGroups`' own declared order),
+  then by TYPE within that group (the template's own `value[]` position, falling back to
+  `tkDisplayOrder` for a type outside it — Stage 3 gives that fallback case a real order).
+  `syncSceneData` skips the rebuild entirely when a cheap signature (part ids, active
+  filters, stream-template preference, theme) hasn't changed since the last sync, so the
+  frequent `app.render()` calls that fire on nearly every store mutation don't pay for a
+  full InstancedMesh rebuild when nothing relevant changed. The Stream/Type filters
+  (`passesStreamFilter`/`passesElementTypeFilter`) and element-group fill colors
+  (`groupFill`) are reused unchanged — reading from `store.doc.parts` directly rather
+  than any one view's viewMembers, since main.js's filter-menu handlers now branch on
+  `tab.type === '3d'` to source their available-options list from the whole model
+  instead. `getDebugSceneInfo(tabId)` (view3d.js) exposes the real scene state
+  (per-type instance counts, Z position, mesh identity) for the regression suite to
+  assert on directly, the same "no mocks, genuine state" testing philosophy §10 describes.
 - **Stage 2** — connector lines between resolved positions; cluster parts within a
   layer by `section` first, then by shared stream, so a stream's chain visually clumps
   even across group/type layers.

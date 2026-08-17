@@ -1795,7 +1795,7 @@ def check_smart_check_node(page):
 
 
 def check_view3d_boots(page):
-    """Regression guard for the 3D View tab (Stage 0 plumbing): Catalogs > 3D View opens
+    """Regression guard for the 3D View tab (Stage 0 plumbing): Explore > 3D View opens
     a singleton tab, lazy-loads the vendored Three.js/OrbitControls (js/vendor/) without
     any console error, and renders a real <canvas> with nonzero size — not stuck behind
     the "Loading 3D view..." placeholder (a real bug found while building this: the
@@ -1810,9 +1810,9 @@ def check_view3d_boots(page):
     page.goto(f"http://localhost:{PORT}/index.html")
     page.wait_for_timeout(800)
 
-    page.click("#catalogs-menu-btn")
-    menu_has_item = js(page, "async () => !!document.querySelector('#catalogs-menu .dd-item[data-action=\"view3d\"]')")
-    page.click('#catalogs-menu .dd-item[data-action="view3d"]')
+    page.click("#explore-menu-btn")
+    menu_has_item = js(page, "async () => !!document.querySelector('#explore-menu .dd-item[data-action=\"view3d\"]')")
+    page.click('#explore-menu .dd-item[data-action="view3d"]')
     try:
         page.wait_for_function("!!document.querySelector('.page-view.active canvas')", timeout=5000)
     except Exception:
@@ -1857,7 +1857,7 @@ def check_view3d_boots(page):
     """)
 
     if not menu_has_item:
-        return False, "Catalogs menu is missing the '3D View' item"
+        return False, "Explore menu is missing the '3D View' item"
     if logs:
         return False, f"console errors opening the 3D View tab: {logs}"
     if not first["canvasFound"]:
@@ -1873,6 +1873,94 @@ def check_view3d_boots(page):
     if second["tabCount"] != 1:
         return False, f"closing and reopening should still result in exactly one 3D tab (singleton), got {second['tabCount']}"
     return True, f"3D View opened as a singleton tab, lazy-loaded cleanly with no console errors, rendered a real {first['canvasWidth']}x{first['canvasHeight']} canvas, and survived a close/reopen cycle"
+
+
+def check_view3d_layers_and_filters(page):
+    """Regression guard for 3D View Stage 1 (real data): parts are grouped into one
+    InstancedMesh per element TYPE, layered in Z by element GROUP order (General, then
+    Business, then Application, then Data — the Enterprise template's own value[] group
+    order), reads the actual Three.js scene via view3d.js's getDebugSceneInfo (genuine
+    internal state, not a screenshot guess). Also confirms the Stream/Type filters — now
+    wired up for the 3D tab in main.js's filter-menu handlers, previously canvas-tab-only
+    — actually reach the 3D scene, and that re-rendering with nothing changed reuses the
+    same InstancedMesh objects (the signature-based skip in syncSceneData) rather than
+    rebuilding them every single app.render() call, which fires on nearly every store
+    mutation."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      const mk = (type, streams) => store.createPart({ type, label: type, model: store.defaultModel, streams: streams || [] });
+      for (let i = 0; i < 3; i++) mk('GeneralActor');
+      for (let i = 0; i < 2; i++) mk('BusinessCapability');
+      for (let i = 0; i < 5; i++) mk('ApplicationCapability', i < 2 ? ['S1'] : []);
+      mk('DataDataEntity', ['S1']);
+
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 200));
+
+      const initial = view3d.getDebugSceneInfo(tab.id);
+
+      // stream filter: only ApplicationCapability(x2)+DataDataEntity(x1) carry S1
+      tab.activeStreams = ['S1'];
+      app.render();
+      await new Promise(r => setTimeout(r, 100));
+      const streamFiltered = view3d.getDebugSceneInfo(tab.id);
+
+      // clear stream filter, apply type filter instead
+      tab.activeStreams = [];
+      tab.activeElementTypes = ['BusinessCapability'];
+      app.render();
+      await new Promise(r => setTimeout(r, 100));
+      const typeFiltered = view3d.getDebugSceneInfo(tab.id);
+
+      // back to unfiltered, capture a mesh identity, re-render with nothing changed
+      tab.activeElementTypes = null;
+      app.render();
+      await new Promise(r => setTimeout(r, 100));
+      const beforeNoopUuid = view3d.getDebugSceneInfo(tab.id).types['GeneralActor'].meshUuid;
+      app.render();
+      await new Promise(r => setTimeout(r, 100));
+      const afterNoopUuid = view3d.getDebugSceneInfo(tab.id).types['GeneralActor'].meshUuid;
+
+      // a REAL change (new part of an already-present type) should be picked up
+      mk('GeneralActor');
+      app.render();
+      await new Promise(r => setTimeout(r, 100));
+      const afterRealChange = view3d.getDebugSceneInfo(tab.id);
+
+      return { initial, streamFiltered, typeFiltered, beforeNoopUuid, afterNoopUuid, afterRealChange };
+    }
+    """)
+    i = result["initial"]
+    problems = []
+    if i["meshCount"] != 4:
+        problems.append(f"expected 4 InstancedMeshes (one per distinct type present), got {i['meshCount']}: {i['types']}")
+    else:
+        for type_, count in [("GeneralActor", 3), ("BusinessCapability", 2), ("ApplicationCapability", 5), ("DataDataEntity", 1)]:
+            if i["types"].get(type_, {}).get("count") != count:
+                problems.append(f"expected {count} instances of {type_}, got {i['types'].get(type_)}")
+        z_general = i["types"]["GeneralActor"]["z"]
+        z_business = i["types"]["BusinessCapability"]["z"]
+        z_application = i["types"]["ApplicationCapability"]["z"]
+        z_data = i["types"]["DataDataEntity"]["z"]
+        if not (z_general < z_business < z_application < z_data):
+            problems.append(f"expected layer Z order General < Business < Application < Data, got {z_general}, {z_business}, {z_application}, {z_data}")
+    sf = result["streamFiltered"]
+    if sf["meshCount"] != 2 or sf["types"].get("ApplicationCapability", {}).get("count") != 2 or sf["types"].get("DataDataEntity", {}).get("count") != 1:
+        problems.append(f"Stream filter ['S1'] should leave only 2 ApplicationCapability + 1 DataDataEntity, got {sf}")
+    tf = result["typeFiltered"]
+    if tf["meshCount"] != 1 or tf["types"].get("BusinessCapability", {}).get("count") != 2:
+        problems.append(f"Type filter ['BusinessCapability'] should leave only that type (2 instances), got {tf}")
+    if result["beforeNoopUuid"] != result["afterNoopUuid"]:
+        problems.append("re-rendering with nothing changed should reuse the same InstancedMesh (signature-based skip), got a different mesh uuid — rebuilding on every render() would be wasteful at real scale")
+    arc = result["afterRealChange"]
+    if arc["types"].get("GeneralActor", {}).get("count") != 4:
+        problems.append(f"adding a new GeneralActor part should bring its count to 4 after the next render(), got {arc['types'].get('GeneralActor')}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "parts grouped into one InstancedMesh per type, layered in the correct General/Business/Application/Data Z order, Stream and Type filters both reach the 3D scene, and an unchanged re-render reuses the same mesh instead of rebuilding it"
 
 
 def check_load_sfcce(page):
@@ -2062,6 +2150,7 @@ CHECKS = [
     check_node_size_multiplier,
     check_smart_check_node,
     check_view3d_boots,
+    check_view3d_layers_and_filters,
 ]
 
 

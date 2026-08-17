@@ -2,15 +2,19 @@
 // connectors data every other view reads (never viewMembers or views — this is a
 // data-level visualization, not another placement of the 2D canvas's own nodes).
 //
-// Stage 0 (current): plumbing only — persistent per-tab renderer/scene/camera/controls,
-// a placeholder cube, proof the vendored Three.js loads and renders. Later stages layer
-// in: real part/connector data (grouped by element group, then type, ordered by a
-// stream template's value[] — InstancedMesh from the start, since this needs to handle
-// thousands of parts and retrofitting instancing after building one-mesh-per-part would
-// mean redoing the renderer), section/stream clustering, a master cube order for
-// elements outside any template's value[], zoom-to-2D-detail (jumps to the matching
-// canvas tab past a threshold, not a seamless morph — see this feature's own design
-// notes), and a live simulation-value overlay (current tick only, no history scrubbing).
+// Stage 0 (done): plumbing only — persistent per-tab renderer/scene/camera/controls,
+// proof the vendored Three.js loads and renders cleanly.
+// Stage 1 (current): real data — parts grouped by element group (broad Z-slab), then by
+// type within that group (finer sub-layer), ordered by a stream template's value[] (see
+// resolveLayerOrder below); rendered via THREE.InstancedMesh from the start (not
+// retrofitted later — this needs to handle thousands of parts, and switching a
+// mesh-per-part scene to instancing after the fact would mean redoing the renderer).
+// Reuses the existing Stream/Type filters (passesStreamFilter/passesElementTypeFilter,
+// now wired up for this tab type too in main.js's filter-menu handlers) and element-group
+// fill colors (groupFill) unchanged.
+// Still ahead: connector lines + section/stream clustering (Stage 2), a master cube-order
+// fallback list for types outside any template's value[] (Stage 3), zoom-to-2D-detail
+// (Stage 4), and a live simulation-value overlay (Stage 5). Full plan: DESIGN_DOCUMENT.md §9.
 //
 // Deliberately the ONLY module that imports the vendored Three.js/OrbitControls — every
 // other module stays free of a 3D dependency, and canvas.js only ever reaches this file
@@ -18,9 +22,19 @@
 // library never loads unless someone actually opens the 3D tab.
 import * as THREE from './vendor/three.module.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
+import { ciEq } from './state.js';
+import { elementByType } from './rules.js';
+import { groupFill } from './render.js';
+import { passesStreamFilter, passesElementTypeFilter } from './canvas.js';
 
-// tab.id -> { renderer, scene, camera, controls, container, resizeObserver, animId }
+// tab.id -> { renderer, scene, camera, controls, container, resizeObserver, animId,
+//             typeMeshes: Map<type, InstancedMesh>, hasFramedOnce, lastSignature }
 const instances = new Map();
+
+const NODE_SIZE = 0.9;          // box geometry edge length
+const NODE_SPACING = 1.4;       // gap between adjacent instances within one type's grid
+const TYPE_LAYER_GAP = 1.6;     // Z distance between consecutive type sub-layers
+const GROUP_LAYER_GAP = 1.2;    // EXTRA Z gap inserted at each element-group boundary
 
 function themeBackgroundColor() {
   // Reads the app's own CSS custom property so the 3D scene's background matches
@@ -30,12 +44,60 @@ function themeBackgroundColor() {
   return raw || '#e8e8e8';
 }
 
+/** The "last used" Stream Template preference (see main.js's getCachedStreamTemplate) —
+ * read directly from its localStorage cache here rather than imported from main.js,
+ * since main.js sits at the TOP of this app's dependency graph (nothing imports it; see
+ * DESIGN_DOCUMENT.md §3) and importing it here would invert that. Same key, same shape,
+ * deliberately duplicated in miniature rather than restructuring the module graph for a
+ * four-line read. */
+function preferredStreamTemplateName() {
+  try {
+    const cached = JSON.parse(localStorage.getItem('dycad-local-settings-cache') || '{}');
+    return typeof cached.streamTemplate === 'string' && cached.streamTemplate ? cached.streamTemplate : null;
+  } catch { return null; }
+}
+
+/**
+ * Decides layer order: which element GROUPS come first (broad Z-slabs) and which TYPES
+ * come first within a group (finer sub-layers) — both driven by the current stream
+ * template's value[] order, same "last used" default Generate Stream/Remap/Smart Check
+ * View already share. Group order is each group's first-seen position while walking the
+ * template's value[] (e.g. Enterprise's chain visits General, then Business, then
+ * Application, then Data, in that order); a group the template never mentions is
+ * appended afterward in custom.json's own elementGroups declaration order (the same
+ * order the toolbox sidebar's group chips already use). Type order within a group
+ * follows the SAME template value[] position when the type is in it; a type that isn't
+ * falls back to its toolbox tkDisplayOrder — the Stage 1 fallback. (Stage 3's master
+ * cube-order list will give that fallback case a real, hand-authored order instead.)
+ */
+function resolveLayerOrder(store) {
+  const templates = store.settings.streamTemplates || [];
+  const preferredName = preferredStreamTemplateName();
+  const template = (preferredName && templates.find((t) => ciEq(t.name, preferredName)))
+    || templates.find((t) => ciEq(t.name, 'Enterprise'))
+    || templates[0]
+    || null;
+  const templateValue = template?.value || [];
+
+  const groupOrder = [];
+  for (const type of templateValue) {
+    const el = elementByType(store, type);
+    if (el && !groupOrder.includes(el.group)) groupOrder.push(el.group);
+  }
+  for (const g of store.settings.elementGroups || []) {
+    if (!groupOrder.includes(g.group)) groupOrder.push(g.group);
+  }
+
+  const templateTypeOrder = new Map(templateValue.map((t, i) => [String(t).toLowerCase(), i]));
+  return { template, groupOrder, templateTypeOrder };
+}
+
 function createInstance(app, tab, container) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(themeBackgroundColor());
 
   const width = container.clientWidth || 1, height = container.clientHeight || 1;
-  const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 5000);
+  const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 20000);
   camera.position.set(6, 6, 10);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -53,14 +115,6 @@ function createInstance(app, tab, container) {
   dirLight.position.set(5, 10, 7);
   scene.add(dirLight);
 
-  // Stage 0 placeholder — proves the vendored library loads and renders correctly.
-  // Removed the moment Stage 1 populates the scene from real part/connector data.
-  const placeholder = new THREE.Mesh(
-    new THREE.BoxGeometry(2, 2, 2),
-    new THREE.MeshStandardMaterial({ color: 0x3b5bfd }),
-  );
-  scene.add(placeholder);
-
   let animId = null;
   const animate = () => {
     animId = requestAnimationFrame(animate);
@@ -77,7 +131,10 @@ function createInstance(app, tab, container) {
   });
   resizeObserver.observe(container);
 
-  return { renderer, scene, camera, controls, container, resizeObserver, animId, placeholder };
+  return {
+    renderer, scene, camera, controls, container, resizeObserver, animId,
+    typeMeshes: new Map(), hasFramedOnce: false, lastSignature: null,
+  };
 }
 
 function disposeInstance(inst) {
@@ -95,6 +152,113 @@ function disposeInstance(inst) {
   if (inst.renderer.domElement.parentNode) inst.renderer.domElement.parentNode.removeChild(inst.renderer.domElement);
 }
 
+/** Cheap "did anything this sync depends on actually change" check, so re-rendering the
+ * whole app (which happens on nearly every store mutation) doesn't rebuild every
+ * InstancedMesh from scratch each time — only when the filtered part set, the stream
+ * template preference, or the theme could plausibly have changed. Not a full diff (still
+ * a full rebuild when it DOES decide something changed), just a skip for the common case
+ * of "something unrelated changed and we re-rendered anyway". */
+function computeSignature(app, tab) {
+  const { store } = app;
+  return JSON.stringify([
+    store.doc.parts.length,
+    store.doc.parts.map((p) => p.id).join(','), // catches add/remove without a length change (rare) cheaply enough at realistic scale
+    tab.activeStreams,
+    tab.activeElementTypes,
+    preferredStreamTemplateName(),
+    document.body.dataset.theme,
+  ]);
+}
+
+function syncSceneData(app, tab, inst) {
+  const { store } = app;
+  const signature = computeSignature(app, tab);
+  if (signature === inst.lastSignature) return;
+  inst.lastSignature = signature;
+
+  for (const mesh of inst.typeMeshes.values()) {
+    inst.scene.remove(mesh);
+    mesh.geometry.dispose();
+    mesh.material.dispose();
+  }
+  inst.typeMeshes.clear();
+  inst.scene.background = new THREE.Color(themeBackgroundColor());
+
+  const parts = store.doc.parts.filter((p) => passesStreamFilter(tab, p.streams) && passesElementTypeFilter(tab, p.type));
+  if (parts.length === 0) return;
+
+  const { groupOrder, templateTypeOrder } = resolveLayerOrder(store);
+
+  const byType = new Map();
+  for (const p of parts) {
+    if (!byType.has(p.type)) byType.set(p.type, []);
+    byType.get(p.type).push(p);
+  }
+
+  const typeEntries = [...byType.keys()].map((type) => {
+    const el = elementByType(store, type);
+    const groupIdx = groupOrder.indexOf(el?.group);
+    return {
+      type, el,
+      groupIdx: groupIdx === -1 ? groupOrder.length : groupIdx,
+      templateIdx: templateTypeOrder.has(type.toLowerCase()) ? templateTypeOrder.get(type.toLowerCase()) : Infinity,
+      tkOrder: el?.tkDisplayOrder ?? 999,
+    };
+  });
+  typeEntries.sort((a, b) => (a.groupIdx - b.groupIdx) || (a.templateIdx - b.templateIdx) || (a.tkOrder - b.tkOrder) || a.type.localeCompare(b.type));
+
+  let z = 0;
+  let prevGroupIdx = null;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  const matrix = new THREE.Matrix4();
+
+  for (const entry of typeEntries) {
+    if (prevGroupIdx !== null && entry.groupIdx !== prevGroupIdx) z += GROUP_LAYER_GAP;
+    prevGroupIdx = entry.groupIdx;
+
+    const typeParts = byType.get(entry.type);
+    const count = typeParts.length;
+    const color = new THREE.Color(groupFill(app, entry.el));
+    const geometry = new THREE.BoxGeometry(NODE_SIZE, NODE_SIZE, NODE_SIZE);
+    const material = new THREE.MeshStandardMaterial({ color });
+    const mesh = new THREE.InstancedMesh(geometry, material, count);
+    mesh.userData.type = entry.type;
+    mesh.userData.group = entry.el?.group;
+    mesh.userData.z = z;
+    mesh.userData.partIds = typeParts.map((p) => p.id);
+
+    const cols = Math.ceil(Math.sqrt(count));
+    const rows = Math.ceil(count / cols);
+    typeParts.forEach((p, i) => {
+      const col = i % cols, row = Math.floor(i / cols);
+      const x = (col - (cols - 1) / 2) * NODE_SPACING;
+      const y = (row - (rows - 1) / 2) * NODE_SPACING;
+      matrix.setPosition(x, y, z);
+      mesh.setMatrixAt(i, matrix);
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+
+    inst.scene.add(mesh);
+    inst.typeMeshes.set(entry.type, mesh);
+    z += TYPE_LAYER_GAP;
+  }
+
+  // Frame the camera to the data's actual extent — only the FIRST time this tab gets
+  // real data, so re-syncs after that (a filter change, a new part) don't yank the view
+  // out from under someone who's already navigating.
+  if (!inst.hasFramedOnce) {
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = z / 2;
+    const radius = Math.max(maxX - minX, maxY - minY, z, NODE_SPACING * 4) / 2;
+    inst.controls.target.set(cx, cy, cz);
+    inst.camera.position.set(cx + radius * 1.6, cy + radius * 1.6, cz + radius * 2.2);
+    inst.camera.far = Math.max(20000, radius * 20);
+    inst.camera.updateProjectionMatrix();
+    inst.hasFramedOnce = true;
+  }
+}
+
 /**
  * Entry point canvas.js calls on every render() while a 3D tab is active. Creates the
  * persistent renderer/scene/camera/controls the FIRST time this tab is seen, then only
@@ -109,8 +273,7 @@ function renderView3D(app, tab, container) {
     inst = createInstance(app, tab, container);
     instances.set(tab.id, inst);
   }
-  // Stage 0 has no real data to sync yet; later stages update instanced mesh
-  // transforms/colors here from store.doc.parts/connectors.
+  syncSceneData(app, tab, inst);
 }
 
 /** Called from App.closeTab (main.js, via canvas.js's disposeView3DTab) so a closed 3D
@@ -123,4 +286,19 @@ function disposeView3D(tabId) {
   instances.delete(tabId);
 }
 
-export { renderView3D, disposeView3D };
+/** Read-only introspection of a 3D tab's actual current scene contents — for the
+ * regression suite to assert on genuine internal state (per-type instance counts, Z
+ * layer position, mesh identity) rather than only what a screenshot happens to show.
+ * Not used by the app itself; a legitimate small hook in the same spirit as
+ * window.dycadApp being exposed as a debugging aid (see main.js's bootstrapApp). */
+function getDebugSceneInfo(tabId) {
+  const inst = instances.get(tabId);
+  if (!inst) return null;
+  const types = {};
+  for (const [type, mesh] of inst.typeMeshes) {
+    types[type] = { count: mesh.count, z: mesh.userData.z, group: mesh.userData.group, meshUuid: mesh.uuid };
+  }
+  return { types, meshCount: inst.typeMeshes.size, hasFramedOnce: inst.hasFramedOnce };
+}
+
+export { renderView3D, disposeView3D, getDebugSceneInfo };

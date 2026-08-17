@@ -3050,23 +3050,36 @@ function wireGlobalEvents(app) {
   ];
   const catalogsMenu = document.getElementById('catalogs-menu');
   catalogsMenu.innerHTML = CATALOGS.map((c) => `<div class="dd-item" data-type="${c.type}" data-label="${c.label}">${c.label}</div>`).join('')
-    + '<div class="dd-separator"></div><div class="dd-item" data-action="sfce">SFCCE</div>'
-    + '<div class="dd-item" data-action="view3d">3D View</div>';
+    + '<div class="dd-separator"></div><div class="dd-item" data-action="sfce">SFCCE</div>';
   catalogsMenu.querySelectorAll('.dd-item').forEach((item) => {
     item.addEventListener('click', () => {
       if (item.dataset.action === 'sfce') { app.promptSfceCatalog(); catalogsMenu.classList.add('hidden'); return; }
-      if (item.dataset.action === 'view3d') { app.openOrSwitch3DView(); catalogsMenu.classList.add('hidden'); return; }
       app.openOrSwitchCatalog(item.dataset.type, `${item.dataset.label} Catalog`);
       catalogsMenu.classList.add('hidden');
     });
   });
 
-  // ===== Shared open/close wiring for all four top-row dropdown menus =====
+  // ===== Explore menu (alternate, whole-model visualizations — currently just the 3D
+  // View; distinct from Catalogs' per-entity tables and Advanced's one-shot commands) =====
+  const EXPLORE_LINKS = [
+    { label: '3D View', action: 'view3d' },
+  ];
+  const exploreMenu = document.getElementById('explore-menu');
+  exploreMenu.innerHTML = EXPLORE_LINKS.map((l) => `<div class="dd-item" data-action="${l.action}">${l.label}</div>`).join('');
+  exploreMenu.querySelectorAll('.dd-item').forEach((item) => {
+    item.addEventListener('click', () => {
+      if (item.dataset.action === 'view3d') app.openOrSwitch3DView();
+      exploreMenu.classList.add('hidden');
+    });
+  });
+
+  // ===== Shared open/close wiring for all top-row dropdown menus =====
   const MENU_PAIRS = [
     ['file-menu-btn', fileMenu],
     ['catalogs-menu-btn', catalogsMenu],
     ['advanced-menu-btn', advancedMenu],
     ['simulation-menu-btn', simulationMenu],
+    ['explore-menu-btn', exploreMenu],
   ];
   MENU_PAIRS.forEach(([btnId, menu]) => {
     document.getElementById(btnId).addEventListener('click', (e) => {
@@ -3126,20 +3139,30 @@ function wireGlobalEvents(app) {
     e.stopPropagation();
     const menu = document.getElementById('stream-filter-menu');
     const tab = store.activeTab();
-    if (!tab || tab.type !== 'canvas') return;
+    if (!tab || (tab.type !== 'canvas' && tab.type !== '3d')) return;
+    const is3D = tab.type === '3d';
     const availableStreams = new Set();
-    for (const vm of store.viewMembersForView(tab.viewId)) {
-      const obj = vm.objectType === 'part' ? store.findPart(vm.objectId) : store.findConnector(vm.objectId);
-      for (const s of obj?.streams || []) availableStreams.add(s);
+    if (is3D) {
+      // The 3D view represents the whole model's parts/connectors directly, not any one
+      // view's viewMembers — so its filter options come from the raw data, not a view.
+      for (const p of store.doc.parts) for (const s of p.streams || []) availableStreams.add(s);
+      for (const c of store.doc.connectors) for (const s of c.streams || []) availableStreams.add(s);
+    } else {
+      for (const vm of store.viewMembersForView(tab.viewId)) {
+        const obj = vm.objectType === 'part' ? store.findPart(vm.objectId) : store.findConnector(vm.objectId);
+        for (const s of obj?.streams || []) availableStreams.add(s);
+      }
     }
     const sorted = [...availableStreams].sort();
     menu.innerHTML = sorted.length
       ? sorted.map((s) => `<div class="dd-item"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" value="${escapeHtml(s)}" ${tab.activeStreams.includes(s) ? 'checked' : ''} />${escapeHtml(s)}</label></div>`).join('')
-      : '<div class="dd-empty">No streams in this view</div>';
+      : `<div class="dd-empty">No streams in ${is3D ? 'the model' : 'this view'}</div>`;
     menu.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
       cb.addEventListener('change', () => {
         tab.activeStreams = [...menu.querySelectorAll('input[type="checkbox"]:checked')].map((c) => c.value);
-        if (tab.activeStreams.length > 0) {
+        // The auto-select-matching-nodes side effect only makes sense for a canvas tab's
+        // own viewMember-backed selection — the 3D tab has no such selection concept yet.
+        if (!is3D && tab.activeStreams.length > 0) {
           tab.selection.clear();
           for (const vm of store.viewMembersForView(tab.viewId)) {
             const obj = vm.objectType === 'part' ? store.findPart(vm.objectId) : store.findConnector(vm.objectId);
@@ -3163,13 +3186,19 @@ function wireGlobalEvents(app) {
     e.stopPropagation();
     const menu = document.getElementById('element-type-filter-menu');
     const tab = store.activeTab();
-    if (!tab || tab.type !== 'canvas') return;
+    if (!tab || (tab.type !== 'canvas' && tab.type !== '3d')) return;
+    const is3D = tab.type === '3d';
 
     const availableTypes = new Set();
-    for (const vm of store.viewMembersForView(tab.viewId)) {
-      if (vm.objectType !== 'part') continue;
-      const part = store.findPart(vm.objectId);
-      if (part) availableTypes.add(part.type);
+    if (is3D) {
+      // Same reasoning as the stream filter above — the whole model's parts, not one view's.
+      for (const p of store.doc.parts) availableTypes.add(p.type);
+    } else {
+      for (const vm of store.viewMembersForView(tab.viewId)) {
+        if (vm.objectType !== 'part') continue;
+        const part = store.findPart(vm.objectId);
+        if (part) availableTypes.add(part.type);
+      }
     }
     // display title (falling back to the raw type if undefined), sorted by that title
     const items = [...availableTypes].map((type) => {
@@ -3185,7 +3214,7 @@ function wireGlobalEvents(app) {
     const allChecked = items.length > 0 && items.every((i) => checkedTypes.has(i.type));
 
     if (items.length === 0) {
-      menu.innerHTML = '<div class="dd-empty">No elements in this view</div>';
+      menu.innerHTML = `<div class="dd-empty">No elements in ${is3D ? 'the model' : 'this view'}</div>`;
     } else {
       menu.innerHTML = `
         <div class="dd-item dd-select-all">

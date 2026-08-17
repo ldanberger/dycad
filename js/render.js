@@ -100,13 +100,22 @@ function renderToolbar(app) {
   viewSel.innerHTML = store.doc.views.map((v) => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.viewName)}</option>`).join('');
   viewSel.value = store.currentView || '';
 
+  // Stream/Type filters apply to canvas AND 3d tabs (3d reads store.doc.parts directly,
+  // not any one view's viewMembers, but the same tab.activeStreams/activeElementTypes
+  // fields already exist on every tab type — see the filter-menu click handlers below
+  // for the two tab types' different available-options sourcing). Connector Levels stays
+  // canvas-only below — it expands via THIS view's own viewMember-connectors, a concept
+  // the 3D scene (parts/connectors directly, Stage 1 draws no connectors yet) doesn't
+  // share the same way.
+  const filtersApply = !!(tab && (tab.type === 'canvas' || tab.type === '3d'));
+
   const streamBtn = document.getElementById('stream-filter-btn');
-  const activeStreams = tab && tab.type === 'canvas' ? (tab.activeStreams || []) : [];
+  const activeStreams = filtersApply ? (tab.activeStreams || []) : [];
   streamBtn.textContent = activeStreams.length === 0 ? 'All streams' : activeStreams.length === 1 ? activeStreams[0] : `${activeStreams.length} streams`;
-  streamBtn.disabled = !(tab && tab.type === 'canvas');
+  streamBtn.disabled = !filtersApply;
 
   const typeBtn = document.getElementById('element-type-filter-btn');
-  const rawActiveTypes = tab && tab.type === 'canvas' ? tab.activeElementTypes : null;
+  const rawActiveTypes = filtersApply ? tab.activeElementTypes : null;
   if (rawActiveTypes == null) {
     typeBtn.textContent = 'All types';
   } else if (rawActiveTypes.length === 0) {
@@ -117,7 +126,7 @@ function renderToolbar(app) {
   } else {
     typeBtn.textContent = `${rawActiveTypes.length} types`;
   }
-  typeBtn.disabled = !(tab && tab.type === 'canvas');
+  typeBtn.disabled = !filtersApply;
 
   const levelsInput = document.getElementById('connector-levels-input');
   if (document.activeElement !== levelsInput) { // don't clobber the value while the user is actively typing in it
