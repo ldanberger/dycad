@@ -1,42 +1,63 @@
-// sfce.js — Load SFCE: import an arbitrary JSON file as an alternate industry
-// collection (Section/Function/Capability/Entity) for use by Advanced > Generate
-// Industry. Pure logic only, no DOM — the modal wizard in main.js drives this.
+// sfce.js — Load SFCCE: import an arbitrary JSON file as an alternate industry
+// collection (Section / Function / Capability / Sub-Capability / Entity) for use by
+// Advanced > Generate Industry. Pure logic only, no DOM — the modal wizard in main.js
+// drives this. Originally two separate features (Load SFCE: Section/Function/Capability/
+// Entity, and a later Load Capability Map: Section/Function/Business Capability/
+// Application Capability), combined into one because they were almost the same wizard
+// with one extra level — see buildRowsFromRecords' own comment for how the extra level
+// is made optional via cascade rather than requiring two different code paths.
 //
-// Output shape (stored into store.industryData[industryName]) extends the existing
-// fce-generalnodes.json tree by one field: each Function-level node now carries a
-// nodeSection. That's the "addition of a 'section' identifier" this feature adds to
-// the pre-existing Function -> Capability -> Entity shape:
+// Output shape (stored into store.industryData[industryName]) is a 4-level tree —
+// BusinessFunction (carrying nodeSection) -> BusinessCapability -> ApplicationCapability
+// -> DataDataEntity:
 //   [{ nodeElementType:'BusinessFunction', nodeName, nodeId, nodeDescription, nodeSection,
 //      nodeChildren:[{ nodeElementType:'BusinessCapability', nodeName, nodeId, nodeDescription,
-//        nodeChildren:[{ nodeElementType:'DataDataEntity', nodeName, nodeId, nodeDescription }] }] }]
+//        nodeChildren:[{ nodeElementType:'ApplicationCapability', nodeName, nodeId, nodeDescription,
+//          nodeChildren:[{ nodeElementType:'DataDataEntity', nodeName, nodeId, nodeDescription }] }] }] }]
+// generateIndustry (commands.js) walks this via the 'SFCCE' stream template
+// (custom.json) — registered per industryData key in store.industryTemplates (state.js)
+// so the built-in 'general' dataset (a genuine 3-level tree, unrelated to this wizard)
+// keeps using 'Enterprise' and is completely unaffected by anything in this file.
 // generateIndustry itself isn't changed by this file to place nodes per-section — that's
 // a separate placement-algorithm concern. This produces and stores the section-tagged
-// data; it doesn't touch the canvas (no viewMembers, no new view), matching the request.
+// data; it doesn't touch the canvas (no viewMembers, no new view).
 
 /**
- * Flattens an industry tree (either from Load SFCE, with nodeSection on each Function,
- * or the original fce-generalnodes.json shape, which has no section concept at all —
- * both are supported, section just comes back blank for the latter) into flat rows for
- * a catalog-style table: one row per Function/Capability/Entity combination, with id
- * and description at every level. A capability with no entity children (see
- * generateIndustry's own entity-fallback for why that's a real, valid case) still
- * produces one row, with the entity columns left blank rather than being dropped.
+ * Flattens an industry tree into flat rows for a catalog-style table: one row per
+ * Function/Capability/Sub-Capability/Entity combination, with id and description at
+ * every level. Handles TWO tree shapes transparently, detected structurally per
+ * Capability (not assumed globally, so a tree could in principle mix both — though in
+ * practice only the built-in 'general' dataset is ever the 3-level shape):
+ *   - 4-level (from this file's own buildIndustryTree): a Capability's children are
+ *     ApplicationCapability nodes, each with its own Entity children.
+ *   - 3-level (fce-generalnodes.json, predating this file entirely): a Capability's
+ *     children ARE the Entity nodes directly, no Sub-Capability layer at all — those
+ *     rows come back with the Sub-Capability columns blank, not fabricated.
+ * A Capability/Sub-Capability with no further children still produces one row, with
+ * the deeper columns left blank rather than being dropped (see generateIndustry's own
+ * "no children -> treat this node as its own next level" fallback for why that's a
+ * real, valid case, not just an import artifact).
  */
 export function flattenIndustryTree(tree) {
   const rows = [];
   for (const func of tree || []) {
     if (!ciEqLocal(func.nodeElementType, 'BusinessFunction')) continue;
     const caps = func.nodeChildren || [];
-    if (caps.length === 0) {
-      rows.push(makeRow(func, null, null));
-      continue;
-    }
+    if (caps.length === 0) { rows.push(makeRow(func, null, null, null)); continue; }
     for (const cap of caps) {
-      const entities = (cap.nodeChildren || []).filter((e) => ciEqLocal(e.nodeElementType, 'DataDataEntity'));
-      if (entities.length === 0) {
-        rows.push(makeRow(func, cap, null));
+      const children = cap.nodeChildren || [];
+      const subCaps = children.filter((c) => ciEqLocal(c.nodeElementType, 'ApplicationCapability'));
+      if (subCaps.length > 0) {
+        for (const subCap of subCaps) {
+          const entities = (subCap.nodeChildren || []).filter((e) => ciEqLocal(e.nodeElementType, 'DataDataEntity'));
+          if (entities.length === 0) rows.push(makeRow(func, cap, subCap, null));
+          else for (const ent of entities) rows.push(makeRow(func, cap, subCap, ent));
+        }
       } else {
-        for (const ent of entities) rows.push(makeRow(func, cap, ent));
+        // 3-level shape: this Capability's own children are Entities directly.
+        const entities = children.filter((e) => ciEqLocal(e.nodeElementType, 'DataDataEntity'));
+        if (entities.length === 0) rows.push(makeRow(func, cap, null, null));
+        else for (const ent of entities) rows.push(makeRow(func, cap, null, ent));
       }
     }
   }
@@ -45,12 +66,13 @@ export function flattenIndustryTree(tree) {
 function ciEqLocal(a, b) {
   return String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
 }
-function makeRow(func, cap, ent) {
+function makeRow(func, cap, subCap, ent) {
   return {
-    id: `${func.nodeId || ''}|${cap?.nodeId || ''}|${ent?.nodeId || ''}`,
+    id: `${func.nodeId || ''}|${cap?.nodeId || ''}|${subCap?.nodeId || ''}|${ent?.nodeId || ''}`,
     section: func.nodeSection || '',
     functionId: func.nodeId || '', functionName: func.nodeName || '', functionDescription: func.nodeDescription || '',
     capabilityId: cap?.nodeId || '', capabilityName: cap?.nodeName || '', capabilityDescription: cap?.nodeDescription || '',
+    subCapabilityId: subCap?.nodeId || '', subCapabilityName: subCap?.nodeName || '', subCapabilityDescription: subCap?.nodeDescription || '',
     entityId: ent?.nodeId || '', entityName: ent?.nodeName || '', entityDescription: ent?.nodeDescription || '',
   };
 }
@@ -59,20 +81,31 @@ function makeRow(func, cap, ent) {
  * Turns arbitrary JSON into a flat list of "records" (plain objects) plus the set of
  * field names available across them, for the wizard's selectors to offer.
  *
- * Handles one level of "wrapped nested records" — the shape capabilities.json actually
- * has: a top-level array where each item carries a nested array-of-objects field (here,
- * "capabilities"). When that pattern is detected, each nested item becomes its own
- * record, with the outer item's OWN scalar fields (here, "domain") merged in as
- * additional selectable fields — so "domain" and "name"/"description"/"ministries" are
- * all available on the same flattened record, exactly matching how the wizard's
- * Section/Function/Capability/Entity selectors need to read them.
+ * Handles arbitrarily-nested "wrapped nested records" — e.g. a merged capabilities
+ * file's actual shape: a top-level array where each item carries a nested array-of-
+ * objects field ("businessCapabilities"), each of THOSE carrying its own nested
+ * array-of-objects field ("applicationCapabilities") — two levels deep, needed once
+ * SFCCE's Sub-Capability level meant a single "group with a nested list" unwrap (the
+ * original Load SFCE's only case) was no longer enough. Repeatedly unwraps one more
+ * level of nested array-of-objects at a time (detected fresh on the CURRENT records
+ * after each pass) until none remain, merging each outer item's own scalar fields
+ * forward into every record it expands into — so e.g. "domain" ends up available on
+ * every doubly-nested Application Capability record, however many levels down.
  *
- * Falls back to: top-level array of objects used directly; or, if the JSON is a single
- * wrapping object, the first array-of-objects property found on it; or a lone object
- * treated as one record. This isn't a fully general recursive flattener — it's scoped
- * to the "list of groups, each with a nested list of items" shape that's the common
- * real-world case (and is exactly capabilities.json's shape), rather than trying to
- * handle arbitrary nesting depth speculatively.
+ * EVERY field belonging to a nested array item is renamed to its full dot-path —
+ * `${nestedKey}.${field}`, and again for each further level (e.g. a doubly-nested
+ * Application Capability's own "name" becomes "businessCapabilities.applicationCapabilities.
+ * name", not just "applicationCapabilities.name") — showing "the full length attribute
+ * name with all its parent fields," not just renamed on collision. A field never inside
+ * any nested array (e.g. the outermost "domain") stays bare throughout, since there's
+ * nothing to disambiguate it from. This makes every field's origin unambiguous at a
+ * glance when a source has more than one "name"/"description"-style field at different
+ * nesting depths — the exact scenario a merged capabilities file has (both a Business
+ * Capability and each of its own Application Capabilities carry their own "name").
+ *
+ * Falls back to: top-level array of objects used directly (no nesting to unwrap at all,
+ * so every field stays bare); or, if the JSON is a single wrapping object, the first
+ * array-of-objects property found on it; or a lone object treated as one record.
  */
 export function flattenJsonRecords(data) {
   let baseArray = null;
@@ -86,34 +119,40 @@ export function flattenJsonRecords(data) {
 
   const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 
-  // detect a nested array-of-objects field present on the first object we find (checked
-  // across a few items in case the very first one happens to have an empty/missing one)
-  let nestedKey = null;
-  for (const item of baseArray.slice(0, 10)) {
-    if (!isObj(item)) continue;
-    for (const [k, v] of Object.entries(item)) {
-      if (Array.isArray(v) && v.length > 0 && isObj(v[0])) { nestedKey = k; break; }
-    }
-    if (nestedKey) break;
-  }
+  let records = baseArray.filter(isObj);
 
-  const records = [];
-  if (nestedKey) {
-    for (const outer of baseArray) {
-      if (!isObj(outer)) continue;
-      const outerScalars = {};
+  // Safety cap (not a realistic depth for actual data) guards against runaway looping on
+  // pathological input rather than genuinely needing 10 levels. Each pass's nestedKey is
+  // itself already a full dot-path once depth > 0 (a prior pass renamed it), so prefixing
+  // with `${nestedKey}.${k}` naturally accumulates the WHOLE ancestor chain, not just the
+  // immediate parent.
+  for (let depth = 0; depth < 10; depth++) {
+    let nestedKey = null;
+    for (const item of records.slice(0, 10)) {
+      for (const [k, v] of Object.entries(item)) {
+        if (Array.isArray(v) && v.length > 0 && isObj(v[0])) { nestedKey = k; break; }
+      }
+      if (nestedKey) break;
+    }
+    if (!nestedKey) break;
+
+    const next = [];
+    for (const outer of records) {
+      const outerRest = {};
       for (const [k, v] of Object.entries(outer)) {
         if (k === nestedKey) continue;
-        if (!Array.isArray(v) && !isObj(v)) outerScalars[k] = v; // only carry forward scalars, not other nested structures
+        if (!Array.isArray(v) && !isObj(v)) outerRest[k] = v; // only carry forward scalars, not other nested structures
       }
       const inner = Array.isArray(outer[nestedKey]) ? outer[nestedKey] : [];
       for (const item of inner) {
-        if (isObj(item)) records.push({ ...outerScalars, ...item });
+        if (!isObj(item)) continue;
+        const merged = { ...outerRest };
+        for (const [k, v] of Object.entries(item)) merged[`${nestedKey}.${k}`] = v;
+        next.push(merged);
       }
-      if (inner.length === 0 && Object.keys(outerScalars).length > 0) records.push(outerScalars); // outer-only row, nothing nested to flatten
+      if (inner.length === 0 && Object.keys(outerRest).length > 0) next.push(outerRest); // outer-only row, nothing nested to flatten
     }
-  } else {
-    for (const item of baseArray) if (isObj(item)) records.push(item);
+    records = next;
   }
 
   const fieldSet = new Set();
@@ -146,93 +185,164 @@ function readScalar(record, field, fallback) {
 }
 
 /**
- * Turns raw records into (section, function, capability, entity, description) rows —
- * one row per record per split section (a capability whose section field has multiple
- * values still becomes multiple rows here, each with its own section — that part is
- * unchanged). Missing values are kept as '(unspecified)' rather than dropping the
- * record (a missing Entity is the one exception: it's left as null so no entity child
- * gets created for that row, since an entity genuinely might not exist in the source
- * data at all — see the module doc).
+ * Turns raw records into (section, function, capability, subCapability, entity,
+ * description, subCapabilityDescription, entityDescription) rows — one row per record
+ * per split section (a record whose section field has multiple values still becomes
+ * multiple rows here, each with its own section).
  *
- * Note there's no "shared" flag on a row here — "Shared" describes a FUNCTION that
- * ends up needing to exist in more than one distinct section (because different
- * capabilities under it landed in different single sections), not a capability whose
- * own section field had multiple values. See detectSharedFunctions below.
+ * CASCADE: capability/subCapability/entity are each OPTIONAL in `mapping` (pass '' /
+ * null / omit to mean "no field for this level"). Whenever a level has no mapped field,
+ * OR the mapped field is empty for a given record, that level's value becomes a COPY of
+ * the level immediately above it (function -> capability -> subCapability -> entity) —
+ * this is what lets one wizard serve both old-style 3-level data (no distinct Sub-
+ * Capability concept — its value just inherits the Capability's own name) and 4-level
+ * data with every level distinct, without two different code paths. Function itself has
+ * no cascade source (nothing above it) and keeps the '(unspecified)' fallback instead.
+ * Descriptions are NOT cascaded — an inherited level has no description of its own
+ * rather than a copy of its parent's, since duplicating description TEXT (unlike a
+ * name, which is what makes the level exist and connect at all) has no benefit.
+ *
+ * Every row also carries originalFunctionName/originalCapabilityName/
+ * originalSubCapabilityName/originalSection — frozen at build time, never touched by
+ * resolveSharedFunctions/resolveSharedCapabilities/resolveSharedSubCapabilities below —
+ * see detectSharedLevel's own comment for why that stability matters.
  */
 export function buildRowsFromRecords(records, mapping) {
-  const { sectionField, functionField, capabilityField, entityField, descriptionField } = mapping;
+  const {
+    sectionField, functionField,
+    capabilityField, capabilityDescriptionField,
+    subCapabilityField, subCapabilityDescriptionField,
+    entityField, entityDescriptionField,
+  } = mapping;
   const rows = [];
-  let missingFunction = 0, missingCapability = 0, missingEntity = 0, missingDescription = 0;
+  let missingFunction = 0, missingCapability = 0, missingSubCapability = 0, missingEntity = 0, missingDescription = 0;
   for (const record of records) {
     const sections = readSectionValues(record, sectionField);
     const functionName = readScalar(record, functionField, '(unspecified)');
-    const capabilityName = readScalar(record, capabilityField, '(unspecified)');
-    const description = readScalar(record, descriptionField, '');
-    const entityName = entityField ? readScalar(record, entityField, null) : null;
     if (functionName === '(unspecified)') missingFunction += 1;
-    if (capabilityName === '(unspecified)') missingCapability += 1;
-    if (entityField && !entityName) missingEntity += 1;
+
+    const rawCapability = readScalar(record, capabilityField, null);
+    const capabilityName = rawCapability ?? functionName; // cascade: capability <- function
+    if (rawCapability == null) missingCapability += 1;
+    const description = readScalar(record, capabilityDescriptionField, '');
     if (!description) missingDescription += 1;
+
+    const rawSubCapability = readScalar(record, subCapabilityField, null);
+    const subCapabilityName = rawSubCapability ?? capabilityName; // cascade: subCapability <- capability
+    if (rawSubCapability == null) missingSubCapability += 1;
+    const subCapabilityDescription = readScalar(record, subCapabilityDescriptionField, '');
+
+    const rawEntity = readScalar(record, entityField, null);
+    const entityName = rawEntity ?? subCapabilityName; // cascade: entity <- subCapability
+    if (rawEntity == null) missingEntity += 1;
+    const entityDescription = readScalar(record, entityDescriptionField, '');
+
     for (const section of sections) {
-      rows.push({ section, functionName, capabilityName, entityName, description });
+      rows.push({
+        section, originalSection: section,
+        functionName, originalFunctionName: functionName,
+        capabilityName, originalCapabilityName: capabilityName,
+        description,
+        subCapabilityName, originalSubCapabilityName: subCapabilityName,
+        subCapabilityDescription,
+        entityName, entityDescription,
+      });
     }
   }
-  return { rows, missingFunction, missingCapability, missingEntity, missingDescription };
+  return { rows, missingFunction, missingCapability, missingSubCapability, missingEntity, missingDescription };
 }
 
 /**
- * Finds Functions that end up needing to exist in more than one distinct Section —
- * e.g. from the real capabilities.json data, "Analytics, Reporting & Business
- * Intelligence" has some capabilities placed under Section "Agriculture" and others
- * under "Central Government", so that Function name appears in both. Returns:
- *   - sectionsByFunction: Map<functionName, string[]> — every distinct section that
- *     function name's rows use, in first-seen row order (needed by
- *     resolveSharedFunctions below to decide which section is "first").
- *   - sharedFunctionNames: Set<functionName> — the subset with more than one section.
+ * Finds identities that end up needing to exist in more than one distinct Section —
+ * generic core shared by the three exported detect/resolve pairs below (Function,
+ * Capability, Sub-Capability each independently need this: a real merged capabilities
+ * dataset showed ~93% of business capabilities span multiple sections through their own
+ * sub-capabilities alone, so this is the common case here, not a rare edge case).
+ * `identityKeyFn(row)` returns a STABLE identity for the level being checked, scoped to
+ * its own ancestors (e.g. a Capability's identity includes its Function, so two
+ * different Functions coincidentally sharing a Capability name aren't conflated) — reads
+ * row.originalSection (frozen, never mutated by resolveSharedLevel) rather than the live
+ * row.section, so all three levels' detection AND resolution give the identical answer
+ * regardless of what order they run in or what the other levels' choices were. Without
+ * that stability, whichever resolution ran second would rank against whatever section
+ * value the first one already rewrote (e.g. to 'Shared'), silently losing its own
+ * numbered-suffix distinctions for any row more than one level touched.
  */
-export function detectSharedFunctions(rows) {
-  const sectionsByFunction = new Map();
+function detectSharedLevel(rows, identityKeyFn) {
+  const sectionsByIdentity = new Map();
   for (const row of rows) {
-    let list = sectionsByFunction.get(row.functionName);
-    if (!list) { list = []; sectionsByFunction.set(row.functionName, list); }
-    if (!list.includes(row.section)) list.push(row.section);
+    const key = identityKeyFn(row);
+    let list = sectionsByIdentity.get(key);
+    if (!list) { list = []; sectionsByIdentity.set(key, list); }
+    if (!list.includes(row.originalSection)) list.push(row.originalSection);
   }
-  const sharedFunctionNames = new Set();
-  for (const [name, sections] of sectionsByFunction) {
-    if (sections.length > 1) sharedFunctionNames.add(name);
-  }
-  return { sectionsByFunction, sharedFunctionNames };
+  const sharedIdentities = new Set();
+  for (const [key, sections] of sectionsByIdentity) if (sections.length > 1) sharedIdentities.add(key);
+  return { sectionsByIdentity, sharedIdentities };
 }
 
 /**
- * Applies the user's decision about the Functions detectSharedFunctions found.
+ * Applies the user's decision about the identities detectSharedLevel found.
  *
- * collapseToShared=true: every row whose function name is shared gets its section
- * forced to the literal 'Shared' — so, following the example above, every "Analytics,
- * Reporting & Business Intelligence" row (regardless of which section it originally
- * came from) ends up in one combined Function under section "Shared", with all of its
- * capabilities together. (No explicit de-duplication needed here beyond that — rows
- * that become identical on section+function+capability+entity after this rewrite are
- * naturally merged by buildIndustryTree's own merge-to-uniqueness step.)
+ * collapseToShared=true: every row whose identity is shared gets its section forced to
+ * the literal 'Shared' — so e.g. every row of a Function/Capability/Sub-Capability that
+ * spans several sections (regardless of which section it originally came from) ends up
+ * combined under section "Shared". (No explicit de-duplication needed beyond that — rows
+ * that become identical after this rewrite are naturally merged by buildIndustryTree's
+ * own merge-to-uniqueness step.)
  *
  * collapseToShared=false: rows keep their original individual sections, but a shared
- * function name gets a numbered suffix in every section after its first (by first-seen
- * row order): the section that saw this function name first keeps the plain name; the
- * second section's copy becomes "Name1"; the third "Name2"; and so on — matching the
- * exact naming convention described in the request (no parentheses, no space).
+ * identity gets a numbered suffix on `levelField` in every section after its first (by
+ * first-seen row order, ranked against originalSection so this is independent of
+ * whatever the OTHER levels' own resolution already did to the live section value): the
+ * section that saw this identity first keeps the plain name; the second section's copy
+ * becomes "Name1"; the third "Name2"; and so on.
  */
-export function resolveSharedFunctions(rows, sectionsByFunction, sharedFunctionNames, collapseToShared) {
-  if (sharedFunctionNames.size === 0) return rows;
+function resolveSharedLevel(rows, sectionsByIdentity, sharedIdentities, identityKeyFn, levelField, collapseToShared) {
+  if (sharedIdentities.size === 0) return rows;
   if (collapseToShared) {
-    return rows.map((row) => (sharedFunctionNames.has(row.functionName) ? { ...row, section: 'Shared' } : row));
+    return rows.map((row) => (sharedIdentities.has(identityKeyFn(row)) ? { ...row, section: 'Shared' } : row));
   }
   return rows.map((row) => {
-    if (!sharedFunctionNames.has(row.functionName)) return row;
-    const sections = sectionsByFunction.get(row.functionName);
-    const rank = sections.indexOf(row.section); // 0 = first-seen section for this function name
+    const key = identityKeyFn(row);
+    if (!sharedIdentities.has(key)) return row;
+    const sections = sectionsByIdentity.get(key);
+    const rank = sections.indexOf(row.originalSection); // 0 = first-seen section for this identity
     if (rank <= 0) return row;
-    return { ...row, functionName: `${row.functionName}${rank}` };
+    return { ...row, [levelField]: `${row[levelField]}${rank}` };
   });
+}
+
+/** Function-level sharing — e.g. "Transportation & Roads" appearing under both
+ * "Environment" and "Justice" sections. Independent of the Capability/Sub-Capability
+ * checks below (see detectSharedLevel's own comment for why they can run in any order). */
+export function detectSharedFunctions(rows) {
+  const { sectionsByIdentity, sharedIdentities } = detectSharedLevel(rows, (row) => row.originalFunctionName);
+  return { sectionsByFunction: sectionsByIdentity, sharedFunctionNames: sharedIdentities };
+}
+export function resolveSharedFunctions(rows, sectionsByFunction, sharedFunctionNames, collapseToShared) {
+  return resolveSharedLevel(rows, sectionsByFunction, sharedFunctionNames, (row) => row.originalFunctionName, 'functionName', collapseToShared);
+}
+
+/** Capability-level sharing, scoped within its own Function so two different Functions
+ * coincidentally sharing a Capability name aren't conflated. Independent of the
+ * Function/Sub-Capability checks. */
+export function detectSharedCapabilities(rows) {
+  const { sectionsByIdentity, sharedIdentities } = detectSharedLevel(rows, (row) => `${row.originalFunctionName}|${row.originalCapabilityName}`);
+  return { sectionsByCapability: sectionsByIdentity, sharedCapabilityKeys: sharedIdentities };
+}
+export function resolveSharedCapabilities(rows, sectionsByCapability, sharedCapabilityKeys, collapseToShared) {
+  return resolveSharedLevel(rows, sectionsByCapability, sharedCapabilityKeys, (row) => `${row.originalFunctionName}|${row.originalCapabilityName}`, 'capabilityName', collapseToShared);
+}
+
+/** Sub-Capability-level sharing, scoped within its own (Function, Capability) pair.
+ * Independent of the Function/Capability checks. */
+export function detectSharedSubCapabilities(rows) {
+  const { sectionsByIdentity, sharedIdentities } = detectSharedLevel(rows, (row) => `${row.originalFunctionName}|${row.originalCapabilityName}|${row.originalSubCapabilityName}`);
+  return { sectionsBySubCapability: sectionsByIdentity, sharedSubCapabilityKeys: sharedIdentities };
+}
+export function resolveSharedSubCapabilities(rows, sectionsBySubCapability, sharedSubCapabilityKeys, collapseToShared) {
+  return resolveSharedLevel(rows, sectionsBySubCapability, sharedSubCapabilityKeys, (row) => `${row.originalFunctionName}|${row.originalCapabilityName}|${row.originalSubCapabilityName}`, 'subCapabilityName', collapseToShared);
 }
 
 function slugify(text) {
@@ -240,23 +350,25 @@ function slugify(text) {
 }
 
 /**
- * Builds the final Function -> Capability -> Entity tree (with nodeSection on each
- * Function) from resolved rows, merging to uniqueness on (section, function,
- * capability, entity) as rows are folded in — a true duplicate on all four contributes
- * nothing new; a repeat of the same function+section adds another capability under the
- * existing Function node rather than a new one; etc. Also returns the statistics the
- * caller writes to the Message Log: the ordered unique section list (first-seen order,
- * which the caller needs to reuse elsewhere per the request) and subtotals.
+ * Builds the final Function -> Capability -> Sub-Capability -> Entity tree (with
+ * nodeSection on each Function) from resolved rows, merging to uniqueness on (section,
+ * function, capability, subCapability, entity) as rows are folded in. Always 4 levels
+ * deep — subCapabilityName is never empty by the time rows reach here (buildRowsFromRecords'
+ * cascade guarantees it), so there's no "skip this level" branch to speak of, unlike
+ * entity (still conditionally created — see below). Also returns the statistics the
+ * caller writes to the Message Log: the ordered unique section list (first-seen order)
+ * and subtotals.
  */
 export function buildIndustryTree(rows) {
   const functionsByKey = new Map(); // `${section}|${functionName}` -> function node
   const capsByKey = new Map(); // `${functionKey}|${capabilityName}` -> capability node
-  const entitiesByKey = new Set(); // `${capKey}|${entityName}` — true-duplicate guard
+  const subCapsByKey = new Map(); // `${capKey}|${subCapabilityName}` -> sub-capability node
+  const entitiesByKey = new Set(); // `${subCapKey}|${entityName}` — true-duplicate guard
   const sectionOrder = [];
   const sectionSeen = new Set();
   const functionNamesUsedInSection = new Map(); // section -> Set(function display names already used) for the "increment as needed" safety net
 
-  let functionCount = 0, capabilityCount = 0, entityCount = 0, mergedDuplicates = 0;
+  let functionCount = 0, capabilityCount = 0, subCapabilityCount = 0, entityCount = 0, mergedDuplicates = 0;
 
   for (const row of rows) {
     if (!sectionSeen.has(row.section)) { sectionSeen.add(row.section); sectionOrder.push(row.section); }
@@ -302,15 +414,32 @@ export function buildIndustryTree(rows) {
       capNode.nodeDescription = row.description; // fill in from a later row if the first one that created this capability had none
     }
 
+    const subCapKey = `${capKey}|${row.subCapabilityName}`;
+    let subCapNode = subCapsByKey.get(subCapKey);
+    if (!subCapNode) {
+      subCapNode = {
+        nodeElementType: 'ApplicationCapability',
+        nodeName: row.subCapabilityName,
+        nodeId: `${capNode.nodeId}-${slugify(row.subCapabilityName)}`,
+        nodeDescription: row.subCapabilityDescription || '',
+        nodeChildren: [],
+      };
+      subCapsByKey.set(subCapKey, subCapNode);
+      capNode.nodeChildren.push(subCapNode);
+      subCapabilityCount += 1;
+    } else if (!subCapNode.nodeDescription && row.subCapabilityDescription) {
+      subCapNode.nodeDescription = row.subCapabilityDescription;
+    }
+
     if (row.entityName) {
-      const entKey = `${capKey}|${row.entityName}`;
+      const entKey = `${subCapKey}|${row.entityName}`;
       if (entitiesByKey.has(entKey)) { mergedDuplicates += 1; continue; }
       entitiesByKey.add(entKey);
-      capNode.nodeChildren.push({
+      subCapNode.nodeChildren.push({
         nodeElementType: 'DataDataEntity',
         nodeName: row.entityName,
-        nodeId: `${capNode.nodeId}-${slugify(row.entityName)}`,
-        nodeDescription: '',
+        nodeId: `${subCapNode.nodeId}-${slugify(row.entityName)}`,
+        nodeDescription: row.entityDescription || '',
       });
       entityCount += 1;
     }
@@ -319,6 +448,6 @@ export function buildIndustryTree(rows) {
   const tree = [...functionsByKey.values()];
   return {
     tree,
-    stats: { sectionOrder, functionCount, capabilityCount, entityCount, mergedDuplicates },
+    stats: { sectionOrder, functionCount, capabilityCount, subCapabilityCount, entityCount, mergedDuplicates },
   };
 }

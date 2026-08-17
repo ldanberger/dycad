@@ -1940,6 +1940,29 @@
       ]
     },
     {
+      "name": "SFCCE",
+      "pattern": "fce",
+      "capabilityNameBegin": "BusinessCapability",
+      "subCapabilityNameBegin": "ApplicationCapability",
+      "entityNameBegin": "DataDataEntity",
+      "value": [
+        "BusinessFunction",
+        "BusinessCapability",
+        "ApplicationCapability",
+        "DataDataEntity"
+      ],
+      "passive": [
+        {
+          "from": "BusinessFunction",
+          "to": "BusinessProcess"
+        },
+        {
+          "from": "ApplicationApplication",
+          "to": "ApplicationPhysicalComponent"
+        }
+      ]
+    },
+    {
       "name": "Enterprise Full",
       "pattern": "fce",
       "capabilityNameBegin": "GeneralActor",

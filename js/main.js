@@ -8,7 +8,38 @@ import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, leve
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
-import { flattenJsonRecords, buildRowsFromRecords, detectSharedFunctions, resolveSharedFunctions, buildIndustryTree, flattenIndustryTree } from './sfce.js';
+import { flattenJsonRecords, buildRowsFromRecords, detectSharedFunctions, resolveSharedFunctions, detectSharedCapabilities, resolveSharedCapabilities, detectSharedSubCapabilities, resolveSharedSubCapabilities, buildIndustryTree, flattenIndustryTree } from './sfce.js';
+
+/** The three independently-resolvable "spans more than one Section" levels Load SFCCE's
+ * wizard walks through in order — see sfce.js's detectSharedLevel for why each is safe
+ * to resolve independently of the others. `detect`/`resolve` are thin adapters over
+ * sfce.js's per-level exports (each returns/expects slightly different key names —
+ * sectionsByFunction/sharedFunctionNames vs. sectionsByCapability/sharedCapabilityKeys
+ * etc. — normalized here to one common shape so promptSFCCESharedLevelConfirm below can
+ * stay level-agnostic instead of three near-duplicate modal functions).
+ * `exampleName` extracts the human-readable name from a shared identity key (a compound
+ * `function|capability|subCapability` string for the deeper levels) for the modal's
+ * example sentence. */
+const SFCCE_SHARED_LEVELS = [
+  {
+    label: 'Domain', plural: 'Domains',
+    detect: (rows) => { const { sectionsByFunction, sharedFunctionNames } = detectSharedFunctions(rows); return { sectionsByIdentity: sectionsByFunction, sharedIdentities: sharedFunctionNames }; },
+    resolve: (rows, sectionsByIdentity, sharedIdentities, collapse) => resolveSharedFunctions(rows, sectionsByIdentity, sharedIdentities, collapse),
+    exampleName: (key) => key,
+  },
+  {
+    label: 'Business Capability', plural: 'Business Capabilities',
+    detect: (rows) => { const { sectionsByCapability, sharedCapabilityKeys } = detectSharedCapabilities(rows); return { sectionsByIdentity: sectionsByCapability, sharedIdentities: sharedCapabilityKeys }; },
+    resolve: (rows, sectionsByIdentity, sharedIdentities, collapse) => resolveSharedCapabilities(rows, sectionsByIdentity, sharedIdentities, collapse),
+    exampleName: (key) => key.split('|')[1],
+  },
+  {
+    label: 'Application Capability', plural: 'Application Capabilities',
+    detect: (rows) => { const { sectionsBySubCapability, sharedSubCapabilityKeys } = detectSharedSubCapabilities(rows); return { sectionsByIdentity: sectionsBySubCapability, sharedIdentities: sharedSubCapabilityKeys }; },
+    resolve: (rows, sectionsByIdentity, sharedIdentities, collapse) => resolveSharedSubCapabilities(rows, sectionsByIdentity, sharedIdentities, collapse),
+    exampleName: (key) => key.split('|')[2],
+  },
+];
 
 /** Pretty-prints a Script Console result. JSON.stringify covers plain data (the common
  * case — arrays of parts, objects, etc.); falls back to String() for anything it can't
@@ -111,6 +142,29 @@ function setCachedMaxScriptEntities(n) { setLocalSettingsCache({ maxScriptEntiti
  * matching how "closed" is meant to stick. */
 function getCachedInstructionsClosed() { return getLocalSettingsCache().instructionsClosed === true; }
 function setCachedInstructionsClosed() { setLocalSettingsCache({ instructionsClosed: true }); }
+
+/** Last-used Stream Template name, shared as the default selection across every dialog
+ * that offers a Stream Template picker (Generate Stream, Smart Check View's Auto-Complete
+ * Streams option, Remap) — picking a template in any one of them becomes the default for
+ * the others next time, instead of each independently defaulting to "Enterprise". */
+function getCachedStreamTemplate() {
+  const v = getLocalSettingsCache().streamTemplate;
+  return typeof v === 'string' && v ? v : null;
+}
+function setCachedStreamTemplate(name) { setLocalSettingsCache({ streamTemplate: name }); }
+
+/** Remap dialog's own options (pattern, limit-to-view, filtered-only, the two force-
+ * directed sub-options, and sort priority order) — remembered as user-level defaults
+ * across ALL views, applied whenever Remap reopens so even a brand-new view starts from
+ * them rather than the dialog's hardcoded defaults. Distinct from (and lower-priority
+ * than) view.remapSortKeys, which remembers the order actually last used ON THAT SPECIFIC
+ * view and still wins once a view has its own history — this is only the fallback for a
+ * view that doesn't. */
+function getCachedRemapOptions() {
+  const v = getLocalSettingsCache().remapOptions;
+  return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+}
+function setCachedRemapOptions(patch) { setLocalSettingsCache({ remapOptions: { ...getCachedRemapOptions(), ...patch } }); }
 
 function getRecentFiles() {
   try {
@@ -624,6 +678,8 @@ class App {
       levelDown(this, tab, selIds);
     } else if (key === 'generate') {
       const templates = (this.store.settings.streamTemplates || []).map((t) => t.name);
+      const cachedTemplate = getCachedStreamTemplate();
+      const defaultTemplate = (cachedTemplate && templates.includes(cachedTemplate)) ? cachedTemplate : (templates.includes('Enterprise') ? 'Enterprise' : templates[0]);
       // Step 37: existing BusinessFunction-type parts in the current model — shown as a
       // suggestion list on Function Name so the user can pick one to reuse without
       // retyping it exactly, but the field stays free-text (they can still type a new
@@ -637,7 +693,7 @@ class App {
       this.promptModal({
         title: 'Generate Stream',
         fields: [
-          { key: 'template', label: 'Stream template', type: 'select', options: templates, value: templates.includes('Enterprise') ? 'Enterprise' : templates[0] },
+          { key: 'template', label: 'Stream template', type: 'select', options: templates, value: defaultTemplate },
           { key: 'stream', label: 'Stream name', value: `Stream-${Date.now().toString().slice(-4)}` },
           { key: 'functionName', label: 'Function Name', type: 'combo', options: existingFunctionNames, value: existingFunctionNames.length ? '' : 'testFunction' },
           { key: 'capabilityName', label: 'Capability Name', value: 'testCapability' },
@@ -649,6 +705,7 @@ class App {
           // possibility, not just a leftover default — guard against silently creating
           // a part with a blank label.
           if (!vals.functionName.trim()) { this.toast('Function Name is required.', true); return; }
+          setCachedStreamTemplate(vals.template);
           createStream(this, {
             templateName: vals.template, streamName: vals.stream,
             functionName: vals.functionName, capabilityName: vals.capabilityName, entityName: vals.entityName,
@@ -702,7 +759,7 @@ class App {
 
   /** Bespoke (not the generic promptModal) so it can carry the "Place on current view"
    * checkbox alongside the industry picker. To review a dataset before generating, use
-   * Catalogs > SFCE first, separately — this dialog is a modal overlay (like every
+   * Catalogs > SFCCE first, separately — this dialog is a modal overlay (like every
    * other modal in the app; see CLAUDE.md's "no click-outside-to-close" convention),
    * so nothing behind it is reachable while it's open, which ruled out a "preview"
    * button that would open the catalog in another tab the person still couldn't see. */
@@ -755,7 +812,7 @@ class App {
     }
   }
 
-  /** Catalogs > SFCE: a read-only, flattened table of one industryData
+  /** Catalogs > SFCCE: a read-only, flattened table of one industryData
    * collection's Section/Function/Capability/Entity hierarchy — works for both a
    * Load SFCE import and the built-in "general" data (fce-generalnodes.json), since
    * flattenIndustryTree supports both shapes. Read-only for now; the request notes
@@ -766,7 +823,7 @@ class App {
     if (industries.length === 0) { this.toast('No industry data loaded.', true); return; }
     if (industries.length === 1) { this.openOrSwitchSfceCatalog(industries[0]); return; }
     this.promptModal({
-      title: 'SFCE Catalog',
+      title: 'SFCCE Catalog',
       fields: [
         { key: 'industry', label: 'Industry', type: 'select', options: industries, value: industries[0] },
       ],
@@ -786,10 +843,10 @@ class App {
       } else {
         const tree = this.store.industryData?.[industryKey] || [];
         const rows = flattenIndustryTree(tree);
-        tab = this.store.createTab({ type: 'table', title: `SFCE: ${industryKey}` });
+        tab = this.store.createTab({ type: 'table', title: `SFCCE: ${industryKey}` });
         tab.sfceIndustryKey = industryKey;
         tab.tableRows = rows;
-        tab.tableCols = ['section', 'functionId', 'functionName', 'functionDescription', 'capabilityId', 'capabilityName', 'capabilityDescription', 'entityId', 'entityName', 'entityDescription'];
+        tab.tableCols = ['section', 'functionId', 'functionName', 'functionDescription', 'capabilityId', 'capabilityName', 'capabilityDescription', 'subCapabilityId', 'subCapabilityName', 'subCapabilityDescription', 'entityId', 'entityName', 'entityDescription'];
       }
     }
     this.switchToTab(tab.id);
@@ -806,6 +863,8 @@ class App {
     const tab = this.store.activeTab();
     if (!tab || tab.type !== 'canvas') { this.toast('Open a view to Smart Check first.', true); return; }
     const templateNames = (this.store.settings.streamTemplates || []).map((t) => t.name);
+    const cachedTemplate = getCachedStreamTemplate();
+    const defaultTemplate = (cachedTemplate && templateNames.includes(cachedTemplate)) ? cachedTemplate : (templateNames.includes('Enterprise') ? 'Enterprise' : templateNames[0]);
     const root = document.getElementById('modal-root');
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -816,7 +875,7 @@ class App {
       <div class="prop-row checkbox"><input type="checkbox" id="scv-missing-connectors-nodes" /><label for="scv-missing-connectors-nodes">Missing connectors and nodes — also pull in connected nodes not yet on this view</label></div>
       <div class="prop-row" id="scv-levels-row" style="margin-left:22px;"><label>Levels</label><input type="number" id="scv-levels-input" class="tb-select" style="width:60px;" min="0" step="1" value="" placeholder="All" title="How many hops of missing connected nodes to pull in. Blank = unlimited." /></div>
       <div class="prop-row checkbox"><input type="checkbox" id="scv-autocomplete" /><label for="scv-autocomplete">Auto-complete streams in model — find existing stream names and fill in any missing parts/nodes for them, following a stream template</label></div>
-      <div class="prop-row" id="scv-autocomplete-template-row" style="margin-left:22px;"><label>Stream Template</label><select id="scv-autocomplete-template">${templateNames.map((n) => `<option value="${escapeHtml(n)}" ${n === (templateNames.includes('Enterprise') ? 'Enterprise' : templateNames[0]) ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></div>
+      <div class="prop-row" id="scv-autocomplete-template-row" style="margin-left:22px;"><label>Stream Template</label><select id="scv-autocomplete-template">${templateNames.map((n) => `<option value="${escapeHtml(n)}" ${n === defaultTemplate ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></div>
       <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Check</button></div>`;
     overlay.appendChild(box);
     root.appendChild(overlay);
@@ -855,7 +914,7 @@ class App {
         this.toast(parts.length ? `Smart Check added ${parts.join(' and ')}.` : 'Smart Check found nothing missing.');
       }
 
-      if (doAutoComplete) this.promptAutoCompleteStreams(tab, autoCompleteTemplate);
+      if (doAutoComplete) { setCachedStreamTemplate(autoCompleteTemplate); this.promptAutoCompleteStreams(tab, autoCompleteTemplate); }
     });
   }
 
@@ -958,12 +1017,21 @@ class App {
       return;
     }
     const labels = REMAP_SORT_LABELS;
-    const remembered = view?.remapSortKeys && view.remapSortKeys.length ? view.remapSortKeys.filter((k) => REMAP_SORT_KEYS.includes(k)) : DEFAULT_REMAP_SORT_KEYS;
+    const cachedRemap = getCachedRemapOptions();
+    const cachedSortKeys = Array.isArray(cachedRemap.sortKeys) ? cachedRemap.sortKeys.filter((k) => REMAP_SORT_KEYS.includes(k)) : null;
+    // view.remapSortKeys (this specific view's own remembered order) wins if present;
+    // otherwise fall back to the cross-view user default; otherwise the built-in default.
+    const remembered = (view?.remapSortKeys && view.remapSortKeys.length)
+      ? view.remapSortKeys.filter((k) => REMAP_SORT_KEYS.includes(k))
+      : (cachedSortKeys && cachedSortKeys.length ? cachedSortKeys : DEFAULT_REMAP_SORT_KEYS);
     // start from the remembered/default order, then append any keys missing from it
     // (e.g. a newly-added key like elementGroup that predates a saved remapSortKeys) —
     // every key appears exactly once, so duplicates are impossible by construction.
     const orderedKeys = [...remembered, ...REMAP_SORT_KEYS.filter((k) => !remembered.includes(k))];
     const templateNames = (this.store.settings.streamTemplates || []).map((t) => t.name);
+    const cachedTemplate = getCachedStreamTemplate();
+    const defaultTemplate = (cachedTemplate && templateNames.includes(cachedTemplate)) ? cachedTemplate : (templateNames.includes('Enterprise') ? 'Enterprise' : templateNames[0]);
+    const defaultPattern = ['default', 'none', 'force'].includes(cachedRemap.pattern) ? cachedRemap.pattern : 'default';
 
     const root = document.getElementById('modal-root');
     const overlay = document.createElement('div');
@@ -972,17 +1040,17 @@ class App {
     box.className = 'modal-box';
     box.innerHTML = `
       <h3>Remap</h3>
-      <div class="prop-row"><label>Stream Template</label><select id="rm-template">${templateNames.map((n) => `<option value="${escapeHtml(n)}" ${n === (templateNames.includes('Enterprise') ? 'Enterprise' : templateNames[0]) ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></div>
-      <div class="prop-row"><label>Pattern</label><select id="rm-pattern"><option value="default">default</option><option value="none">none</option><option value="force">force-directed</option></select></div>
-      <div class="prop-row checkbox" id="rm-limit-row"><input type="checkbox" id="rm-limit" /><label for="rm-limit">Limit columns to view</label></div>
-      <div class="prop-row checkbox"><input type="checkbox" id="rm-filtered-only" /><label for="rm-filtered-only">Only remap filtered nodes (others stay put, hidden by the current filter)</label></div>
+      <div class="prop-row"><label>Stream Template</label><select id="rm-template">${templateNames.map((n) => `<option value="${escapeHtml(n)}" ${n === defaultTemplate ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></div>
+      <div class="prop-row"><label>Pattern</label><select id="rm-pattern"><option value="default" ${defaultPattern === 'default' ? 'selected' : ''}>default</option><option value="none" ${defaultPattern === 'none' ? 'selected' : ''}>none</option><option value="force" ${defaultPattern === 'force' ? 'selected' : ''}>force-directed</option></select></div>
+      <div class="prop-row checkbox" id="rm-limit-row"><input type="checkbox" id="rm-limit" ${cachedRemap.limitColumnsToView ? 'checked' : ''} /><label for="rm-limit">Limit columns to view</label></div>
+      <div class="prop-row checkbox"><input type="checkbox" id="rm-filtered-only" ${cachedRemap.filteredOnly ? 'checked' : ''} /><label for="rm-filtered-only">Only remap filtered nodes (others stay put, hidden by the current filter)</label></div>
       <div id="rm-priority-section">
         <div style="margin-top:10px; font-size:12px; color:var(--text-muted);">Sort priority (top = highest priority)</div>
         <ul id="rm-priority-list" style="list-style:none; margin:6px 0 0 0; padding:0; display:flex; flex-direction:column; gap:3px;"></ul>
       </div>
       <div id="rm-force-note" class="hidden" style="margin-top:10px; font-size:12px; color:var(--text-muted);">Force-directed placement clusters connected nodes together and reduces total edge length — it doesn't use sort order or column limits, so those are hidden while this pattern is selected.</div>
-      <div class="prop-row checkbox hidden" id="rm-force-prefer-right-row"><input type="checkbox" id="rm-force-prefer-right" /><label for="rm-force-prefer-right">Prefer placing connected nodes to the right when a cell is available</label></div>
-      <div class="prop-row checkbox hidden" id="rm-force-group-rows-row"><input type="checkbox" id="rm-force-group-rows" /><label for="rm-force-group-rows">Only start a new row when a node is a new hop away (keep same-hop nodes on one row)</label></div>
+      <div class="prop-row checkbox hidden" id="rm-force-prefer-right-row"><input type="checkbox" id="rm-force-prefer-right" ${cachedRemap.forcePreferRight ? 'checked' : ''} /><label for="rm-force-prefer-right">Prefer placing connected nodes to the right when a cell is available</label></div>
+      <div class="prop-row checkbox hidden" id="rm-force-group-rows-row"><input type="checkbox" id="rm-force-group-rows" ${cachedRemap.forceGroupRows ? 'checked' : ''} /><label for="rm-force-group-rows">Only start a new row when a node is a new hop away (keep same-hop nodes on one row)</label></div>
       <div class="modal-actions"><button class="reset" style="margin-right:auto;">Reset</button><button class="cancel">Cancel</button><button class="primary submit">Remap</button></div>
     `;
     overlay.appendChild(box);
@@ -1042,6 +1110,9 @@ class App {
       const forceGroupRows = box.querySelector('#rm-force-group-rows').checked;
       const sortKeys = [...orderedKeys];
       overlay.remove();
+
+      setCachedStreamTemplate(templateName);
+      setCachedRemapOptions({ pattern, limitColumnsToView, filteredOnly, forcePreferRight, forceGroupRows, sortKeys });
 
       let visiblePartVmIds = null;
       if (filteredOnly && isAnyVisibilityFilterActive(tab)) {
@@ -1983,23 +2054,23 @@ class App {
   /** File > Load SFCE: imports an arbitrary JSON file as an alternate industry
    * collection (Section/Function/Capability/Entity) for Advanced > Generate Industry.
    * Doesn't touch the canvas — no viewMembers, no new view; only store.industryData. */
-  promptLoadSFCE() {
+  promptLoadSFCCE() {
     const root = document.getElementById('modal-root');
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const box = document.createElement('div');
     box.className = 'modal-box';
-    box.innerHTML = `<h3>Load SFCE</h3>
-      <p style="font-size:12px; color:var(--text-muted); margin-top:-6px;">Loads a Section/Function/Capability/Entity collection from a JSON file as an alternate to the built-in "general" industry data, for use with Advanced &gt; Generate Industry. This does not add anything to the current view.</p>
-      <div class="prop-row"><label>File</label><input type="file" id="sfce-file-input" accept="application/json" /></div>
-      <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary" id="sfce-preread-btn">Preread</button></div>
+    box.innerHTML = `<h3>Load SFCCE</h3>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:-6px;">Loads a Section/Function/Capability/Sub-Capability/Entity collection from a JSON file as an alternate to the built-in "general" industry data, for use with Advanced &gt; Generate Industry. Any level below Function can be left unmapped — its value then inherits the level above it (e.g. no distinct Application Capability data means each one just takes its Business Capability's own name). This does not add anything to the current view.</p>
+      <div class="prop-row"><label>File</label><input type="file" id="sfcce-file-input" accept="application/json" /></div>
+      <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary" id="sfcce-preread-btn">Preread</button></div>
     `;
     overlay.appendChild(box);
     root.appendChild(overlay);
     box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
 
-    box.querySelector('#sfce-preread-btn').addEventListener('click', async () => {
-      const fileInput = box.querySelector('#sfce-file-input');
+    box.querySelector('#sfcce-preread-btn').addEventListener('click', async () => {
+      const fileInput = box.querySelector('#sfcce-file-input');
       const file = fileInput.files?.[0];
       if (!file) { this.toast('Choose a file first.', true); return; }
       let raw;
@@ -2012,22 +2083,25 @@ class App {
       }
       const { records, fields } = flattenJsonRecords(raw);
       if (records.length === 0) {
-        this.toast('No records found in that file — check it contains an array of objects (optionally nested one level, e.g. groups each containing a list of items).', true);
+        this.toast('No records found in that file — check it contains an array of objects (optionally nested, e.g. groups each containing a list of items, which may themselves each contain another nested list).', true);
         return;
       }
       overlay.remove();
-      this.promptSFCEMapping(file.name, records, fields);
+      this.promptSFCCEMapping(file.name, records, fields);
     });
   }
 
   /** Second step: suggested industry name + field selectors, built from what
-   * flattenJsonRecords found in the file. */
-  promptSFCEMapping(fileName, records, fields) {
+   * flattenJsonRecords found in the file. Capability/Sub-Capability/Entity (and their
+   * description fields) are all optional — "(none)" means that level cascades from the
+   * one above it (see buildRowsFromRecords' own comment) rather than being dropped, the
+   * way Load SFCE's original Entity field alone used to work. */
+  promptSFCCEMapping(fileName, records, fields) {
     const root = document.getElementById('modal-root');
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const box = document.createElement('div');
-    box.className = 'modal-box';
+    box.className = 'modal-box modal-box-textedit';
 
     const suggestedName = fileName.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || 'imported';
     // Lightweight keyword-based suggestion per field — the person can always override
@@ -2043,23 +2117,44 @@ class App {
       }
       return '';
     };
+    // Depth-aware variant, for Capability vs Sub-Capability specifically: with
+    // flattenJsonRecords' full dot-path naming (e.g. "businessCapabilities.name" vs
+    // "businessCapabilities.applicationCapabilities.name"), the two levels often share
+    // the exact same trailing keyword — the field with FEWER dot-separated segments is
+    // reliably the shallower (Capability) one, more segments the deeper (Sub-Capability)
+    // one, regardless of what either level happens to be called in this particular file.
+    const suggestByDepth = (keywords, deepest) => {
+      const matches = fields.filter((f) => keywords.some((kw) => f.toLowerCase().includes(kw)));
+      if (matches.length === 0) return '';
+      return matches.reduce((best, f) => {
+        const better = deepest ? f.split('.').length > best.split('.').length : f.split('.').length < best.split('.').length;
+        return better ? f : best;
+      });
+    };
     const suggestedSection = suggest('section', 'ministr', 'department', 'group');
     const suggestedFunction = suggest('function', 'domain', 'category');
-    const suggestedCapability = suggest('name', 'capability', 'title');
+    const capabilityKeywords = ['capability', 'name', 'title'];
+    const suggestedCapability = suggestByDepth(capabilityKeywords, false);
+    const suggestedCapabilityDescription = suggestByDepth(['description', 'desc', 'summary'], false);
+    const suggestedSubCapability = suggestByDepth(capabilityKeywords, true);
+    const suggestedSubCapabilityDescription = suggestByDepth(['description', 'desc', 'summary'], true);
     const suggestedEntity = suggest('entity', 'object', 'data');
-    const suggestedDescription = suggest('description', 'desc', 'summary');
+    const suggestedEntityDescription = suggest('entity description', 'entity_description');
 
     const fieldOptions = (selected) => fields.map((f) => `<option value="${escapeHtml(f)}" ${f === selected ? 'selected' : ''}>${escapeHtml(f)}</option>`).join('');
-    const fieldOptionsWithNone = (selected) => `<option value="">(none)</option>` + fieldOptions(selected);
+    const fieldOptionsWithNone = (selected) => `<option value="">(none — inherit from the level above)</option>` + fieldOptions(selected);
 
-    box.innerHTML = `<h3>Load SFCE — ${records.length} record${records.length === 1 ? '' : 's'} found</h3>
-      <div class="prop-row"><label>Industry Name</label><input type="text" id="sfce-industry-name" value="${escapeHtml(suggestedName)}" /></div>
-      <div class="prop-row"><label>Section field</label><select id="sfce-field-section">${fieldOptions(suggestedSection)}</select></div>
-      <div class="prop-row"><label>Function field</label><select id="sfce-field-function">${fieldOptions(suggestedFunction)}</select></div>
-      <div class="prop-row"><label>Capability field</label><select id="sfce-field-capability">${fieldOptions(suggestedCapability)}</select></div>
-      <div class="prop-row"><label>Entity field</label><select id="sfce-field-entity">${fieldOptionsWithNone(suggestedEntity)}</select></div>
-      <div class="prop-row"><label>Description field</label><select id="sfce-field-description">${fieldOptionsWithNone(suggestedDescription)}</select></div>
-      <p style="font-size:12px; color:var(--text-muted);">A Section value containing multiple entries (a comma-separated list, or an array) is split into one row per section. Missing Section/Function/Capability values are kept as "(unspecified)" rather than dropped; a missing Entity value simply means that row won't add an entity.</p>
+    box.innerHTML = `<h3>Load SFCCE — ${records.length} record${records.length === 1 ? '' : 's'} found</h3>
+      <div class="prop-row"><label>Industry Name</label><input type="text" id="sfcce-industry-name" value="${escapeHtml(suggestedName)}" /></div>
+      <div class="prop-row"><label>Section field</label><select id="sfcce-field-section">${fieldOptions(suggestedSection)}</select></div>
+      <div class="prop-row"><label>Function field</label><select id="sfcce-field-function">${fieldOptions(suggestedFunction)}</select></div>
+      <div class="prop-row"><label>Capability field</label><select id="sfcce-field-capability">${fieldOptionsWithNone(suggestedCapability)}</select></div>
+      <div class="prop-row"><label>Capability Description</label><select id="sfcce-field-capability-desc">${fieldOptionsWithNone(suggestedCapabilityDescription)}</select></div>
+      <div class="prop-row"><label>Sub-Capability field</label><select id="sfcce-field-subcapability">${fieldOptionsWithNone(suggestedSubCapability)}</select></div>
+      <div class="prop-row"><label>Sub-Capability Description</label><select id="sfcce-field-subcapability-desc">${fieldOptionsWithNone(suggestedSubCapabilityDescription)}</select></div>
+      <div class="prop-row"><label>Entity field</label><select id="sfcce-field-entity">${fieldOptionsWithNone(suggestedEntity)}</select></div>
+      <div class="prop-row"><label>Entity Description</label><select id="sfcce-field-entity-desc">${fieldOptionsWithNone(suggestedEntityDescription)}</select></div>
+      <p style="font-size:12px; color:var(--text-muted);">A Section value containing multiple entries (a comma-separated list, or an array) is split into one row per section. A missing Function value is kept as "(unspecified)" rather than dropped. A missing Capability/Sub-Capability/Entity value inherits the level above it instead — see the note on the previous step.</p>
       <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Load</button></div>
     `;
     overlay.appendChild(box);
@@ -2067,84 +2162,101 @@ class App {
     box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
 
     box.querySelector('.submit').addEventListener('click', () => {
-      const industryName = box.querySelector('#sfce-industry-name').value.trim();
+      const industryName = box.querySelector('#sfcce-industry-name').value.trim();
       if (!industryName) { this.toast('Industry Name is required.', true); return; }
       if (this.store.industryData?.[industryName]) {
         this.toast(`"${industryName}" already exists — choose a different Industry Name.`, true);
         return;
       }
       const mapping = {
-        sectionField: box.querySelector('#sfce-field-section').value,
-        functionField: box.querySelector('#sfce-field-function').value,
-        capabilityField: box.querySelector('#sfce-field-capability').value,
-        entityField: box.querySelector('#sfce-field-entity').value || null,
-        descriptionField: box.querySelector('#sfce-field-description').value || null,
+        sectionField: box.querySelector('#sfcce-field-section').value,
+        functionField: box.querySelector('#sfcce-field-function').value,
+        capabilityField: box.querySelector('#sfcce-field-capability').value || null,
+        capabilityDescriptionField: box.querySelector('#sfcce-field-capability-desc').value || null,
+        subCapabilityField: box.querySelector('#sfcce-field-subcapability').value || null,
+        subCapabilityDescriptionField: box.querySelector('#sfcce-field-subcapability-desc').value || null,
+        entityField: box.querySelector('#sfcce-field-entity').value || null,
+        entityDescriptionField: box.querySelector('#sfcce-field-entity-desc').value || null,
       };
       overlay.remove();
       const parsed = buildRowsFromRecords(records, mapping);
-      const { sectionsByFunction, sharedFunctionNames } = detectSharedFunctions(parsed.rows);
-      if (sharedFunctionNames.size > 0) {
-        this.promptSFCESharedConfirm(industryName, parsed, sectionsByFunction, sharedFunctionNames);
-      } else {
-        this.finishSFCEImport(industryName, parsed.rows, parsed);
-      }
+      this.promptSFCCESharedLevelConfirm(industryName, parsed, parsed.rows, 0);
     });
   }
 
-  /** Third step, only shown when detectSharedFunctions found any Function names that
-   * end up needing to exist in more than one Section: ask whether to combine each of
-   * those into one shared Function (placed in a single section called "Shared", with
-   * its capabilities from every section combined), or keep each Section's own copy
-   * (with a numbered suffix on the name for every section after the first). */
-  promptSFCESharedConfirm(industryName, parsed, sectionsByFunction, sharedFunctionNames) {
-    const sharedCount = sharedFunctionNames.size;
-    const exampleName = [...sharedFunctionNames][0];
-    const exampleSections = sectionsByFunction.get(exampleName);
+  /** Walks SFCCE_SHARED_LEVELS (Domain, then Business Capability, then Application
+   * Capability) in order, skipping straight past any level with nothing shared and
+   * showing one confirm modal per level that DOES have something — each level's
+   * collapse-vs-numbered-suffix choice is fully independent of the others' (see
+   * sfce.js's detectSharedLevel for why they can resolve in any order/combination
+   * without corrupting each other). Recurses to the next level after each resolution or
+   * skip; calls finishSFCCEImport once all three are done. */
+  promptSFCCESharedLevelConfirm(industryName, parsed, rows, levelIndex) {
+    if (levelIndex >= SFCCE_SHARED_LEVELS.length) {
+      this.finishSFCCEImport(industryName, rows, parsed);
+      return;
+    }
+    const level = SFCCE_SHARED_LEVELS[levelIndex];
+    const { sectionsByIdentity, sharedIdentities } = level.detect(rows);
+    if (sharedIdentities.size === 0) {
+      this.promptSFCCESharedLevelConfirm(industryName, parsed, rows, levelIndex + 1);
+      return;
+    }
+
+    const sharedCount = sharedIdentities.size;
+    const exampleKey = [...sharedIdentities][0];
+    const exampleName = level.exampleName(exampleKey);
+    const exampleSections = sectionsByIdentity.get(exampleKey);
+
     const root = document.getElementById('modal-root');
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const box = document.createElement('div');
     box.className = 'modal-box';
-    box.innerHTML = `<h3>Shared Functions found</h3>
-      <p>${sharedCount} Function name${sharedCount === 1 ? '' : 's'} appear${sharedCount === 1 ? 's' : ''} in more than one Section — e.g. "${escapeHtml(exampleName)}" appears in: ${exampleSections.map(escapeHtml).join(', ')}.</p>
-      <p>Combine each of these into a single shared Function (with its Capabilities from every section combined), placed in one Section called "Shared"?</p>
-      <div class="modal-actions"><button class="cancel" id="sfce-shared-no">No, keep in original sections</button><button class="primary" id="sfce-shared-yes">Yes, use "Shared"</button></div>
+    box.innerHTML = `<h3>Shared ${escapeHtml(level.plural)} found</h3>
+      <p>${sharedCount} ${escapeHtml(level.label)}${sharedCount === 1 ? '' : ' name'}${sharedCount === 1 ? ' ends' : 's end'} up needing to exist in more than one Section — e.g. "${escapeHtml(exampleName)}" appears in: ${exampleSections.map(escapeHtml).join(', ')}.</p>
+      <p>Combine each of these into a single shared ${escapeHtml(level.label)} (with everything below it from every section combined), placed in one Section called "Shared"? This choice is independent of any other level's choice.</p>
+      <div class="modal-actions"><button class="cancel" id="sfcce-shared-no">No, keep in original sections</button><button class="primary" id="sfcce-shared-yes">Yes, use "Shared"</button></div>
     `;
     overlay.appendChild(box);
     root.appendChild(overlay);
-    box.querySelector('#sfce-shared-yes').addEventListener('click', () => {
+    box.querySelector('#sfcce-shared-yes').addEventListener('click', () => {
       overlay.remove();
-      this.finishSFCEImport(industryName, resolveSharedFunctions(parsed.rows, sectionsByFunction, sharedFunctionNames, true), parsed);
+      this.promptSFCCESharedLevelConfirm(industryName, parsed, level.resolve(rows, sectionsByIdentity, sharedIdentities, true), levelIndex + 1);
     });
-    box.querySelector('#sfce-shared-no').addEventListener('click', () => {
+    box.querySelector('#sfcce-shared-no').addEventListener('click', () => {
       overlay.remove();
-      this.finishSFCEImport(industryName, resolveSharedFunctions(parsed.rows, sectionsByFunction, sharedFunctionNames, false), parsed);
+      this.promptSFCCESharedLevelConfirm(industryName, parsed, level.resolve(rows, sectionsByIdentity, sharedIdentities, false), levelIndex + 1);
     });
   }
 
-  /** Builds the tree, stores it, and reports statistics — the unique section list (in
-   * first-seen order, per the request, since it'll be needed elsewhere) and subtotals —
-   * to the Message Log as well as a toast summary. */
-  finishSFCEImport(industryName, resolvedRows, parsed) {
+  /** Builds the tree, stores it (registering the 'SFCCE' stream template so Generate
+   * Industry walks its 4 levels instead of assuming 'Enterprise' — see
+   * store.industryTemplates' own comment in state.js), and reports statistics — the
+   * unique section list (first-seen order) and subtotals — to the Message Log as well as
+   * a toast summary. */
+  finishSFCCEImport(industryName, resolvedRows, parsed) {
     const { tree, stats } = buildIndustryTree(resolvedRows);
     this.store.industryData = { ...(this.store.industryData || {}), [industryName]: tree };
+    this.store.industryTemplates = { ...(this.store.industryTemplates || {}), [industryName]: 'SFCCE' };
 
     const lines = [
-      `[Load SFCE: "${industryName}"] ${parsed.rows.length} row${parsed.rows.length === 1 ? '' : 's'} processed.`,
+      `[Load SFCCE: "${industryName}"] ${parsed.rows.length} row${parsed.rows.length === 1 ? '' : 's'} processed.`,
       `Sections (${stats.sectionOrder.length}, in order): ${stats.sectionOrder.join(', ')}`,
-      `Subtotals — Functions: ${stats.functionCount}, Capabilities: ${stats.capabilityCount}, Entities: ${stats.entityCount}`,
+      `Subtotals — Functions: ${stats.functionCount}, Capabilities: ${stats.capabilityCount}, Sub-Capabilities: ${stats.subCapabilityCount}, Entities: ${stats.entityCount}`,
     ];
     const notes = [];
     if (stats.mergedDuplicates) notes.push(`${stats.mergedDuplicates} exact duplicate row${stats.mergedDuplicates === 1 ? '' : 's'} merged`);
     if (parsed.missingFunction) notes.push(`${parsed.missingFunction} row${parsed.missingFunction === 1 ? '' : 's'} had no Function value`);
-    if (parsed.missingCapability) notes.push(`${parsed.missingCapability} row${parsed.missingCapability === 1 ? '' : 's'} had no Capability value`);
-    if (parsed.missingEntity) notes.push(`${parsed.missingEntity} row${parsed.missingEntity === 1 ? '' : 's'} had no Entity value`);
-    if (parsed.missingDescription) notes.push(`${parsed.missingDescription} row${parsed.missingDescription === 1 ? '' : 's'} had no Description value`);
+    if (parsed.missingCapability) notes.push(`${parsed.missingCapability} row${parsed.missingCapability === 1 ? '' : 's'} had no Capability value (inherited Function's)`);
+    if (parsed.missingSubCapability) notes.push(`${parsed.missingSubCapability} row${parsed.missingSubCapability === 1 ? '' : 's'} had no Sub-Capability value (inherited Capability's)`);
+    if (parsed.missingEntity) notes.push(`${parsed.missingEntity} row${parsed.missingEntity === 1 ? '' : 's'} had no Entity value (inherited Sub-Capability's)`);
+    if (parsed.missingDescription) notes.push(`${parsed.missingDescription} row${parsed.missingDescription === 1 ? '' : 's'} had no Capability Description value`);
     if (notes.length) lines.push(`Missing-value handling: ${notes.join('; ')} — kept, not dropped.`);
 
     for (const line of lines) pushMessageLog(this.store, line);
     this.render();
-    this.toast(`Loaded "${industryName}": ${stats.sectionOrder.length} sections, ${stats.functionCount} functions, ${stats.capabilityCount} capabilities, ${stats.entityCount} entities. Details in the Message Log.`);
+    this.toast(`Loaded "${industryName}": ${stats.sectionOrder.length} sections, ${stats.functionCount} functions, ${stats.capabilityCount} capabilities, ${stats.subCapabilityCount} sub-capabilities, ${stats.entityCount} entities. Details in the Message Log.`);
   }
 }
 
@@ -2554,7 +2666,7 @@ function wireGlobalEvents(app) {
     <div class="dd-item" data-action="exportImage">Export View as Image...</div>
     <div class="dd-separator"></div>
     <div class="dd-item" data-action="loadExample">Load Example</div>
-    <div class="dd-item" data-action="loadSFCE">Load SFCE</div>
+    <div class="dd-item" data-action="loadSFCCE">Load SFCCE</div>
     <div class="dd-item" data-action="loadLocalSecrets">Load Local Secrets</div>
     <div class="dd-item" data-action="saveLocalSecrets">Save Local Secrets</div>
     <div class="dd-item" data-action="loadLocalSettings">Load Local Settings</div>
@@ -2571,7 +2683,7 @@ function wireGlobalEvents(app) {
       else if (item.dataset.action === 'print') app.promptPrint();
       else if (item.dataset.action === 'exportImage') app.promptExportViewAsImage();
       else if (item.dataset.action === 'loadExample') app.promptLoadExample();
-      else if (item.dataset.action === 'loadSFCE') app.promptLoadSFCE();
+      else if (item.dataset.action === 'loadSFCCE') app.promptLoadSFCCE();
       else if (item.dataset.action === 'loadLocalSecrets') document.getElementById('load-local-secrets-input').click();
       else if (item.dataset.action === 'saveLocalSecrets') app.saveLocalSecrets();
       else if (item.dataset.action === 'loadLocalSettings') document.getElementById('load-local-settings-input').click();
@@ -2747,7 +2859,7 @@ function wireGlobalEvents(app) {
   ];
   const catalogsMenu = document.getElementById('catalogs-menu');
   catalogsMenu.innerHTML = CATALOGS.map((c) => `<div class="dd-item" data-type="${c.type}" data-label="${c.label}">${c.label}</div>`).join('')
-    + '<div class="dd-separator"></div><div class="dd-item" data-action="sfce">SFCE</div>';
+    + '<div class="dd-separator"></div><div class="dd-item" data-action="sfce">SFCCE</div>';
   catalogsMenu.querySelectorAll('.dd-item').forEach((item) => {
     item.addEventListener('click', () => {
       if (item.dataset.action === 'sfce') { app.promptSfceCatalog(); catalogsMenu.classList.add('hidden'); return; }

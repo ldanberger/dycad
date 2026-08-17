@@ -33,6 +33,14 @@ class Store {
     // 'fce-generalnodes.json' -> 'general'). Only one file is loaded today; more can be
     // added here later without changing how Generate Industry consumes this map.
     this.industryData = { [deriveIndustryName('fce-generalnodes.json')]: fce };
+    // Which stream template generateIndustry (commands.js) should use for each
+    // industryData key — every key defaults to 'Enterprise' (generateIndustry's own
+    // fallback when a key has no entry here, matching the built-in 'general' dataset's
+    // 3-level Function/Capability/Entity shape) except keys imported via File > Load
+    // SFCCE, which register 'SFCCE' here (a 4-level Function/Capability/Sub-Capability/
+    // Entity chain — see sfce.js's own module comment). Memory-only, same lifetime as
+    // industryData itself.
+    this.industryTemplates = {};
 
     // ---- persisted model doc (round-trips via Save/Load JSON, shape ~ onestream.json) ----
     this.doc = {

@@ -73,6 +73,7 @@ function createStream(app, {
   templateName, streamName, functionName, capabilityName, entityName, modelName, viewName, anchorX, anchorY,
   functionDescription = '', functionxIds = '', functionSection = '',
   capabilityDescription = '', capabilityxIds = '',
+  subCapabilityName, subCapabilityDescription = '', subCapabilityxIds = '',
   entityDescription = '', entityxIds = '',
   silent = false, lookupCache = null, placeInView = true,
 }) {
@@ -80,11 +81,20 @@ function createStream(app, {
   const template = (store.settings.streamTemplates || []).find((t) => ciEq(t.name, templateName));
   if (!template) { app.toast(`Stream template "${templateName}" not found.`, true); return null; }
 
-  // Validate capabilityNameBegin / entityNameBegin resolve to real element types before doing anything.
+  // Validate capabilityNameBegin / subCapabilityNameBegin / entityNameBegin resolve to
+  // real element types before doing anything. subCapabilityNameBegin is optional — only
+  // the 'SFCCE' template (and anything else that opts in) declares it; every other
+  // existing template has no such field, so capBeginEl/subCapBeginEl checks below are
+  // skipped entirely for them, matching their unchanged pre-existing behavior.
   const capBeginEl = elementLookupExact(store, template.capabilityNameBegin);
+  const subCapBeginEl = elementLookupExact(store, template.subCapabilityNameBegin);
   const entBeginEl = elementLookupExact(store, template.entityNameBegin);
   if (template.capabilityNameBegin && !capBeginEl) {
     app.toast(`Template "${templateName}": capabilityNameBegin "${template.capabilityNameBegin}" is not a known element type. Aborted.`, true);
+    return null;
+  }
+  if (template.subCapabilityNameBegin && !subCapBeginEl) {
+    app.toast(`Template "${templateName}": subCapabilityNameBegin "${template.subCapabilityNameBegin}" is not a known element type. Aborted.`, true);
     return null;
   }
   if (template.entityNameBegin && !entBeginEl) {
@@ -104,6 +114,7 @@ function createStream(app, {
   if (placeInView) view.chkShowStreamType = true; // otherwise the stream connectors this command creates would be invisible
 
   const capBeginIdx = template.value.findIndex((v) => ciEq(v, template.capabilityNameBegin));
+  const subCapBeginIdx = template.value.findIndex((v) => ciEq(v, template.subCapabilityNameBegin));
   const entBeginIdx = template.value.findIndex((v) => ciEq(v, template.entityNameBegin));
 
   // Default anchor (no explicit right-click position): stack below whatever's already
@@ -150,6 +161,8 @@ function createStream(app, {
       label = joinLabel(el, functionName); category = 'function';
     } else if (entBeginIdx >= 0 && i >= entBeginIdx) {
       label = joinLabel(el, entityName); category = 'entity';
+    } else if (subCapBeginIdx >= 0 && i >= subCapBeginIdx) {
+      label = joinLabel(el, subCapabilityName); category = 'subCapability';
     } else if (capBeginIdx >= 0 && i >= capBeginIdx) {
       label = joinLabel(el, capabilityName); category = 'capability';
     } else {
@@ -161,12 +174,20 @@ function createStream(app, {
     // TechnologyProcess, ...); only the one literally typed BusinessCapability/
     // DataDataEntity represents "the" capability/entity and should be find-or-reused.
     // Everything else in that range is a fresh per-stream supporting node, as before.
+    // subCapability's canonical type is 'ApplicationCapability', matching the same
+    // hardcoded-canonical-type convention as the other three categories rather than
+    // reading it dynamically off the template.
     const isPreciseCategoryMatch =
       (category === 'function' && ciEq(resolvedType, 'BusinessFunction')) ||
       (category === 'capability' && ciEq(resolvedType, 'BusinessCapability')) ||
+      (category === 'subCapability' && ciEq(resolvedType, 'ApplicationCapability')) ||
       (category === 'entity' && ciEq(resolvedType, 'DataDataEntity'));
-    const catDescription = isPreciseCategoryMatch ? (category === 'function' ? functionDescription : category === 'capability' ? capabilityDescription : entityDescription) : '';
-    const catXId = isPreciseCategoryMatch ? (category === 'function' ? functionxIds : category === 'capability' ? capabilityxIds : entityxIds) : '';
+    const catDescription = isPreciseCategoryMatch
+      ? (category === 'function' ? functionDescription : category === 'capability' ? capabilityDescription : category === 'subCapability' ? subCapabilityDescription : entityDescription)
+      : '';
+    const catXId = isPreciseCategoryMatch
+      ? (category === 'function' ? functionxIds : category === 'capability' ? capabilityxIds : category === 'subCapability' ? subCapabilityxIds : entityxIds)
+      : '';
     // Section only applies at the function level — it's where Load SFCE's imported
     // Section identifier lives on the generated data (see js/sfce.js's module doc for
     // why: Section groups Functions, not Capabilities or Entities).
@@ -1340,6 +1361,16 @@ async function generateIndustry(app, industryKey, onProgress, placeInView = true
   const { store } = app;
   const data = store.industryData?.[industryKey];
   if (!data) { app.toast(`Industry data "${industryKey}" not found.`, true); return; }
+  // See store.industryTemplates' own comment (state.js) — defaults to 'Enterprise' for
+  // every existing dataset (the general one, and anything from a pre-SFCCE Load SFCE);
+  // only File > Load SFCCE's data registers a different template here.
+  const templateName = store.industryTemplates?.[industryKey] || 'Enterprise';
+  const genTemplate = (store.settings.streamTemplates || []).find((t) => ciEq(t.name, templateName));
+  // Whether this run's tree has a genuine 4th (Sub-Capability) level — driven by the
+  // TEMPLATE, not by inspecting the tree data itself, so the built-in 'general' dataset
+  // (always 3-level, walked via the unchanged branch below) is never at risk of
+  // misinterpreting one of its own entity-level nodes as a sub-capability.
+  const hasSubCapability = !!(genTemplate && genTemplate.subCapabilityNameBegin);
 
   // Built once, up front — see createBulkLookupCache's own doc comment for why. Without
   // this, generateIndustry on a large dataset (confirmed as the actual cause of a real
@@ -1367,44 +1398,62 @@ async function generateIndustry(app, industryKey, onProgress, placeInView = true
     const { h: genNodeH } = getNodeSize(view);
     const existingPartVms = store.viewMembersForView(view.id).filter((vm) => vm.objectType === 'part');
     nextAnchorY = existingPartVms.length > 0 ? Math.max(...existingPartVms.map((vm) => (vm.y ?? 0) + genNodeH)) + 60 : 60;
-    // A single row isn't enough space per job — the "Enterprise" template's passive
-    // entries place additional nodes on rows BELOW the main chain's row (passiveRow 1, 2,
-    // 3, ...), so without accounting for that, the next job's row started overlapping the
-    // previous job's passive-node rows (confirmed: real duplicate-position collisions in
-    // testing). Reserving (1 + passive.length) rows per job is the same worst-case space
-    // createStream's own passivePos() layout can actually use.
-    const enterpriseTemplate = (store.settings.streamTemplates || []).find((t) => ciEq(t.name, 'Enterprise'));
-    const rowsPerJob = 1 + (enterpriseTemplate?.passive?.length || 0);
+    // A single row isn't enough space per job — a template's passive entries place
+    // additional nodes on rows BELOW the main chain's row (passiveRow 1, 2, 3, ...), so
+    // without accounting for that, the next job's row started overlapping the previous
+    // job's passive-node rows (confirmed: real duplicate-position collisions in testing).
+    // Reserving (1 + passive.length) rows per job is the same worst-case space
+    // createStream's own passivePos() layout can actually use. Keyed off the ACTUAL
+    // template this run uses, not always 'Enterprise' — SFCCE has no passive entries at
+    // all, so its jobs pack far tighter than Enterprise's would.
+    const rowsPerJob = 1 + (genTemplate?.passive?.length || 0);
     anchorStepY = (genNodeH + 44 * (view.spacingScale || 1)) * rowsPerJob;
   }
 
   // Flattened up front so progress can be reported as a simple "done / total" — the
-  // work itself is identical to walking func -> cap -> entityLevelNodes directly.
+  // work itself is identical to walking func -> cap -> [subCap ->] entityLevelNodes
+  // directly. Two walk shapes, chosen by hasSubCapability (computed from the TEMPLATE,
+  // not the tree) rather than unconditionally trying 4 levels everywhere: the built-in
+  // 'general' dataset (and any pre-SFCCE Load SFCE import) is a genuine 3-level tree —
+  // walking it as if a 4th level might exist would treat its own entity-level nodes as
+  // sub-capabilities, which is wrong and was never needed, so that path is untouched.
   const jobs = [];
   for (const func of data) {
     if (!ciEq(func.nodeElementType, 'BusinessFunction')) continue;
     for (const cap of func.nodeChildren || []) {
-      const entityLevelNodes = (cap.nodeChildren && cap.nodeChildren.length > 0) ? cap.nodeChildren : [cap];
-      for (const ent of entityLevelNodes) {
-        if (ent !== cap && !ciEq(ent.nodeElementType, 'DataDataEntity')) continue;
-        jobs.push({ func, cap, ent });
+      if (hasSubCapability) {
+        const subCapLevelNodes = (cap.nodeChildren && cap.nodeChildren.length > 0) ? cap.nodeChildren : [cap];
+        for (const subCap of subCapLevelNodes) {
+          const entityLevelNodes = (subCap !== cap && subCap.nodeChildren && subCap.nodeChildren.length > 0) ? subCap.nodeChildren : [subCap];
+          for (const ent of entityLevelNodes) {
+            if (ent !== subCap && ent !== cap && !ciEq(ent.nodeElementType, 'DataDataEntity')) continue;
+            jobs.push({ func, cap, subCap, ent });
+          }
+        }
+      } else {
+        const entityLevelNodes = (cap.nodeChildren && cap.nodeChildren.length > 0) ? cap.nodeChildren : [cap];
+        for (const ent of entityLevelNodes) {
+          if (ent !== cap && !ciEq(ent.nodeElementType, 'DataDataEntity')) continue;
+          jobs.push({ func, cap, subCap: null, ent });
+        }
       }
     }
   }
 
   let entityCount = 0, skippedCount = 0;
   for (let i = 0; i < jobs.length; i++) {
-    const { func, cap, ent } = jobs[i];
-    const tripleKey = `${func.nodeId || ''}|${cap.nodeId || ''}`;
+    const { func, cap, subCap, ent } = jobs[i];
+    const groupKey = subCap ? `${func.nodeId || ''}|${cap.nodeId || ''}|${subCap.nodeId || ''}` : `${func.nodeId || ''}|${cap.nodeId || ''}`;
     const existingEntityPart = findEntityPart(ent.nodeId);
-    if (existingEntityPart && (existingEntityPart.other?.generatedFor || []).includes(tripleKey)) {
+    if (existingEntityPart && (existingEntityPart.other?.generatedFor || []).includes(groupKey)) {
       skippedCount += 1;
     } else {
       createStream(app, {
-        templateName: 'Enterprise',
+        templateName,
         streamName: ent.nodeName,
         functionName: func.nodeName, functionDescription: func.nodeDescription, functionxIds: func.nodeId, functionSection: func.nodeSection || '',
         capabilityName: cap.nodeName, capabilityDescription: cap.nodeDescription, capabilityxIds: cap.nodeId,
+        subCapabilityName: subCap ? subCap.nodeName : undefined, subCapabilityDescription: subCap ? subCap.nodeDescription : undefined, subCapabilityxIds: subCap ? subCap.nodeId : undefined,
         entityName: ent.nodeName, entityDescription: ent.nodeDescription, entityxIds: ent.nodeId,
         modelName: store.defaultModel, viewName: store.currentView,
         anchorX: 60, anchorY: nextAnchorY,
@@ -1416,8 +1465,8 @@ async function generateIndustry(app, industryKey, onProgress, placeInView = true
       const generatedEntityPart = findEntityPart(ent.nodeId);
       if (generatedEntityPart) {
         const list = generatedEntityPart.other?.generatedFor || [];
-        if (!list.includes(tripleKey)) {
-          generatedEntityPart.other = { ...(generatedEntityPart.other || {}), generatedFor: [...list, tripleKey] };
+        if (!list.includes(groupKey)) {
+          generatedEntityPart.other = { ...(generatedEntityPart.other || {}), generatedFor: [...list, groupKey] };
         }
       }
     }

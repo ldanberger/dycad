@@ -1258,4 +1258,145 @@
 // tab is active instead, then confirms the Help button still works — verified it fails
 // with the expected message against a version with the boot-time check removed before
 // confirming it passes with the fix. Full suite now 34/34.
-export const APP_VERSION = '0.94';
+// Replaced Load SFCE and Load Capability Map (a prior version of this session's own
+// work, since reverted) with ONE unified feature, File > Load SFCCE — a
+// Section/Function/Capability/Sub-Capability/Entity import, per a direct request that
+// the two features were "almost the same wizard with one extra level." The unification
+// turned out to require more than just merging two menu items:
+//
+// - custom.json gained a new 'SFCCE' stream template (BusinessFunction ->
+//   BusinessCapability -> ApplicationCapability -> DataDataEntity, no passive entries —
+//   discovered while designing it that every EXISTING template routes BusinessFunction
+//   through a passive pair rather than the main chain, a template design choice, not a
+//   technical requirement, so SFCCE's own BusinessFunction sits directly at chain
+//   position 0 instead).
+// - createStream (commands.js) gained a 4th category, 'subCapability', alongside
+//   function/capability/entity — a new optional subCapabilityNameBegin template field
+//   (only 'SFCCE' sets it; every other template's behavior is 100% unchanged, verified
+//   byte-identical against the pre-change baseline for the built-in 'general' dataset:
+//   198 parts, 18 of them ApplicationCapability-typed from Enterprise's own unrelated
+//   chain position, both confirmed against a real pre-change run, not assumed) — plus
+//   isPreciseCategoryMatch extended so a Sub-Capability position's description/xIds
+//   actually get threaded through (caught via a real failing test: generated parts had
+//   empty descriptions until this was added).
+// - generateIndustry (commands.js) now reads store.industryTemplates[industryKey] (new
+//   Store field, state.js) instead of hardcoding 'Enterprise', and its job-building walk
+//   branches on whether that template declares subCapabilityNameBegin — 4 levels deep
+//   for 'SFCCE' data, the ORIGINAL unchanged 3-level walk for everything else (the
+//   built-in dataset and any file predating this feature), so a 3-level tree's own
+//   entity-level nodes are never misread as sub-capabilities.
+// - sfce.js: buildRowsFromRecords now cascades every level below Function when its
+//   mapped field is missing/unmapped — Capability inherits Function's name, Sub-
+//   Capability inherits Capability's, Entity inherits Sub-Capability's — rather than the
+//   old behavior (Capability/Function fell back to "(unspecified)", a missing Entity was
+//   simply never created). This is what lets old-style 3-level data and new 4-level data
+//   share one wizard: old data just never maps Sub-Capability, so it inherits Capability's
+//   own name at that position instead of the level being absent. buildIndustryTree
+//   correspondingly always builds the full 4 levels now (no more "capability with no
+//   entity children" branch — cascade guarantees there's always a next level).
+// - flattenJsonRecords (sfce.js) now unwraps arbitrarily many levels of nested
+//   array-of-objects, not just one — needed once a real merged-capabilities file's shape
+//   (domain -> businessCapabilities[] -> applicationCapabilities[]) turned out to be two
+//   levels deep, past what the original single-level unwrap (built for Load SFCE's one
+//   real-world case) could handle. A field name colliding between two nesting levels
+//   (e.g. both a Business Capability and its own Application Capabilities having their
+//   own "name"/"description") is preserved under a renamed field
+//   (`${nestedKey}_${field}`, e.g. "applicationCapabilities_name") rather than the
+//   deeper level silently overwriting the outer one and losing data.
+// - Sharing (a Domain/Capability/Sub-Capability spanning more than one Section) is now
+//   THREE independently-resolvable questions instead of Load SFCE's original one,
+//   generalized into one detectSharedLevel/resolveSharedLevel pair (sfce.js) rather than
+//   three hand-copied near-duplicates, and the wizard (main.js) walks them via one
+//   SFCCE_SHARED_LEVELS-driven recursive step instead of three separate modal functions.
+//   Found and fixed a real design bug before shipping: Capability-level detection, if run
+//   using the CURRENT (already Domain-resolved) section/name fields, could never fire —
+//   Domain-level resolution fully consumes a Domain's section diversity when it resolves
+//   (every row of a collapsed-or-suffixed Domain ends up with exactly one section), so
+//   grouping by the live fields always saw at most one section per Capability. This
+//   wasn't a rare corner case: verified 93% of business capabilities in a real merged
+//   capabilities dataset genuinely span multiple sections through their own application
+//   capabilities. Fixed by freezing originalFunctionName/originalCapabilityName/
+//   originalSubCapabilityName/originalSection on each row (never touched by any
+//   resolution) and keying/ranking all three levels' detection AND resolution off those
+//   instead — correct regardless of what order the three run in or what the others
+//   already decided, including "collapse one level, suffix another," which — given that
+//   93% overlap rate — is the common case here, not an edge case.
+//
+// New permanent regression check (check_load_sfcce) exercises the full wizard against a
+// small deliberate fixture (one domain, one business capability, one application
+// capability that itself lists 2 ministries — chosen so all three sharing levels fire
+// from a single row) — verified it fails with the expected message against the
+// Capability-detection ordering bug above (using the live section/name fields instead of
+// the frozen ones) before confirming it passes with the real fix. Four existing checks
+// (check_sfce_import_and_generate, check_generate_industry_no_collapse_keeps_functions_
+// separate, check_modal_no_close_on_outside_click, check_sfce_catalog_page) updated for
+// the renamed method/menu item and the new field-mapping/template-registration shape.
+// Verified via plain-Node harnesses first, at both small fixture scale and full real-data
+// scale (2,182 source records -> 5,869 fanned-out rows -> 15,167 generated parts in
+// ~450ms) before the Playwright checks. Full suite now 35/35.
+//
+// 0.96: Load SFCCE's field-mapping wizard was mislabeling fields when a source file has
+// more than one "name"/"description" at different nesting depths (a merged capabilities
+// file has one on each Business Capability AND each of its own Application Capabilities).
+// flattenJsonRecords (sfce.js) now ALWAYS renames every field belonging to a nested-array
+// unwrap to its full dot-path from the outermost record, e.g.
+// "businessCapabilities.applicationCapabilities.name" — not just on collision, and not
+// abbreviated to the nearest nesting level — so the wizard's dropdowns show each field's
+// complete parentage at a glance. A field never inside any nested array (e.g. the
+// outermost "domain") still stays bare, since there's nothing to disambiguate it from.
+// main.js's auto-suggestion logic (suggestByDepth) was updated to pick the SHALLOWEST
+// matching dot-path for "Capability field" and the DEEPEST for "Sub-Capability field",
+// replacing the old flat keyword-priority heuristic that assumed unique field names.
+// Confirmed against the real 2,182-record merged file: fields now read exactly
+// ['domain', 'businessCapabilities.name', 'businessCapabilities.description',
+// 'businessCapabilities.applicationCapabilities.name',
+// 'businessCapabilities.applicationCapabilities.description',
+// 'businessCapabilities.applicationCapabilities.ministries'], and auto-suggestion picks
+// the correct field at each of the 6 mapping slots. Updated the three SFCE/SFCCE tests
+// whose fixtures reference nested field names (check_sfce_import_and_generate,
+// check_generate_industry_no_collapse_keeps_functions_separate, check_load_sfcce) to the
+// new dot-path values; re-verified check_load_sfcce still catches the original
+// resolution-order bug by temporarily reintroducing it (swapping originalSection back to
+// the live section field in detectSharedLevel/resolveSharedLevel), confirming the exact
+// expected failure message, then restoring the fix. Full suite 35/35.
+// 0.97: Renamed the "Catalogs > SFCE" label to "SFCCE" (menu item, dialog title, table
+// tab title, and matching doc comments) to match the unified Load SFCCE wizard — it was
+// still saying "SFCE" from before the two features were merged. Also gave the 'SFCCE'
+// stream template (custom.json) the same `passive` entries as 'Enterprise'
+// (BusinessFunction->BusinessProcess, ApplicationApplication->ApplicationPhysicalComponent)
+// so Generate Industry on SFCCE-imported data also creates a Business Process (reusing
+// the chain's own BusinessFunction node) and an Application Application / Application
+// Physical Component pair per stream, needed to map real software applications onto the
+// generated Application Capabilities — previously SFCCE's passive list was empty.
+// capabilityNameBegin/entityNameBegin/value/subCapabilityNameBegin were deliberately left
+// distinct from Enterprise's (copying those would have collapsed generateIndustry back to
+// its 3-level walk and silently dropped every Application Capability node). Extended
+// check_load_sfcce to assert all three passive-generated part types appear exactly once;
+// verified by temporarily reverting SFCCE's passive back to [] and confirming the check
+// fails with the expected message before restoring the fix. Full suite 35/35.
+// 0.98: Dialog defaults now persist across sessions via the existing Local Settings
+// localStorage cache (LOCAL_SETTINGS_CACHE_KEY). Two new members: `streamTemplate` — the
+// last Stream Template picked in ANY dialog offering one (Generate Stream, Smart Check
+// View's Auto-Complete Streams, Remap) becomes the shared default for all of them, instead
+// of each independently defaulting to "Enterprise"; and `remapOptions` — Remap's own
+// pattern/limit-columns/filtered-only/force-directed-suboptions/sort-priority-order are
+// remembered as user-level defaults across ALL views, applied whenever Remap reopens (even
+// on a brand-new view). This sits BELOW view.remapSortKeys in priority — a view's own
+// remembered sort order (set the first time Remap actually runs on it) still wins once it
+// has one; the cached user default is only the fallback for a view that doesn't yet.
+// Remap's "Reset" button is unchanged — it still restores the app's true built-in defaults
+// (Enterprise/default pattern/unchecked), ignoring both the per-view and user-level
+// remembered values, since that's a distinct, deliberate action from just reopening the
+// dialog. Added two permanent checks (check_stream_template_shared_default,
+// check_remap_options_persist_across_views), each verified via reload and via temporarily
+// reverting the two new cache getters to no-ops, confirming the expected failure, then
+// restoring the fix. Full suite 37/37.
+// 0.99: Instructions tab, Commands section — added "AI-Assisted Capability Data
+// Generation" with two ready-to-paste prompts for producing industry JSON to feed
+// Generate Industry / File > Load SFCCE: GoA_Capabilities_to_SFCCE (condenses a flat,
+// ministry-tagged capability list into DyCAD's two-tier Capability/Sub-Capability shape —
+// matches capabilities.json -> capabilities-merged.json's real schema) and
+// Industry_to_SFCCE (a from-scratch generator with an {{INDUSTRY}} placeholder, 4-level
+// SFCCE shape by default, 3-level SFCE-style if the Sub-Capability level is omitted).
+// Content-only change, no code touched.
+export const APP_VERSION = '0.99';

@@ -802,12 +802,19 @@ def check_sfce_import_and_generate(page):
       ];
 
       const { records, fields } = sfce.flattenJsonRecords(fixture);
-      const mapping = { sectionField: 'ministries', functionField: 'domain', capabilityField: 'name', entityField: null, descriptionField: 'description' };
+      const mapping = { sectionField: 'capabilities.ministries', functionField: 'domain', capabilityField: 'capabilities.name', capabilityDescriptionField: 'capabilities.description', entityField: null };
       const parsed = sfce.buildRowsFromRecords(records, mapping);
       const { sectionsByFunction, sharedFunctionNames } = sfce.detectSharedFunctions(parsed.rows);
       const resolved = sfce.resolveSharedFunctions(parsed.rows, sectionsByFunction, sharedFunctionNames, true);
       const { tree, stats } = sfce.buildIndustryTree(resolved);
       store.industryData['sfce-fixture'] = tree;
+      // Registering 'SFCCE' here is what File > Load SFCCE's own wizard always does
+      // (finishSFCCEImport) — required now that buildIndustryTree always produces a
+      // 4-level tree (Sub-Capability cascades from Capability when unmapped, same as
+      // here): without it generateIndustry defaults to 'Enterprise', which has no
+      // Sub-Capability concept and would reject every Sub-Capability-typed child as an
+      // invalid entity, producing zero jobs.
+      store.industryTemplates['sfce-fixture'] = 'SFCCE';
 
       const view = store.addView('SFCERegr_' + Date.now());
       view.viewType = 'ff';
@@ -822,7 +829,7 @@ def check_sfce_import_and_generate(page):
 
       return {
         recordCount: records.length,
-        fieldsHasMinistries: fields.includes('ministries'),
+        fieldsHasMinistries: fields.includes('capabilities.ministries'),
         domainOneIsShared: sharedFunctionNames.has('Domain One'),
         domainTwoIsShared: sharedFunctionNames.has('Domain Two'),
         sectionOrder: stats.sectionOrder,
@@ -872,12 +879,13 @@ def check_generate_industry_no_collapse_keeps_functions_separate(page):
         ]},
       ];
       const { records } = sfce.flattenJsonRecords(fixture);
-      const mapping = { sectionField: 'ministries', functionField: 'domain', capabilityField: 'name', entityField: null, descriptionField: 'description' };
+      const mapping = { sectionField: 'capabilities.ministries', functionField: 'domain', capabilityField: 'capabilities.name', capabilityDescriptionField: 'capabilities.description', entityField: null };
       const { rows } = sfce.buildRowsFromRecords(records, mapping);
       const { sectionsByFunction, sharedFunctionNames } = sfce.detectSharedFunctions(rows);
       const resolved = sfce.resolveSharedFunctions(rows, sectionsByFunction, sharedFunctionNames, false);
       const { tree } = sfce.buildIndustryTree(resolved);
       store.industryData['sfce-nocollapse-fixture'] = tree;
+      store.industryTemplates['sfce-nocollapse-fixture'] = 'SFCCE'; // see check_sfce_import_and_generate's own comment on this line
 
       const view = store.addView('SFCENoCollapse_' + Date.now());
       view.viewType = 'ff';
@@ -960,7 +968,7 @@ def check_generate_industry_selection_cap(page):
 
 
 def check_modal_no_close_on_outside_click(page):
-    """Regression guard: dialogs (tested here via Load SFCE, but the fix applies to all
+    """Regression guard: dialogs (tested here via Load SFCCE, but the fix applies to all
     of them — every modal in the app shares the same overlay pattern) should only close
     via their own Cancel/Close controls, not a click anywhere outside the box."""
     result = js(page, """
@@ -969,7 +977,7 @@ def check_modal_no_close_on_outside_click(page):
       const homeTab = store.tabs.find(t => t.type === 'canvas');
       app.switchToTab(homeTab.id);
       const out = {};
-      app.promptLoadSFCE();
+      app.promptLoadSFCCE();
       await new Promise(r => setTimeout(r, 30));
       out.openInitially = !!document.querySelector('.modal-overlay');
       document.querySelector('.modal-overlay').dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -1009,9 +1017,10 @@ def check_dropdown_scrollable(page):
 
 def check_sfce_catalog_page(page):
     """Regression guard: Catalogs > SFCE should open a read-only table of the
-    Section/Function/Capability/Entity hierarchy, with id and description at every
-    level, working for the built-in "general" data (no section concept) as well as a
-    Load SFCE import."""
+    Section/Function/Capability/Sub-Capability/Entity hierarchy, with id and description
+    at every level, working for the built-in "general" data (a genuine 3-level tree, no
+    Sub-Capability concept, blank Sub-Capability columns) as well as a Load SFCCE
+    import."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -1030,7 +1039,7 @@ def check_sfce_catalog_page(page):
       };
     }
     """)
-    expectedCols = ["section", "functionId", "functionName", "functionDescription", "capabilityId", "capabilityName", "capabilityDescription", "entityId", "entityName", "entityDescription"]
+    expectedCols = ["section", "functionId", "functionName", "functionDescription", "capabilityId", "capabilityName", "capabilityDescription", "subCapabilityId", "subCapabilityName", "subCapabilityDescription", "entityId", "entityName", "entityDescription"]
     if not result["tabCreated"] or result["rowCount"] == 0:
         return False, f"catalog tab wasn't created or has no rows: {result}"
     if result["cols"] != expectedCols:
@@ -1387,6 +1396,290 @@ def check_instructions_closed_persists_across_reload(page):
     return True, "closing Instructions sticks across a reload (no auto-reopen), while the Help button still opens it on demand"
 
 
+def check_stream_template_shared_default(page):
+    """Regression guard: picking a Stream Template in one dialog (Remap) should become
+    the default selection in every OTHER dialog that also offers a Stream Template picker
+    (Generate Stream, Smart Check View's Auto-Complete Streams option) — cached to
+    localStorage (LOCAL_SETTINGS_CACHE_KEY's streamTemplate member) so it survives a page
+    reload too, not just later dialogs in the same session."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.addView('RegrTemplateShare_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const templateNames = (store.settings.streamTemplates || []).map(t => t.name);
+      const nonDefault = templateNames.find(n => n !== 'Enterprise');
+
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 30));
+      document.getElementById('rm-template').value = nonDefault;
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 80));
+
+      return { nonDefault, cached: JSON.parse(localStorage.getItem('dycad-local-settings-cache') || '{}').streamTemplate };
+    }
+    """)
+    if not result["nonDefault"]:
+        return False, "test setup itself is wrong — need at least 2 stream templates to pick a non-default one"
+    if result["cached"] != result["nonDefault"]:
+        return False, f"Remap's chosen template wasn't cached as the shared default: {result}"
+
+    page.reload()
+    page.wait_for_timeout(1200)
+    result2 = js(page, f"""
+    async () => {{
+      const app = window.dycadApp, store = app.store;
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+
+      app.runCommand('generate', null);
+      await new Promise(r => setTimeout(r, 30));
+      const generateDefault = document.querySelector('.modal-overlay [data-key="template"]')?.value;
+      document.querySelector('.modal-overlay .cancel')?.click();
+      await new Promise(r => setTimeout(r, 30));
+
+      app.promptSmartCheckView();
+      await new Promise(r => setTimeout(r, 30));
+      const smartCheckDefault = document.getElementById('scv-autocomplete-template')?.value;
+      document.querySelector('.modal-overlay .cancel')?.click();
+
+      return {{ generateDefault, smartCheckDefault }};
+    }}
+    """)
+    if result2["generateDefault"] != result["nonDefault"]:
+        return False, f"Generate Stream's default template after reload should be {result['nonDefault']!r}, got: {result2}"
+    if result2["smartCheckDefault"] != result["nonDefault"]:
+        return False, f"Smart Check View's Auto-Complete Streams default template after reload should be {result['nonDefault']!r}, got: {result2}"
+    return True, f"picking {result['nonDefault']!r} in Remap made it the shared default for Generate Stream and Smart Check View, surviving a reload"
+
+
+def check_remap_options_persist_across_views(page):
+    """Regression guard: Remap's own options (pattern, limit-columns, filtered-only, the
+    two force-directed sub-options, and sort priority order) should be remembered as
+    user-level defaults across ALL views, not just the specific view they were set on —
+    so even a brand-new view's Remap dialog starts from them, surviving a page reload.
+    Distinct from (and lower-priority than) view.remapSortKeys, which remembers a
+    specific view's own last-used order and still wins once that view has its own
+    history — this only checks the fallback a fresh view gets."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.addView('RegrRemapOptsA_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const commands = await import('./js/commands.js');
+      commands.createStream(app, {
+        templateName: 'Enterprise', streamName: 'RegrRemapOptsStream',
+        functionName: 'RegrFunc', capabilityName: 'RegrCap', entityName: 'RegrEnt',
+        modelName: store.defaultModel, viewName: view.id, silent: true,
+      });
+
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 30));
+      document.getElementById('rm-pattern').value = 'force';
+      document.getElementById('rm-pattern').dispatchEvent(new Event('change', { bubbles: true }));
+      document.getElementById('rm-limit').checked = true;
+      document.getElementById('rm-filtered-only').checked = true;
+      document.getElementById('rm-force-prefer-right').checked = true;
+      document.getElementById('rm-force-group-rows').checked = true;
+      // move the first sort-priority item down one slot, so the new first item is
+      // distinguishable from DEFAULT_REMAP_SORT_KEYS' own first item ('streamName')
+      document.querySelector('#rm-priority-list .rm-down[data-idx="0"]').click();
+      const reorderedFirstKey = document.querySelector('#rm-priority-list li').dataset.key;
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 80));
+
+      return { reorderedFirstKey };
+    }
+    """)
+    if not result["reorderedFirstKey"] or result["reorderedFirstKey"] == "streamName":
+        return False, f"test setup itself is wrong — reordering didn't change the first sort-priority key: {result}"
+
+    page.reload()
+    page.wait_for_timeout(1200)
+    result2 = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.addView('RegrRemapOptsB_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 30));
+      const out = {
+        pattern: document.getElementById('rm-pattern').value,
+        limit: document.getElementById('rm-limit').checked,
+        filteredOnly: document.getElementById('rm-filtered-only').checked,
+        forcePreferRight: document.getElementById('rm-force-prefer-right').checked,
+        forceGroupRows: document.getElementById('rm-force-group-rows').checked,
+        firstKey: document.querySelector('#rm-priority-list li')?.dataset.key,
+      };
+      document.querySelector('.modal-overlay .cancel')?.click();
+      return out;
+    }
+    """)
+    problems = []
+    if result2["pattern"] != "force": problems.append(f"pattern default should be 'force', got {result2['pattern']!r}")
+    if not result2["limit"]: problems.append("'Limit columns to view' should default checked")
+    if not result2["filteredOnly"]: problems.append("'Only remap filtered nodes' should default checked")
+    if not result2["forcePreferRight"]: problems.append("'Prefer placing connected nodes to the right' should default checked")
+    if not result2["forceGroupRows"]: problems.append("'Only start a new row when a node is a new hop away' should default checked")
+    if result2["firstKey"] != result["reorderedFirstKey"]: problems.append(f"sort priority order should default to the previously-reordered order (first key {result['reorderedFirstKey']!r}), got {result2['firstKey']!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result2})"
+    return True, "Remap's options (pattern, checkboxes, sort order) persisted as user-level defaults onto a brand-new view, surviving a reload"
+
+
+def check_load_sfcce(page):
+    """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
+    Sub-Capability/Entity import that replaced separate Load SFCE and Load Capability Map
+    features. Uses a small, deliberate 2-level-nested fixture (one domain, one business
+    capability, one application capability that itself lists 2 ministries) designed so
+    ALL THREE independently-resolvable sharing levels (Domain, Business Capability,
+    Application Capability) fire simultaneously from one row — this specifically guards a
+    real bug found while building this: capability-level sharing detection was
+    structurally unable to fire once domain-level resolution had already consumed the
+    section diversity (fixed via frozen originalFunctionName/originalCapabilityName/
+    originalSubCapabilityName/originalSection fields, immune to resolution order — see
+    sfce.js's detectSharedLevel). Also exercises flattenJsonRecords' full-dot-path field
+    naming (both nesting levels have their own "name"/"description" fields, which must
+    surface as distinct businessCapabilities.name / businessCapabilities.applicationCapabilities.name
+    rather than clobbering each other), the cascade-when-unmapped design (Entity isn't
+    mapped here, so it inherits the Application Capability's own name — producing a real
+    DataDataEntity part one level deeper, not an absent one), confirms Generate Industry
+    produces a real ApplicationCapability-typed part via the 'SFCCE' stream template
+    (through store.industryTemplates, not always 'Enterprise'), and confirms SFCCE's
+    passive entries (matching Enterprise's: BusinessFunction->BusinessProcess,
+    ApplicationApplication->ApplicationPhysicalComponent) each produce their own part —
+    the BusinessFunction side reusing the chain's own node rather than duplicating it."""
+    fixture = {
+        "type": "array",
+        "value": [
+            {
+                "domain": "Alpha Domain",
+                "businessCapabilities": [
+                    {
+                        "name": "Shared Business Cap",
+                        "description": "Biz cap desc",
+                        "applicationCapabilities": [
+                            {"name": "App Cap One", "description": "Desc one.", "ministries": ["Ministry A", "Ministry B"]},
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    result = js(page, f"""
+    async () => {{
+      const app = window.dycadApp, store = app.store;
+      const text = {json.dumps(json.dumps(fixture["value"]))};
+      const blob = new Blob([text], {{ type: 'application/json' }});
+      const file = new File([blob], 'fixture.json', {{ type: 'application/json' }});
+      const dt = new DataTransfer();
+      dt.items.add(file);
+
+      document.getElementById('file-menu-btn').click();
+      await new Promise(r => setTimeout(r, 50));
+      [...document.querySelectorAll('#file-menu .dd-item')].find(el => el.dataset.action === 'loadSFCCE')?.click();
+      await new Promise(r => setTimeout(r, 50));
+
+      const input = document.getElementById('sfcce-file-input');
+      input.files = dt.files;
+      document.getElementById('sfcce-preread-btn').click();
+      await new Promise(r => setTimeout(r, 100));
+
+      const step2Title = document.querySelector('.modal-box h3')?.textContent || '';
+      // Force the correct mapping explicitly rather than trusting auto-suggestion —
+      // this check is about the import mechanism, not the suggestion heuristic.
+      document.getElementById('sfcce-field-section').value = 'businessCapabilities.applicationCapabilities.ministries';
+      document.getElementById('sfcce-field-function').value = 'domain';
+      document.getElementById('sfcce-field-capability').value = 'businessCapabilities.name';
+      document.getElementById('sfcce-field-capability-desc').value = 'businessCapabilities.description';
+      document.getElementById('sfcce-field-subcapability').value = 'businessCapabilities.applicationCapabilities.name';
+      document.getElementById('sfcce-field-subcapability-desc').value = 'businessCapabilities.applicationCapabilities.description';
+      document.getElementById('sfcce-industry-name').value = 'RegrSFCCE';
+      document.querySelector('.modal-box .submit').click();
+      await new Promise(r => setTimeout(r, 80));
+
+      const step3Title = document.querySelector('.modal-box h3')?.textContent || '';
+      document.getElementById('sfcce-shared-yes')?.click(); // Domain: collapse
+      await new Promise(r => setTimeout(r, 80));
+
+      const step4Title = document.querySelector('.modal-box h3')?.textContent || '';
+      document.getElementById('sfcce-shared-yes')?.click(); // Business Capability: collapse
+      await new Promise(r => setTimeout(r, 80));
+
+      const step5Title = document.querySelector('.modal-box h3')?.textContent || '';
+      document.getElementById('sfcce-shared-yes')?.click(); // Application Capability: collapse
+      await new Promise(r => setTimeout(r, 100));
+
+      const tree = store.industryData['RegrSFCCE'];
+      const templateName = store.industryTemplates['RegrSFCCE'];
+
+      const commands = await import('./js/commands.js');
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      store.currentView = homeTab.viewId;
+      await commands.generateIndustry(app, 'RegrSFCCE', null, false);
+
+      const funcParts = store.doc.parts.filter(p => p.type === 'BusinessFunction');
+      const capParts = store.doc.parts.filter(p => p.type === 'BusinessCapability');
+      const appCapParts = store.doc.parts.filter(p => p.type === 'ApplicationCapability');
+      const dataEntityParts = store.doc.parts.filter(p => p.type === 'DataDataEntity');
+      const businessProcessParts = store.doc.parts.filter(p => p.type === 'BusinessProcess');
+      const appApplicationParts = store.doc.parts.filter(p => p.type === 'ApplicationApplication');
+      const appPhysicalComponentParts = store.doc.parts.filter(p => p.type === 'ApplicationPhysicalComponent');
+
+      return {{
+        step2Title, step3Title, step4Title, step5Title,
+        treeLength: tree?.length,
+        templateName,
+        funcCount: funcParts.length,
+        capCount: capParts.length,
+        appCapCount: appCapParts.length,
+        appCapLabel: appCapParts[0]?.label,
+        appCapDescription: appCapParts[0]?.description,
+        dataEntityCount: dataEntityParts.length,
+        businessProcessCount: businessProcessParts.length,
+        appApplicationCount: appApplicationParts.length,
+        appPhysicalComponentCount: appPhysicalComponentParts.length,
+      }};
+    }}
+    """)
+    if 'record' not in result['step2Title']:
+        return False, f"unexpected step 2 title (preread didn't parse the 2-level-nested fixture correctly): {result}"
+    if result['step3Title'] != 'Shared Domains found':
+        return False, f"expected the Domain-sharing question to appear: {result}"
+    if result['step4Title'] != 'Shared Business Capabilities found':
+        return False, f"expected the Business-Capability-sharing question to appear too — this is the ordering bug this check guards against: {result}"
+    if result['step5Title'] != 'Shared Application Capabilities found':
+        return False, f"expected the Application-Capability-sharing question to appear too (the app capability itself lists 2 ministries directly): {result}"
+    if result['templateName'] != 'SFCCE':
+        return False, f"expected store.industryTemplates to register the 'SFCCE' template: {result}"
+    if result['funcCount'] != 1 or result['capCount'] != 1 or result['appCapCount'] != 1:
+        return False, f"expected exactly 1 part at each of Function/Capability/ApplicationCapability (all 3 levels collapsed to 'Shared'): {result}"
+    # Entity was left unmapped, so it cascades from the Application Capability's own name
+    # (not left absent) — a real DataDataEntity part IS expected here, one level deeper
+    # than the ApplicationCapability part, both sharing the same cascaded name/label.
+    if result['dataEntityCount'] != 1:
+        return False, f"expected exactly 1 DataDataEntity part (cascaded from the Application Capability's own name, since Entity was left unmapped): {result}"
+    # SFCCE's template.passive now matches Enterprise's: BusinessFunction->BusinessProcess
+    # (reusing the chain's own BusinessFunction node, not duplicating it) and
+    # ApplicationApplication->ApplicationPhysicalComponent (both newly created, to map real
+    # software applications onto the generated Application Capability).
+    if result['businessProcessCount'] != 1 or result['appApplicationCount'] != 1 or result['appPhysicalComponentCount'] != 1:
+        return False, f"expected SFCCE's passive entries (BusinessFunction->BusinessProcess, ApplicationApplication->ApplicationPhysicalComponent) to each produce exactly 1 part: {result}"
+    if result['appCapLabel'] != 'Manage App Cap One':
+        return False, f"unexpected ApplicationCapability part label: {result['appCapLabel']}"
+    if result['appCapDescription'] != 'Desc one.':
+        return False, f"expected the ApplicationCapability part's description threaded through from the collision-renamed field, got: {result['appCapDescription']}"
+    return True, "Load SFCCE's unified wizard correctly resolves all three independent sharing levels, and Generate Industry produces a real ApplicationCapability-typed part via the 'SFCCE' template"
+
+
 CHECKS = [
     check_boots_clean,
     check_example_simulates,
@@ -1422,6 +1715,9 @@ CHECKS = [
     check_pinned_field_dblclick_not_stolen_by_pin_icon,
     check_local_secrets_settings_split,
     check_instructions_closed_persists_across_reload,
+    check_load_sfcce,
+    check_stream_template_shared_default,
+    check_remap_options_persist_across_views,
 ]
 
 

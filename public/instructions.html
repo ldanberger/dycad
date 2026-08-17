@@ -101,6 +101,10 @@ capability flow, you generate the whole pattern from a template and a few names.
 </ul>
 <p>Remap also has an "only remap filtered nodes" option — combine it with the Stream or Type filter to
 reorganize just a subset of a busy view without disturbing everything else.</p>
+<p>Remap's own choices (pattern, options, sort priority order) are remembered as your defaults the next
+time you open it on any view. The Stream Template you pick is remembered too, and shared as the default
+across every dialog that offers one (Remap, Generate Stream, Smart Check View's Auto-Complete Streams) —
+so you only have to pick it once.</p>
 
 <h3>Connector routing</h3>
 <p>A per-view setting (Root Properties on the view, or the view's own property panel) with three styles:</p>
@@ -160,9 +164,78 @@ canvas. Availability depends on what's selected — greyed out means the current
     created until you click Proceed.</td></tr>
     <tr><td><strong>Generate Industry / Generate Inventory View</strong></td><td>(Advanced menu) Bulk-generate
     a starter set of parts/connectors for a named industry, or a summary inventory view of everything in the
-    model.</td></tr>
+    model. The built-in "general" industry data can be supplemented with your own via <strong>File &gt; Load
+    SFCCE</strong> — a Section/Function/Capability/Sub-Capability/Entity collection from an arbitrary JSON
+    file (with a field-mapping step, since the shape can be anything, including nested groups of groups).
+    Capability, Sub-Capability, and Entity are all optional: leaving one unmapped means it simply inherits the
+    name of the level above it, rather than being dropped — so the same wizard handles data with only a single
+    capability concept just as well as data with a distinct Business/Application Capability split. A Domain,
+    Business Capability, or Application Capability that ends up spanning more than one Section can
+    independently be collapsed into one shared node or kept as separate numbered copies, one question per
+    level. Review the result via <strong>Catalogs &gt; SFCCE</strong> before generating.</td></tr>
   </tbody>
 </table>
+
+<h3>AI-Assisted Capability Data Generation</h3>
+<p>No suitable industry data on hand for <strong>Generate Industry</strong> or <strong>File &gt; Load
+SFCCE</strong>? Paste one of these prompts into an AI assistant to produce a JSON file in the right shape.
+Neither prompt is DyCAD-specific — the AI just needs to follow the JSON shape described; any assistant
+capable of following structured instructions and producing valid JSON will do.</p>
+
+<p><strong>GoA_Capabilities_to_SFCCE</strong> — condenses a flat list of fine-grained capabilities (each
+tagged with the ministries/departments that rely on it) into a smaller set of broader business
+capabilities, each still listing its own original fine-grained capabilities underneath. Use this when you
+already have a flat capability inventory and want it organized into DyCAD's two-tier
+Capability/Sub-Capability shape.</p>
+<pre class="docs-code">You will receive a JSON file shaped as an array of domains, each with a flat list of
+fine-grained "application capabilities":
+  [{ "domain": string, "capabilities": [{ "name": string, "description": string,
+     "ministries": string[] }, ...] }, ...]
+(Other fields on each capability, like repo_count, can be ignored and dropped.)
+
+For each domain, group its application capabilities into a smaller number of
+broader, outcome-oriented "business capabilities" -- capabilities describing WHAT
+the business does, not the granular systems/features that support it. Every
+application capability must end up under exactly one business capability, none may
+be dropped, merged away, or renamed. Business capability names/descriptions are new
+and yours to write (aim for roughly 5-15 application capabilities per business
+capability, fewer for small domains); the application capability's own
+name/description/ministries must be copied through unchanged.
+
+Output ONLY a JSON array in this exact shape, one entry per input domain:
+  [{ "domain": string,
+     "businessCapabilities": [{ "name": string, "description": string,
+       "applicationCapabilities": [{ "name": string, "description": string,
+         "ministries": string[] }, ...] }, ...] }, ...]
+
+Save the result as capabilities_merged.json.</pre>
+
+<p><strong>Industry_to_SFCCE</strong> — generates a capability map for an industry from scratch, no source
+file needed. Fill in the <code>{{INDUSTRY}}</code> placeholder before running it. Leaving out the
+Sub-Capability level (as the prompt itself notes) produces the simpler 3-level Function/Capability/Entity
+shape instead, for a plain <strong>Load SFCE</strong>-style import.</p>
+<pre class="docs-code">Generate a capability map for the {{INDUSTRY}} industry, suitable for import into
+DyCAD via File > Load SFCCE.
+
+Structure it as a JSON array of top-level business Functions, each containing
+Capabilities, each containing Sub-Capabilities (omit this level entirely for a
+simpler 3-level Function/Capability/Entity map instead), each tagged with the
+Section(s) -- business units, departments, or lines of business -- that rely on it:
+
+  [{ "function": string,
+     "capabilities": [{ "name": string, "description": string,
+       "subCapabilities": [{ "name": string, "description": string,
+         "sections": string[] }, ...] }, ...] }, ...]
+
+Cover the industry's full breadth: aim for 8-15 Functions, 3-8 Capabilities per
+Function, and 2-6 Sub-Capabilities per Capability (skip Sub-Capabilities entirely
+for a flatter map). Every name should be specific to {{INDUSTRY}}, not generic
+boilerplate. Descriptions are one concise sentence. "sections" should list 1-4
+realistic organizational units per Sub-Capability (or per Capability, if
+Sub-Capabilities are omitted) -- reusing the same section names across many entries
+is expected and normal.
+
+Output ONLY the JSON array, valid and complete -- no commentary.</pre>
 
 <h3>Keyboard Shortcuts</h3>
 <table class="docs-table">
