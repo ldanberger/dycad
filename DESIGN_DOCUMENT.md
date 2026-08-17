@@ -301,7 +301,7 @@ subsequent calls; `disposeView3D(tabId)` (called from `App.closeTab`) tears the 
 context and animation loop down explicitly, since browsers cap how many live contexts a
 page may hold.
 
-Staged build-out (Stages 0-1 shipped; this is the plan for what's still ahead, kept here
+Staged build-out (Stages 0-2 shipped; this is the plan for what's still ahead, kept here
 so a future session doesn't have to re-derive it from scratch):
 
 - **Stage 0 (done)** — plumbing only: persistent per-tab renderer/camera/`OrbitControls`,
@@ -325,9 +325,22 @@ so a future session doesn't have to re-derive it from scratch):
   instead. `getDebugSceneInfo(tabId)` (view3d.js) exposes the real scene state
   (per-type instance counts, Z position, mesh identity) for the regression suite to
   assert on directly, the same "no mocks, genuine state" testing philosophy §10 describes.
-- **Stage 2** — connector lines between resolved positions; cluster parts within a
-  layer by `section` first, then by shared stream, so a stream's chain visually clumps
-  even across group/type layers.
+- **Stage 2 (done)** — connector lines between resolved positions: one connector drawn
+  iff BOTH endpoints are currently visible (the same "hide the node, its connectors
+  disappear too" convention `passesStreamFilter`'s own comment already documents for the
+  2D canvas — not a new rule invented for 3D), rendered as a single `THREE.LineSegments`
+  with one shared `BufferGeometry` (one draw call for every visible connector — the
+  line-drawing equivalent of Stage 1's `InstancedMesh` choice; verified at 60,530 real
+  connectors with zero console errors). Within a type's own grid, parts are pre-sorted by
+  `(section, representative stream, id)` and `layoutGridWithSectionBreaks` forces a new
+  row at every section boundary, so a section's parts occupy their own visually distinct
+  band instead of packing straight across into the next section's; same-stream parts end
+  up adjacent via the sort even without their own forced break. `computeSignature` grew
+  accordingly — every part's type/streams/section (not just id, so retyping an existing
+  part via the property panel is now caught) and every connector's id/from/to (catches
+  add/remove and rewiring) — confirmed still fast enough at that same real scale
+  (~29ms for a no-op signature check over 22K parts + 60K connectors, comfortably
+  imperceptible for a UI interaction).
 - **Stage 3** — a hand-authored master "cube order" list in `custom.json` (alongside
   `streamTemplates`/`elementGroups`) as the *fallback* ordering for a type absent from
   the active template's `value[]` — the template's own order still wins when a type is

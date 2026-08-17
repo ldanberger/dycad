@@ -1541,4 +1541,23 @@
 // rendered with zero console errors, nearly-instant no-op re-syncs (~7ms). Also: new
 // top-level Explore menu (after Simulation) — 3D View moved there from Catalogs, its
 // first and, for now, only item. Full suite 42/42.
-export const APP_VERSION = '0.806';
+// 0.807: Stage 2 of the 3D View (Explore menu): connector lines and section/stream
+// clustering. A connector draws iff BOTH its endpoints are currently visible — the same
+// "hide the node, its connectors disappear too" convention the 2D canvas already uses
+// (passesStreamFilter's own comment), not a new rule invented for 3D — rendered as one
+// THREE.LineSegments with a single shared BufferGeometry (one draw call for every
+// visible connector, the line-drawing equivalent of Stage 1's InstancedMesh choice).
+// Within a type's own grid, parts now sort by (section, then a representative stream,
+// then id) before layout, and layoutGridWithSectionBreaks forces a new row at every
+// section boundary, so a section's parts occupy their own visually distinct band instead
+// of packing straight across into the next section's; same-stream parts end up adjacent
+// via the sort even without their own forced break. computeSignature grew accordingly —
+// every part's type/streams/section (not just id, so retyping an existing part via the
+// property panel is now caught, a real gap in Stage 1's signature) and every connector's
+// id/from/to (catches add/remove and rewiring) — verified still comfortably fast at real
+// scale (~29ms for a no-op signature check over 22,399 parts + 60,530 connectors). New
+// permanent regression check (fixture sized so natural packing and clustering-aware
+// packing would actually disagree, not coincidentally match), each assertion confirmed
+// to catch its own deliberately-reintroduced regression before being trusted. Full suite
+// 43/43.
+export const APP_VERSION = '0.807';

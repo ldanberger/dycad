@@ -1963,6 +1963,67 @@ def check_view3d_layers_and_filters(page):
     return True, "parts grouped into one InstancedMesh per type, layered in the correct General/Business/Application/Data Z order, Stream and Type filters both reach the 3D scene, and an unchanged re-render reuses the same mesh instead of rebuilding it"
 
 
+def check_view3d_connectors_and_clustering(page):
+    """Regression guard for 3D View Stage 2: connector lines and section clustering.
+    Builds A0/A1/A2 (GeneralActor, section "SectionA"), B0 (GeneralActor, section
+    "SectionB"), C (BusinessCapability, a different type/layer), and Ghost
+    (DataDataEntity) — with cols=2 for the 4 GeneralActor parts, so filling them in
+    section-sorted order WITHOUT a forced row break would land A2 and B0 on the SAME row
+    (2 per row, 4 parts -> exactly 2 rows, no room for a section boundary unless a row is
+    deliberately left partially filled). Connectors: A0->A1 (same type), A0->C (crosses
+    type/group layers), A0->Ghost (to prove a connector disappears once either endpoint
+    is filtered out — same "hide the node, its connectors disappear too" convention the
+    2D canvas already uses, not a new rule invented for 3D)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      const mk = (type, label, section) => store.createPart({ type, label, model: store.defaultModel, streams: [], section: section || '' });
+      const A0 = mk('GeneralActor', 'A0', 'SectionA');
+      const A1 = mk('GeneralActor', 'A1', 'SectionA');
+      const A2 = mk('GeneralActor', 'A2', 'SectionA');
+      const B0 = mk('GeneralActor', 'B0', 'SectionB');
+      const C = mk('BusinessCapability', 'C', '');
+      const ghost = mk('DataDataEntity', 'Ghost', '');
+      const conn = (from, to) => store.createConnector({ from: from.id, to: to.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      conn(A0, A1);
+      conn(A0, C);
+      conn(A0, ghost);
+
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 200));
+      const initial = view3d.getDebugSceneInfo(tab.id);
+
+      // exclude DataDataEntity -> the A0->Ghost connector's target vanishes
+      tab.activeElementTypes = ['GeneralActor', 'BusinessCapability'];
+      app.render();
+      await new Promise(r => setTimeout(r, 150));
+      const filtered = view3d.getDebugSceneInfo(tab.id);
+
+      return { initial, filtered };
+    }
+    """)
+    i = result["initial"]
+    problems = []
+    if i["connectorCount"] != 3:
+        problems.append(f"expected 3 connector lines initially (all endpoints visible), got {i['connectorCount']}")
+    ga = i["types"].get("GeneralActor", {})
+    positions = ga.get("positions", {})
+    if len(positions) != 4:
+        problems.append(f"expected 4 GeneralActor positions, got {len(positions)}")
+    else:
+        distinctYs = len(set(round(p["y"], 6) for p in positions.values()))
+        if distinctYs != 3:
+            problems.append(f"expected 3 distinct rows (Y values) among A0/A1/A2/B0 with cols=2 — proves the section boundary forced an extra row rather than naturally packing 4 into 2 rows — got {distinctYs} distinct Y values: {positions}")
+    f = result["filtered"]
+    if f["connectorCount"] != 2:
+        problems.append(f"expected the A0->Ghost connector to disappear once DataDataEntity is filtered out (2 remaining), got {f['connectorCount']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "connector lines drawn between resolved positions (and correctly disappearing once a filtered-out endpoint hides), and section clustering forces a new row at each section boundary instead of packing across it"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
@@ -2151,6 +2212,7 @@ CHECKS = [
     check_smart_check_node,
     check_view3d_boots,
     check_view3d_layers_and_filters,
+    check_view3d_connectors_and_clustering,
 ]
 
 

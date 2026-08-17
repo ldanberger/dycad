@@ -294,11 +294,14 @@ doesn't also delete the selected node) and require the current tab to be a canva
   by name rather than hunting across views. Selecting a row shows the same property panel a canvas selection
   would.</li>
 </ul>
-<p><strong>Explore &gt; 3D View</strong> — a rotatable/zoomable 3D scene over your Parts directly (not any
-one 2D view's placement of them), still in progress. Parts are grouped into layers by element type, stacked
-into broader bands by element group, colored the same as the toolbox/canvas. The Stream and Type filters
-(top toolbar) work here too, narrowing which parts appear. Connectors, stream/section clustering, and a
-simulation overlay are still to come.</p>
+<p><strong>Explore &gt; 3D View</strong> — a rotatable/zoomable 3D scene over your Parts and Connectors
+directly (not any one 2D view's placement of them), still in progress. Parts are grouped into layers by
+element type, stacked into broader bands by element group, colored the same as the toolbox/canvas; within a
+layer, parts cluster into their own band by Section, then by Stream. Connector lines are drawn between
+Parts the same way they'd be hidden on the 2D canvas — a connector only shows once both its ends are
+visible. The Stream and Type filters (top toolbar) work here too, narrowing which parts (and their
+connectors) appear. A master ordering for element types outside your stream template, jumping to the
+matching 2D view when you zoom in far enough, and a simulation overlay are still to come.</p>
 
 <h2 id="properties">5. Property Panels</h2>
 <p>Selecting a node or connector on canvas shows two layers, deliberately kept separate:</p>

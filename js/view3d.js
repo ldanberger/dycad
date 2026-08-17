@@ -4,7 +4,7 @@
 //
 // Stage 0 (done): plumbing only — persistent per-tab renderer/scene/camera/controls,
 // proof the vendored Three.js loads and renders cleanly.
-// Stage 1 (current): real data — parts grouped by element group (broad Z-slab), then by
+// Stage 1 (done): real data — parts grouped by element group (broad Z-slab), then by
 // type within that group (finer sub-layer), ordered by a stream template's value[] (see
 // resolveLayerOrder below); rendered via THREE.InstancedMesh from the start (not
 // retrofitted later — this needs to handle thousands of parts, and switching a
@@ -12,9 +12,19 @@
 // Reuses the existing Stream/Type filters (passesStreamFilter/passesElementTypeFilter,
 // now wired up for this tab type too in main.js's filter-menu handlers) and element-group
 // fill colors (groupFill) unchanged.
-// Still ahead: connector lines + section/stream clustering (Stage 2), a master cube-order
-// fallback list for types outside any template's value[] (Stage 3), zoom-to-2D-detail
-// (Stage 4), and a live simulation-value overlay (Stage 5). Full plan: DESIGN_DOCUMENT.md §9.
+// Stage 2 (current): connector lines between resolved part positions — one connector
+// drawn iff BOTH its endpoints are currently visible, same convention the 2D canvas
+// already uses (see passesStreamFilter's own comment: hiding a node hides its connectors
+// automatically, no separate connector-level filter check). Rendered as a single
+// THREE.LineSegments with one shared BufferGeometry (one draw call for every visible
+// connector, the line-drawing equivalent of Stage 1's InstancedMesh) rather than one Line
+// object per connector. Also: within a type's own grid, parts now sort by (section, then
+// a representative stream) before layout, and a new row starts at each section boundary
+// — so a section's parts cluster together as their own visually distinct band, and
+// same-stream parts end up adjacent via the sort even without their own forced break.
+// Still ahead: a master cube-order fallback list for types outside any template's
+// value[] (Stage 3), zoom-to-2D-detail (Stage 4), and a live simulation-value overlay
+// (Stage 5). Full plan: DESIGN_DOCUMENT.md §9.
 //
 // Deliberately the ONLY module that imports the vendored Three.js/OrbitControls — every
 // other module stays free of a 3D dependency, and canvas.js only ever reaches this file
@@ -42,6 +52,45 @@ function themeBackgroundColor() {
   // already uses. Falls back to a neutral grey if the variable somehow isn't set yet.
   const raw = getComputedStyle(document.body).getPropertyValue('--bg').trim();
   return raw || '#e8e8e8';
+}
+
+function themeConnectorColor() {
+  // Same reasoning as themeBackgroundColor — a muted, theme-aware neutral so a dense
+  // web of connectors doesn't visually fight the colorful element-group node layers.
+  const raw = getComputedStyle(document.body).getPropertyValue('--text-muted').trim();
+  return raw || '#888888';
+}
+
+/** A part's single representative stream for clustering purposes — the alphabetically
+ * first of (possibly several) streams it carries, so ordering is deterministic. A part
+ * with no streams sorts before any that has one (empty string < any non-empty string). */
+function representativeStream(part) {
+  const streams = part.streams || [];
+  return streams.length ? [...streams].sort()[0] : '';
+}
+
+/**
+ * Lays a type's parts out into a grid, clustering by section first (a new row starts at
+ * every section boundary, so each section's parts occupy their own visually distinct
+ * band within the layer) — parts must already be pre-sorted by (section, representative
+ * stream, id) by the caller, so same-stream parts end up adjacent via sort order even
+ * without their own forced row break. Returns each part's (col, row) plus the actual
+ * total row count (not a simple ceil(count/cols), since section breaks can leave rows
+ * partially filled) so the caller can center the grid correctly.
+ */
+function layoutGridWithSectionBreaks(typeParts, cols) {
+  const placements = [];
+  let col = 0, row = 0, prevSection;
+  for (const p of typeParts) {
+    const section = p.section || '';
+    if (prevSection !== undefined && section !== prevSection && col !== 0) { row += 1; col = 0; }
+    prevSection = section;
+    placements.push({ part: p, col, row });
+    col += 1;
+    if (col >= cols) { col = 0; row += 1; }
+  }
+  const rows = placements.length ? Math.max(...placements.map((pl) => pl.row)) + 1 : 0;
+  return { placements, rows };
 }
 
 /** The "last used" Stream Template preference (see main.js's getCachedStreamTemplate) —
@@ -133,7 +182,7 @@ function createInstance(app, tab, container) {
 
   return {
     renderer, scene, camera, controls, container, resizeObserver, animId,
-    typeMeshes: new Map(), hasFramedOnce: false, lastSignature: null,
+    typeMeshes: new Map(), connectorLines: null, hasFramedOnce: false, lastSignature: null,
   };
 }
 
@@ -154,15 +203,19 @@ function disposeInstance(inst) {
 
 /** Cheap "did anything this sync depends on actually change" check, so re-rendering the
  * whole app (which happens on nearly every store mutation) doesn't rebuild every
- * InstancedMesh from scratch each time — only when the filtered part set, the stream
- * template preference, or the theme could plausibly have changed. Not a full diff (still
- * a full rebuild when it DOES decide something changed), just a skip for the common case
- * of "something unrelated changed and we re-rendered anyway". */
+ * InstancedMesh/the connector lines from scratch each time. Includes every PART field
+ * that affects layout (type/streams/section — not just id, so editing an existing part's
+ * type via the property panel is caught even though the part set itself didn't change)
+ * and every CONNECTOR field that affects the line geometry (id/from/to — catches
+ * add/remove and rewiring). Not a full diff (still a full rebuild when it DOES decide
+ * something changed), just a skip for the common case of "something unrelated changed
+ * and we re-rendered anyway" — verified fast enough at real scale (22K parts/60K
+ * connectors) to not be a bottleneck itself. */
 function computeSignature(app, tab) {
   const { store } = app;
   return JSON.stringify([
-    store.doc.parts.length,
-    store.doc.parts.map((p) => p.id).join(','), // catches add/remove without a length change (rare) cheaply enough at realistic scale
+    store.doc.parts.map((p) => `${p.id}:${p.type}:${(p.streams || []).join('+')}:${p.section || ''}`).join(','),
+    store.doc.connectors.map((c) => `${c.id}:${c.from}:${c.to}`).join(','),
     tab.activeStreams,
     tab.activeElementTypes,
     preferredStreamTemplateName(),
@@ -182,6 +235,12 @@ function syncSceneData(app, tab, inst) {
     mesh.material.dispose();
   }
   inst.typeMeshes.clear();
+  if (inst.connectorLines) {
+    inst.scene.remove(inst.connectorLines);
+    inst.connectorLines.geometry.dispose();
+    inst.connectorLines.material.dispose();
+    inst.connectorLines = null;
+  }
   inst.scene.background = new THREE.Color(themeBackgroundColor());
 
   const parts = store.doc.parts.filter((p) => passesStreamFilter(tab, p.streams) && passesElementTypeFilter(tab, p.type));
@@ -211,12 +270,17 @@ function syncSceneData(app, tab, inst) {
   let prevGroupIdx = null;
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   const matrix = new THREE.Matrix4();
+  const partPositions = new Map(); // partId -> {x, y, z}, for the connector-line pass below
 
   for (const entry of typeEntries) {
     if (prevGroupIdx !== null && entry.groupIdx !== prevGroupIdx) z += GROUP_LAYER_GAP;
     prevGroupIdx = entry.groupIdx;
 
-    const typeParts = byType.get(entry.type);
+    // Cluster by section (a new row starts at every section boundary), then by
+    // representative stream within a section — see layoutGridWithSectionBreaks' own
+    // comment for why this needs an actual row count, not a simple ceil(count/cols).
+    const typeParts = [...byType.get(entry.type)].sort((a, b) =>
+      (a.section || '').localeCompare(b.section || '') || representativeStream(a).localeCompare(representativeStream(b)) || a.id.localeCompare(b.id));
     const count = typeParts.length;
     const color = new THREE.Color(groupFill(app, entry.el));
     const geometry = new THREE.BoxGeometry(NODE_SIZE, NODE_SIZE, NODE_SIZE);
@@ -228,13 +292,13 @@ function syncSceneData(app, tab, inst) {
     mesh.userData.partIds = typeParts.map((p) => p.id);
 
     const cols = Math.ceil(Math.sqrt(count));
-    const rows = Math.ceil(count / cols);
-    typeParts.forEach((p, i) => {
-      const col = i % cols, row = Math.floor(i / cols);
+    const { placements, rows } = layoutGridWithSectionBreaks(typeParts, cols);
+    placements.forEach(({ part, col, row }, i) => {
       const x = (col - (cols - 1) / 2) * NODE_SPACING;
       const y = (row - (rows - 1) / 2) * NODE_SPACING;
       matrix.setPosition(x, y, z);
       mesh.setMatrixAt(i, matrix);
+      partPositions.set(part.id, { x, y, z });
       minX = Math.min(minX, x); maxX = Math.max(maxX, x);
       minY = Math.min(minY, y); maxY = Math.max(maxY, y);
     });
@@ -243,6 +307,27 @@ function syncSceneData(app, tab, inst) {
     inst.scene.add(mesh);
     inst.typeMeshes.set(entry.type, mesh);
     z += TYPE_LAYER_GAP;
+  }
+
+  // Connector lines: one visible iff BOTH endpoints are currently visible (same
+  // convention the 2D canvas already uses — see passesStreamFilter's own comment).
+  // A single LineSegments/BufferGeometry for every visible connector, one draw call
+  // total, the line-drawing equivalent of the InstancedMesh approach above.
+  const linePositions = [];
+  for (const c of store.doc.connectors) {
+    const fromPos = partPositions.get(c.from);
+    const toPos = partPositions.get(c.to);
+    if (!fromPos || !toPos) continue;
+    linePositions.push(fromPos.x, fromPos.y, fromPos.z, toPos.x, toPos.y, toPos.z);
+  }
+  if (linePositions.length > 0) {
+    const lineGeometry = new THREE.BufferGeometry();
+    lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
+    const lineMaterial = new THREE.LineBasicMaterial({ color: new THREE.Color(themeConnectorColor()), transparent: true, opacity: 0.35 });
+    const lines = new THREE.LineSegments(lineGeometry, lineMaterial);
+    lines.userData.connectorCount = linePositions.length / 6;
+    inst.scene.add(lines);
+    inst.connectorLines = lines;
   }
 
   // Frame the camera to the data's actual extent — only the FIRST time this tab gets
@@ -295,10 +380,24 @@ function getDebugSceneInfo(tabId) {
   const inst = instances.get(tabId);
   if (!inst) return null;
   const types = {};
+  const matrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
   for (const [type, mesh] of inst.typeMeshes) {
-    types[type] = { count: mesh.count, z: mesh.userData.z, group: mesh.userData.group, meshUuid: mesh.uuid };
+    const positions = {};
+    for (let i = 0; i < mesh.count; i++) {
+      mesh.getMatrixAt(i, matrix);
+      position.setFromMatrixPosition(matrix);
+      positions[mesh.userData.partIds[i]] = { x: position.x, y: position.y, z: position.z };
+    }
+    types[type] = { count: mesh.count, z: mesh.userData.z, group: mesh.userData.group, meshUuid: mesh.uuid, positions };
   }
-  return { types, meshCount: inst.typeMeshes.size, hasFramedOnce: inst.hasFramedOnce };
+  return {
+    types,
+    meshCount: inst.typeMeshes.size,
+    hasFramedOnce: inst.hasFramedOnce,
+    connectorCount: inst.connectorLines ? inst.connectorLines.userData.connectorCount : 0,
+    connectorLinesUuid: inst.connectorLines ? inst.connectorLines.uuid : null,
+  };
 }
 
 export { renderView3D, disposeView3D, getDebugSceneInfo };
