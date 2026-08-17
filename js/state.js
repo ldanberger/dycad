@@ -22,8 +22,28 @@ function deriveIndustryName(filename) {
   return idx >= 0 ? afterDash.slice(0, idx) : afterDash;
 }
 
+// The base node box size (matches canvas.js's getNodeSize fallback and NODE_HALF_W/H)
+// BEFORE nodeSizeMultiplier is applied. Kept here, not exported, since only
+// defaultNodeSize below and Store's own view-creation code need it.
+const BASE_NODE_WIDTH = 130, BASE_NODE_HEIGHT = 46;
+
+/** Scales the base node box size by a multiplier, rounding to whole pixels — used
+ * whenever a new view's nodeWidth/nodeHeight is set (Store constructor, addView,
+ * migrateDoc's fallback for an older file with no nodeWidth/nodeHeight of its own). */
+function defaultNodeSize(multiplier) {
+  return { nodeWidth: Math.round(BASE_NODE_WIDTH * multiplier), nodeHeight: Math.round(BASE_NODE_HEIGHT * multiplier) };
+}
+
 class Store {
-  constructor(settings, fce) {
+  /** nodeSizeMultiplier: scales the default node box size new views are created with
+   * (see defaultNodeSize above) — a plain constructor param, not read from localStorage
+   * here, so this class stays usable headless under plain Node (see DESIGN_DOCUMENT.md /
+   * CLAUDE.md's testing section); main.js reads the cached user preference (Local
+   * Settings) and passes it in at construction time instead. Defaults to 1.2 (the new
+   * out-of-the-box default node size, 1.2x the original 130x46 — nodes generated at the
+   * old size were cramped and often clipped their own label text). */
+  constructor(settings, fce, nodeSizeMultiplier = 1.2) {
+    this.nodeSizeMultiplier = nodeSizeMultiplier;
     this.settings = settings;   // custom.json contents
     this.fce = fce;             // fce-generalnodes.json contents
     this.mergedRelationshipPairs = []; // set by main.js after data load
@@ -37,7 +57,7 @@ class Store {
     // industryData key — every key defaults to 'Enterprise' (generateIndustry's own
     // fallback when a key has no entry here, matching the built-in 'general' dataset's
     // 3-level Function/Capability/Entity shape) except keys imported via File > Load
-    // SFCCE, which register 'SFCCE' here (a 4-level Function/Capability/Sub-Capability/
+    // SFCCE, which register 'SFCCE' here (a 4-level Function/Capability/Application Capability/
     // Entity chain — see sfce.js's own module comment). Memory-only, same lifetime as
     // industryData itself.
     this.industryTemplates = {};
@@ -50,7 +70,7 @@ class Store {
       currentView: 'home',
       models: [{ modelName: 'Reference' }, { modelName: 'As-is' }, { modelName: 'To-be' }, { modelName: 'Gap' }],
       views: [
-        { id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], nodeWidth: 130, nodeHeight: 46, remapSortKeys: null, spacingScale: 1 },
+        { id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, spacingScale: 1 },
       ],
       parts: [],
       connectors: [],
@@ -144,7 +164,7 @@ class Store {
   addView(viewName, viewType = 'ff') {
     const id = viewName;
     if (this.findView(id)) return this.findView(id);
-    const view = { id, viewName, viewType, chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], nodeWidth: 130, nodeHeight: 46, remapSortKeys: null, spacingScale: 1 };
+    const view = { id, viewName, viewType, chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(this.nodeSizeMultiplier), remapSortKeys: null, spacingScale: 1 };
     this.doc.views.push(view);
     this.ensureViewSections(view);
     return view;
@@ -485,7 +505,7 @@ class Store {
   }
 
   loadFromJSON(obj) {
-    const migrated = migrateDoc(obj);
+    const migrated = migrateDoc(obj, this.nodeSizeMultiplier);
     this.doc = migrated;
     // A freshly loaded model's parts/connectors are unrelated to whatever was simulated
     // before — stop any active runs and clear all runtime state, rather than risk stale
@@ -501,15 +521,18 @@ class Store {
   }
 }
 
-/** Migrate an older/foreign save file: fill in missing fields with documented defaults. */
-function migrateDoc(obj) {
+/** Migrate an older/foreign save file: fill in missing fields with documented defaults.
+ * nodeSizeMultiplier defaults to the same 1.2 the Store constructor does, so a direct/
+ * standalone call (as tests make) behaves identically to before this param existed;
+ * Store's own loadFromJSON passes its live this.nodeSizeMultiplier instead. */
+function migrateDoc(obj, nodeSizeMultiplier = 1.2) {
   const doc = {
     version: obj.version || '0.2',
     readme: obj.readme || { note: '' },
     defaultModel: obj.defaultModel || (obj.models?.[0]?.modelName ?? 'Reference'),
     currentView: obj.currentView || 'home',
     models: obj.models && obj.models.length ? obj.models : [{ modelName: 'Reference' }],
-    views: obj.views && obj.views.length ? obj.views.map((v) => ({ ...v, viewType: v.viewType || 'ff', sections: v.sections ?? [], nodeWidth: v.nodeWidth ?? 130, nodeHeight: v.nodeHeight ?? 46, remapSortKeys: v.remapSortKeys ?? null, chkShowConnectorType: v.chkShowConnectorType ?? (v.chkShowConnectors ?? true), chkShowStreamType: v.chkShowStreamType ?? (v.chkShowConnectors ?? true), chkShowDescription: v.chkShowDescription ?? true, chkShowSimValues: v.chkShowSimValues ?? false, chkShowScriptBadge: v.chkShowScriptBadge ?? false, routingStyle: v.routingStyle ?? 'default', routingStyleStream: v.routingStyleStream ?? 'default', spacingScale: v.spacingScale ?? 1 })) : [{ id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], nodeWidth: 130, nodeHeight: 46, remapSortKeys: null, spacingScale: 1 }],
+    views: obj.views && obj.views.length ? obj.views.map((v) => ({ ...v, viewType: v.viewType || 'ff', sections: v.sections ?? [], nodeWidth: v.nodeWidth ?? defaultNodeSize(nodeSizeMultiplier).nodeWidth, nodeHeight: v.nodeHeight ?? defaultNodeSize(nodeSizeMultiplier).nodeHeight, remapSortKeys: v.remapSortKeys ?? null, chkShowConnectorType: v.chkShowConnectorType ?? (v.chkShowConnectors ?? true), chkShowStreamType: v.chkShowStreamType ?? (v.chkShowConnectors ?? true), chkShowDescription: v.chkShowDescription ?? true, chkShowSimValues: v.chkShowSimValues ?? false, chkShowScriptBadge: v.chkShowScriptBadge ?? false, routingStyle: v.routingStyle ?? 'default', routingStyleStream: v.routingStyleStream ?? 'default', spacingScale: v.spacingScale ?? 1 })) : [{ id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, spacingScale: 1 }],
     parts: (obj.parts || []).map((p) => ({
       id: p.id, type: p.type, label: p.label ?? p.id, rawLabel: p.rawLabel ?? p.label ?? p.id,
       model: p.model ?? (obj.defaultModel || 'Reference'),

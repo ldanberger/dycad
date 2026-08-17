@@ -1399,4 +1399,74 @@
 // Industry_to_SFCCE (a from-scratch generator with an {{INDUSTRY}} placeholder, 4-level
 // SFCCE shape by default, 3-level SFCE-style if the Sub-Capability level is omitted).
 // Content-only change, no code touched.
-export const APP_VERSION = '0.99';
+// 1.00: Generate Stream's Stream Name field is now a text input backed by a <datalist>
+// of existing stream names (same discoverability pattern Function Name already used),
+// not a plain text box — typing a brand-new name still works exactly as before, but
+// picking/typing an EXISTING stream name now prepopulates Function/Capability/
+// Sub-Capability/Entity Name from that stream's own already-generated parts
+// (commands.js: new deriveStreamNames + its unjoinLabel helper, reading only the 4
+// canonical "precise category match" types createStream itself singles out, so it works
+// regardless of which template originally generated the stream) and switches the
+// template to one with a Sub-Capability level if the stream has one. A brand-new stream
+// name leaves every field at its own default rather than clearing anything. Added a new
+// "Sub-Capability Name" field (shown only for templates with subCapabilityNameBegin) —
+// previously Generate Stream had no way to set it at all, so picking the 'SFCCE' template
+// from this dialog silently produced a Sub-Capability part labeled just its bare prefix
+// ("Manage"). The dialog is now bespoke (like Remap/Smart Check View) instead of the
+// generic promptModal, for the dynamic show/hide and the Stream Name input's own change
+// handling. Existing-part reuse itself needed no new code — createStream already
+// find-or-creates every position by xIds or by label+type+model — this dialog only
+// affects what gets typed into it. One new permanent regression check, verified via
+// temporarily disabling the prepopulation logic and confirming the expected failure
+// before restoring it. Full suite 38/38.
+// 1.01: Renamed "Sub-Capability" to "Application Capability" everywhere — UI labels
+// (Generate Stream's field, the Load SFCCE mapping wizard's field/description, the SFCCE
+// Catalog's columns, Instructions), and internal identifiers/ids (subCapabilityName ->
+// applicationCapabilityName, subCapabilityNameBegin -> applicationCapabilityNameBegin in
+// custom.json's SFCCE template, category 'subCapability' -> 'applicationCapability',
+// gs-subcapability* -> gs-application-capability*, sfcce-field-subcapability* ->
+// sfcce-field-application-capability*, short-form subCap/SubCap -> appCap/AppCap). This
+// also fixes a pre-existing inconsistency: the shared-level confirmation dialog
+// (SFCCE_SHARED_LEVELS in main.js) already said "Application Capability" while the
+// field-mapping wizard and dialogs said "Sub-Capability" for the exact same level — now
+// they agree. Historical changelog entries above describing past work still say
+// "Sub-Capability" — an accurate record of what it was called at the time, not rewritten
+// (see CLAUDE.md's Rebrand note for the same policy applied to the FlowRun->DyCAD rename).
+// Content/identifier rename only, no behavior change. Full suite 38/38.
+// 0.800: Version reset — no prior users, so no backwards-compatibility reason to keep
+// climbing the old 0.xx/1.xx numbering. Increments are now 0.001 per change going
+// forward (was 0.01).
+//
+// Also: SFCCE's stream template (custom.json) now matches Enterprise's on every field
+// except name (and the one field Enterprise doesn't have, applicationCapabilityNameBegin)
+// — capabilityNameBegin -> "GeneralActor", value gains GeneralActor/BusinessService/
+// BusinessProcess/ApplicationProcess/ApplicationLogicalComponent/ApplicationPhysicalComponent
+// (matching Enterprise's own supporting-node chain) and drops the literal "BusinessFunction"
+// entry (it's created via the existing passive entry only, same as Enterprise already does
+// — BusinessFunction was never meant to be in a template's own value[]). Verified this
+// doesn't reintroduce the earlier-flagged label-collision risk: two distinct Application
+// Capabilities under the same Business Capability now generate two distinct
+// ApplicationCapability parts with their own labels/descriptions (confirmed via a live
+// generateIndustry run against a 2-Application-Capability fixture) — applicationCapabilityNameBegin
+// still marks where naming switches from capabilityName to applicationCapabilityName, it's
+// only the SUPPORTING node types around it that now match Enterprise's richer chain. Full
+// suite 38/38.
+// 0.801: New views default to a bigger node box — 156x55 (130x46 * 1.2) instead of the
+// old flat 130x46 — generated nodes were cramped and often clipped their own label text.
+// The 1.2 multiplier is a real, user-configurable Local Settings preference
+// (nodeSizeMultiplier), not a one-off hardcoded bump: state.js's Store constructor takes
+// it as an optional param (default 1.2, so it stays usable headless under plain Node with
+// no localStorage), used by defaultNodeSize() wherever a view's nodeWidth/nodeHeight gets
+// set (the initial doc, addView, migrateDoc's fallback for an older file with no
+// nodeWidth/nodeHeight of its own). main.js reads it from the same localStorage cache
+// maxScriptEntities already uses (getCachedNodeSizeMultiplier/setCachedNodeSizeMultiplier,
+// clamped to 0.5-3), settable via File > Load/Save Local Settings. Only affects NEW
+// views — doesn't resize anything already on screen (that's still Redraw/Remap's job).
+// Ordering mattered here: the cached value has to reach the Store constructor itself
+// (not be applied to store.nodeSizeMultiplier after construction), since the initial home
+// view is built inside the constructor — verified via a new permanent check
+// (check_node_size_multiplier) that specifically confirms the very first view after a
+// reload already reflects a cached custom multiplier, and by temporarily reintroducing
+// the wrong order (apply-after-construction) and confirming the expected failure before
+// restoring the fix. Full suite 39/39.
+export const APP_VERSION = '0.801';

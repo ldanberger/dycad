@@ -120,7 +120,15 @@ the way.</p>
 
 <h3>Spacing</h3>
 <p>The Spacing +/- control scales the gap between every node uniformly, keeping their relative arrangement
-intact — it doesn't reflow the layout, just stretches or compresses the space between what's already there.</p>
+intact — it doesn't reflow the layout, just stretches or compresses the space between what's already there.
+This is separate from node <em>size</em>: a new view's nodes default to 156x55 (the base 130x46 box, scaled by
+the node size multiplier below) — bigger than a stretched gap between small boxes, so labels are less likely
+to get clipped in the first place. The <strong>Redraw</strong> command (see Commands below) still auto-fits an
+existing view's node size to its actual content on demand.</p>
+<p>The node size multiplier (default 1.2) is configurable via File &gt; Load Local Settings, alongside Max
+Script Entities — see <a href="#simulation">Simulation Scripting</a> below for how that file and its
+localStorage caching work. It only affects views created <em>after</em> it's set; it doesn't resize anything
+already on screen.</p>
 
 <h2 id="commands">3. Commands</h2>
 <p>Available from the Commands panel (left sidebar) when a canvas view is active, and via right-click on the
@@ -131,7 +139,10 @@ canvas. Availability depends on what's selected — greyed out means the current
   <tbody>
     <tr><td><strong>Generate Stream</strong></td><td>Builds a whole flow from a stream template — pick a
     template, name the function/capability/entity, and DyCAD creates and connects the matching set of parts
-    for you.</td></tr>
+    for you (reusing any part that already matches by name/type instead of duplicating it). Stream Name
+    accepts a new name or an existing one — picking an existing stream prepopulates the other fields from
+    it (and switches to an Application Capability-capable template if that stream has one), so you can add to or
+    regenerate a stream without retyping everything.</td></tr>
     <tr><td><strong>Duplicate Stream</strong></td><td>Clones an existing stream (a part that already has a
     stream tag) under a new name — useful for variations on an existing flow without starting from scratch.</td></tr>
     <tr><td><strong>Split Node</strong></td><td>Creates a sibling copy of the selected part and rewires its
@@ -165,9 +176,9 @@ canvas. Availability depends on what's selected — greyed out means the current
     <tr><td><strong>Generate Industry / Generate Inventory View</strong></td><td>(Advanced menu) Bulk-generate
     a starter set of parts/connectors for a named industry, or a summary inventory view of everything in the
     model. The built-in "general" industry data can be supplemented with your own via <strong>File &gt; Load
-    SFCCE</strong> — a Section/Function/Capability/Sub-Capability/Entity collection from an arbitrary JSON
+    SFCCE</strong> — a Section/Function/Capability/Application Capability/Entity collection from an arbitrary JSON
     file (with a field-mapping step, since the shape can be anything, including nested groups of groups).
-    Capability, Sub-Capability, and Entity are all optional: leaving one unmapped means it simply inherits the
+    Capability, Application Capability, and Entity are all optional: leaving one unmapped means it simply inherits the
     name of the level above it, rather than being dropped — so the same wizard handles data with only a single
     capability concept just as well as data with a distinct Business/Application Capability split. A Domain,
     Business Capability, or Application Capability that ends up spanning more than one Section can
@@ -186,7 +197,7 @@ capable of following structured instructions and producing valid JSON will do.</
 tagged with the ministries/departments that rely on it) into a smaller set of broader business
 capabilities, each still listing its own original fine-grained capabilities underneath. Use this when you
 already have a flat capability inventory and want it organized into DyCAD's two-tier
-Capability/Sub-Capability shape.</p>
+Capability/Application Capability shape.</p>
 <pre class="docs-code">You will receive a JSON file shaped as an array of domains, each with a flat list of
 fine-grained "application capabilities":
   [{ "domain": string, "capabilities": [{ "name": string, "description": string,
@@ -212,27 +223,27 @@ Save the result as capabilities_merged.json.</pre>
 
 <p><strong>Industry_to_SFCCE</strong> — generates a capability map for an industry from scratch, no source
 file needed. Fill in the <code>{{INDUSTRY}}</code> placeholder before running it. Leaving out the
-Sub-Capability level (as the prompt itself notes) produces the simpler 3-level Function/Capability/Entity
+Application Capability level (as the prompt itself notes) produces the simpler 3-level Function/Capability/Entity
 shape instead, for a plain <strong>Load SFCE</strong>-style import.</p>
 <pre class="docs-code">Generate a capability map for the {{INDUSTRY}} industry, suitable for import into
 DyCAD via File > Load SFCCE.
 
 Structure it as a JSON array of top-level business Functions, each containing
-Capabilities, each containing Sub-Capabilities (omit this level entirely for a
+Capabilities, each containing Application Capabilities (omit this level entirely for a
 simpler 3-level Function/Capability/Entity map instead), each tagged with the
 Section(s) -- business units, departments, or lines of business -- that rely on it:
 
   [{ "function": string,
      "capabilities": [{ "name": string, "description": string,
-       "subCapabilities": [{ "name": string, "description": string,
+       "applicationCapabilities": [{ "name": string, "description": string,
          "sections": string[] }, ...] }, ...] }, ...]
 
 Cover the industry's full breadth: aim for 8-15 Functions, 3-8 Capabilities per
-Function, and 2-6 Sub-Capabilities per Capability (skip Sub-Capabilities entirely
+Function, and 2-6 Application Capabilities per Capability (skip Application Capabilities entirely
 for a flatter map). Every name should be specific to {{INDUSTRY}}, not generic
 boilerplate. Descriptions are one concise sentence. "sections" should list 1-4
-realistic organizational units per Sub-Capability (or per Capability, if
-Sub-Capabilities are omitted) -- reusing the same section names across many entries
+realistic organizational units per Application Capability (or per Capability, if
+Application Capabilities are omitted) -- reusing the same section names across many entries
 is expected and normal.
 
 Output ONLY the JSON array, valid and complete -- no commentary.</pre>
@@ -310,8 +321,8 @@ Enabled" in Root Properties, then write the script body in the Script field.</p>
     <tr><td><code>ctx.secrets</code></td><td>Read-only access to your Local Secrets (File &gt; Load Local
     Secrets — e.g. an API key) that should never end up saved into a shared model file. Deliberately
     memory-only — never cached to localStorage either, so it must be re-loaded each browser session, unlike
-    File &gt; Load/Save Local Settings (pinned fields, Max Script Entities) which IS cached and auto-applies
-    on startup.</td></tr>
+    File &gt; Load/Save Local Settings (pinned fields, Max Script Entities, node size) which IS cached and
+    auto-applies on startup.</td></tr>
     <tr><td><code>ctx.setState(patch)</code></td><td>For asynchronous work (e.g. a fetch whose result arrives
     later) — merges into this part's state at the start of the <em>next</em> tick rather than immediately.</td></tr>
     <tr><td><code>ctx.loadedFileName</code></td><td>The filename of the last file that fully replaced the model
@@ -360,7 +371,8 @@ Enabled" in Root Properties, then write the script body in the Script field.</p>
 to. Hitting the cap throws an error (same as any other script error, visible on that node) rather than silently
 doing nothing — a script that creates something every tick with no guard will hit it fast under continuous Run.
 Configurable via File &gt; Load Local Settings, which caches it to this browser's localStorage so it stays in
-effect across page refreshes without re-loading the file.</p>
+effect across page refreshes without re-loading the file. The same file/mechanism also holds the node size
+multiplier — see <a href="#views">Views &amp; Layout</a> above.</p>
 
 <h3>Script Console</h3>
 <p>Simulation &gt; Script Console opens a REPL-style debugging tool, separate from any one part's script — for

@@ -4,11 +4,11 @@ import { parseArchimateXml } from './archimate.js';
 import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
-import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection as duplicateSectionCommand, smartCheckView, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache } from './commands.js';
+import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection as duplicateSectionCommand, smartCheckView, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames } from './commands.js';
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
-import { flattenJsonRecords, buildRowsFromRecords, detectSharedFunctions, resolveSharedFunctions, detectSharedCapabilities, resolveSharedCapabilities, detectSharedSubCapabilities, resolveSharedSubCapabilities, buildIndustryTree, flattenIndustryTree } from './sfce.js';
+import { flattenJsonRecords, buildRowsFromRecords, detectSharedFunctions, resolveSharedFunctions, detectSharedCapabilities, resolveSharedCapabilities, detectSharedApplicationCapabilities, resolveSharedApplicationCapabilities, buildIndustryTree, flattenIndustryTree } from './sfce.js';
 
 /** The three independently-resolvable "spans more than one Section" levels Load SFCCE's
  * wizard walks through in order — see sfce.js's detectSharedLevel for why each is safe
@@ -18,7 +18,7 @@ import { flattenJsonRecords, buildRowsFromRecords, detectSharedFunctions, resolv
  * etc. — normalized here to one common shape so promptSFCCESharedLevelConfirm below can
  * stay level-agnostic instead of three near-duplicate modal functions).
  * `exampleName` extracts the human-readable name from a shared identity key (a compound
- * `function|capability|subCapability` string for the deeper levels) for the modal's
+ * `function|capability|applicationCapability` string for the deeper levels) for the modal's
  * example sentence. */
 const SFCCE_SHARED_LEVELS = [
   {
@@ -35,8 +35,8 @@ const SFCCE_SHARED_LEVELS = [
   },
   {
     label: 'Application Capability', plural: 'Application Capabilities',
-    detect: (rows) => { const { sectionsBySubCapability, sharedSubCapabilityKeys } = detectSharedSubCapabilities(rows); return { sectionsByIdentity: sectionsBySubCapability, sharedIdentities: sharedSubCapabilityKeys }; },
-    resolve: (rows, sectionsByIdentity, sharedIdentities, collapse) => resolveSharedSubCapabilities(rows, sectionsByIdentity, sharedIdentities, collapse),
+    detect: (rows) => { const { sectionsByApplicationCapability, sharedApplicationCapabilityKeys } = detectSharedApplicationCapabilities(rows); return { sectionsByIdentity: sectionsByApplicationCapability, sharedIdentities: sharedApplicationCapabilityKeys }; },
+    resolve: (rows, sectionsByIdentity, sharedIdentities, collapse) => resolveSharedApplicationCapabilities(rows, sectionsByIdentity, sharedIdentities, collapse),
     exampleName: (key) => key.split('|')[2],
   },
 ];
@@ -102,12 +102,13 @@ const RECENT_FILE_MAX_BYTES = 3 * 1024 * 1024; // stay well under typical 5-10MB
 // Local Settings cache: user PREFERENCES that auto-apply on every boot without any file
 // to (re)load, deliberately separate from Local Secrets (API keys etc., which must NEVER
 // be cached to localStorage — see saveLocalSecrets/the load-local-secrets-input handler
-// below). Two members today: maxScriptEntities (only ever set via File > Load Local
-// Settings — pinnedFields, the file's other member, already persists itself via its own
-// localStorage key in render.js's getPinnedFields/setPinnedFields, so it doesn't need a
-// slot here) and instructionsClosed (set purely from closing the Instructions tab in the
-// UI, nothing to do with the Local Settings file at all — this cache is really "auto-
-// persisted preferences" in general, not strictly a mirror of that one file's contents).
+// below). Members today: maxScriptEntities and nodeSizeMultiplier (both only ever set via
+// File > Load Local Settings — pinnedFields, the file's other member, already persists
+// itself via its own localStorage key in render.js's getPinnedFields/setPinnedFields, so
+// it doesn't need a slot here) and instructionsClosed (set purely from closing the
+// Instructions tab in the UI, nothing to do with the Local Settings file at all — this
+// cache is really "auto-persisted preferences" in general, not strictly a mirror of that
+// one file's contents).
 const LOCAL_SETTINGS_CACHE_KEY = 'dycad-local-settings-cache';
 
 /** Read-modify-write helpers for LOCAL_SETTINGS_CACHE_KEY — every member is written via
@@ -134,6 +135,20 @@ function getCachedMaxScriptEntities() {
  * without re-loading the Local Settings file — called whenever it's set (today: only
  * from the Load Local Settings file handler below). */
 function setCachedMaxScriptEntities(n) { setLocalSettingsCache({ maxScriptEntities: n }); }
+
+/** Reads the cached nodeSizeMultiplier value (if any). Returns null if nothing valid is
+ * cached (fresh browser, cache cleared, or never loaded) — bootstrapApp then falls back
+ * to the Store constructor's own 1.2 default. Clamped to a sane 0.5-3 range so a bad or
+ * corrupted cached value can't produce degenerate (near-zero or absurdly huge) nodes. */
+function getCachedNodeSizeMultiplier() {
+  const n = Number(getLocalSettingsCache().nodeSizeMultiplier);
+  return Number.isFinite(n) && n >= 0.5 && n <= 3 ? n : null;
+}
+
+/** Writes nodeSizeMultiplier to the localStorage cache so it survives a page refresh
+ * without re-loading the Local Settings file — called whenever it's set (today: only
+ * from the Load Local Settings file handler below). */
+function setCachedNodeSizeMultiplier(n) { setLocalSettingsCache({ nodeSizeMultiplier: n }); }
 
 /** Whether the user has closed the Instructions tab before — once true, bootstrapApp
  * stops auto-opening it on startup, so closing it is a real "don't show this again"
@@ -677,44 +692,7 @@ class App {
     } else if (key === 'levelDown') {
       levelDown(this, tab, selIds);
     } else if (key === 'generate') {
-      const templates = (this.store.settings.streamTemplates || []).map((t) => t.name);
-      const cachedTemplate = getCachedStreamTemplate();
-      const defaultTemplate = (cachedTemplate && templates.includes(cachedTemplate)) ? cachedTemplate : (templates.includes('Enterprise') ? 'Enterprise' : templates[0]);
-      // Step 37: existing BusinessFunction-type parts in the current model — shown as a
-      // suggestion list on Function Name so the user can pick one to reuse without
-      // retyping it exactly, but the field stays free-text (they can still type a new
-      // name). Actual reuse-by-label-match already happens in createStream (Step 33) —
-      // this is purely a discoverability aid, no new reuse logic needed.
-      const existingFunctionNames = [...new Set(
-        this.store.doc.parts
-          .filter((p) => ciEq(p.type, 'BusinessFunction') && ciEq(p.model, this.store.defaultModel))
-          .map((p) => p.label)
-      )];
-      this.promptModal({
-        title: 'Generate Stream',
-        fields: [
-          { key: 'template', label: 'Stream template', type: 'select', options: templates, value: defaultTemplate },
-          { key: 'stream', label: 'Stream name', value: `Stream-${Date.now().toString().slice(-4)}` },
-          { key: 'functionName', label: 'Function Name', type: 'combo', options: existingFunctionNames, value: existingFunctionNames.length ? '' : 'testFunction' },
-          { key: 'capabilityName', label: 'Capability Name', value: 'testCapability' },
-          { key: 'entityName', label: 'Entity Name', value: 'testEntity' },
-        ],
-        onSubmit: (vals) => {
-          // Function Name now defaults to blank (rather than a placeholder value) when
-          // existing functions are available, so leaving it empty on submit is a real
-          // possibility, not just a leftover default — guard against silently creating
-          // a part with a blank label.
-          if (!vals.functionName.trim()) { this.toast('Function Name is required.', true); return; }
-          setCachedStreamTemplate(vals.template);
-          createStream(this, {
-            templateName: vals.template, streamName: vals.stream,
-            functionName: vals.functionName, capabilityName: vals.capabilityName, entityName: vals.entityName,
-            modelName: this.store.defaultModel, viewName: this.store.currentView,
-            anchorX: canvasPos?.x, anchorY: canvasPos?.y,
-          });
-        },
-        closeOnOutsideClick: false,
-      });
+      this.promptGenerateStream(tab, canvasPos);
     } else if (key === 'copy') {
       copyNodes(this, tab);
     } else if (key === 'paste') {
@@ -741,6 +719,98 @@ class App {
     } else if (key === 'populateFromTemplate') {
       this.promptPopulateFromTemplate(tab);
     }
+  }
+
+  /** Bespoke (not the generic promptModal) so Stream Name can drive the other fields:
+   * typing/picking an EXISTING stream name (native <input list> + <datalist>, same
+   * discoverability pattern Function Name already used) prepopulates Function/Capability/
+   * Application Capability/Entity Name from that stream's own already-generated parts (see
+   * commands.js's deriveStreamNames — reads only the 4 canonical "precise category match"
+   * types, so it works regardless of which template originally generated the stream), and
+   * switches the template to one with an Application Capability level if the stream has one. A
+   * brand-new stream name leaves every field at its own default, untouched. Actual
+   * reuse-by-label-match for the parts/nodes themselves already happens inside
+   * createStream (Step 33) — this dialog only pre-fills what to type, it doesn't
+   * duplicate that check. */
+  promptGenerateStream(tab, canvasPos) {
+    const store = this.store;
+    const templates = (store.settings.streamTemplates || []).map((t) => t.name);
+    const cachedTemplate = getCachedStreamTemplate();
+    const defaultTemplate = (cachedTemplate && templates.includes(cachedTemplate)) ? cachedTemplate : (templates.includes('Enterprise') ? 'Enterprise' : templates[0]);
+    const existingFunctionNames = [...new Set(
+      store.doc.parts
+        .filter((p) => ciEq(p.type, 'BusinessFunction') && ciEq(p.model, store.defaultModel))
+        .map((p) => p.label)
+    )];
+    const existingStreamNames = [...new Set(
+      store.doc.parts
+        .filter((p) => ciEq(p.model, store.defaultModel))
+        .flatMap((p) => p.streams || [])
+    )].sort();
+    const templateHasAppCap = (name) => {
+      const t = (store.settings.streamTemplates || []).find((tt) => ciEq(tt.name, name));
+      return !!(t && t.applicationCapabilityNameBegin);
+    };
+
+    const root = document.getElementById('modal-root');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal-box';
+    box.innerHTML = `<h3>Generate Stream</h3>
+      <div class="prop-row"><label>Stream template</label><select id="gs-template">${templates.map((n) => `<option value="${escapeHtml(n)}" ${n === defaultTemplate ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></div>
+      <div class="prop-row"><label>Stream name</label><input type="text" id="gs-stream" list="gs-stream-datalist" value="${escapeHtml(`Stream-${Date.now().toString().slice(-4)}`)}" /><datalist id="gs-stream-datalist">${existingStreamNames.map((n) => `<option value="${escapeHtml(n)}"></option>`).join('')}</datalist></div>
+      <div class="prop-row"><label>Function Name</label><input type="text" id="gs-function" list="gs-function-datalist" value="${escapeHtml(existingFunctionNames.length ? '' : 'testFunction')}" /><datalist id="gs-function-datalist">${existingFunctionNames.map((n) => `<option value="${escapeHtml(n)}"></option>`).join('')}</datalist></div>
+      <div class="prop-row"><label>Capability Name</label><input type="text" id="gs-capability" value="testCapability" /></div>
+      <div class="prop-row hidden" id="gs-application-capability-row"><label>Application Capability Name</label><input type="text" id="gs-application-capability" value="testApplicationCapability" /></div>
+      <div class="prop-row"><label>Entity Name</label><input type="text" id="gs-entity" value="testEntity" /></div>
+      <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Generate</button></div>`;
+    overlay.appendChild(box);
+    root.appendChild(overlay);
+
+    const templateSelect = box.querySelector('#gs-template');
+    const appCapRow = box.querySelector('#gs-application-capability-row');
+    const updateAppCapVisibility = () => appCapRow.classList.toggle('hidden', !templateHasAppCap(templateSelect.value));
+    templateSelect.addEventListener('change', updateAppCapVisibility);
+    updateAppCapVisibility();
+
+    const streamInput = box.querySelector('#gs-stream');
+    streamInput.addEventListener('input', () => {
+      const name = streamInput.value;
+      if (!existingStreamNames.includes(name)) return; // only act on an exact match to an existing stream
+      const derived = deriveStreamNames(store, name);
+      if (derived.functionName != null) box.querySelector('#gs-function').value = derived.functionName;
+      if (derived.capabilityName != null) box.querySelector('#gs-capability').value = derived.capabilityName;
+      if (derived.applicationCapabilityName != null) box.querySelector('#gs-application-capability').value = derived.applicationCapabilityName;
+      if (derived.entityName != null) box.querySelector('#gs-entity').value = derived.entityName;
+      if (derived.hasApplicationCapability && !templateHasAppCap(templateSelect.value)) {
+        const appCapTemplate = templates.find((n) => templateHasAppCap(n));
+        if (appCapTemplate) { templateSelect.value = appCapTemplate; updateAppCapVisibility(); }
+      }
+    });
+
+    box.querySelector('input,select')?.focus();
+    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+    box.querySelector('.submit').addEventListener('click', () => {
+      // Function Name now defaults to blank (rather than a placeholder value) when
+      // existing functions are available, so leaving it empty on submit is a real
+      // possibility, not just a leftover default — guard against silently creating
+      // a part with a blank label.
+      const functionName = box.querySelector('#gs-function').value;
+      if (!functionName.trim()) { this.toast('Function Name is required.', true); return; }
+      const templateName = templateSelect.value;
+      const streamName = streamInput.value;
+      const capabilityName = box.querySelector('#gs-capability').value;
+      const applicationCapabilityName = templateHasAppCap(templateName) ? box.querySelector('#gs-application-capability').value : undefined;
+      const entityName = box.querySelector('#gs-entity').value;
+      overlay.remove();
+      setCachedStreamTemplate(templateName);
+      createStream(this, {
+        templateName, streamName, functionName, capabilityName, applicationCapabilityName, entityName,
+        modelName: store.defaultModel, viewName: store.currentView,
+        anchorX: canvasPos?.x, anchorY: canvasPos?.y,
+      });
+    });
   }
 
   promptPopulateFromTemplate(tab) {
@@ -846,7 +916,7 @@ class App {
         tab = this.store.createTab({ type: 'table', title: `SFCCE: ${industryKey}` });
         tab.sfceIndustryKey = industryKey;
         tab.tableRows = rows;
-        tab.tableCols = ['section', 'functionId', 'functionName', 'functionDescription', 'capabilityId', 'capabilityName', 'capabilityDescription', 'subCapabilityId', 'subCapabilityName', 'subCapabilityDescription', 'entityId', 'entityName', 'entityDescription'];
+        tab.tableCols = ['section', 'functionId', 'functionName', 'functionDescription', 'capabilityId', 'capabilityName', 'capabilityDescription', 'applicationCapabilityId', 'applicationCapabilityName', 'applicationCapabilityDescription', 'entityId', 'entityName', 'entityDescription'];
       }
     }
     this.switchToTab(tab.id);
@@ -1464,16 +1534,18 @@ class App {
   }
 
   /** File > Save Local Settings: bundles user PREFERENCES that deliberately live outside
-   * the main save file — the pinned-fields config and maxScriptEntities (the
-   * ctx.createPart/ctx.createConnector safety cap, see simulation.js) — into a single
-   * downloadable file, so they travel together between browsers/machines. Deliberately
-   * excludes secrets (see saveLocalSecrets above) — these two were bundled together in an
-   * earlier version of this feature; split apart because secrets must never be cached to
-   * localStorage while these settings now deliberately ARE (see loadLocalSettings's
-   * handler), so bundling them would have meant either caching secrets too (unacceptable)
-   * or a settings load leaving secrets in some ambiguous state. */
+   * the main save file — the pinned-fields config, maxScriptEntities (the
+   * ctx.createPart/ctx.createConnector safety cap, see simulation.js), and
+   * nodeSizeMultiplier (the default node box size new views are created with, see
+   * state.js's defaultNodeSize) — into a single downloadable file, so they travel
+   * together between browsers/machines. Deliberately excludes secrets (see
+   * saveLocalSecrets above) — these two were bundled together in an earlier version of
+   * this feature; split apart because secrets must never be cached to localStorage while
+   * these settings now deliberately ARE (see loadLocalSettings's handler), so bundling
+   * them would have meant either caching secrets too (unacceptable) or a settings load
+   * leaving secrets in some ambiguous state. */
   saveLocalSettings() {
-    const data = { pinnedFields: getAllPinnedFields(), maxScriptEntities: this.store.maxScriptEntities };
+    const data = { pinnedFields: getAllPinnedFields(), maxScriptEntities: this.store.maxScriptEntities, nodeSizeMultiplier: this.store.nodeSizeMultiplier };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2061,7 +2133,7 @@ class App {
     const box = document.createElement('div');
     box.className = 'modal-box';
     box.innerHTML = `<h3>Load SFCCE</h3>
-      <p style="font-size:12px; color:var(--text-muted); margin-top:-6px;">Loads a Section/Function/Capability/Sub-Capability/Entity collection from a JSON file as an alternate to the built-in "general" industry data, for use with Advanced &gt; Generate Industry. Any level below Function can be left unmapped — its value then inherits the level above it (e.g. no distinct Application Capability data means each one just takes its Business Capability's own name). This does not add anything to the current view.</p>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:-6px;">Loads a Section/Function/Capability/Application Capability/Entity collection from a JSON file as an alternate to the built-in "general" industry data, for use with Advanced &gt; Generate Industry. Any level below Function can be left unmapped — its value then inherits the level above it (e.g. no distinct Application Capability data means each one just takes its Business Capability's own name). This does not add anything to the current view.</p>
       <div class="prop-row"><label>File</label><input type="file" id="sfcce-file-input" accept="application/json" /></div>
       <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary" id="sfcce-preread-btn">Preread</button></div>
     `;
@@ -2092,7 +2164,7 @@ class App {
   }
 
   /** Second step: suggested industry name + field selectors, built from what
-   * flattenJsonRecords found in the file. Capability/Sub-Capability/Entity (and their
+   * flattenJsonRecords found in the file. Capability/Application Capability/Entity (and their
    * description fields) are all optional — "(none)" means that level cascades from the
    * one above it (see buildRowsFromRecords' own comment) rather than being dropped, the
    * way Load SFCE's original Entity field alone used to work. */
@@ -2117,11 +2189,11 @@ class App {
       }
       return '';
     };
-    // Depth-aware variant, for Capability vs Sub-Capability specifically: with
+    // Depth-aware variant, for Capability vs Application Capability specifically: with
     // flattenJsonRecords' full dot-path naming (e.g. "businessCapabilities.name" vs
     // "businessCapabilities.applicationCapabilities.name"), the two levels often share
     // the exact same trailing keyword — the field with FEWER dot-separated segments is
-    // reliably the shallower (Capability) one, more segments the deeper (Sub-Capability)
+    // reliably the shallower (Capability) one, more segments the deeper (Application Capability)
     // one, regardless of what either level happens to be called in this particular file.
     const suggestByDepth = (keywords, deepest) => {
       const matches = fields.filter((f) => keywords.some((kw) => f.toLowerCase().includes(kw)));
@@ -2136,8 +2208,8 @@ class App {
     const capabilityKeywords = ['capability', 'name', 'title'];
     const suggestedCapability = suggestByDepth(capabilityKeywords, false);
     const suggestedCapabilityDescription = suggestByDepth(['description', 'desc', 'summary'], false);
-    const suggestedSubCapability = suggestByDepth(capabilityKeywords, true);
-    const suggestedSubCapabilityDescription = suggestByDepth(['description', 'desc', 'summary'], true);
+    const suggestedApplicationCapability = suggestByDepth(capabilityKeywords, true);
+    const suggestedApplicationCapabilityDescription = suggestByDepth(['description', 'desc', 'summary'], true);
     const suggestedEntity = suggest('entity', 'object', 'data');
     const suggestedEntityDescription = suggest('entity description', 'entity_description');
 
@@ -2150,11 +2222,11 @@ class App {
       <div class="prop-row"><label>Function field</label><select id="sfcce-field-function">${fieldOptions(suggestedFunction)}</select></div>
       <div class="prop-row"><label>Capability field</label><select id="sfcce-field-capability">${fieldOptionsWithNone(suggestedCapability)}</select></div>
       <div class="prop-row"><label>Capability Description</label><select id="sfcce-field-capability-desc">${fieldOptionsWithNone(suggestedCapabilityDescription)}</select></div>
-      <div class="prop-row"><label>Sub-Capability field</label><select id="sfcce-field-subcapability">${fieldOptionsWithNone(suggestedSubCapability)}</select></div>
-      <div class="prop-row"><label>Sub-Capability Description</label><select id="sfcce-field-subcapability-desc">${fieldOptionsWithNone(suggestedSubCapabilityDescription)}</select></div>
+      <div class="prop-row"><label>Application Capability field</label><select id="sfcce-field-application-capability">${fieldOptionsWithNone(suggestedApplicationCapability)}</select></div>
+      <div class="prop-row"><label>Application Capability Description</label><select id="sfcce-field-application-capability-desc">${fieldOptionsWithNone(suggestedApplicationCapabilityDescription)}</select></div>
       <div class="prop-row"><label>Entity field</label><select id="sfcce-field-entity">${fieldOptionsWithNone(suggestedEntity)}</select></div>
       <div class="prop-row"><label>Entity Description</label><select id="sfcce-field-entity-desc">${fieldOptionsWithNone(suggestedEntityDescription)}</select></div>
-      <p style="font-size:12px; color:var(--text-muted);">A Section value containing multiple entries (a comma-separated list, or an array) is split into one row per section. A missing Function value is kept as "(unspecified)" rather than dropped. A missing Capability/Sub-Capability/Entity value inherits the level above it instead — see the note on the previous step.</p>
+      <p style="font-size:12px; color:var(--text-muted);">A Section value containing multiple entries (a comma-separated list, or an array) is split into one row per section. A missing Function value is kept as "(unspecified)" rather than dropped. A missing Capability/Application Capability/Entity value inherits the level above it instead — see the note on the previous step.</p>
       <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Load</button></div>
     `;
     overlay.appendChild(box);
@@ -2173,8 +2245,8 @@ class App {
         functionField: box.querySelector('#sfcce-field-function').value,
         capabilityField: box.querySelector('#sfcce-field-capability').value || null,
         capabilityDescriptionField: box.querySelector('#sfcce-field-capability-desc').value || null,
-        subCapabilityField: box.querySelector('#sfcce-field-subcapability').value || null,
-        subCapabilityDescriptionField: box.querySelector('#sfcce-field-subcapability-desc').value || null,
+        applicationCapabilityField: box.querySelector('#sfcce-field-application-capability').value || null,
+        applicationCapabilityDescriptionField: box.querySelector('#sfcce-field-application-capability-desc').value || null,
         entityField: box.querySelector('#sfcce-field-entity').value || null,
         entityDescriptionField: box.querySelector('#sfcce-field-entity-desc').value || null,
       };
@@ -2243,20 +2315,20 @@ class App {
     const lines = [
       `[Load SFCCE: "${industryName}"] ${parsed.rows.length} row${parsed.rows.length === 1 ? '' : 's'} processed.`,
       `Sections (${stats.sectionOrder.length}, in order): ${stats.sectionOrder.join(', ')}`,
-      `Subtotals — Functions: ${stats.functionCount}, Capabilities: ${stats.capabilityCount}, Sub-Capabilities: ${stats.subCapabilityCount}, Entities: ${stats.entityCount}`,
+      `Subtotals — Functions: ${stats.functionCount}, Capabilities: ${stats.capabilityCount}, Application Capabilities: ${stats.applicationCapabilityCount}, Entities: ${stats.entityCount}`,
     ];
     const notes = [];
     if (stats.mergedDuplicates) notes.push(`${stats.mergedDuplicates} exact duplicate row${stats.mergedDuplicates === 1 ? '' : 's'} merged`);
     if (parsed.missingFunction) notes.push(`${parsed.missingFunction} row${parsed.missingFunction === 1 ? '' : 's'} had no Function value`);
     if (parsed.missingCapability) notes.push(`${parsed.missingCapability} row${parsed.missingCapability === 1 ? '' : 's'} had no Capability value (inherited Function's)`);
-    if (parsed.missingSubCapability) notes.push(`${parsed.missingSubCapability} row${parsed.missingSubCapability === 1 ? '' : 's'} had no Sub-Capability value (inherited Capability's)`);
-    if (parsed.missingEntity) notes.push(`${parsed.missingEntity} row${parsed.missingEntity === 1 ? '' : 's'} had no Entity value (inherited Sub-Capability's)`);
+    if (parsed.missingApplicationCapability) notes.push(`${parsed.missingApplicationCapability} row${parsed.missingApplicationCapability === 1 ? '' : 's'} had no Application Capability value (inherited Capability's)`);
+    if (parsed.missingEntity) notes.push(`${parsed.missingEntity} row${parsed.missingEntity === 1 ? '' : 's'} had no Entity value (inherited Application Capability's)`);
     if (parsed.missingDescription) notes.push(`${parsed.missingDescription} row${parsed.missingDescription === 1 ? '' : 's'} had no Capability Description value`);
     if (notes.length) lines.push(`Missing-value handling: ${notes.join('; ')} — kept, not dropped.`);
 
     for (const line of lines) pushMessageLog(this.store, line);
     this.render();
-    this.toast(`Loaded "${industryName}": ${stats.sectionOrder.length} sections, ${stats.functionCount} functions, ${stats.capabilityCount} capabilities, ${stats.subCapabilityCount} sub-capabilities, ${stats.entityCount} entities. Details in the Message Log.`);
+    this.toast(`Loaded "${industryName}": ${stats.sectionOrder.length} sections, ${stats.functionCount} functions, ${stats.capabilityCount} capabilities, ${stats.applicationCapabilityCount} application capabilities, ${stats.entityCount} entities. Details in the Message Log.`);
   }
 }
 
@@ -2444,7 +2516,12 @@ async function bootstrapApp() {
     return;
   }
 
-  const store = new Store(data.settings, data.fce);
+  // nodeSizeMultiplier has to be known BEFORE the Store is constructed (unlike
+  // maxScriptEntities below) — it's baked into the initial doc's own home view at
+  // construction time, not applied after the fact, so a cached custom value must reach
+  // the constructor itself rather than overwriting store.nodeSizeMultiplier afterward.
+  const cachedMultiplier = getCachedNodeSizeMultiplier();
+  const store = new Store(data.settings, data.fce, cachedMultiplier ?? undefined);
   store.mergedRelationshipPairs = data.mergedRelationshipPairs;
   // Local Settings' maxScriptEntities auto-loads from its localStorage cache here — see
   // LOCAL_SETTINGS_CACHE_KEY's comment for why this is safe to cache (unlike Local
@@ -2716,9 +2793,10 @@ function wireGlobalEvents(app) {
       app.toast(`Local secrets load failed: ${err.message}`, true);
     }
   });
-  // File > Load Local Settings: user PREFERENCES only (pinnedFields, maxScriptEntities) —
-  // separate from secrets above. Caches maxScriptEntities to localStorage (see
-  // setCachedMaxScriptEntities) so it survives a page refresh without re-loading this
+  // File > Load Local Settings: user PREFERENCES only (pinnedFields, maxScriptEntities,
+  // nodeSizeMultiplier) — separate from secrets above. Caches maxScriptEntities/
+  // nodeSizeMultiplier to localStorage (see setCachedMaxScriptEntities/
+  // setCachedNodeSizeMultiplier) so they survive a page refresh without re-loading this
   // file; pinnedFields already caches itself the moment setAllPinnedFields runs. Same
   // dual-shape acceptance as Load Local Secrets, for the same pre-split-file reason.
   document.getElementById('load-local-settings-input').addEventListener('change', async (e) => {
@@ -2736,10 +2814,18 @@ function wireGlobalEvents(app) {
         app.store.maxScriptEntities = Math.floor(capNum);
         setCachedMaxScriptEntities(app.store.maxScriptEntities);
       }
+      const multNum = Number(obj.nodeSizeMultiplier);
+      // 0.5-3 matches getCachedNodeSizeMultiplier's own clamp — same sane range either way.
+      const hasMult = Number.isFinite(multNum) && multNum >= 0.5 && multNum <= 3;
+      if (hasMult) {
+        app.store.nodeSizeMultiplier = multNum;
+        setCachedNodeSizeMultiplier(multNum);
+      }
       app.render(); // picks up the new pin config immediately if a property panel is open
       const parts = [];
       if (obj.pinnedFields) parts.push('pinned fields');
       if (hasCap) parts.push(`max script entities: ${app.store.maxScriptEntities}`);
+      if (hasMult) parts.push(`node size multiplier: ${app.store.nodeSizeMultiplier}`);
       app.toast(parts.length ? `Local settings loaded (${parts.join(', ')}).` : 'Local settings file had nothing recognized to load.');
     } catch (err) {
       app.toast(`Local settings load failed: ${err.message}`, true);

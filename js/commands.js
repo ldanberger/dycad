@@ -73,7 +73,7 @@ function createStream(app, {
   templateName, streamName, functionName, capabilityName, entityName, modelName, viewName, anchorX, anchorY,
   functionDescription = '', functionxIds = '', functionSection = '',
   capabilityDescription = '', capabilityxIds = '',
-  subCapabilityName, subCapabilityDescription = '', subCapabilityxIds = '',
+  applicationCapabilityName, applicationCapabilityDescription = '', applicationCapabilityxIds = '',
   entityDescription = '', entityxIds = '',
   silent = false, lookupCache = null, placeInView = true,
 }) {
@@ -81,20 +81,20 @@ function createStream(app, {
   const template = (store.settings.streamTemplates || []).find((t) => ciEq(t.name, templateName));
   if (!template) { app.toast(`Stream template "${templateName}" not found.`, true); return null; }
 
-  // Validate capabilityNameBegin / subCapabilityNameBegin / entityNameBegin resolve to
-  // real element types before doing anything. subCapabilityNameBegin is optional — only
+  // Validate capabilityNameBegin / applicationCapabilityNameBegin / entityNameBegin resolve to
+  // real element types before doing anything. applicationCapabilityNameBegin is optional — only
   // the 'SFCCE' template (and anything else that opts in) declares it; every other
-  // existing template has no such field, so capBeginEl/subCapBeginEl checks below are
+  // existing template has no such field, so capBeginEl/appCapBeginEl checks below are
   // skipped entirely for them, matching their unchanged pre-existing behavior.
   const capBeginEl = elementLookupExact(store, template.capabilityNameBegin);
-  const subCapBeginEl = elementLookupExact(store, template.subCapabilityNameBegin);
+  const appCapBeginEl = elementLookupExact(store, template.applicationCapabilityNameBegin);
   const entBeginEl = elementLookupExact(store, template.entityNameBegin);
   if (template.capabilityNameBegin && !capBeginEl) {
     app.toast(`Template "${templateName}": capabilityNameBegin "${template.capabilityNameBegin}" is not a known element type. Aborted.`, true);
     return null;
   }
-  if (template.subCapabilityNameBegin && !subCapBeginEl) {
-    app.toast(`Template "${templateName}": subCapabilityNameBegin "${template.subCapabilityNameBegin}" is not a known element type. Aborted.`, true);
+  if (template.applicationCapabilityNameBegin && !appCapBeginEl) {
+    app.toast(`Template "${templateName}": applicationCapabilityNameBegin "${template.applicationCapabilityNameBegin}" is not a known element type. Aborted.`, true);
     return null;
   }
   if (template.entityNameBegin && !entBeginEl) {
@@ -114,7 +114,7 @@ function createStream(app, {
   if (placeInView) view.chkShowStreamType = true; // otherwise the stream connectors this command creates would be invisible
 
   const capBeginIdx = template.value.findIndex((v) => ciEq(v, template.capabilityNameBegin));
-  const subCapBeginIdx = template.value.findIndex((v) => ciEq(v, template.subCapabilityNameBegin));
+  const appCapBeginIdx = template.value.findIndex((v) => ciEq(v, template.applicationCapabilityNameBegin));
   const entBeginIdx = template.value.findIndex((v) => ciEq(v, template.entityNameBegin));
 
   // Default anchor (no explicit right-click position): stack below whatever's already
@@ -161,8 +161,8 @@ function createStream(app, {
       label = joinLabel(el, functionName); category = 'function';
     } else if (entBeginIdx >= 0 && i >= entBeginIdx) {
       label = joinLabel(el, entityName); category = 'entity';
-    } else if (subCapBeginIdx >= 0 && i >= subCapBeginIdx) {
-      label = joinLabel(el, subCapabilityName); category = 'subCapability';
+    } else if (appCapBeginIdx >= 0 && i >= appCapBeginIdx) {
+      label = joinLabel(el, applicationCapabilityName); category = 'applicationCapability';
     } else if (capBeginIdx >= 0 && i >= capBeginIdx) {
       label = joinLabel(el, capabilityName); category = 'capability';
     } else {
@@ -174,19 +174,19 @@ function createStream(app, {
     // TechnologyProcess, ...); only the one literally typed BusinessCapability/
     // DataDataEntity represents "the" capability/entity and should be find-or-reused.
     // Everything else in that range is a fresh per-stream supporting node, as before.
-    // subCapability's canonical type is 'ApplicationCapability', matching the same
+    // applicationCapability's canonical type is 'ApplicationCapability', matching the same
     // hardcoded-canonical-type convention as the other three categories rather than
     // reading it dynamically off the template.
     const isPreciseCategoryMatch =
       (category === 'function' && ciEq(resolvedType, 'BusinessFunction')) ||
       (category === 'capability' && ciEq(resolvedType, 'BusinessCapability')) ||
-      (category === 'subCapability' && ciEq(resolvedType, 'ApplicationCapability')) ||
+      (category === 'applicationCapability' && ciEq(resolvedType, 'ApplicationCapability')) ||
       (category === 'entity' && ciEq(resolvedType, 'DataDataEntity'));
     const catDescription = isPreciseCategoryMatch
-      ? (category === 'function' ? functionDescription : category === 'capability' ? capabilityDescription : category === 'subCapability' ? subCapabilityDescription : entityDescription)
+      ? (category === 'function' ? functionDescription : category === 'capability' ? capabilityDescription : category === 'applicationCapability' ? applicationCapabilityDescription : entityDescription)
       : '';
     const catXId = isPreciseCategoryMatch
-      ? (category === 'function' ? functionxIds : category === 'capability' ? capabilityxIds : category === 'subCapability' ? subCapabilityxIds : entityxIds)
+      ? (category === 'function' ? functionxIds : category === 'capability' ? capabilityxIds : category === 'applicationCapability' ? applicationCapabilityxIds : entityxIds)
       : '';
     // Section only applies at the function level — it's where Load SFCE's imported
     // Section identifier lives on the generated data (see js/sfce.js's module doc for
@@ -560,6 +560,50 @@ function findOrCreateStreamConnector(store, view, fromPart, toPart, fromVm, toVm
 
 function joinLabel(el, name) {
   return [el?.prefix, name, el?.suffix].filter((s) => s && String(s).trim().length).join(' ').trim() || name;
+}
+
+/** Reverses joinLabel for one specific element type's CURRENT prefix/suffix — used only
+ * by deriveStreamNames below to recover a raw name from an already-generated label. Not
+ * a general-purpose inverse: a label whose raw name was left blank (so the label is just
+ * the bare prefix/suffix) can't be told apart from a raw name that happens to equal the
+ * prefix/suffix text — an acceptable, rare imperfection for a "prepopulate a dialog
+ * field, still editable" convenience, not data used for anything authoritative. */
+function unjoinLabel(el, label) {
+  const prefix = (el?.prefix || '').trim();
+  const suffix = (el?.suffix || '').trim();
+  let name = String(label ?? '');
+  if (prefix && name.startsWith(`${prefix} `)) name = name.slice(prefix.length + 1);
+  if (suffix && name.endsWith(` ${suffix}`)) name = name.slice(0, name.length - suffix.length - 1);
+  return name;
+}
+
+/**
+ * Best-effort reconstruction of the raw function/capability/applicationCapability/entity names
+ * that produced an existing stream's parts — for the Generate Stream dialog's "pick an
+ * existing stream to prepopulate the rest of the fields from" flow. Reads only the 4
+ * canonical "precise category match" types createStream itself singles out
+ * (BusinessFunction/BusinessCapability/ApplicationCapability/DataDataEntity — see
+ * createStream's own isPreciseCategoryMatch comment), since those converge on the exact
+ * same joinLabel(el, rawName) shape regardless of which stream template originally
+ * generated them — this works without needing to know (or guess) that template. A type
+ * with no part tagged in this stream comes back null (e.g. every stream lacks a
+ * Application Capability unless it was generated via a template with applicationCapabilityNameBegin),
+ * letting the caller leave that dialog field's own default untouched rather than
+ * blanking it.
+ */
+function deriveStreamNames(store, streamName) {
+  const findByType = (type) => store.doc.parts.find((p) => ciEq(p.type, type) && (p.streams || []).includes(streamName));
+  const extract = (type) => {
+    const part = findByType(type);
+    return part ? unjoinLabel(elementByType(store, type), part.label) : null;
+  };
+  return {
+    functionName: extract('BusinessFunction'),
+    capabilityName: extract('BusinessCapability'),
+    applicationCapabilityName: extract('ApplicationCapability'),
+    entityName: extract('DataDataEntity'),
+    hasApplicationCapability: !!findByType('ApplicationCapability'),
+  };
 }
 /**
  * expectedLabel guards against a real bug: matching on type+streamName alone isn't
@@ -1366,11 +1410,11 @@ async function generateIndustry(app, industryKey, onProgress, placeInView = true
   // only File > Load SFCCE's data registers a different template here.
   const templateName = store.industryTemplates?.[industryKey] || 'Enterprise';
   const genTemplate = (store.settings.streamTemplates || []).find((t) => ciEq(t.name, templateName));
-  // Whether this run's tree has a genuine 4th (Sub-Capability) level — driven by the
+  // Whether this run's tree has a genuine 4th (Application Capability) level — driven by the
   // TEMPLATE, not by inspecting the tree data itself, so the built-in 'general' dataset
   // (always 3-level, walked via the unchanged branch below) is never at risk of
-  // misinterpreting one of its own entity-level nodes as a sub-capability.
-  const hasSubCapability = !!(genTemplate && genTemplate.subCapabilityNameBegin);
+  // misinterpreting one of its own entity-level nodes as an application capability.
+  const hasApplicationCapability = !!(genTemplate && genTemplate.applicationCapabilityNameBegin);
 
   // Built once, up front — see createBulkLookupCache's own doc comment for why. Without
   // this, generateIndustry on a large dataset (confirmed as the actual cause of a real
@@ -1411,30 +1455,30 @@ async function generateIndustry(app, industryKey, onProgress, placeInView = true
   }
 
   // Flattened up front so progress can be reported as a simple "done / total" — the
-  // work itself is identical to walking func -> cap -> [subCap ->] entityLevelNodes
-  // directly. Two walk shapes, chosen by hasSubCapability (computed from the TEMPLATE,
+  // work itself is identical to walking func -> cap -> [appCap ->] entityLevelNodes
+  // directly. Two walk shapes, chosen by hasApplicationCapability (computed from the TEMPLATE,
   // not the tree) rather than unconditionally trying 4 levels everywhere: the built-in
   // 'general' dataset (and any pre-SFCCE Load SFCE import) is a genuine 3-level tree —
   // walking it as if a 4th level might exist would treat its own entity-level nodes as
-  // sub-capabilities, which is wrong and was never needed, so that path is untouched.
+  // application capabilities, which is wrong and was never needed, so that path is untouched.
   const jobs = [];
   for (const func of data) {
     if (!ciEq(func.nodeElementType, 'BusinessFunction')) continue;
     for (const cap of func.nodeChildren || []) {
-      if (hasSubCapability) {
-        const subCapLevelNodes = (cap.nodeChildren && cap.nodeChildren.length > 0) ? cap.nodeChildren : [cap];
-        for (const subCap of subCapLevelNodes) {
-          const entityLevelNodes = (subCap !== cap && subCap.nodeChildren && subCap.nodeChildren.length > 0) ? subCap.nodeChildren : [subCap];
+      if (hasApplicationCapability) {
+        const appCapLevelNodes = (cap.nodeChildren && cap.nodeChildren.length > 0) ? cap.nodeChildren : [cap];
+        for (const appCap of appCapLevelNodes) {
+          const entityLevelNodes = (appCap !== cap && appCap.nodeChildren && appCap.nodeChildren.length > 0) ? appCap.nodeChildren : [appCap];
           for (const ent of entityLevelNodes) {
-            if (ent !== subCap && ent !== cap && !ciEq(ent.nodeElementType, 'DataDataEntity')) continue;
-            jobs.push({ func, cap, subCap, ent });
+            if (ent !== appCap && ent !== cap && !ciEq(ent.nodeElementType, 'DataDataEntity')) continue;
+            jobs.push({ func, cap, appCap, ent });
           }
         }
       } else {
         const entityLevelNodes = (cap.nodeChildren && cap.nodeChildren.length > 0) ? cap.nodeChildren : [cap];
         for (const ent of entityLevelNodes) {
           if (ent !== cap && !ciEq(ent.nodeElementType, 'DataDataEntity')) continue;
-          jobs.push({ func, cap, subCap: null, ent });
+          jobs.push({ func, cap, appCap: null, ent });
         }
       }
     }
@@ -1442,8 +1486,8 @@ async function generateIndustry(app, industryKey, onProgress, placeInView = true
 
   let entityCount = 0, skippedCount = 0;
   for (let i = 0; i < jobs.length; i++) {
-    const { func, cap, subCap, ent } = jobs[i];
-    const groupKey = subCap ? `${func.nodeId || ''}|${cap.nodeId || ''}|${subCap.nodeId || ''}` : `${func.nodeId || ''}|${cap.nodeId || ''}`;
+    const { func, cap, appCap, ent } = jobs[i];
+    const groupKey = appCap ? `${func.nodeId || ''}|${cap.nodeId || ''}|${appCap.nodeId || ''}` : `${func.nodeId || ''}|${cap.nodeId || ''}`;
     const existingEntityPart = findEntityPart(ent.nodeId);
     if (existingEntityPart && (existingEntityPart.other?.generatedFor || []).includes(groupKey)) {
       skippedCount += 1;
@@ -1453,7 +1497,7 @@ async function generateIndustry(app, industryKey, onProgress, placeInView = true
         streamName: ent.nodeName,
         functionName: func.nodeName, functionDescription: func.nodeDescription, functionxIds: func.nodeId, functionSection: func.nodeSection || '',
         capabilityName: cap.nodeName, capabilityDescription: cap.nodeDescription, capabilityxIds: cap.nodeId,
-        subCapabilityName: subCap ? subCap.nodeName : undefined, subCapabilityDescription: subCap ? subCap.nodeDescription : undefined, subCapabilityxIds: subCap ? subCap.nodeId : undefined,
+        applicationCapabilityName: appCap ? appCap.nodeName : undefined, applicationCapabilityDescription: appCap ? appCap.nodeDescription : undefined, applicationCapabilityxIds: appCap ? appCap.nodeId : undefined,
         entityName: ent.nodeName, entityDescription: ent.nodeDescription, entityxIds: ent.nodeId,
         modelName: store.defaultModel, viewName: store.currentView,
         anchorX: 60, anchorY: nextAnchorY,
@@ -2236,4 +2280,4 @@ function duplicateSection(app, tab, sectionInstanceId) {
   app.toast(`Duplicated section "${originalName}" as "${newSection.name}" (${oldVmToNewVm.size} node${oldVmToNewVm.size === 1 ? '' : 's'}, ${connDupCount} connector${connDupCount === 1 ? '' : 's'}).`);
 }
 
-export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection, smartCheckView, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams };
+export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection, smartCheckView, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames };

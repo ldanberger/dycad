@@ -1,5 +1,5 @@
 // sfce.js — Load SFCCE: import an arbitrary JSON file as an alternate industry
-// collection (Section / Function / Capability / Sub-Capability / Entity) for use by
+// collection (Section / Function / Capability / Application Capability / Entity) for use by
 // Advanced > Generate Industry. Pure logic only, no DOM — the modal wizard in main.js
 // drives this. Originally two separate features (Load SFCE: Section/Function/Capability/
 // Entity, and a later Load Capability Map: Section/Function/Business Capability/
@@ -24,16 +24,16 @@
 
 /**
  * Flattens an industry tree into flat rows for a catalog-style table: one row per
- * Function/Capability/Sub-Capability/Entity combination, with id and description at
+ * Function/Capability/Application Capability/Entity combination, with id and description at
  * every level. Handles TWO tree shapes transparently, detected structurally per
  * Capability (not assumed globally, so a tree could in principle mix both — though in
  * practice only the built-in 'general' dataset is ever the 3-level shape):
  *   - 4-level (from this file's own buildIndustryTree): a Capability's children are
  *     ApplicationCapability nodes, each with its own Entity children.
  *   - 3-level (fce-generalnodes.json, predating this file entirely): a Capability's
- *     children ARE the Entity nodes directly, no Sub-Capability layer at all — those
- *     rows come back with the Sub-Capability columns blank, not fabricated.
- * A Capability/Sub-Capability with no further children still produces one row, with
+ *     children ARE the Entity nodes directly, no Application Capability layer at all — those
+ *     rows come back with the Application Capability columns blank, not fabricated.
+ * A Capability/Application Capability with no further children still produces one row, with
  * the deeper columns left blank rather than being dropped (see generateIndustry's own
  * "no children -> treat this node as its own next level" fallback for why that's a
  * real, valid case, not just an import artifact).
@@ -46,12 +46,12 @@ export function flattenIndustryTree(tree) {
     if (caps.length === 0) { rows.push(makeRow(func, null, null, null)); continue; }
     for (const cap of caps) {
       const children = cap.nodeChildren || [];
-      const subCaps = children.filter((c) => ciEqLocal(c.nodeElementType, 'ApplicationCapability'));
-      if (subCaps.length > 0) {
-        for (const subCap of subCaps) {
-          const entities = (subCap.nodeChildren || []).filter((e) => ciEqLocal(e.nodeElementType, 'DataDataEntity'));
-          if (entities.length === 0) rows.push(makeRow(func, cap, subCap, null));
-          else for (const ent of entities) rows.push(makeRow(func, cap, subCap, ent));
+      const appCaps = children.filter((c) => ciEqLocal(c.nodeElementType, 'ApplicationCapability'));
+      if (appCaps.length > 0) {
+        for (const appCap of appCaps) {
+          const entities = (appCap.nodeChildren || []).filter((e) => ciEqLocal(e.nodeElementType, 'DataDataEntity'));
+          if (entities.length === 0) rows.push(makeRow(func, cap, appCap, null));
+          else for (const ent of entities) rows.push(makeRow(func, cap, appCap, ent));
         }
       } else {
         // 3-level shape: this Capability's own children are Entities directly.
@@ -66,13 +66,13 @@ export function flattenIndustryTree(tree) {
 function ciEqLocal(a, b) {
   return String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
 }
-function makeRow(func, cap, subCap, ent) {
+function makeRow(func, cap, appCap, ent) {
   return {
-    id: `${func.nodeId || ''}|${cap?.nodeId || ''}|${subCap?.nodeId || ''}|${ent?.nodeId || ''}`,
+    id: `${func.nodeId || ''}|${cap?.nodeId || ''}|${appCap?.nodeId || ''}|${ent?.nodeId || ''}`,
     section: func.nodeSection || '',
     functionId: func.nodeId || '', functionName: func.nodeName || '', functionDescription: func.nodeDescription || '',
     capabilityId: cap?.nodeId || '', capabilityName: cap?.nodeName || '', capabilityDescription: cap?.nodeDescription || '',
-    subCapabilityId: subCap?.nodeId || '', subCapabilityName: subCap?.nodeName || '', subCapabilityDescription: subCap?.nodeDescription || '',
+    applicationCapabilityId: appCap?.nodeId || '', applicationCapabilityName: appCap?.nodeName || '', applicationCapabilityDescription: appCap?.nodeDescription || '',
     entityId: ent?.nodeId || '', entityName: ent?.nodeName || '', entityDescription: ent?.nodeDescription || '',
   };
 }
@@ -85,7 +85,7 @@ function makeRow(func, cap, subCap, ent) {
  * file's actual shape: a top-level array where each item carries a nested array-of-
  * objects field ("businessCapabilities"), each of THOSE carrying its own nested
  * array-of-objects field ("applicationCapabilities") — two levels deep, needed once
- * SFCCE's Sub-Capability level meant a single "group with a nested list" unwrap (the
+ * SFCCE's Application Capability level meant a single "group with a nested list" unwrap (the
  * original Load SFCE's only case) was no longer enough. Repeatedly unwraps one more
  * level of nested array-of-objects at a time (detected fresh on the CURRENT records
  * after each pass) until none remain, merging each outer item's own scalar fields
@@ -185,15 +185,15 @@ function readScalar(record, field, fallback) {
 }
 
 /**
- * Turns raw records into (section, function, capability, subCapability, entity,
- * description, subCapabilityDescription, entityDescription) rows — one row per record
+ * Turns raw records into (section, function, capability, applicationCapability, entity,
+ * description, applicationCapabilityDescription, entityDescription) rows — one row per record
  * per split section (a record whose section field has multiple values still becomes
  * multiple rows here, each with its own section).
  *
- * CASCADE: capability/subCapability/entity are each OPTIONAL in `mapping` (pass '' /
+ * CASCADE: capability/applicationCapability/entity are each OPTIONAL in `mapping` (pass '' /
  * null / omit to mean "no field for this level"). Whenever a level has no mapped field,
  * OR the mapped field is empty for a given record, that level's value becomes a COPY of
- * the level immediately above it (function -> capability -> subCapability -> entity) —
+ * the level immediately above it (function -> capability -> applicationCapability -> entity) —
  * this is what lets one wizard serve both old-style 3-level data (no distinct Sub-
  * Capability concept — its value just inherits the Capability's own name) and 4-level
  * data with every level distinct, without two different code paths. Function itself has
@@ -203,19 +203,19 @@ function readScalar(record, field, fallback) {
  * name, which is what makes the level exist and connect at all) has no benefit.
  *
  * Every row also carries originalFunctionName/originalCapabilityName/
- * originalSubCapabilityName/originalSection — frozen at build time, never touched by
- * resolveSharedFunctions/resolveSharedCapabilities/resolveSharedSubCapabilities below —
+ * originalApplicationCapabilityName/originalSection — frozen at build time, never touched by
+ * resolveSharedFunctions/resolveSharedCapabilities/resolveSharedApplicationCapabilities below —
  * see detectSharedLevel's own comment for why that stability matters.
  */
 export function buildRowsFromRecords(records, mapping) {
   const {
     sectionField, functionField,
     capabilityField, capabilityDescriptionField,
-    subCapabilityField, subCapabilityDescriptionField,
+    applicationCapabilityField, applicationCapabilityDescriptionField,
     entityField, entityDescriptionField,
   } = mapping;
   const rows = [];
-  let missingFunction = 0, missingCapability = 0, missingSubCapability = 0, missingEntity = 0, missingDescription = 0;
+  let missingFunction = 0, missingCapability = 0, missingApplicationCapability = 0, missingEntity = 0, missingDescription = 0;
   for (const record of records) {
     const sections = readSectionValues(record, sectionField);
     const functionName = readScalar(record, functionField, '(unspecified)');
@@ -227,13 +227,13 @@ export function buildRowsFromRecords(records, mapping) {
     const description = readScalar(record, capabilityDescriptionField, '');
     if (!description) missingDescription += 1;
 
-    const rawSubCapability = readScalar(record, subCapabilityField, null);
-    const subCapabilityName = rawSubCapability ?? capabilityName; // cascade: subCapability <- capability
-    if (rawSubCapability == null) missingSubCapability += 1;
-    const subCapabilityDescription = readScalar(record, subCapabilityDescriptionField, '');
+    const rawApplicationCapability = readScalar(record, applicationCapabilityField, null);
+    const applicationCapabilityName = rawApplicationCapability ?? capabilityName; // cascade: applicationCapability <- capability
+    if (rawApplicationCapability == null) missingApplicationCapability += 1;
+    const applicationCapabilityDescription = readScalar(record, applicationCapabilityDescriptionField, '');
 
     const rawEntity = readScalar(record, entityField, null);
-    const entityName = rawEntity ?? subCapabilityName; // cascade: entity <- subCapability
+    const entityName = rawEntity ?? applicationCapabilityName; // cascade: entity <- applicationCapability
     if (rawEntity == null) missingEntity += 1;
     const entityDescription = readScalar(record, entityDescriptionField, '');
 
@@ -243,21 +243,21 @@ export function buildRowsFromRecords(records, mapping) {
         functionName, originalFunctionName: functionName,
         capabilityName, originalCapabilityName: capabilityName,
         description,
-        subCapabilityName, originalSubCapabilityName: subCapabilityName,
-        subCapabilityDescription,
+        applicationCapabilityName, originalApplicationCapabilityName: applicationCapabilityName,
+        applicationCapabilityDescription,
         entityName, entityDescription,
       });
     }
   }
-  return { rows, missingFunction, missingCapability, missingSubCapability, missingEntity, missingDescription };
+  return { rows, missingFunction, missingCapability, missingApplicationCapability, missingEntity, missingDescription };
 }
 
 /**
  * Finds identities that end up needing to exist in more than one distinct Section —
  * generic core shared by the three exported detect/resolve pairs below (Function,
- * Capability, Sub-Capability each independently need this: a real merged capabilities
+ * Capability, Application Capability each independently need this: a real merged capabilities
  * dataset showed ~93% of business capabilities span multiple sections through their own
- * sub-capabilities alone, so this is the common case here, not a rare edge case).
+ * application capabilities alone, so this is the common case here, not a rare edge case).
  * `identityKeyFn(row)` returns a STABLE identity for the level being checked, scoped to
  * its own ancestors (e.g. a Capability's identity includes its Function, so two
  * different Functions coincidentally sharing a Capability name aren't conflated) — reads
@@ -285,7 +285,7 @@ function detectSharedLevel(rows, identityKeyFn) {
  * Applies the user's decision about the identities detectSharedLevel found.
  *
  * collapseToShared=true: every row whose identity is shared gets its section forced to
- * the literal 'Shared' — so e.g. every row of a Function/Capability/Sub-Capability that
+ * the literal 'Shared' — so e.g. every row of a Function/Capability/Application Capability that
  * spans several sections (regardless of which section it originally came from) ends up
  * combined under section "Shared". (No explicit de-duplication needed beyond that — rows
  * that become identical after this rewrite are naturally merged by buildIndustryTree's
@@ -314,7 +314,7 @@ function resolveSharedLevel(rows, sectionsByIdentity, sharedIdentities, identity
 }
 
 /** Function-level sharing — e.g. "Transportation & Roads" appearing under both
- * "Environment" and "Justice" sections. Independent of the Capability/Sub-Capability
+ * "Environment" and "Justice" sections. Independent of the Capability/Application Capability
  * checks below (see detectSharedLevel's own comment for why they can run in any order). */
 export function detectSharedFunctions(rows) {
   const { sectionsByIdentity, sharedIdentities } = detectSharedLevel(rows, (row) => row.originalFunctionName);
@@ -326,7 +326,7 @@ export function resolveSharedFunctions(rows, sectionsByFunction, sharedFunctionN
 
 /** Capability-level sharing, scoped within its own Function so two different Functions
  * coincidentally sharing a Capability name aren't conflated. Independent of the
- * Function/Sub-Capability checks. */
+ * Function/Application Capability checks. */
 export function detectSharedCapabilities(rows) {
   const { sectionsByIdentity, sharedIdentities } = detectSharedLevel(rows, (row) => `${row.originalFunctionName}|${row.originalCapabilityName}`);
   return { sectionsByCapability: sectionsByIdentity, sharedCapabilityKeys: sharedIdentities };
@@ -335,14 +335,14 @@ export function resolveSharedCapabilities(rows, sectionsByCapability, sharedCapa
   return resolveSharedLevel(rows, sectionsByCapability, sharedCapabilityKeys, (row) => `${row.originalFunctionName}|${row.originalCapabilityName}`, 'capabilityName', collapseToShared);
 }
 
-/** Sub-Capability-level sharing, scoped within its own (Function, Capability) pair.
+/** Application Capability-level sharing, scoped within its own (Function, Capability) pair.
  * Independent of the Function/Capability checks. */
-export function detectSharedSubCapabilities(rows) {
-  const { sectionsByIdentity, sharedIdentities } = detectSharedLevel(rows, (row) => `${row.originalFunctionName}|${row.originalCapabilityName}|${row.originalSubCapabilityName}`);
-  return { sectionsBySubCapability: sectionsByIdentity, sharedSubCapabilityKeys: sharedIdentities };
+export function detectSharedApplicationCapabilities(rows) {
+  const { sectionsByIdentity, sharedIdentities } = detectSharedLevel(rows, (row) => `${row.originalFunctionName}|${row.originalCapabilityName}|${row.originalApplicationCapabilityName}`);
+  return { sectionsByApplicationCapability: sectionsByIdentity, sharedApplicationCapabilityKeys: sharedIdentities };
 }
-export function resolveSharedSubCapabilities(rows, sectionsBySubCapability, sharedSubCapabilityKeys, collapseToShared) {
-  return resolveSharedLevel(rows, sectionsBySubCapability, sharedSubCapabilityKeys, (row) => `${row.originalFunctionName}|${row.originalCapabilityName}|${row.originalSubCapabilityName}`, 'subCapabilityName', collapseToShared);
+export function resolveSharedApplicationCapabilities(rows, sectionsByApplicationCapability, sharedApplicationCapabilityKeys, collapseToShared) {
+  return resolveSharedLevel(rows, sectionsByApplicationCapability, sharedApplicationCapabilityKeys, (row) => `${row.originalFunctionName}|${row.originalCapabilityName}|${row.originalApplicationCapabilityName}`, 'applicationCapabilityName', collapseToShared);
 }
 
 function slugify(text) {
@@ -350,10 +350,10 @@ function slugify(text) {
 }
 
 /**
- * Builds the final Function -> Capability -> Sub-Capability -> Entity tree (with
+ * Builds the final Function -> Capability -> Application Capability -> Entity tree (with
  * nodeSection on each Function) from resolved rows, merging to uniqueness on (section,
- * function, capability, subCapability, entity) as rows are folded in. Always 4 levels
- * deep — subCapabilityName is never empty by the time rows reach here (buildRowsFromRecords'
+ * function, capability, applicationCapability, entity) as rows are folded in. Always 4 levels
+ * deep — applicationCapabilityName is never empty by the time rows reach here (buildRowsFromRecords'
  * cascade guarantees it), so there's no "skip this level" branch to speak of, unlike
  * entity (still conditionally created — see below). Also returns the statistics the
  * caller writes to the Message Log: the ordered unique section list (first-seen order)
@@ -362,13 +362,13 @@ function slugify(text) {
 export function buildIndustryTree(rows) {
   const functionsByKey = new Map(); // `${section}|${functionName}` -> function node
   const capsByKey = new Map(); // `${functionKey}|${capabilityName}` -> capability node
-  const subCapsByKey = new Map(); // `${capKey}|${subCapabilityName}` -> sub-capability node
-  const entitiesByKey = new Set(); // `${subCapKey}|${entityName}` — true-duplicate guard
+  const appCapsByKey = new Map(); // `${capKey}|${applicationCapabilityName}` -> application capability node
+  const entitiesByKey = new Set(); // `${appCapKey}|${entityName}` — true-duplicate guard
   const sectionOrder = [];
   const sectionSeen = new Set();
   const functionNamesUsedInSection = new Map(); // section -> Set(function display names already used) for the "increment as needed" safety net
 
-  let functionCount = 0, capabilityCount = 0, subCapabilityCount = 0, entityCount = 0, mergedDuplicates = 0;
+  let functionCount = 0, capabilityCount = 0, applicationCapabilityCount = 0, entityCount = 0, mergedDuplicates = 0;
 
   for (const row of rows) {
     if (!sectionSeen.has(row.section)) { sectionSeen.add(row.section); sectionOrder.push(row.section); }
@@ -414,31 +414,31 @@ export function buildIndustryTree(rows) {
       capNode.nodeDescription = row.description; // fill in from a later row if the first one that created this capability had none
     }
 
-    const subCapKey = `${capKey}|${row.subCapabilityName}`;
-    let subCapNode = subCapsByKey.get(subCapKey);
-    if (!subCapNode) {
-      subCapNode = {
+    const appCapKey = `${capKey}|${row.applicationCapabilityName}`;
+    let appCapNode = appCapsByKey.get(appCapKey);
+    if (!appCapNode) {
+      appCapNode = {
         nodeElementType: 'ApplicationCapability',
-        nodeName: row.subCapabilityName,
-        nodeId: `${capNode.nodeId}-${slugify(row.subCapabilityName)}`,
-        nodeDescription: row.subCapabilityDescription || '',
+        nodeName: row.applicationCapabilityName,
+        nodeId: `${capNode.nodeId}-${slugify(row.applicationCapabilityName)}`,
+        nodeDescription: row.applicationCapabilityDescription || '',
         nodeChildren: [],
       };
-      subCapsByKey.set(subCapKey, subCapNode);
-      capNode.nodeChildren.push(subCapNode);
-      subCapabilityCount += 1;
-    } else if (!subCapNode.nodeDescription && row.subCapabilityDescription) {
-      subCapNode.nodeDescription = row.subCapabilityDescription;
+      appCapsByKey.set(appCapKey, appCapNode);
+      capNode.nodeChildren.push(appCapNode);
+      applicationCapabilityCount += 1;
+    } else if (!appCapNode.nodeDescription && row.applicationCapabilityDescription) {
+      appCapNode.nodeDescription = row.applicationCapabilityDescription;
     }
 
     if (row.entityName) {
-      const entKey = `${subCapKey}|${row.entityName}`;
+      const entKey = `${appCapKey}|${row.entityName}`;
       if (entitiesByKey.has(entKey)) { mergedDuplicates += 1; continue; }
       entitiesByKey.add(entKey);
-      subCapNode.nodeChildren.push({
+      appCapNode.nodeChildren.push({
         nodeElementType: 'DataDataEntity',
         nodeName: row.entityName,
-        nodeId: `${subCapNode.nodeId}-${slugify(row.entityName)}`,
+        nodeId: `${appCapNode.nodeId}-${slugify(row.entityName)}`,
         nodeDescription: row.entityDescription || '',
       });
       entityCount += 1;
@@ -448,6 +448,6 @@ export function buildIndustryTree(rows) {
   const tree = [...functionsByKey.values()];
   return {
     tree,
-    stats: { sectionOrder, functionCount, capabilityCount, subCapabilityCount, entityCount, mergedDuplicates },
+    stats: { sectionOrder, functionCount, capabilityCount, applicationCapabilityCount, entityCount, mergedDuplicates },
   };
 }

@@ -810,9 +810,9 @@ def check_sfce_import_and_generate(page):
       store.industryData['sfce-fixture'] = tree;
       // Registering 'SFCCE' here is what File > Load SFCCE's own wizard always does
       // (finishSFCCEImport) — required now that buildIndustryTree always produces a
-      // 4-level tree (Sub-Capability cascades from Capability when unmapped, same as
+      // 4-level tree (Application Capability cascades from Capability when unmapped, same as
       // here): without it generateIndustry defaults to 'Enterprise', which has no
-      // Sub-Capability concept and would reject every Sub-Capability-typed child as an
+      // Application Capability concept and would reject every Application Capability-typed child as an
       // invalid entity, producing zero jobs.
       store.industryTemplates['sfce-fixture'] = 'SFCCE';
 
@@ -1017,9 +1017,9 @@ def check_dropdown_scrollable(page):
 
 def check_sfce_catalog_page(page):
     """Regression guard: Catalogs > SFCE should open a read-only table of the
-    Section/Function/Capability/Sub-Capability/Entity hierarchy, with id and description
+    Section/Function/Capability/Application Capability/Entity hierarchy, with id and description
     at every level, working for the built-in "general" data (a genuine 3-level tree, no
-    Sub-Capability concept, blank Sub-Capability columns) as well as a Load SFCCE
+    Application Capability concept, blank Application Capability columns) as well as a Load SFCCE
     import."""
     result = js(page, """
     async () => {
@@ -1039,7 +1039,7 @@ def check_sfce_catalog_page(page):
       };
     }
     """)
-    expectedCols = ["section", "functionId", "functionName", "functionDescription", "capabilityId", "capabilityName", "capabilityDescription", "subCapabilityId", "subCapabilityName", "subCapabilityDescription", "entityId", "entityName", "entityDescription"]
+    expectedCols = ["section", "functionId", "functionName", "functionDescription", "capabilityId", "capabilityName", "capabilityDescription", "applicationCapabilityId", "applicationCapabilityName", "applicationCapabilityDescription", "entityId", "entityName", "entityDescription"]
     if not result["tabCreated"] or result["rowCount"] == 0:
         return False, f"catalog tab wasn't created or has no rows: {result}"
     if result["cols"] != expectedCols:
@@ -1437,7 +1437,7 @@ def check_stream_template_shared_default(page):
 
       app.runCommand('generate', null);
       await new Promise(r => setTimeout(r, 30));
-      const generateDefault = document.querySelector('.modal-overlay [data-key="template"]')?.value;
+      const generateDefault = document.getElementById('gs-template')?.value;
       document.querySelector('.modal-overlay .cancel')?.click();
       await new Promise(r => setTimeout(r, 30));
 
@@ -1535,9 +1535,165 @@ def check_remap_options_persist_across_views(page):
     return True, "Remap's options (pattern, checkboxes, sort order) persisted as user-level defaults onto a brand-new view, surviving a reload"
 
 
+def check_generate_stream_prepopulates_from_existing(page):
+    """Regression guard for Generate Stream's Stream Name field: it's a text input backed
+    by a <datalist> of existing stream names (not a locked-down <select>), so typing a
+    brand-new name still works exactly as before; but typing/picking an EXISTING stream
+    name should prepopulate Function/Capability/Application Capability/Entity Name from that
+    stream's own already-generated parts (commands.js's deriveStreamNames) and switch the
+    template to one with an Application Capability level if the stream has one — without touching
+    those fields for a stream name that doesn't match anything (typing further shouldn't
+    fight the user). Also confirms regenerating the SAME stream (same names) reuses the
+    existing parts instead of creating duplicates — createStream's own pre-existing
+    find-or-create logic, exercised end-to-end through this dialog."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const view = store.addView('RegrGenStreamPrepop_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      commands.createStream(app, {
+        templateName: 'SFCCE', streamName: 'RegrGSStream',
+        functionName: 'RegrFunc', capabilityName: 'RegrCap',
+        applicationCapabilityName: 'RegrAppCap', entityName: 'RegrEnt',
+        modelName: store.defaultModel, viewName: view.id, silent: true,
+      });
+      const partCountBefore = store.doc.parts.length;
+
+      app.promptGenerateStream(tab, null);
+      await new Promise(r => setTimeout(r, 30));
+      const templateBefore = document.getElementById('gs-template').value;
+
+      document.getElementById('gs-stream').value = 'RegrGSStream';
+      document.getElementById('gs-stream').dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 30));
+
+      const populated = {
+        template: document.getElementById('gs-template').value,
+        appCapRowHidden: document.getElementById('gs-application-capability-row').classList.contains('hidden'),
+        functionName: document.getElementById('gs-function').value,
+        capabilityName: document.getElementById('gs-capability').value,
+        applicationCapabilityName: document.getElementById('gs-application-capability').value,
+        entityName: document.getElementById('gs-entity').value,
+      };
+
+      // typing a brand-new stream name shouldn't clear what was just prepopulated
+      document.getElementById('gs-stream').value = 'RegrGSStream-brand-new';
+      document.getElementById('gs-stream').dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 30));
+      const afterNewName = { functionName: document.getElementById('gs-function').value };
+
+      // put the stream name back and submit -- should reuse the existing parts, not duplicate them
+      document.getElementById('gs-stream').value = 'RegrGSStream';
+      document.getElementById('gs-stream').dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 30));
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 80));
+
+      return { templateBefore, populated, afterNewName, partCountBefore, partCountAfter: store.doc.parts.length };
+    }
+    """)
+    if result["templateBefore"] == "SFCCE":
+        return False, f"test setup itself is wrong — template shouldn't default to SFCCE before selecting the existing stream: {result}"
+    p = result["populated"]
+    problems = []
+    if p["template"] != "SFCCE": problems.append(f"template should auto-switch to 'SFCCE' (the stream has an Application Capability), got {p['template']!r}")
+    if p["appCapRowHidden"]: problems.append("Application Capability Name row should be visible once the template switched to SFCCE")
+    if p["functionName"] != "RegrFunc": problems.append(f"functionName should prepopulate to 'RegrFunc', got {p['functionName']!r}")
+    if p["capabilityName"] != "RegrCap": problems.append(f"capabilityName should prepopulate to 'RegrCap', got {p['capabilityName']!r}")
+    if p["applicationCapabilityName"] != "RegrAppCap": problems.append(f"applicationCapabilityName should prepopulate to 'RegrAppCap', got {p['applicationCapabilityName']!r}")
+    if p["entityName"] != "RegrEnt": problems.append(f"entityName should prepopulate to 'RegrEnt', got {p['entityName']!r}")
+    if result["afterNewName"]["functionName"] != "RegrFunc": problems.append(f"typing a brand-new stream name shouldn't clear the already-prepopulated Function Name, got {result['afterNewName']['functionName']!r}")
+    if result["partCountAfter"] != result["partCountBefore"]: problems.append(f"regenerating the same stream with the same names should reuse existing parts, not create new ones: {result['partCountBefore']} -> {result['partCountAfter']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "selecting an existing stream prepopulated Function/Capability/Application Capability/Entity Name and switched to the SFCCE template, without disturbing fields when a brand-new name is typed, and regenerating reused the existing parts"
+
+
+def check_node_size_multiplier(page):
+    """Regression guard: new views should default to a bigger node box (130x46 * the
+    Store's nodeSizeMultiplier, default 1.2 -> 156x55) than the old flat 130x46 — nodes
+    generated at the old size were cramped and often clipped their own label text. Also
+    confirms nodeSizeMultiplier is a real Local Settings preference: File > Load Local
+    Settings can set a custom value, it's cached to localStorage (same mechanism as
+    maxScriptEntities), and a NEW view created after a reload uses the cached value —
+    proving the cached multiplier reaches the Store BEFORE its initial home view is built
+    (bootstrapApp must read the cache and pass it into `new Store(...)`, not apply it to
+    store.nodeSizeMultiplier only after construction, or the very first view would miss
+    it)."""
+    default_result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const freshView = store.addView('RegrNodeSizeDefault_' + Date.now());
+      return {
+        multiplier: store.nodeSizeMultiplier,
+        homeWidth: store.doc.views[0].nodeWidth,
+        homeHeight: store.doc.views[0].nodeHeight,
+        freshWidth: freshView.nodeWidth,
+        freshHeight: freshView.nodeHeight,
+      };
+    }
+    """)
+    if default_result["multiplier"] != 1.2:
+        return False, f"expected the default nodeSizeMultiplier to be 1.2, got {default_result['multiplier']}"
+    if default_result["freshWidth"] != 156 or default_result["freshHeight"] != 55:
+        return False, f"expected a fresh view to default to 156x55 (130x46 * 1.2), got {default_result['freshWidth']}x{default_result['freshHeight']}"
+    if default_result["homeWidth"] != 156 or default_result["homeHeight"] != 55:
+        return False, f"expected the initial home view to also default to 156x55, got {default_result['homeWidth']}x{default_result['homeHeight']}"
+
+    load_result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const text = JSON.stringify({ nodeSizeMultiplier: 2 });
+      const blob = new Blob([text], { type: 'application/json' });
+      const file = new File([blob], 'settings.json', { type: 'application/json' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const input = document.getElementById('load-local-settings-input');
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 150));
+      const view = store.addView('RegrNodeSizeLoaded_' + Date.now());
+      return {
+        multiplier: store.nodeSizeMultiplier,
+        width: view.nodeWidth,
+        height: view.nodeHeight,
+        cached: JSON.parse(localStorage.getItem('dycad-local-settings-cache') || '{}').nodeSizeMultiplier,
+      };
+    }
+    """)
+    if load_result["multiplier"] != 2:
+        return False, f"Load Local Settings should have set store.nodeSizeMultiplier to 2, got {load_result['multiplier']}"
+    if load_result["width"] != 260 or load_result["height"] != 92:
+        return False, f"a view created after loading multiplier=2 should be 260x92 (130x46 * 2), got {load_result['width']}x{load_result['height']}"
+    if load_result["cached"] != 2:
+        return False, f"nodeSizeMultiplier=2 wasn't cached to localStorage: {load_result}"
+
+    page.reload()
+    page.wait_for_timeout(1200)
+    reload_result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      return {
+        multiplier: store.nodeSizeMultiplier,
+        homeWidth: store.doc.views[0].nodeWidth,
+        homeHeight: store.doc.views[0].nodeHeight,
+      };
+    }
+    """)
+    if reload_result["multiplier"] != 2:
+        return False, f"nodeSizeMultiplier didn't auto-apply from its localStorage cache after reload (expected 2): {reload_result}"
+    if reload_result["homeWidth"] != 260 or reload_result["homeHeight"] != 92:
+        return False, f"the very first (home) view after a reload should already reflect the cached multiplier=2 (260x92) — got {reload_result['homeWidth']}x{reload_result['homeHeight']}, meaning the cache reached the Store too late"
+    return True, "new views default to 156x55 (130x46 * 1.2), and a custom nodeSizeMultiplier loaded via Local Settings is cached and reaches the Store before its very first view is built, surviving a reload"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
-    Sub-Capability/Entity import that replaced separate Load SFCE and Load Capability Map
+    Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
     features. Uses a small, deliberate 2-level-nested fixture (one domain, one business
     capability, one application capability that itself lists 2 ministries) designed so
     ALL THREE independently-resolvable sharing levels (Domain, Business Capability,
@@ -1545,7 +1701,7 @@ def check_load_sfcce(page):
     real bug found while building this: capability-level sharing detection was
     structurally unable to fire once domain-level resolution had already consumed the
     section diversity (fixed via frozen originalFunctionName/originalCapabilityName/
-    originalSubCapabilityName/originalSection fields, immune to resolution order — see
+    originalApplicationCapabilityName/originalSection fields, immune to resolution order — see
     sfce.js's detectSharedLevel). Also exercises flattenJsonRecords' full-dot-path field
     naming (both nesting levels have their own "name"/"description" fields, which must
     surface as distinct businessCapabilities.name / businessCapabilities.applicationCapabilities.name
@@ -1600,8 +1756,8 @@ def check_load_sfcce(page):
       document.getElementById('sfcce-field-function').value = 'domain';
       document.getElementById('sfcce-field-capability').value = 'businessCapabilities.name';
       document.getElementById('sfcce-field-capability-desc').value = 'businessCapabilities.description';
-      document.getElementById('sfcce-field-subcapability').value = 'businessCapabilities.applicationCapabilities.name';
-      document.getElementById('sfcce-field-subcapability-desc').value = 'businessCapabilities.applicationCapabilities.description';
+      document.getElementById('sfcce-field-application-capability').value = 'businessCapabilities.applicationCapabilities.name';
+      document.getElementById('sfcce-field-application-capability-desc').value = 'businessCapabilities.applicationCapabilities.description';
       document.getElementById('sfcce-industry-name').value = 'RegrSFCCE';
       document.querySelector('.modal-box .submit').click();
       await new Promise(r => setTimeout(r, 80));
@@ -1718,6 +1874,8 @@ CHECKS = [
     check_load_sfcce,
     check_stream_template_shared_default,
     check_remap_options_persist_across_views,
+    check_generate_stream_prepopulates_from_existing,
+    check_node_size_multiplier,
 ]
 
 
