@@ -52,6 +52,7 @@ There is no client-side router and no history API usage — the whole app is one
 | `js/archimate.js` | ArchiMate 3.0 Exchange Format import: element/relationship/view parsing, junction flattening, nested-shape (Composition/Aggregation) detection |
 | `js/sfce.js` | Pure logic (no DOM) for the Load SFCE wizard and industry-tree operations: `flattenJsonRecords` (generic nested-JSON flattener), `buildRowsFromRecords`, `detectSharedFunctions`/`resolveSharedFunctions`, `buildIndustryTree`, `flattenIndustryTree` (for the SFCE Catalog page) |
 | `js/simulation.js` | Per-model tick engine (`stepSimulation`, `startContinuousRun`/`pauseContinuousRun`/`stopContinuousRun`), the `ctx` contract implementation, Message Log (`pushMessageLog`), simulation snapshot save/load |
+| `js/view3d.js` | The 3D View tab: a rotatable/zoomable WebGL scene over `store.doc.parts`/`connectors` (never viewMembers/views). The only module that imports the vendored Three.js/OrbitControls (`js/vendor/`) — reached exclusively via a dynamic `import()` from `canvas.js`'s `renderView3DPage`, so the ~800KB vendored library never loads unless the tab is actually opened. Persists its renderer/scene/camera/controls per tab id across re-renders instead of tearing down and rebuilding the WebGL context on every `app.render()` call the way the 2D canvas page does |
 | `js/main.js` | `App` class: all UI-facing methods (every `prompt*` dialog, tab management, toast/message-log hookup, theme/panel-width persistence), global event wiring, the File/Advanced dropdown menus, bootstrap |
 | `js/version.js` | `APP_VERSION` plus a per-release changelog as code comments — the authoritative history of *why* things are the way they are; consult before assuming something is unintentional |
 
@@ -274,7 +275,60 @@ acknowledgement/feedback flows running opposite the connector direction. A Part 
 script and exactly one input passes it through unchanged. Full contract documented for
 end users in `public/instructions.html`.
 
-## 9. Testing strategy
+## 9. The 3D View subsystem (`view3d.js`)
+
+A rotatable/zoomable WebGL scene over `store.doc.parts`/`connectors` directly —
+deliberately not another placement of viewMembers/views, since the point is a data-level
+visualization independent of any one 2D layout. The one deliberate exception to the
+vanilla-JS/no-dependency rule: real 3D rendering needs a real rendering library. Rather
+than a CDN `<script>` tag (a live runtime dependency — breaks offline, breaks if the CDN
+changes or is unreachable), Three.js + its `OrbitControls` addon are downloaded once and
+committed under `js/vendor/` (see that directory's own `README.md` for exact provenance
+and how to update), imported the same way every other module is. `view3d.js` is the
+*only* module that imports them, and is itself only ever reached via a dynamic
+`import()` from `canvas.js`'s `renderView3DPage` — triggered the first time the 3D tab
+is actually opened, so the ~800KB vendored payload never loads for anyone who doesn't
+use this feature.
+
+Rendering persistence is the one place this tab type genuinely differs from every other
+`renderPages` dispatch target: `renderCanvasPage`/`renderTablePage`/etc. all wipe and
+rebuild their container's DOM on every single `app.render()` call, which is fine for
+plain DOM but wrong for a WebGL scene — recreating the renderer/camera/controls on every
+store mutation would both be wasteful and would reset whatever rotation/zoom the person
+is mid-interacting with. `view3d.js` instead keeps a `Map<tabId, {renderer, scene,
+camera, controls, ...}>`, created once per tab and only *updated* (not rebuilt) on
+subsequent calls; `disposeView3D(tabId)` (called from `App.closeTab`) tears the WebGL
+context and animation loop down explicitly, since browsers cap how many live contexts a
+page may hold.
+
+Staged build-out (Stage 0 shipped; this is the plan for what's still ahead, kept here so
+a future session doesn't have to re-derive it from scratch):
+
+- **Stage 0 (done)** — plumbing only: persistent per-tab renderer/camera/`OrbitControls`,
+  a placeholder cube, proof the vendored library loads and renders cleanly.
+- **Stage 1** — real data: group parts by element group (broad layer) then type (finer
+  sub-layer) within it, ordered by a stream template's `value[]`; render with
+  `THREE.InstancedMesh` from the start (not retrofitted later — the app needs to handle
+  thousands of parts, and switching a mesh-per-part scene to instancing after the fact
+  would mean redoing the renderer). Reuses the existing Stream/Type filters
+  (`passesStreamFilter`/`passesElementTypeFilter`) and element-group fill colors as-is.
+- **Stage 2** — connector lines between resolved positions; cluster parts within a
+  layer by `section` first, then by shared stream, so a stream's chain visually clumps
+  even across group/type layers.
+- **Stage 3** — a hand-authored master "cube order" list in `custom.json` (alongside
+  `streamTemplates`/`elementGroups`) as the *fallback* ordering for a type absent from
+  the active template's `value[]` — the template's own order still wins when a type is
+  in it, so Stage 1 behavior for typical stream-heavy models is unaffected; this only
+  gets the fallback case to full coverage.
+- **Stage 4** — zoom-to-detail: past a threshold, jump to (or open) the matching 2D
+  canvas tab rather than attempting a continuous 3D→2D morph — chosen as the
+  deliberately cheaper option; a seamless morph may be explored later.
+- **Stage 5** — live simulation overlay: color/pulse each node from `store.simRuntime`'s
+  current per-part value/state (same encoding the 2D canvas's "Show Simulation Values"
+  toggle already uses). Current-tick only, no history scrubbing — that would need
+  `simRuntime` to retain a tick history it doesn't today, a separate piece of scope.
+
+## 10. Testing strategy
 
 `tests/run_all.py` — no test framework, matching the app's own zero-dependency stance.
 Starts a local static server as a subprocess, drives a real headless Chromium instance
@@ -295,7 +349,7 @@ settings loaded from `custom.json`, UI methods stubbed as no-ops) — useful for
 correctness and performance testing where no actual DOM interaction is being verified.
 Anything that touches `document`/canvas rendering still needs the real Playwright path.
 
-## 10. Known, permanent limitations
+## 11. Known, permanent limitations
 
 Documented here (and in `public/instructions.html` for end users) so they aren't
 rediscovered and re-investigated as if new:
@@ -317,7 +371,7 @@ rediscovered and re-investigated as if new:
 - `templates[].parts[].x`/`.y` hints are not honored by Populate From Template's
   placement (row-major first-free-cell instead).
 
-## 11. Extension points for future work
+## 12. Extension points for future work
 
 - New editable field on any entity → `showFields` schema entry + accessor pair (§5.1),
   not a bespoke panel.

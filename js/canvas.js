@@ -30,8 +30,47 @@ function renderPages(app) {
     else if (tab.type === 'table') renderTablePage(app, tab, el);
     else if (tab.type === 'pdf') renderPdfPage(app, tab, el);
     else if (tab.type === 'docs') renderDocsPage(app, tab, el);
+    else if (tab.type === '3d') renderView3DPage(app, tab, el);
     else renderTextPage(app, tab, el);
   }
+}
+
+// ===================== 3D VIEW PAGE =====================
+// The vendored Three.js/OrbitControls (~800KB) only ever loads via this dynamic
+// import() — triggered the first time a 3D tab is actually rendered, cached here after
+// that so every later render() call for the same or another 3D tab reuses the already-
+// loaded module instead of re-importing. Every other DyCAD module stays completely free
+// of a 3D dependency; see view3d.js's own header comment for the full design.
+let view3dModule = null;
+let view3dLoadPromise = null;
+
+function renderView3DPage(app, tab, container) {
+  if (!view3dModule) {
+    if (!view3dLoadPromise) {
+      view3dLoadPromise = import('./view3d.js').then((mod) => {
+        view3dModule = mod;
+        app.render(); // re-dispatch now that the module is available
+      });
+    }
+    if (!container.querySelector('.view3d-loading')) {
+      container.innerHTML = '<div class="view3d-loading">Loading 3D view…</div>';
+    }
+    return;
+  }
+  // First render after the module finished loading — clear the placeholder text before
+  // view3d.js appends its actual <canvas>, otherwise the two sit as siblings and the
+  // unpositioned placeholder div (100% width/height) pushes the canvas out of view
+  // beneath it instead of being replaced by it.
+  if (container.querySelector('.view3d-loading')) container.innerHTML = '';
+  view3dModule.renderView3D(app, tab, container);
+}
+
+/** Called from App.closeTab so a closed 3D tab's WebGL context/animation loop are torn
+ * down instead of leaking (browsers cap how many live WebGL contexts a page can hold).
+ * A no-op if the 3D module was never loaded (nothing to dispose) or this tab was never a
+ * 3D tab in the first place. */
+function disposeView3DTab(tabId) {
+  if (view3dModule) view3dModule.disposeView3D(tabId);
 }
 
 // ===================== CANVAS PAGE =====================
@@ -1137,4 +1176,4 @@ function renderDocsPage(app, tab, container) {
     });
 }
 
-export { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, getNodeSize, redrawAndResolveLayout, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel };
+export { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, getNodeSize, redrawAndResolveLayout, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab };

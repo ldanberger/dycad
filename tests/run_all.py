@@ -1794,6 +1794,87 @@ def check_smart_check_node(page):
     return True, "right-click opened Smart Check Node with correct defaults, and downstream-only + fixed-to-the-original-node's-stream traversal pulled in exactly the reachable same-stream nodes"
 
 
+def check_view3d_boots(page):
+    """Regression guard for the 3D View tab (Stage 0 plumbing): Catalogs > 3D View opens
+    a singleton tab, lazy-loads the vendored Three.js/OrbitControls (js/vendor/) without
+    any console error, and renders a real <canvas> with nonzero size — not stuck behind
+    the "Loading 3D view..." placeholder (a real bug found while building this: the
+    placeholder div was never removed before the canvas got appended as its sibling,
+    so the unpositioned, 100%-height placeholder pushed the actual canvas out of view
+    instead of being replaced by it). Also confirms closing and reopening the tab doesn't
+    throw (the WebGL context gets disposed and a fresh one created, not a stale/duplicate
+    one) and that reopening finds the same singleton tab rather than creating a second."""
+    logs = []
+    page.on("console", lambda m: logs.append(f"{m.type}: {m.text}") if m.type == "error" else None)
+    page.on("pageerror", lambda exc: logs.append(str(exc)))
+    page.goto(f"http://localhost:{PORT}/index.html")
+    page.wait_for_timeout(800)
+
+    page.click("#catalogs-menu-btn")
+    menu_has_item = js(page, "async () => !!document.querySelector('#catalogs-menu .dd-item[data-action=\"view3d\"]')")
+    page.click('#catalogs-menu .dd-item[data-action="view3d"]')
+    try:
+        page.wait_for_function("!!document.querySelector('.page-view.active canvas')", timeout=5000)
+    except Exception:
+        pass
+    page.wait_for_timeout(300)
+
+    first = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const canvas = document.querySelector('.page-view.active canvas');
+      const placeholderStillShowing = !!document.querySelector('.page-view.active .view3d-loading');
+      const tabCount = store.tabs.filter(t => t.type === '3d').length;
+      return {
+        canvasFound: !!canvas,
+        canvasWidth: canvas ? canvas.width : 0,
+        canvasHeight: canvas ? canvas.height : 0,
+        placeholderStillShowing,
+        tabCount,
+      };
+    }
+    """)
+
+    # Close and reopen — should dispose cleanly and re-render without error, still one tab.
+    js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const tab = store.tabs.find(t => t.type === '3d');
+      app.closeTab(tab.id);
+      app.openOrSwitch3DView();
+    }
+    """)
+    page.wait_for_timeout(400)
+    second = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const canvas = document.querySelector('.page-view.active canvas');
+      return {
+        canvasFound: !!canvas,
+        tabCount: store.tabs.filter(t => t.type === '3d').length,
+      };
+    }
+    """)
+
+    if not menu_has_item:
+        return False, "Catalogs menu is missing the '3D View' item"
+    if logs:
+        return False, f"console errors opening the 3D View tab: {logs}"
+    if not first["canvasFound"]:
+        return False, f"no <canvas> found after opening 3D View: {first}"
+    if first["canvasWidth"] == 0 or first["canvasHeight"] == 0:
+        return False, f"the 3D view's canvas has zero size: {first}"
+    if first["placeholderStillShowing"]:
+        return False, f"the 'Loading 3D view...' placeholder is still showing alongside the rendered canvas: {first}"
+    if first["tabCount"] != 1:
+        return False, f"expected exactly one 3D tab, got {first['tabCount']}"
+    if not second["canvasFound"]:
+        return False, f"closing and reopening the 3D View tab left no canvas: {second}"
+    if second["tabCount"] != 1:
+        return False, f"closing and reopening should still result in exactly one 3D tab (singleton), got {second['tabCount']}"
+    return True, f"3D View opened as a singleton tab, lazy-loaded cleanly with no console errors, rendered a real {first['canvasWidth']}x{first['canvasHeight']} canvas, and survived a close/reopen cycle"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
@@ -1980,6 +2061,7 @@ CHECKS = [
     check_generate_stream_prepopulates_from_existing,
     check_node_size_multiplier,
     check_smart_check_node,
+    check_view3d_boots,
 ]
 
 

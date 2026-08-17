@@ -1489,4 +1489,30 @@
 // "Customer Profile," "Bill of Materials") pulled from the actual DataDataEntity
 // examples in DyCAD's own built-in "general" industry dataset (fce-generalnodes.json),
 // per the user's pointer to look there. Content-only change, no code touched.
-export const APP_VERSION = '0.803';
+// 0.804: Stage 0 of the new 3D View (Catalogs menu): a rotatable/zoomable WebGL scene
+// over store.doc.parts/connectors directly (never viewMembers/views) — plumbing only so
+// far (persistent per-tab renderer/camera/OrbitControls, a placeholder cube), proving
+// the vendored library loads and renders cleanly before any real data logic touches it.
+// The one deliberate exception to the vanilla-JS/no-dependency rule: real 3D needs a
+// real rendering library. Rather than a CDN <script> tag (a live runtime dependency —
+// breaks offline, breaks if the CDN changes), Three.js r185 + OrbitControls are
+// downloaded once and committed under js/vendor/ (see its own README.md for exact
+// provenance/update instructions), imported the same way every other module is. New
+// js/view3d.js is the only module that imports them, reached exclusively via a dynamic
+// import() from canvas.js's renderView3DPage, so the ~800KB vendored payload never loads
+// unless the tab is actually opened. Persists its renderer/scene/camera/controls per tab
+// id across re-renders instead of tearing down and rebuilding the WebGL context on every
+// app.render() call the way every other tab type's page does — recreating a WebGL
+// context on every store mutation would both be wasteful and would reset whatever
+// rotation/zoom the person is mid-interacting with. App.closeTab now disposes a closed
+// 3D tab's WebGL context/animation loop explicitly (browsers cap live contexts per page).
+// Fixed a real bug found while testing: the "Loading 3D view..." placeholder was never
+// cleared before the actual <canvas> got appended, so the unpositioned, 100%-height
+// placeholder div pushed the canvas out of view beneath it instead of being replaced by
+// it — caught via a new permanent check (temporarily reverted the fix, confirmed the
+// check fails with the expected message, restored it). Full staged plan (Stages 1-5:
+// real data grouped by element type via InstancedMesh, connectors + section/stream
+// clustering, a master cube-order fallback list, zoom-to-2D-detail, live simulation
+// overlay) recorded in DESIGN_DOCUMENT.md §9 so it doesn't need re-deriving later. Full
+// suite 41/41.
+export const APP_VERSION = '0.804';

@@ -2,7 +2,7 @@ import { loadAllData } from './data.js';
 import { Store, ciEq, newId } from './state.js';
 import { parseArchimateXml } from './archimate.js';
 import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
-import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel } from './canvas.js';
+import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
 import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames } from './commands.js';
 import { APP_VERSION } from './version.js';
@@ -268,6 +268,9 @@ class App {
     // Closing the Instructions tab is a "don't show this again" signal — cached so
     // bootstrapApp stops auto-opening it on future startups. See getCachedInstructionsClosed.
     if (tab && tab.type === 'docs') setCachedInstructionsClosed();
+    // Tears down the WebGL context/animation loop instead of leaking it — a no-op if
+    // this wasn't a 3D tab, or the 3D module was never loaded in the first place.
+    if (tab && tab.type === '3d') disposeView3DTab(tabId);
     this.store.closeTab(tabId);
     this.render();
   }
@@ -354,6 +357,26 @@ class App {
       } else {
         tab = this.store.createTab({ type: 'table', title });
         tab.catalogType = catalogType;
+      }
+    }
+    this.switchToTab(tab.id);
+    return tab;
+  }
+
+  /** Find-or-create the single 3D View tab — one shared tab (like Instructions), not
+   * one per anything, since it's a single whole-model visualization rather than scoped
+   * to one view/catalog/model the way other tab types are. The actual WebGL scene lives
+   * in view3d.js, lazy-loaded the first time this tab renders (see canvas.js's
+   * renderView3DPage) — this method only manages the tab itself. */
+  openOrSwitch3DView() {
+    let tab = this.store.tabs.find((t) => t.type === '3d');
+    if (!tab) {
+      const closedIdx = this.store.closedTabs.findIndex((t) => t.type === '3d');
+      if (closedIdx !== -1) {
+        tab = this.store.closedTabs.splice(closedIdx, 1)[0];
+        this.store.tabs.push(tab);
+      } else {
+        tab = this.store.createTab({ type: '3d', title: '3D View' });
       }
     }
     this.switchToTab(tab.id);
@@ -3027,10 +3050,12 @@ function wireGlobalEvents(app) {
   ];
   const catalogsMenu = document.getElementById('catalogs-menu');
   catalogsMenu.innerHTML = CATALOGS.map((c) => `<div class="dd-item" data-type="${c.type}" data-label="${c.label}">${c.label}</div>`).join('')
-    + '<div class="dd-separator"></div><div class="dd-item" data-action="sfce">SFCCE</div>';
+    + '<div class="dd-separator"></div><div class="dd-item" data-action="sfce">SFCCE</div>'
+    + '<div class="dd-item" data-action="view3d">3D View</div>';
   catalogsMenu.querySelectorAll('.dd-item').forEach((item) => {
     item.addEventListener('click', () => {
       if (item.dataset.action === 'sfce') { app.promptSfceCatalog(); catalogsMenu.classList.add('hidden'); return; }
+      if (item.dataset.action === 'view3d') { app.openOrSwitch3DView(); catalogsMenu.classList.add('hidden'); return; }
       app.openOrSwitchCatalog(item.dataset.type, `${item.dataset.label} Catalog`);
       catalogsMenu.classList.add('hidden');
     });
