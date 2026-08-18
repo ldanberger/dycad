@@ -2586,6 +2586,63 @@ def check_view3d_node_context_menu(page):
     return True, "the 3D node right-click context menu offers a working Filter-to-Streams quick filter and a working Connector Type filter (All/Connectors/Streams), driven via genuine right-click mouse events"
 
 
+def check_view3d_disposed_on_full_document_load(page):
+    """Regression guard for a real bug: File > Load / Load Example / Recently Opened all
+    replace store.doc by wiping store.tabs directly (this.store.tabs = []) rather than
+    closing each tab through App.closeTab — the only path that normally disposes a 3D
+    tab's WebGL context/animation loop. An open 3D tab survived that wipe with its render
+    loop still running forever in the background (invisible once its own page-<id> DOM
+    container gets removed by the next render(), but never actually torn down) — a silent
+    WebGL-context leak found after a user reported a previous simulation's markers still
+    visibly pulsing (root cause turned out to be a different, correct-by-design case —
+    Load SFCCE intentionally merges rather than replacing — but this leak was real and
+    worth fixing regardless). Fixed via App.disposeAllOpenView3DTabs(), called before the
+    tab wipe in all three load paths. Verified here via a genuine File > Load through the
+    real UI (file input + change event, not a direct loadJson() call): view3d.js's own
+    module-level `instances` map only ever drops a tab's entry via disposeView3D, so
+    getDebugSceneInfo(oldTabId) returning non-null after the load directly proves the old
+    instance was never disposed — a more direct signal than intercepting
+    requestAnimationFrame globally (whose call timing can't be pinned to one specific
+    instance without a race against Playwright's own file-picker boundary)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      app.openOrSwitch3DView();
+      const oldTabId = store.tabs.find(t => t.type === '3d').id;
+      await new Promise(r => setTimeout(r, 300));
+      const hadInstanceBefore = !!view3d.getDebugSceneInfo(oldTabId);
+
+      document.getElementById('file-menu-btn').click();
+      await new Promise(r => setTimeout(r, 50));
+      document.querySelector('#file-menu .dd-item[data-action="load"]').click();
+      return { oldTabId, hadInstanceBefore };
+    }
+    """)
+    page.set_input_files("#load-json-input", "/home/larry/projects/dycad/public/examples/pipeline demo.json")
+    page.wait_for_timeout(400)
+    after = js(page, f"""
+    async () => {{
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      return {{
+        instanceStillExistsAfterLoad: !!view3d.getDebugSceneInfo({result["oldTabId"]!r}),
+        tabTypesAfterLoad: store.tabs.map(t => t.type),
+      }};
+    }}
+    """)
+    problems = []
+    if not result["hadInstanceBefore"]:
+        problems.append(f"expected the 3D tab to have a real live instance before the load, got {result}")
+    if after["instanceStillExistsAfterLoad"]:
+        problems.append(f"expected the old 3D tab's instance to be disposed (removed from view3d.js's own instances map) after a full document replace, but it's still there — the render loop is leaking")
+    if "3d" in after["tabTypesAfterLoad"]:
+        problems.append(f"expected the 3D tab to be gone after a full document replace, got tab types {after['tabTypesAfterLoad']}")
+    if problems:
+        return False, "; ".join(problems) + f" (result: {result}, after: {after})"
+    return True, "a genuine File > Load disposes the open 3D tab's WebGL instance before replacing the document, instead of leaking it"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
@@ -2783,6 +2840,7 @@ CHECKS = [
     check_view3d_dispose_cancels_current_animation_frame,
     check_view3d_real_click_shows_panel_and_no_recenter,
     check_view3d_node_context_menu,
+    check_view3d_disposed_on_full_document_load,
 ]
 
 

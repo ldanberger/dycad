@@ -1690,4 +1690,18 @@
 // first time instead of only the debug shortcut. Four new/updated permanent regression
 // checks, each confirmed to catch its own deliberately-reintroduced regression. Full
 // suite 51/51.
-export const APP_VERSION = '0.814';
+// 0.815: fix a WebGL-context leak — File > Load, Load Example, and Recently Opened all
+// replace store.doc by wiping store.tabs = [] directly rather than closing each tab
+// through App.closeTab, the only path that normally disposes a 3D tab's WebGL context/
+// animation loop. An open 3D tab survived that wipe with its render loop leaking forever
+// in the background (invisible once its own page-<id> DOM container gets removed by the
+// next render(), but never actually torn down). Found while investigating a user report
+// of a previous simulation's markers still visibly pulsing after loading a different
+// file — that specific report's cause turned out to be Load SFCCE, which intentionally
+// MERGES rather than replacing (correct by design), but this leak was real and
+// independently worth fixing. Fixed via new App.disposeAllOpenView3DTabs(), called
+// before the tab wipe in all three load paths. New permanent regression check
+// (check_view3d_disposed_on_full_document_load), driven via a genuine File > Load
+// through the real UI, confirmed to catch the regression via a temporary revert before
+// being trusted. Full suite 52/52.
+export const APP_VERSION = '0.815';

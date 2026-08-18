@@ -256,6 +256,21 @@ class App {
     return tab;
   }
 
+  /** Tears down every currently-open 3D tab's WebGL context/animation loop — call this
+   * BEFORE any full-document-replace load path (Load/Load Example/Recently Opened all
+   * wipe this.store.tabs directly rather than closing each tab through closeTab, which
+   * is the only thing that normally triggers this disposal) wipes store.tabs out from
+   * under it. Without this, an open 3D tab's renderer/animation loop keeps running
+   * forever against a document that no longer exists — invisible (its own page-<id> DOM
+   * container gets removed by the next render()), but never actually torn down: a real,
+   * if silent, WebGL-context leak found and fixed after enough of these piled up. A
+   * no-op for every other tab type. */
+  disposeAllOpenView3DTabs() {
+    for (const tab of this.store.tabs) {
+      if (tab.type === '3d') disposeView3DTab(tab.id);
+    }
+  }
+
   switchToTab(tabId) {
     this.store.activeTabId = tabId;
     const tab = this.store.activeTab();
@@ -1662,6 +1677,7 @@ class App {
     try {
       const text = await file.text();
       const obj = JSON.parse(text);
+      this.disposeAllOpenView3DTabs();
       this.store.loadFromJSON(obj);
       this.store.tabs = [];
       this.store.closedTabs = [];
@@ -2085,6 +2101,7 @@ class App {
           const res = await fetch(`public/examples/${encodeURIComponent(vals.file)}`, { cache: 'no-store' });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const obj = await res.json();
+          this.disposeAllOpenView3DTabs();
           this.store.loadFromJSON(obj);
           this.store.tabs = [];
           this.store.closedTabs = [];
@@ -2126,6 +2143,7 @@ class App {
         if (!entry) { this.toast('That entry is no longer available.', true); return; }
         try {
           const obj = JSON.parse(entry.content);
+          this.disposeAllOpenView3DTabs();
           this.store.loadFromJSON(obj);
           this.store.tabs = [];
           this.store.closedTabs = [];

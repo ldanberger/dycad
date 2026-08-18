@@ -466,6 +466,18 @@ so a future session doesn't have to re-derive it from scratch):
     can target a specific part regardless of layout) — now the standing discipline for any
     new 3D click-driven feature: exercise it with a real mouse event, not only its debug
     shortcut.
+  - **Open 3D tab leaked across a full document replace.** File > Load, Load Example, and
+    Recently Opened all replace `store.doc` by wiping `store.tabs = []` directly rather
+    than closing each tab through `App.closeTab` — the only path that normally calls
+    `disposeView3DTab`. An open 3D tab survived that wipe with its WebGL
+    context/animation loop still running forever in the background (invisible once its
+    own `page-<id>` DOM container gets removed by the next `render()`, but never actually
+    torn down). Found while investigating a user report of a previous simulation's
+    markers still visibly pulsing after loading a different file (that specific report's
+    actual cause turned out to be Load SFCCE, which intentionally MERGES rather than
+    replacing — correct-by-design, not a bug — but this leak was real and independently
+    worth fixing). Fixed via a new `App.disposeAllOpenView3DTabs()`, called before the tab
+    wipe in all three load paths.
 
 ## 10. Testing strategy
 
