@@ -2024,6 +2024,42 @@ def check_view3d_connectors_and_clustering(page):
     return True, "connector lines drawn between resolved positions (and correctly disappearing once a filtered-out endpoint hides), and section clustering forces a new row at each section boundary instead of packing across it"
 
 
+def check_view3d_cube_order_fallback(page):
+    """Regression guard for 3D View Stage 3: custom.json's cubeOrder now decides fallback
+    layer order (both group and type) for any element type the active stream template's
+    value[] doesn't mention — instead of falling back to elementGroups' own declaration
+    order, which isn't itself a meaningful/deliberate sequence (just JSON authoring
+    order). Uses the built-in 'Test' template (value: BusinessService, BusinessCapability,
+    BusinessProcess, thingamajack, DataDataEntity — covering the Business/Unknown/Data
+    groups, nothing else) so General and Application are BOTH left for the fallback to
+    order — the one case where the old elementGroups-order fallback and the new cubeOrder
+    fallback actually disagree (old: Application before General; new, matching
+    cubeOrder's own General-before-Application sequence: General before Application),
+    rather than a case where they'd coincidentally agree either way."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      localStorage.setItem('dycad-local-settings-cache', JSON.stringify({ streamTemplate: 'Test' }));
+
+      store.createPart({ type: 'GeneralActor', label: 'GA', model: store.defaultModel, streams: [] });
+      store.createPart({ type: 'ApplicationComponent', label: 'AC', model: store.defaultModel, streams: [] });
+
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 200));
+      return view3d.getDebugSceneInfo(tab.id);
+    }
+    """)
+    ga = result["types"].get("GeneralActor")
+    ac = result["types"].get("ApplicationComponent")
+    if not ga or not ac:
+        return False, f"expected both GeneralActor and ApplicationComponent to have their own layer, got {result}"
+    if not (ga["z"] < ac["z"]):
+        return False, f"expected General's layer (z={ga['z']}) before Application's (z={ac['z']}) — cubeOrder's own group sequence puts General first; the old elementGroups-declaration-order fallback would have put Application first instead, got: {result}"
+    return True, "with a template (Test) that leaves both General and Application unordered, the fallback used custom.json's cubeOrder sequence (General before Application) rather than elementGroups' own declaration order (which disagrees)"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
@@ -2213,6 +2249,7 @@ CHECKS = [
     check_view3d_boots,
     check_view3d_layers_and_filters,
     check_view3d_connectors_and_clustering,
+    check_view3d_cube_order_fallback,
 ]
 
 

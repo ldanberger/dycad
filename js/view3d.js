@@ -12,7 +12,7 @@
 // Reuses the existing Stream/Type filters (passesStreamFilter/passesElementTypeFilter,
 // now wired up for this tab type too in main.js's filter-menu handlers) and element-group
 // fill colors (groupFill) unchanged.
-// Stage 2 (current): connector lines between resolved part positions — one connector
+// Stage 2 (done): connector lines between resolved part positions — one connector
 // drawn iff BOTH its endpoints are currently visible, same convention the 2D canvas
 // already uses (see passesStreamFilter's own comment: hiding a node hides its connectors
 // automatically, no separate connector-level filter check). Rendered as a single
@@ -22,9 +22,13 @@
 // a representative stream) before layout, and a new row starts at each section boundary
 // — so a section's parts cluster together as their own visually distinct band, and
 // same-stream parts end up adjacent via the sort even without their own forced break.
-// Still ahead: a master cube-order fallback list for types outside any template's
-// value[] (Stage 3), zoom-to-2D-detail (Stage 4), and a live simulation-value overlay
-// (Stage 5). Full plan: DESIGN_DOCUMENT.md §9.
+// Stage 3 (current): custom.json's new cubeOrder — a hand-authored master list covering
+// every element type — is now the fallback ordering (both group and type) for anything
+// the active stream template's value[] doesn't mention (see resolveLayerOrder below).
+// The template's own choices still always win; cubeOrder only fills in what it left
+// unordered, which for a typical handful-of-types template is most of the 74 known types.
+// Still ahead: zoom-to-2D-detail (Stage 4) and a live simulation-value overlay (Stage 5).
+// Full plan: DESIGN_DOCUMENT.md §9.
 //
 // Deliberately the ONLY module that imports the vendored Three.js/OrbitControls — every
 // other module stays free of a 3D dependency, and canvas.js only ever reaches this file
@@ -108,16 +112,23 @@ function preferredStreamTemplateName() {
 
 /**
  * Decides layer order: which element GROUPS come first (broad Z-slabs) and which TYPES
- * come first within a group (finer sub-layers) — both driven by the current stream
- * template's value[] order, same "last used" default Generate Stream/Remap/Smart Check
- * View already share. Group order is each group's first-seen position while walking the
- * template's value[] (e.g. Enterprise's chain visits General, then Business, then
- * Application, then Data, in that order); a group the template never mentions is
- * appended afterward in custom.json's own elementGroups declaration order (the same
- * order the toolbox sidebar's group chips already use). Type order within a group
- * follows the SAME template value[] position when the type is in it; a type that isn't
- * falls back to its toolbox tkDisplayOrder — the Stage 1 fallback. (Stage 3's master
- * cube-order list will give that fallback case a real, hand-authored order instead.)
+ * come first within a group (finer sub-layers). Three sources, in priority order:
+ *   1. The current stream template's value[] — same "last used" default Generate
+ *      Stream/Remap/Smart Check View already share (e.g. Enterprise's chain visits
+ *      General, then Business, then Application, then Data, in that order).
+ *   2. custom.json's cubeOrder — a hand-authored master list covering every element
+ *      type, giving a real, deliberate fallback order for anything the active template
+ *      doesn't mention (which is most types — a typical template's value[] only spans a
+ *      handful). Grouped internally by the same conceptual ArchiMate layering (General,
+ *      Strategy/Motivation, Business, Application, Technology, Data,
+ *      Implementation/Migration, Unknown) rather than custom.json's own elementGroups
+ *      declaration order, which isn't itself meaningful (just JSON authoring order).
+ *   3. A type present in NEITHER list (shouldn't happen once cubeOrder covers everything,
+ *      but stays a defensive fallback) uses its toolbox tkDisplayOrder, then alphabetical.
+ * Group order is each group's first-seen position while walking [...templateValue,
+ * ...cubeOrder] in that combined sequence — so the template's own choices always win,
+ * and cubeOrder fills in every group the template didn't touch. Type order within a
+ * group follows the same combined-sequence position.
  */
 function resolveLayerOrder(store) {
   const templates = store.settings.streamTemplates || [];
@@ -127,9 +138,10 @@ function resolveLayerOrder(store) {
     || templates[0]
     || null;
   const templateValue = template?.value || [];
+  const cubeOrder = store.settings.cubeOrder || [];
 
   const groupOrder = [];
-  for (const type of templateValue) {
+  for (const type of [...templateValue, ...cubeOrder]) {
     const el = elementByType(store, type);
     if (el && !groupOrder.includes(el.group)) groupOrder.push(el.group);
   }
@@ -138,7 +150,8 @@ function resolveLayerOrder(store) {
   }
 
   const templateTypeOrder = new Map(templateValue.map((t, i) => [String(t).toLowerCase(), i]));
-  return { template, groupOrder, templateTypeOrder };
+  const cubeTypeOrder = new Map(cubeOrder.map((t, i) => [String(t).toLowerCase(), i]));
+  return { template, groupOrder, templateTypeOrder, cubeTypeOrder };
 }
 
 function createInstance(app, tab, container) {
@@ -246,7 +259,7 @@ function syncSceneData(app, tab, inst) {
   const parts = store.doc.parts.filter((p) => passesStreamFilter(tab, p.streams) && passesElementTypeFilter(tab, p.type));
   if (parts.length === 0) return;
 
-  const { groupOrder, templateTypeOrder } = resolveLayerOrder(store);
+  const { groupOrder, templateTypeOrder, cubeTypeOrder } = resolveLayerOrder(store);
 
   const byType = new Map();
   for (const p of parts) {
@@ -257,14 +270,16 @@ function syncSceneData(app, tab, inst) {
   const typeEntries = [...byType.keys()].map((type) => {
     const el = elementByType(store, type);
     const groupIdx = groupOrder.indexOf(el?.group);
+    const lower = type.toLowerCase();
     return {
       type, el,
       groupIdx: groupIdx === -1 ? groupOrder.length : groupIdx,
-      templateIdx: templateTypeOrder.has(type.toLowerCase()) ? templateTypeOrder.get(type.toLowerCase()) : Infinity,
+      templateIdx: templateTypeOrder.has(lower) ? templateTypeOrder.get(lower) : Infinity,
+      cubeIdx: cubeTypeOrder.has(lower) ? cubeTypeOrder.get(lower) : Infinity,
       tkOrder: el?.tkDisplayOrder ?? 999,
     };
   });
-  typeEntries.sort((a, b) => (a.groupIdx - b.groupIdx) || (a.templateIdx - b.templateIdx) || (a.tkOrder - b.tkOrder) || a.type.localeCompare(b.type));
+  typeEntries.sort((a, b) => (a.groupIdx - b.groupIdx) || (a.templateIdx - b.templateIdx) || (a.cubeIdx - b.cubeIdx) || (a.tkOrder - b.tkOrder) || a.type.localeCompare(b.type));
 
   let z = 0;
   let prevGroupIdx = null;

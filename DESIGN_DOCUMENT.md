@@ -301,7 +301,7 @@ subsequent calls; `disposeView3D(tabId)` (called from `App.closeTab`) tears the 
 context and animation loop down explicitly, since browsers cap how many live contexts a
 page may hold.
 
-Staged build-out (Stages 0-2 shipped; this is the plan for what's still ahead, kept here
+Staged build-out (Stages 0-3 shipped; this is the plan for what's still ahead, kept here
 so a future session doesn't have to re-derive it from scratch):
 
 - **Stage 0 (done)** — plumbing only: persistent per-tab renderer/camera/`OrbitControls`,
@@ -341,11 +341,20 @@ so a future session doesn't have to re-derive it from scratch):
   add/remove and rewiring) — confirmed still fast enough at that same real scale
   (~29ms for a no-op signature check over 22K parts + 60K connectors, comfortably
   imperceptible for a UI interaction).
-- **Stage 3** — a hand-authored master "cube order" list in `custom.json` (alongside
-  `streamTemplates`/`elementGroups`) as the *fallback* ordering for a type absent from
-  the active template's `value[]` — the template's own order still wins when a type is
-  in it, so Stage 1 behavior for typical stream-heavy models is unaffected; this only
-  gets the fallback case to full coverage.
+- **Stage 3 (done)** — `custom.json`'s new `cubeOrder`: a hand-authored, flat list
+  covering all 74 known element types (alongside `streamTemplates`/`elementGroups`),
+  grouped by ArchiMate-conceptual layer (General, Strategy/Motivation, Business,
+  Application, Technology, Data, Implementation/Migration, Unknown) rather than
+  `elementGroups`' own JSON authoring order, which isn't itself a deliberate sequence.
+  `resolveLayerOrder` walks `[...templateValue, ...cubeOrder]` for BOTH group and type
+  ordering — the template's own choices always win (a type/group it mentions keeps its
+  template-derived position); `cubeOrder` only fills in whatever the template left
+  unordered, which for a typical handful-of-types template is most of the 74 types. Type
+  order within a group still falls back to `tkDisplayOrder` as a final defensive case
+  (shouldn't trigger now that `cubeOrder` has full coverage). Verified with the built-in
+  'Test' template — the one case found where the old (`elementGroups`-order) and new
+  (`cubeOrder`) fallbacks actually disagree on group order rather than coincidentally
+  matching, so the regression check proves real behavior, not an incidental pass.
 - **Stage 4** — zoom-to-detail: past a threshold, jump to (or open) the matching 2D
   canvas tab rather than attempting a continuous 3D→2D morph — chosen as the
   deliberately cheaper option; a seamless morph may be explored later.

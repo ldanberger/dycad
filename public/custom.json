@@ -2049,6 +2049,16 @@
       ]
     }
   ],
+  "cubeOrder": [
+    "GeneralActor", "GeneralCapability", "Text", "MetadataRegistry", "GeneralEntity", "Tester", "Multi", "Grouping", "Location",
+    "Capability", "CourseOfAction", "Resource", "Assessment", "Constraint", "Driver", "Goal", "Meaning", "Outcome", "Principle", "Requirement", "Stakeholder", "Value",
+    "BusinessActor", "BusinessCapability", "BusinessFunction", "BusinessProcess", "BusinessInterface", "BusinessService", "BusinessCollaboration", "BusinessObject", "BusinessRole", "Contract", "Product", "Representation",
+    "ApplicationApplication", "DataObject", "ApplicationComponent", "ApplicationLogicalComponent", "ApplicationPhysicalComponent", "ApplicationCapability", "ApplicationFunction", "ApplicationProcess", "ApplicationService", "ApplicationCollaboration", "ApplicationEvent", "ApplicationInteraction", "ApplicationInterface",
+    "TechnologyCapability", "TechnologyFunction", "TechnologyLogicalComponent", "TechnologyPhysicalComponent", "TechnologyProcess", "TechnologyService", "CommunicationNetwork", "Device", "DistributionNetwork", "Equipment", "Facility", "Material", "Node", "Path", "SystemSoftware", "TechnologyEvent", "TechnologyInteraction", "TechnologyInterface",
+    "DataDataEntity", "DataLogicalComponent", "DataPhysicalComponent",
+    "Deliverable", "Gap", "ImplementationEvent", "Plateau", "WorkPackage",
+    "Unknown"
+  ],
   "sections": [
     {
       "viewType": "sec",

@@ -1560,4 +1560,18 @@
 // packing would actually disagree, not coincidentally match), each assertion confirmed
 // to catch its own deliberately-reintroduced regression before being trusted. Full suite
 // 43/43.
-export const APP_VERSION = '0.807';
+// 0.808: Stage 3 of the 3D View (Explore menu): custom.json's new cubeOrder — a
+// hand-authored, flat list covering all 74 known element types, grouped by
+// ArchiMate-conceptual layer (General, Strategy/Motivation, Business, Application,
+// Technology, Data, Implementation/Migration, Unknown) — is now the fallback layer order
+// (both group and type) for anything the active stream template's value[] doesn't
+// mention, replacing the old fallback of elementGroups' own JSON declaration order
+// (which was never a deliberate sequence, just authoring order). view3d.js's
+// resolveLayerOrder now walks [...templateValue, ...cubeOrder]: the template's own
+// choices always win; cubeOrder only fills in what's left, which for a typical
+// handful-of-types template is most of the 74 types. New permanent regression check
+// using the built-in 'Test' template — the one case found where the old and new
+// fallbacks actually disagree on group order (General vs Application) rather than
+// coincidentally matching, confirmed to catch the regression via temporarily reverting
+// to the old fallback before restoring the fix. Full suite 44/44.
+export const APP_VERSION = '0.808';
