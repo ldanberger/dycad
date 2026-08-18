@@ -22,13 +22,22 @@
 // a representative stream) before layout, and a new row starts at each section boundary
 // — so a section's parts cluster together as their own visually distinct band, and
 // same-stream parts end up adjacent via the sort even without their own forced break.
-// Stage 3 (current): custom.json's new cubeOrder — a hand-authored master list covering
+// Stage 3 (done): custom.json's new cubeOrder — a hand-authored master list covering
 // every element type — is now the fallback ordering (both group and type) for anything
 // the active stream template's value[] doesn't mention (see resolveLayerOrder below).
 // The template's own choices still always win; cubeOrder only fills in what it left
 // unordered, which for a typical handful-of-types template is most of the 74 known types.
-// Still ahead: zoom-to-2D-detail (Stage 4) and a live simulation-value overlay (Stage 5).
-// Full plan: DESIGN_DOCUMENT.md §9.
+// Stage 4 (done): zoom-to-2D-detail. Click a part to focus it (recenters
+// OrbitControls' orbit target on it and highlights it); zooming in past a distance
+// threshold while focused jumps to a 2D canvas view that already has that part placed
+// (selecting it there) — a JUMP, not a continuous 3D->2D morph, the deliberately cheaper
+// option chosen up front (see DESIGN_DOCUMENT.md §9). Double-click a part to jump
+// immediately, skipping the zoom gesture. A part placed on no view yet just toasts
+// rather than jumping anywhere. Click/double-click are hand-distinguished from an
+// OrbitControls drag-to-rotate release (which still fires a native 'click' at the drag's
+// end point) by checking the pointer barely moved between its own pointerdown and the
+// click, not by trusting the browser's click/dblclick events alone.
+// Still ahead: a live simulation-value overlay (Stage 5). Full plan: DESIGN_DOCUMENT.md §9.
 //
 // Deliberately the ONLY module that imports the vendored Three.js/OrbitControls — every
 // other module stays free of a 3D dependency, and canvas.js only ever reaches this file
@@ -49,6 +58,74 @@ const NODE_SIZE = 0.9;          // box geometry edge length
 const NODE_SPACING = 1.4;       // gap between adjacent instances within one type's grid
 const TYPE_LAYER_GAP = 1.6;     // Z distance between consecutive type sub-layers
 const GROUP_LAYER_GAP = 1.2;    // EXTRA Z gap inserted at each element-group boundary
+const ZOOM_JUMP_DISTANCE = NODE_SIZE * 4; // camera-to-target distance that counts as "zoomed in on it"
+const CLICK_DRAG_TOLERANCE = 5; // px of pointer movement still treated as a click, not a drag
+const FOCUS_HIGHLIGHT_COLOR = 0xffcc00;
+
+// Scratch objects reused across picks (no per-call allocation) — Raycaster/Vector2 hold
+// no state between calls, safe to share at module scope.
+const raycaster = new THREE.Raycaster();
+const pointerNDC = new THREE.Vector2();
+
+/** Raycasts from the camera through a client-space (clientX/clientY) point into the
+ * scene's InstancedMeshes, returning the nearest hit's partId (or null). Used by both
+ * the click-to-focus and double-click-to-jump handlers. */
+function pickPartAtClientXY(inst, clientX, clientY) {
+  const rect = inst.renderer.domElement.getBoundingClientRect();
+  pointerNDC.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  pointerNDC.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointerNDC, inst.camera);
+  const hits = raycaster.intersectObjects([...inst.typeMeshes.values()], false);
+  if (hits.length === 0) return null;
+  const hit = hits[0];
+  return { partId: hit.object.userData.partIds[hit.instanceId], mesh: hit.object, instanceId: hit.instanceId };
+}
+
+/** The focused-instance highlight: a wireframe box slightly larger than a node, moved to
+ * sit around whatever's currently focused, rather than recoloring the InstancedMesh
+ * instance itself — per-instance InstancedMesh color (setColorAt/instanceColor) turned
+ * out not to render reliably against the vendored Three.js build here, and a separate
+ * marker mesh sidesteps that entirely: simple, robust, and correct regardless of
+ * per-instance-color shader support. One marker per tab, created lazily and reused
+ * (just repositioned/shown/hidden) rather than recreated on every focus change. */
+function ensureFocusMarker(inst) {
+  if (inst.focusMarker) return inst.focusMarker;
+  const size = NODE_SIZE * 1.35;
+  const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(size, size, size));
+  const material = new THREE.LineBasicMaterial({ color: FOCUS_HIGHLIGHT_COLOR });
+  const marker = new THREE.LineSegments(edges, material);
+  marker.visible = false;
+  inst.scene.add(marker);
+  inst.focusMarker = marker;
+  return marker;
+}
+
+/** Un-highlights whatever was previously focused — a no-op if nothing was focused. */
+function clearFocusHighlight(inst) {
+  if (inst.focusMarker) inst.focusMarker.visible = false;
+}
+
+/** Focuses partId: recenters OrbitControls' orbit target on it and shows the highlight
+ * marker there. Silently does nothing if the part isn't currently in the scene (filtered
+ * out, or removed). Re-usable both from a click and from syncSceneData's own "restore
+ * focus after a resync" step. */
+function focusPart(inst, partId) {
+  for (const mesh of inst.typeMeshes.values()) {
+    const instanceId = mesh.userData.partIds.indexOf(partId);
+    if (instanceId === -1) continue;
+    const matrix = new THREE.Matrix4();
+    mesh.getMatrixAt(instanceId, matrix);
+    const position = new THREE.Vector3().setFromMatrixPosition(matrix);
+    inst.controls.target.copy(position);
+    const marker = ensureFocusMarker(inst);
+    marker.position.copy(position);
+    marker.visible = true;
+    inst.focusedPartId = partId;
+    inst.jumpedForPartId = null; // a fresh focus always gets its own chance to jump
+    return true;
+  }
+  return false;
+}
 
 function themeBackgroundColor() {
   // Reads the app's own CSS custom property so the 3D scene's background matches
@@ -154,6 +231,29 @@ function resolveLayerOrder(store) {
   return { template, groupOrder, templateTypeOrder, cubeTypeOrder };
 }
 
+/** Stage 4's actual "zoom-to-detail" destination: finds a 2D canvas view that already
+ * has partId placed on it (the FIRST one found in store.doc.views order — no attempt to
+ * prefer an already-open tab over a closed one; simplest thing that works), switches to
+ * it, and selects that part's node there. A part that isn't placed on any view yet just
+ * gets a toast — this jumps to EXISTING placements, it doesn't create one (that's what
+ * Add Existing is for, a separate, deliberate action). */
+function jumpToMatching2DView(app, partId) {
+  const { store } = app;
+  const part = store.findPart(partId);
+  if (!part) return;
+  for (const view of store.doc.views) {
+    const vm = store.viewMembersForView(view.id).find((v) => v.objectType === 'part' && v.objectId === partId);
+    if (vm) {
+      const tab = app.openOrSwitchView(view.id);
+      tab.selection.clear();
+      tab.selection.add(vm.id);
+      app.render();
+      return;
+    }
+  }
+  app.toast(`"${part.label}" isn't placed on any view yet.`, true);
+}
+
 function createInstance(app, tab, container) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(themeBackgroundColor());
@@ -193,10 +293,48 @@ function createInstance(app, tab, container) {
   });
   resizeObserver.observe(container);
 
-  return {
+  const inst = {
     renderer, scene, camera, controls, container, resizeObserver, animId,
     typeMeshes: new Map(), connectorLines: null, hasFramedOnce: false, lastSignature: null,
+    focusMarker: null, focusedPartId: null, jumpedForPartId: null,
   };
+
+  // Click-vs-drag: OrbitControls' own rotate/pan drag still ends with the browser firing
+  // a native 'click' at the release point, so a raw 'click' listener can't be trusted
+  // alone — only treat it as a real click if the pointer barely moved since its own
+  // pointerdown.
+  let pointerDownPos = null;
+  renderer.domElement.addEventListener('pointerdown', (e) => { pointerDownPos = { x: e.clientX, y: e.clientY }; });
+  const wasClick = (e) => !!pointerDownPos && Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y) <= CLICK_DRAG_TOLERANCE;
+
+  renderer.domElement.addEventListener('click', (e) => {
+    if (!wasClick(e)) return;
+    const hit = pickPartAtClientXY(inst, e.clientX, e.clientY);
+    if (hit) focusPart(inst, hit.partId);
+  });
+  renderer.domElement.addEventListener('dblclick', (e) => {
+    if (!wasClick(e)) return;
+    const hit = pickPartAtClientXY(inst, e.clientX, e.clientY);
+    if (hit) jumpToMatching2DView(app, hit.partId);
+  });
+
+  // The actual "zoom in past a threshold" trigger — OrbitControls fires 'change' on
+  // every camera/target update (including its own damped-zoom animation frames), so this
+  // reacts as the zoom happens rather than needing an unconditional per-frame poll.
+  controls.addEventListener('change', () => {
+    if (!inst.focusedPartId) return;
+    const distance = camera.position.distanceTo(controls.target);
+    if (distance < ZOOM_JUMP_DISTANCE) {
+      if (inst.jumpedForPartId !== inst.focusedPartId) {
+        inst.jumpedForPartId = inst.focusedPartId;
+        jumpToMatching2DView(app, inst.focusedPartId);
+      }
+    } else {
+      inst.jumpedForPartId = null; // back out past the threshold re-arms it
+    }
+  });
+
+  return inst;
 }
 
 function disposeInstance(inst) {
@@ -324,6 +462,29 @@ function syncSceneData(app, tab, inst) {
     z += TYPE_LAYER_GAP;
   }
 
+  // A resync rebuilds every mesh from scratch, so a part focused before this rebuild
+  // needs its highlight marker repositioned to its NEW instance position — without
+  // touching controls.target (the person isn't re-clicking, don't yank their camera) or
+  // jumpedForPartId (if they'd already zoomed in and jumped once, an unrelated resync
+  // shouldn't re-arm and immediately jump them away again).
+  if (inst.focusedPartId) {
+    let stillPresent = false;
+    for (const mesh of inst.typeMeshes.values()) {
+      const instanceId = mesh.userData.partIds.indexOf(inst.focusedPartId);
+      if (instanceId === -1) continue;
+      mesh.getMatrixAt(instanceId, matrix);
+      const marker = ensureFocusMarker(inst);
+      marker.position.setFromMatrixPosition(matrix);
+      marker.visible = true;
+      stillPresent = true;
+      break;
+    }
+    if (!stillPresent) {
+      clearFocusHighlight(inst);
+      inst.focusedPartId = null; inst.jumpedForPartId = null;
+    }
+  }
+
   // Connector lines: one visible iff BOTH endpoints are currently visible (same
   // convention the 2D canvas already uses — see passesStreamFilter's own comment).
   // A single LineSegments/BufferGeometry for every visible connector, one draw call
@@ -412,7 +573,36 @@ function getDebugSceneInfo(tabId) {
     hasFramedOnce: inst.hasFramedOnce,
     connectorCount: inst.connectorLines ? inst.connectorLines.userData.connectorCount : 0,
     connectorLinesUuid: inst.connectorLines ? inst.connectorLines.uuid : null,
+    focusedPartId: inst.focusedPartId,
+    jumpedForPartId: inst.jumpedForPartId,
+    focusMarkerVisible: inst.focusMarker ? inst.focusMarker.visible : false,
+    cameraTargetDistance: inst.camera.position.distanceTo(inst.controls.target),
   };
 }
 
-export { renderView3D, disposeView3D, getDebugSceneInfo };
+/** Test-only entry points that drive the same code paths a real click/zoom would,
+ * without needing to simulate actual mouse/wheel DOM events against a WebGL canvas
+ * (unreliable in a headless test runner) — the regression suite calls these directly to
+ * exercise focusPart/jumpToMatching2DView/the zoom-threshold check for real, on the
+ * genuine internal scene state, same "no mocks" testing philosophy as the rest of the
+ * app (see DESIGN_DOCUMENT.md §10). Not used by the app itself. */
+function debugFocusPart(tabId, partId) {
+  const inst = instances.get(tabId);
+  if (!inst) return false;
+  return focusPart(inst, partId);
+}
+function debugJumpToMatching2DView(app, tabId, partId) {
+  const inst = instances.get(tabId);
+  if (!inst) return;
+  jumpToMatching2DView(app, partId);
+}
+function debugSetCameraDistance(tabId, distance) {
+  const inst = instances.get(tabId);
+  if (!inst) return;
+  const dir = new THREE.Vector3().subVectors(inst.camera.position, inst.controls.target).normalize();
+  if (dir.lengthSq() === 0) dir.set(1, 1, 1).normalize();
+  inst.camera.position.copy(inst.controls.target).addScaledVector(dir, distance);
+  inst.controls.dispatchEvent({ type: 'change' });
+}
+
+export { renderView3D, disposeView3D, getDebugSceneInfo, debugFocusPart, debugJumpToMatching2DView, debugSetCameraDistance };

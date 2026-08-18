@@ -2060,6 +2060,120 @@ def check_view3d_cube_order_fallback(page):
     return True, "with a template (Test) that leaves both General and Application unordered, the fallback used custom.json's cubeOrder sequence (General before Application) rather than elementGroups' own declaration order (which disagrees)"
 
 
+def check_view3d_focus_and_zoom_jump(page):
+    """Regression guard for 3D View Stage 4 (zoom-to-2D-detail): focusing a part (driven
+    here via view3d.js's debugFocusPart, since real mouse/wheel events are unreliable
+    against a headless WebGL canvas — see that function's own comment) sets focusedPartId
+    and shows the wireframe highlight marker; zooming in past ZOOM_JUMP_DISTANCE while
+    focused (driven via debugSetCameraDistance, which repositions the camera and dispatches
+    the same 'change' event a real zoom would) switches to the matching 2D view and selects
+    the right viewMember there — exactly once per crossing, checked directly via
+    jumpedForPartId rather than only by side effect, so a regression that re-fires every
+    frame while still inside the threshold would be caught even though it'd look
+    superficially the same (still ends up on the right view); zooming back out past the
+    threshold re-arms it so zooming back in jumps again; and a focused part with no view
+    placement anywhere toasts to the Message Log instead of jumping or throwing."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+
+      const placed = store.createPart({ type: 'GeneralActor', label: 'Placed', model: store.defaultModel, streams: [] });
+      const orphan = store.createPart({ type: 'GeneralActor', label: 'Orphan', model: store.defaultModel, streams: [] });
+      const view = store.addView('ZoomJumpDemo');
+      const vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: placed.id, x: 100, y: 100 });
+
+      app.openOrSwitch3DView();
+      const tab3d = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 200));
+
+      // Spy on openOrSwitchView (jumpToMatching2DView's only way to navigate) so the
+      // "fires once per crossing, not once per frame" guard is checked by actual CALL
+      // COUNT, not just by the resulting state, which stays identical either way once
+      // openOrSwitchView/reselecting the same viewMember is itself idempotent.
+      let switchCalls = 0;
+      const origOpenOrSwitchView = app.openOrSwitchView.bind(app);
+      app.openOrSwitchView = (...args) => { switchCalls++; return origOpenOrSwitchView(...args); };
+
+      const focusOk = view3d.debugFocusPart(tab3d.id, placed.id);
+      const afterFocus = view3d.getDebugSceneInfo(tab3d.id);
+
+      // zoom in past the threshold -> should jump to ZoomJumpDemo and select vm
+      view3d.debugSetCameraDistance(tab3d.id, 0.5);
+      await new Promise(r => setTimeout(r, 100));
+      const at1 = store.activeTab();
+      const afterJump = { type: at1 ? at1.type : null, viewId: at1 ? at1.viewId : null, selection: at1 ? [...at1.selection] : [] };
+      const switchCallsAfterFirstJump = switchCalls;
+
+      // still "inside" the threshold, no re-arm in between -> must NOT re-trigger
+      const jumpedForBefore = view3d.getDebugSceneInfo(tab3d.id).jumpedForPartId;
+      view3d.debugSetCameraDistance(tab3d.id, 0.4);
+      const jumpedForAfterRepeat = view3d.getDebugSceneInfo(tab3d.id).jumpedForPartId;
+      const switchCallsAfterRepeat = switchCalls;
+
+      // zoom back OUT past the threshold -> re-arms (jumpedForPartId clears, focus stays)
+      app.switchToTab(tab3d.id);
+      view3d.debugSetCameraDistance(tab3d.id, 50);
+      const rearmed = view3d.getDebugSceneInfo(tab3d.id);
+
+      // zoom back in -> jumps again, proving re-arm actually re-fires, not just the flag
+      view3d.debugSetCameraDistance(tab3d.id, 0.5);
+      await new Promise(r => setTimeout(r, 100));
+      const at2 = store.activeTab();
+      const secondJump = { type: at2 ? at2.type : null, viewId: at2 ? at2.viewId : null };
+
+      // a focused part with NO view placement should toast, not navigate or throw
+      app.switchToTab(tab3d.id);
+      const beforeLogLen = store.messageLog.length;
+      view3d.debugFocusPart(tab3d.id, orphan.id);
+      view3d.debugSetCameraDistance(tab3d.id, 0.5);
+      await new Promise(r => setTimeout(r, 100));
+      const at3 = store.activeTab();
+      const orphanResult = {
+        activeTabType: at3 ? at3.type : null,
+        logGrew: store.messageLog.length > beforeLogLen,
+        lastLogMsg: store.messageLog.length ? store.messageLog[store.messageLog.length - 1].message : '',
+      };
+
+      app.openOrSwitchView = origOpenOrSwitchView;
+      return { focusOk, afterFocus, afterJump, jumpedForBefore, jumpedForAfterRepeat, switchCallsAfterFirstJump, switchCallsAfterRepeat, rearmed, secondJump, orphanResult, vmId: vm.id, viewId: view.id, partId: placed.id, orphanId: orphan.id };
+    }
+    """)
+    problems = []
+    partId = result["partId"]
+    if not result["focusOk"]:
+        problems.append("debugFocusPart returned false for a part actually present in the scene")
+    af = result["afterFocus"]
+    if af["focusedPartId"] != partId or not af["focusMarkerVisible"]:
+        problems.append(f"expected focusPart to set focusedPartId and show the highlight marker, got {af}")
+    aj = result["afterJump"]
+    if aj["type"] != "canvas" or aj["viewId"] != result["viewId"] or result["vmId"] not in aj["selection"]:
+        problems.append(f"zooming past the threshold while focused should jump to view '{result['viewId']}' and select viewMember {result['vmId']}, got {aj}")
+    if result["switchCallsAfterFirstJump"] != 1:
+        problems.append(f"expected exactly 1 navigation call for the first threshold crossing, got {result['switchCallsAfterFirstJump']}")
+    if result["jumpedForBefore"] != partId:
+        problems.append(f"expected jumpedForPartId to be set to the focused part right after the jump, got {result['jumpedForBefore']}")
+    if result["jumpedForAfterRepeat"] != partId:
+        problems.append(f"a second zoom call while still inside the threshold (no re-arm in between) should NOT change jumpedForPartId — the jump must fire once per crossing, not once per frame; got {result['jumpedForAfterRepeat']}")
+    if result["switchCallsAfterRepeat"] != 1:
+        problems.append(f"a second zoom call while still inside the threshold (no re-arm in between) should NOT trigger a second navigation call — expected the call count to stay at 1, got {result['switchCallsAfterRepeat']}")
+    if result["rearmed"]["jumpedForPartId"] is not None:
+        problems.append(f"zooming back out past the threshold should re-arm (clear jumpedForPartId), got {result['rearmed']}")
+    if result["rearmed"]["focusedPartId"] != partId:
+        problems.append(f"zooming back out shouldn't clear the focus itself, only re-arm the jump, got {result['rearmed']}")
+    sj = result["secondJump"]
+    if sj["type"] != "canvas" or sj["viewId"] != result["viewId"]:
+        problems.append(f"zooming back in past the threshold after re-arming should jump again, got {sj}")
+    orp = result["orphanResult"]
+    if orp["activeTabType"] != "3d":
+        problems.append(f"a focused part with no view placement should NOT navigate anywhere, got active tab type {orp['activeTabType']}")
+    if not orp["logGrew"] or "isn't placed on any view yet" not in orp["lastLogMsg"]:
+        problems.append(f"a focused part with no view placement should toast (logged to the Message Log) instead of silently doing nothing or throwing, got {orp}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "click-to-focus sets state and shows the marker, zooming past the threshold jumps to the matching 2D view and selects the right node exactly once per crossing, zooming back out re-arms it so zooming back in jumps again, and an unplaced part toasts instead of jumping or throwing"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
@@ -2250,6 +2364,7 @@ CHECKS = [
     check_view3d_layers_and_filters,
     check_view3d_connectors_and_clustering,
     check_view3d_cube_order_fallback,
+    check_view3d_focus_and_zoom_jump,
 ]
 
 

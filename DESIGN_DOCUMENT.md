@@ -301,7 +301,7 @@ subsequent calls; `disposeView3D(tabId)` (called from `App.closeTab`) tears the 
 context and animation loop down explicitly, since browsers cap how many live contexts a
 page may hold.
 
-Staged build-out (Stages 0-3 shipped; this is the plan for what's still ahead, kept here
+Staged build-out (Stages 0-4 shipped; this is the plan for what's still ahead, kept here
 so a future session doesn't have to re-derive it from scratch):
 
 - **Stage 0 (done)** — plumbing only: persistent per-tab renderer/camera/`OrbitControls`,
@@ -355,9 +355,31 @@ so a future session doesn't have to re-derive it from scratch):
   'Test' template — the one case found where the old (`elementGroups`-order) and new
   (`cubeOrder`) fallbacks actually disagree on group order rather than coincidentally
   matching, so the regression check proves real behavior, not an incidental pass.
-- **Stage 4** — zoom-to-detail: past a threshold, jump to (or open) the matching 2D
-  canvas tab rather than attempting a continuous 3D→2D morph — chosen as the
-  deliberately cheaper option; a seamless morph may be explored later.
+- **Stage 4 (done)** — zoom-to-detail: clicking a part (`pickPartAtClientXY`, a raycast
+  against every `InstancedMesh`) focuses it — recenters `OrbitControls.target` on it and
+  shows a reusable wireframe marker (`EdgesGeometry`+`LineBasicMaterial`, `ensureFocusMarker`)
+  around it. Zooming in past `ZOOM_JUMP_DISTANCE` (`NODE_SIZE * 4`) while a part is focused
+  jumps to a 2D canvas view that already has it placed (opening/switching to that view and
+  selecting the matching viewMember there) — a JUMP, not a continuous 3D→2D morph, the
+  deliberately cheaper option chosen up front; a seamless morph may be explored later. A
+  part with no view placement yet just toasts rather than jumping anywhere. Double-clicking
+  a part jumps immediately, skipping the zoom gesture. Click/double-click are told apart
+  from an `OrbitControls` rotate/pan drag release (which still fires a native browser
+  `click` at the drag's end point) by checking the pointer barely moved between its own
+  `pointerdown` and the `click` (`CLICK_DRAG_TOLERANCE`), not by trusting the browser's
+  click/dblclick events alone. The zoom-jump only fires once per threshold crossing
+  (`inst.jumpedForPartId`), not once per animation frame while still inside it — damped
+  `OrbitControls` motion dispatches its own `change` event on every settling frame, so a
+  naive "distance < threshold -> jump" check without that guard would re-navigate
+  repeatedly; zooming back out past the threshold clears the guard so zooming back in
+  jumps again. A real technical dead end hit along the way: `InstancedMesh.setColorAt`/
+  `.instanceColor` did not visually render a per-instance highlight color against this
+  vendored Three.js build, even though the underlying color buffer was verified correct
+  (`getColorAt` returned exactly the hex just set) — and `material.vertexColors = true`,
+  the first attempted fix, made it worse (solid black), because `vertexColors` reads a
+  per-GEOMETRY-VERTEX `color` attribute (absent on plain `BoxGeometry`), an entirely
+  different mechanism from `InstancedMesh`'s own separate `instanceColor`. The wireframe
+  marker mesh sidesteps the whole question and is simpler besides.
 - **Stage 5** — live simulation overlay: color/pulse each node from `store.simRuntime`'s
   current per-part value/state (same encoding the 2D canvas's "Show Simulation Values"
   toggle already uses). Current-tick only, no history scrubbing — that would need

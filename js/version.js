@@ -1574,4 +1574,28 @@
 // fallbacks actually disagree on group order (General vs Application) rather than
 // coincidentally matching, confirmed to catch the regression via temporarily reverting
 // to the old fallback before restoring the fix. Full suite 44/44.
-export const APP_VERSION = '0.808';
+// 0.809: Stage 4 of the 3D View (Explore menu): zoom-to-2D-detail. Click a part to focus
+// it (recenters OrbitControls' orbit target on it, shows a wireframe highlight marker);
+// zoom in past a distance threshold while focused jumps to a 2D canvas view that already
+// has that part placed (selecting it there) — a jump, not a continuous 3D->2D morph, the
+// deliberately cheaper option. Double-click a part to jump immediately. A part placed on
+// no view yet just toasts. Click/double-click are hand-distinguished from an
+// OrbitControls drag-to-rotate release (which still fires a native browser click at the
+// drag's end point) by checking the pointer barely moved since its own pointerdown.
+// Real dead end hit along the way: InstancedMesh.setColorAt/.instanceColor did not
+// visually render a per-instance highlight color against this vendored Three.js build
+// (the underlying color buffer was verified correct via getColorAt, but the cube's
+// rendered color never changed), and material.vertexColors = true (the first attempted
+// fix) made it worse — solid black — because vertexColors reads a per-geometry-vertex
+// color attribute, absent on plain BoxGeometry, a different mechanism from
+// InstancedMesh's own separate instanceColor. Abandoned per-instance color entirely for
+// a separate, reusable wireframe marker mesh, repositioned/shown/hidden to indicate
+// focus — simpler and correct regardless of per-instance-color shader support. New
+// permanent regression check covers click-to-focus, the zoom-threshold jump firing
+// exactly once per crossing (verified via a spy on the navigation call count, not just
+// resulting state, since a duplicate jump to an already-open view looks identical to a
+// single one) rather than once per animation frame during OrbitControls' damped zoom,
+// re-arming after zooming back out and in, and the no-placement toast path — each
+// assertion confirmed to catch its own deliberately-reintroduced regression before being
+// trusted. Full suite 45/45.
+export const APP_VERSION = '0.809';
