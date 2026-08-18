@@ -418,6 +418,14 @@ something a saved document runs unattended) via the bindings <code>app</code>, <
 <code>model</code> (the currently-selected simulation model), <code>findParts</code>, and <code>log(...)</code>.
 Enter an expression directly, or full statements ending in your own <code>return</code>; Ctrl+Enter runs it.</p>
 
+<h3>Code Summary</h3>
+<p>Simulation &gt; Code Summary opens a read-only listing of every part's own script in the current document, for
+security review before running an unfamiliar simulation (a script runs with full access to the document — it can
+create parts/connectors and call <code>findParts</code> — and to any configured API secrets). Every part with a
+script is listed regardless of whether its "Part Script Enabled" checkbox is currently on, since a disabled
+script could always be re-enabled later; each entry is clearly marked ENABLED or disabled and identifies its
+source part by label, type, and id, grouped by model.</p>
+
 <h3>What a script must return</h3>
 <p>A script must return an object <code>{ value, state, response, badge }</code> — <code>response</code> and
 <code>badge</code> are both optional.</p>

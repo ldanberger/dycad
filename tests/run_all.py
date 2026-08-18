@@ -231,6 +231,138 @@ def check_property_panel_field_split(page):
     return True, "top-level shows only viewMember fields; Root Properties shows part fields including timestamps"
 
 
+def check_multiselect_shows_entity_level_fields(page):
+    """Regression guard: the multi-select "N items selected — showing common attributes"
+    panel used to build its field list from ONLY viewMember-level showFields (nodes) or
+    ONLY connector-level showFields (connectors) — never merging in the OTHER level, so
+    every part-level field (streams, label, description, script, ...) was entirely
+    unavailable when multi-selecting nodes, and every viewMember-level field (fillColor,
+    fontColor, ...) was entirely unavailable when multi-selecting connectors. Not a
+    blank-value special case — those fields were never considered at all, regardless of
+    value. Covers both directions: an all-node selection now offers 'streams' (a
+    part-level field) and applying a new value actually updates every selected part's own
+    streams; an all-connector selection now offers 'fillColor' (a viewMember-level
+    field)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.addView('RegrMultiSelect_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const p1 = store.createPart({ type: 'GeneralActor', label: 'MS1', model: store.defaultModel, streams: [] });
+      const p2 = store.createPart({ type: 'GeneralActor', label: 'MS2', model: store.defaultModel, streams: [] });
+      const vm1 = store.createViewMember({ view: view.id, objectType: 'part', objectId: p1.id, x: 40, y: 40 });
+      const vm2 = store.createViewMember({ view: view.id, objectType: 'part', objectId: p2.id, x: 240, y: 40 });
+      tab.selection.clear();
+      tab.selection.add(vm1.id);
+      tab.selection.add(vm2.id);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+
+      const streamsInputExists = !!document.getElementById('msf-streams');
+      const input = document.getElementById('msf-streams');
+      input.value = 'Alpha, Beta';
+      input.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 60));
+      document.querySelector('.modal-overlay .primary')?.click();
+      await new Promise(r => setTimeout(r, 100));
+      const p1StreamsAfter = store.findPart(p1.id).streams;
+      const p2StreamsAfter = store.findPart(p2.id).streams;
+
+      // Connector direction: an all-connector selection should now offer a
+      // viewMember-level field (fillColor) it previously never considered.
+      const c1part = store.createPart({ type: 'GeneralActor', label: 'C1', model: store.defaultModel, streams: [] });
+      const c2part = store.createPart({ type: 'GeneralActor', label: 'C2', model: store.defaultModel, streams: [] });
+      const c3part = store.createPart({ type: 'GeneralActor', label: 'C3', model: store.defaultModel, streams: [] });
+      const conn1 = store.createConnector({ from: c1part.id, to: c2part.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      const conn2 = store.createConnector({ from: c2part.id, to: c3part.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      const cvm1 = store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn1.id, fromVmId: vm1.id, toVmId: vm2.id });
+      const cvm2 = store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn2.id, fromVmId: vm1.id, toVmId: vm2.id });
+      tab.selection.clear();
+      tab.selection.add(cvm1.id);
+      tab.selection.add(cvm2.id);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      const connFillColorInputExists = !!document.getElementById('msf-fillColor');
+
+      return { streamsInputExists, p1StreamsAfter, p2StreamsAfter, connFillColorInputExists };
+    }
+    """)
+    problems = []
+    if not result["streamsInputExists"]:
+        problems.append("expected a 'streams' input (part-level field) to be offered for an all-node multi-selection, got none")
+    if result["p1StreamsAfter"] != ["Alpha", "Beta"] or result["p2StreamsAfter"] != ["Alpha", "Beta"]:
+        problems.append(f"expected applying the streams field to update every selected part's own streams, got p1={result['p1StreamsAfter']} p2={result['p2StreamsAfter']}")
+    if not result["connFillColorInputExists"]:
+        problems.append("expected a 'fillColor' input (viewMember-level field) to be offered for an all-connector multi-selection, got none")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "multi-select now offers both viewMember-level and entity-level (part/connector) common fields, in both directions, and applying one actually updates every selected item's underlying entity"
+
+
+def check_code_summary(page):
+    """Regression guard for Simulation > Code Summary: a read-only listing of every
+    part's own script, for reviewing what code exists in a file before running an
+    unfamiliar simulation. Covers: the menu has a separator before the item; a part with
+    NO script is excluded; a part with a script is included REGARDLESS of scriptEnabled
+    (a disabled script could always be re-enabled later, so this is a review of what code
+    exists, not just what's currently wired to run) and clearly marked
+    ENABLED/disabled; each block identifies its source part (label, type, id); grouped by
+    model; and the modal is genuinely read-only (no Save/Cancel, just Close)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const p1 = store.createPart({ type: 'GeneralActor', label: 'Requester', model: store.defaultModel, streams: [] });
+      p1.scriptEnabled = true;
+      p1.script = 'return { value: 42 };';
+      const p2 = store.createPart({ type: 'ApplicationComponent', label: 'DisabledScriptNode', model: 'As-is', streams: [] });
+      p2.scriptEnabled = false;
+      p2.script = 'return { value: 1 };';
+      const p3 = store.createPart({ type: 'GeneralActor', label: 'NoScriptNode', model: store.defaultModel, streams: [] });
+      // p3 has no script at all -- should not appear in the summary
+
+      document.getElementById('simulation-menu-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      const menuItems = [...document.querySelectorAll('#simulation-menu .dd-item')].map(e => e.textContent.trim());
+      const separatorCount = document.querySelectorAll('#simulation-menu .dd-separator').length;
+      document.querySelector('#simulation-menu .dd-item[data-action=\\"codeSummary\\"]').click();
+      await new Promise(r => setTimeout(r, 150));
+
+      const textarea = document.getElementById('text-edit-area');
+      const modalActions = document.querySelector('.modal-overlay .modal-actions');
+      return {
+        menuItems, separatorCount,
+        modalText: textarea ? textarea.value : null,
+        readonly: textarea ? textarea.readOnly : null,
+        actionButtonLabels: modalActions ? [...modalActions.querySelectorAll('button')].map(b => b.textContent.trim()) : [],
+      };
+    }
+    """)
+    problems = []
+    if "Code Summary" not in result["menuItems"]:
+        problems.append(f"expected 'Code Summary' in the Simulation menu, got {result['menuItems']}")
+    if result["separatorCount"] < 1:
+        problems.append("expected at least one separator in the Simulation menu (before Code Summary)")
+    text = result["modalText"] or ""
+    if "Requester" not in text or "GeneralActor" not in text or "ENABLED" not in text:
+        problems.append(f"expected the summary to include the enabled scripted part, its type, and ENABLED marker, got: {text[:400]}")
+    if "DisabledScriptNode" not in text or "disabled" not in text:
+        problems.append(f"expected the summary to include the DISABLED scripted part too (code exists regardless of scriptEnabled) with a 'disabled' marker, got: {text[:400]}")
+    if "NoScriptNode" in text:
+        problems.append("expected a part with no script at all to be excluded from the summary")
+    if "Model: As-is" not in text or "Model:" not in text:
+        problems.append(f"expected the summary to group scripts by model (a 'Model: As-is' section header, at least), got: {text[:400]}")
+    if not result["readonly"]:
+        problems.append("expected the Code Summary textarea to be readonly")
+    if result["actionButtonLabels"] != ["Close"]:
+        problems.append(f"expected only a single 'Close' button (read-only modal), got {result['actionButtonLabels']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full text: {text})"
+    return True, "Code Summary lists every scripted part (enabled or disabled) grouped by model, identifies its source part, excludes unscripted parts, and opens as a genuinely read-only modal"
+
+
 def check_spacing_scale_uniform(page):
     """Regression guard: increasing spacing once clamped edge-adjacent nodes to 0,
     compressing their nearest gap while other gaps scaled correctly."""
@@ -2796,6 +2928,8 @@ CHECKS = [
     check_force_directed_adjacent_cells,
     check_smart_check_view,
     check_property_panel_field_split,
+    check_multiselect_shows_entity_level_fields,
+    check_code_summary,
     check_spacing_scale_uniform,
     check_routing_avoids_obstacle,
     check_archimate_import_fixture,

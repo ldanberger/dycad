@@ -1704,4 +1704,29 @@
 // (check_view3d_disposed_on_full_document_load), driven via a genuine File > Load
 // through the real UI, confirmed to catch the regression via a temporary revert before
 // being trusted. Full suite 52/52.
-export const APP_VERSION = '0.815';
+// 0.816: fix multi-select common-attributes panel silently missing an entire field
+// level. It built its field list from ONLY viewMember-level showFields (nodes) or ONLY
+// connector-level showFields (connectors), never merging in the other level — so every
+// part-level field (streams, label, description, script, ...) was entirely unavailable
+// when multi-selecting nodes, and every viewMember-level field (fillColor, ...) was
+// entirely unavailable when multi-selecting connectors, regardless of value (not a
+// blank-values special case — those fields were simply never considered). Fixed by
+// merging both levels' showFields into the multi-select spec (entity-level wins the
+// 'note'/'order' name collision, both genuinely different fields at each level, matching
+// what getFieldValueForItem already resolved them to before this fix), and extending
+// getFieldValueForItem/setFieldValueForItem to cover the full merged field set instead
+// of a hand-maintained switch statement that had quietly drifted out of sync with
+// showFields (a generic `part[fieldName]`/`conn[fieldName]` default now covers every
+// field with no special logic, so it can't drift again the same way).
+// Also adds Simulation > Code Summary: a read-only listing of every part's own script,
+// for security review before running an unfamiliar simulation. Lists a script
+// REGARDLESS of scriptEnabled (a disabled script could always be re-enabled later, so
+// this reviews what code exists in the file, not just what's currently wired to run),
+// grouped by model, each entry identifying its source part (label/type/id) and
+// enabled/disabled state. Reuses promptTextEdit's existing readonly mode (the same
+// "larger editor" modal a field's own double-click-to-expand already opens) rather than
+// building a new modal.
+// New/updated permanent regression checks (check_multiselect_shows_entity_level_fields,
+// check_code_summary), each confirmed to catch its own deliberately-reintroduced
+// regression before being trusted. Full suite 54/54.
+export const APP_VERSION = '0.816';

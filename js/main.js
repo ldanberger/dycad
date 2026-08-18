@@ -502,6 +502,43 @@ class App {
     });
   }
 
+  /** Simulation > Code Summary: a read-only listing of every part's own script — whether
+   * currently scriptEnabled or not, since this is a security review of what CODE actually
+   * exists in the file (a disabled script could always be re-enabled later), not just
+   * what's presently wired to run. Grouped by model, sorted by label within each, and
+   * each block clearly identifies its source part (label, type, id, enabled/disabled) so
+   * a script can always be traced back to exactly which node it came from before trusting
+   * it. Reuses promptTextEdit's readonly mode — the same "larger editor" modal a field's
+   * own double-click-to-expand already opens, with the same monospace .text-edit-area —
+   * rather than building a new modal for what's fundamentally the same "show me this text
+   * in a bigger read-only box" need. */
+  promptCodeSummary() {
+    const scripted = this.store.doc.parts.filter((p) => (p.script || '').trim().length > 0);
+    if (scripted.length === 0) {
+      this.promptTextEdit({ title: 'Code Summary', value: 'No parts in this document have a script.', readonly: true, onSave: () => {} });
+      return;
+    }
+    const sorted = [...scripted].sort((a, b) =>
+      String(a.model || '').localeCompare(String(b.model || '')) || String(a.label || '').localeCompare(String(b.label || '')));
+
+    const modelCount = new Set(sorted.map((p) => p.model)).size;
+    const lines = [
+      `Code Summary — ${sorted.length} part${sorted.length === 1 ? '' : 's'} with a script, across ${modelCount} model${modelCount === 1 ? '' : 's'}.`,
+      'Review before running any unfamiliar simulation: a script runs with full access to the document (createPart/createConnector/findParts) and to any configured API secrets.',
+      '',
+    ];
+    let currentModel;
+    for (const part of sorted) {
+      if (part.model !== currentModel) {
+        currentModel = part.model;
+        lines.push(`########## Model: ${currentModel || '(none)'} ##########`, '');
+      }
+      lines.push(`==== "${part.label}" (${part.type}, id: ${part.id}) — ${part.scriptEnabled ? 'ENABLED' : 'disabled'} ====`);
+      lines.push(part.script.trim(), '');
+    }
+    this.promptTextEdit({ title: 'Code Summary', value: lines.join('\n'), readonly: true, onSave: () => {} });
+  }
+
   // ===================== SELECTION =====================
   selectOnly(vmId) {
     const tab = this.store.activeTab();
@@ -2766,6 +2803,7 @@ function wireGlobalEvents(app) {
   // when creating new nodes) — never on the active tab/view.
   function runSimAction(action) {
     if (action === 'scriptConsole') { app.promptScriptConsole(); return; } // works with no model selected
+    if (action === 'codeSummary') { app.promptCodeSummary(); return; } // reviews every model's scripts, no model selection needed
     const modelName = app.store.simSelectedModel;
     if (!modelName) { app.toast('No model selected.', true); return; }
     if (action === 'stepSimulation') {
@@ -3051,7 +3089,8 @@ function wireGlobalEvents(app) {
     { label: 'Script Console...', action: 'scriptConsole' },
   ];
   const simulationMenu = document.getElementById('simulation-menu');
-  simulationMenu.innerHTML = SIMULATION_LINKS.map((l) => `<div class="dd-item" data-action="${l.action}">${l.label}</div>`).join('');
+  simulationMenu.innerHTML = SIMULATION_LINKS.map((l) => `<div class="dd-item" data-action="${l.action}">${l.label}</div>`).join('')
+    + '<div class="dd-separator"></div><div class="dd-item" data-action="codeSummary">Code Summary</div>';
   simulationMenu.querySelectorAll('.dd-item').forEach((item) => {
     item.addEventListener('click', () => {
       runSimAction(item.dataset.action);

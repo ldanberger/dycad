@@ -1117,43 +1117,62 @@ function renderConnectorProperties(app, vm) {
 }
 
 // ===================== MULTI-SELECT COMMON ATTRIBUTES =====================
+/** Reads fieldName for one multi-select item. Node fields not explicitly listed here
+ * fall back to reading straight off `part` (every part-level showFields field name is
+ * also a literal property name on the Part object); connector fields likewise default to
+ * `conn`. Only fields that actually need vm-level routing, a computed display value
+ * (from/to), or a fallback default get an explicit case.
+ *
+ * 'note' and 'order' deliberately exist at BOTH the viewMember level (this one
+ * placement's own note/order) and the part level (the underlying Part's own note/order —
+ * connectors only have a viewMember-level 'order', no entity-level one) — genuinely
+ * different fields that happen to share a name. The merged spec built in
+ * renderMultiSelectProperties always lets the entity-level (part/connector) definition
+ * win when both exist, so 'note'/'order' here resolve to the SAME level the merged
+ * spec's label/access describes — falling through to the generic `part`/`conn` default
+ * for 'order'/node-'note', with an explicit vm-routed case only where the entity level
+ * doesn't define that name at all (connector 'order'). */
 function getFieldValueForItem(app, item, fieldName) {
   if (item.type === 'node') {
     const { vm, part } = item;
     switch (fieldName) {
-      case 'type': return part.type;
-      case 'label': return part.label;
+      case 'view': return vm.view;
       case 'fillColor': return vm.fillColor;
       case 'fontColor': return vm.fontColor;
       case 'fontSize': return vm.fontSize;
       case 'borderColor': return vm.borderColor;
       case 'x': return vm.x;
       case 'y': return vm.y;
-      case 'view': return vm.view;
-      case 'model': return part.model;
-      case 'note': return part.note;
-      case 'order': return part.order;
-      case 'xIds': return part.xIds;
       case 'sectionId': return vm.sectionId;
-      case 'streams': return part.streams || [];
       case 'linkedViewName': return vm.linkedViewName;
       case 'isExternal': return vm.isExternal;
-      case 'scriptEnabled': return part.scriptEnabled;
-      case 'script': return part.script;
-      default: return undefined;
+      case 'streams': return part.streams || [];
+      default: return part[fieldName];
     }
   }
-  const { conn } = item;
+  const { vm, conn } = item;
   switch (fieldName) {
     case 'from': { const p = app.store.findPart(conn.from); return p ? `${p.label} (${p.type})` : conn.from; }
     case 'to': { const p = app.store.findPart(conn.to); return p ? `${p.label} (${p.type})` : conn.to; }
-    case 'relationship': return conn.relationship;
-    case 'model': return conn.model;
-    case 'note': return conn.note;
-    default: return undefined;
+    case 'view': return vm.view;
+    case 'fillColor': return vm.fillColor;
+    case 'fontColor': return vm.fontColor;
+    case 'fontSize': return vm.fontSize;
+    case 'borderColor': return vm.borderColor;
+    case 'order': return vm.order; // connectors have no entity-level 'order', only viewMember's
+    case 'linkedViewName': return vm.linkedViewName;
+    case 'isExternal': return vm.isExternal;
+    case 'sectionId': return vm.sectionId;
+    case 'streams': return conn.streams || [];
+    default: return conn[fieldName];
   }
 }
 
+/** Writes fieldName for one multi-select item — see getFieldValueForItem's own comment
+ * for the vm-vs-entity routing rationale (same rules apply here). Only WRITABLE
+ * (access:'w') fields ever reach here: the render loop never wires a change listener to
+ * a read-only field (see renderMultiSelectProperties' `if (def.access === 'r')` early
+ * continue), so an incomplete default case is safely never exercised for those. */
 function setFieldValueForItem(app, item, fieldName, value) {
   if (item.type === 'node') {
     const { vm, part } = item;
@@ -1162,12 +1181,14 @@ function setFieldValueForItem(app, item, fieldName, value) {
         part.type = value;
         const newEl = (app.store.settings.elements || []).find((el) => ciEq(el.type, value));
         vm.fillColor = groupFill(app, newEl);
+        app.store.touchPart(part);
         break;
       }
       case 'label': {
         const oldLabel = part.label;
         part.label = value; part.rawLabel = value;
         if (!ciEq(oldLabel, value)) app.renameLinkedViewIfNeeded(vm, oldLabel, value);
+        app.store.touchPart(part);
         break;
       }
       case 'fillColor': vm.fillColor = value; break;
@@ -1176,22 +1197,33 @@ function setFieldValueForItem(app, item, fieldName, value) {
       case 'borderColor': vm.borderColor = value; break;
       case 'x': vm.x = Number(value) || 0; break;
       case 'y': vm.y = Number(value) || 0; break;
-      case 'model': part.model = value; break;
-      case 'note': part.note = value; break;
-      case 'order': part.order = Number(value) || 0; break;
-      case 'xIds': part.xIds = value; break;
       case 'linkedViewName': vm.linkedViewName = value; break;
       case 'isExternal': vm.isExternal = value; break;
-      case 'scriptEnabled': part.scriptEnabled = value; break;
-      case 'script': part.script = value; break;
+      case 'order': part.order = Number(value) || 0; app.store.touchPart(part); break;
+      case 'streams': part.streams = value.split(',').map((s) => s.trim()).filter(Boolean); app.store.touchPart(part); break;
+      case 'model': part.model = value; app.store.touchPart(part); break;
+      case 'section': part.section = value; app.store.touchPart(part); break;
+      case 'note': part.note = value; app.store.touchPart(part); break;
+      case 'xIds': part.xIds = value; app.store.touchPart(part); break;
+      case 'description': part.description = value; app.store.touchPart(part); break;
+      case 'scriptEnabled': part.scriptEnabled = value; app.store.touchPart(part); break;
+      case 'script': part.script = value; app.store.touchPart(part); break;
       default: break;
     }
     return;
   }
-  const { conn } = item;
+  const { vm, conn } = item;
   switch (fieldName) {
-    case 'relationship': app.applyRelationToConnector(conn, value); break;
-    case 'note': conn.note = value; break;
+    case 'relationship': app.applyRelationToConnector(conn, value); app.store.touchConnector(conn); break;
+    case 'note': conn.note = value; app.store.touchConnector(conn); break;
+    case 'streams': conn.streams = value.split(',').map((s) => s.trim()).filter(Boolean); app.store.touchConnector(conn); break;
+    case 'fillColor': vm.fillColor = value; break;
+    case 'fontColor': vm.fontColor = value; break;
+    case 'fontSize': vm.fontSize = Number(value) || 0; break;
+    case 'borderColor': vm.borderColor = value; break;
+    case 'order': vm.order = Number(value) || 0; break;
+    case 'linkedViewName': vm.linkedViewName = value; break;
+    case 'isExternal': vm.isExternal = value; break;
     default: break;
   }
 }
@@ -1215,13 +1247,28 @@ function renderMultiSelectProperties(app, tab) {
   if (allItems.length === 0) { body.innerHTML = '<div class="empty-hint">Nothing selected.</div>'; return; }
 
   const vmSpec = app.store.settings.showFields?.viewMember?.fields || {};
+  const partSpec = app.store.settings.showFields?.part?.fields || {};
   const connSpec = app.store.settings.showFields?.connector?.fields || {};
   let entityKeyForOptions, spec;
   let selectCtx = null;
   if (nodeItems.length > 0 && connItems.length === 0) {
-    entityKeyForOptions = 'viewMember'; spec = vmSpec;
+    // Merges BOTH levels a node's properties actually span — viewMember (this
+    // placement's own display fields) AND part (the underlying Part's own fields:
+    // label, streams, description, script, ...), the same two halves the single-node
+    // panel shows as "top level" + "Root Properties". Previously only vmSpec was used
+    // here, so every part-level field (streams included) was silently unavailable in
+    // multi-select regardless of value — not a blank-values special case, just never
+    // considered at all. partSpec spread second so it wins the 'note'/'order' name
+    // collision (both levels define those, genuinely different fields) — matching what
+    // getFieldValueForItem already resolves them to.
+    entityKeyForOptions = 'viewMember'; spec = { ...vmSpec, ...partSpec };
   } else if (connItems.length > 0 && nodeItems.length === 0) {
-    entityKeyForOptions = 'connector'; spec = connSpec;
+    // Same reasoning as the node branch above, mirrored for connectors: viewMember
+    // (fillColor/fontColor/order/... for this connector's placement) + connector (the
+    // underlying Connector's own fields: streams, relationship, ...). connSpec spread
+    // second wins the 'note' collision; connectors have no entity-level 'order' at all,
+    // so vmSpec's stays untouched there.
+    entityKeyForOptions = 'connector'; spec = { ...vmSpec, ...connSpec };
     // only meaningful to filter the relationship dropdown if every selected connector
     // shares the same (fromType, toType) pair — otherwise there's no single valid list
     const pairs = connItems.map((item) => {
