@@ -141,7 +141,15 @@ export function flattenJsonRecords(data) {
       const outerRest = {};
       for (const [k, v] of Object.entries(outer)) {
         if (k === nestedKey) continue;
-        if (!Array.isArray(v) && !isObj(v)) outerRest[k] = v; // only carry forward scalars, not other nested structures
+        // Carry forward scalars AND arrays of primitives (e.g. a "sections"/"ministries"
+        // multi-value field sitting alongside a deeper nested array like "entities") —
+        // only an array-of-OBJECTS is excluded, since that's a further nesting level this
+        // same loop will unwrap on its own next pass, and a plain nested object is
+        // excluded as genuinely unflattened structure. A field's own array-of-primitives
+        // value would otherwise be silently dropped here on every pass past the one that
+        // introduced it, even though nothing about it needs unwrapping.
+        const isArrayOfObjects = Array.isArray(v) && v.length > 0 && isObj(v[0]);
+        if (!isArrayOfObjects && !isObj(v)) outerRest[k] = v;
       }
       const inner = Array.isArray(outer[nestedKey]) ? outer[nestedKey] : [];
       for (const item of inner) {

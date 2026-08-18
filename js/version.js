@@ -1613,4 +1613,19 @@
 // fallback. Permanent regression check updated to assert the panel actually renders the
 // clicked/unplaced part's fields (not just that the state field got set), confirmed to
 // catch a deliberately-reintroduced regression before being trusted. Full suite 45/45.
-export const APP_VERSION = '0.810';
+// 0.811: fix Load SFCCE's field-mapping wizard silently omitting a real field from the
+// selector list. flattenJsonRecords' "carry the outer record's own fields forward into
+// the next nesting pass" step excluded every Array value wholesale, not just
+// array-of-OBJECTS values (the ones that genuinely need a further unwrap pass) — so an
+// already-flat array-of-primitives field (e.g. an Application Capability's own
+// "sections"/"ministries" list) got silently dropped the moment there was ANOTHER nested
+// array-of-objects field below it (e.g. that same Application Capability's "entities").
+// This didn't surface with a file where the array field was the deepest level (nothing
+// left to flatten past it, so the drop never triggered) — only with a real generated
+// SFCCE file (capabilities-legal-SFCCE.json) that had a further "entities" nesting
+// underneath "sections". Fixed by only excluding array-of-objects (and plain nested
+// objects) from the carry-forward, keeping arrays of primitives intact through
+// arbitrarily many further nesting levels. New permanent regression check
+// (check_sfce_array_field_survives_deeper_nesting) confirmed to catch the exact
+// regression via temporarily reverting the fix before restoring it. Full suite 46/46.
+export const APP_VERSION = '0.811';

@@ -2186,6 +2186,56 @@ def check_view3d_focus_and_zoom_jump(page):
     return True, "click-to-focus sets state, shows the marker, and shows the part's properties in the panel; zooming past the threshold jumps to the matching 2D view and selects the right node exactly once per crossing; zooming back out re-arms it so zooming back in jumps again; and an unplaced part keeps showing its own properties instead of navigating or throwing"
 
 
+def check_sfce_array_field_survives_deeper_nesting(page):
+    """Regression guard for a real bug found in Load SFCCE's field-mapping wizard: a
+    multi-value field holding an array of PRIMITIVES (e.g. an Application Capability's own
+    "sections"/"ministries" list) sitting alongside a DEEPER nested array-of-OBJECTS field
+    (e.g. that same Application Capability's "entities") was silently dropped from
+    flattenJsonRecords' output fields — so it never appeared as a selector option in the
+    mapping step at all. Root cause: the outer-record "carry forward into the next nesting
+    pass" filter excluded every Array value, not just array-of-OBJECTS values (the ones
+    that actually need a further unwrap pass) — so a field that was already a flat
+    array-of-strings got treated the same as an unflattened array-of-objects and discarded
+    once ANOTHER nested array existed below it. This didn't show up with a file where the
+    array-of-primitives field was the DEEPEST level (nothing left to flatten past it, so
+    the drop never triggered) — only once a file had a further nesting level underneath,
+    which a real user-generated SFCCE file (capabilities-legal-SFCCE.json, applicationCapabilities
+    carrying both "sections" and a further-nested "entities") actually did."""
+    result = js(page, """
+    async () => {
+      const sfce = await import('./js/sfce.js');
+      const data = [{
+        function: 'F1',
+        capabilities: [{
+          name: 'Cap1',
+          applicationCapabilities: [{
+            name: 'AC1',
+            sections: ['SecA', 'SecB'],
+            entities: [{ name: 'Ent1' }, { name: 'Ent2' }],
+          }],
+        }],
+      }];
+      const { records, fields } = sfce.flattenJsonRecords(data);
+      return { records, fields };
+    }
+    """)
+    problems = []
+    fields = result["fields"]
+    if "capabilities.applicationCapabilities.sections" not in fields:
+        problems.append(f"expected 'capabilities.applicationCapabilities.sections' (an array-of-primitives field sitting above a deeper 'entities' nesting) to survive into flattenJsonRecords' fields list, got: {fields}")
+    records = result["records"]
+    if len(records) != 2:
+        problems.append(f"expected 2 flattened records (one per entity under AC1), got {len(records)}")
+    else:
+        for r in records:
+            if r.get("capabilities.applicationCapabilities.sections") != ["SecA", "SecB"]:
+                problems.append(f"expected every flattened record to carry the full, unmodified sections array, got {r.get('capabilities.applicationCapabilities.sections')} in record {r}")
+                break
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "an array-of-primitives field (sections) sitting above a deeper nested array-of-objects field (entities) survives flattening intact, on every resulting record, instead of being silently dropped"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
@@ -2377,6 +2427,7 @@ CHECKS = [
     check_view3d_connectors_and_clustering,
     check_view3d_cube_order_fallback,
     check_view3d_focus_and_zoom_jump,
+    check_sfce_array_field_survives_deeper_nesting,
 ]
 
 
