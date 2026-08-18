@@ -74,18 +74,19 @@ function disposeView3DTab(tabId) {
 }
 
 // ===================== CANVAS PAGE =====================
+/** Stream visibility filter. null/undefined = no filter configured yet (show
+ * everything) — an explicit empty array (set via either filter menu's "Select All /
+ * Exclude All" top-row option) means "show nothing". Same convention
+ * passesElementTypeFilter below uses. */
 function passesStreamFilter(tab, streams) {
-  if (!tab.activeStreams || tab.activeStreams.length === 0) return true;
+  if (tab.activeStreams == null) return true;
   return (streams || []).some((s) => tab.activeStreams.includes(s));
 }
 
-/** View-level element-TYPE visibility filter (distinct from the stream filter above).
- * null/undefined = no filter configured yet (show everything) — an explicit empty array
- * (set via the filter menu's "exclude all" top-row option) means "show nothing", so this
- * deliberately does NOT treat an empty array the same as unset, unlike passesStreamFilter
- * above. Connectors need no separate check: redrawEdges already skips any connector
- * whose endpoint isn't in the (already-filtered) partVms list, so hiding a node's type
- * here automatically hides its connectors too. */
+/** View-level element-TYPE visibility filter (distinct from the stream filter above,
+ * same null-vs-empty-array convention). Connectors need no separate check: redrawEdges
+ * already skips any connector whose endpoint isn't in the (already-filtered) partVms
+ * list, so hiding a node's type here automatically hides its connectors too. */
 function passesElementTypeFilter(tab, type) {
   if (tab.activeElementTypes == null) return true;
   return tab.activeElementTypes.includes(type);
@@ -95,7 +96,7 @@ function passesElementTypeFilter(tab, type) {
  * the view right now (as opposed to sitting in its default "show everything" state).
  * Connector-levels expansion only has any effect while this is true. */
 function isAnyVisibilityFilterActive(tab) {
-  return (tab.activeStreams && tab.activeStreams.length > 0) || tab.activeElementTypes != null;
+  return tab.activeStreams != null || tab.activeElementTypes != null;
 }
 
 /** BFS-expands a seed set of visible part-viewMember ids outward by `levels` hops,

@@ -41,7 +41,23 @@
 // native 'click' at the drag's end point) by checking the pointer barely moved between
 // its own pointerdown and the click, not by trusting the browser's click/dblclick events
 // alone.
-// Still ahead: a live simulation-value overlay (Stage 5). Full plan: DESIGN_DOCUMENT.md §9.
+// Stage 5 (done): live simulation overlay. Every currently-visible part with a
+// store.simRuntime entry for its own model (i.e. that model has been stepped/run at
+// least once) gets a small colored marker floating just above its cube — green/blue/red
+// for normal/changed/error, the SAME 3-state palette the 2D canvas's Show Simulation
+// Values badge already uses (SIM_STATE_COLORS mirrors .fnode-sim-badge's CSS colors in
+// styles.css), so the encoding is shared, not reinvented. A 'changed' marker additionally
+// pulses (its own scale oscillates every animation frame) — 3D's stand-in for the 2D
+// badge's static "changed" border color, since a static color alone reads less clearly in
+// a scene you're also free to freely rotate/zoom. No numeric value text and no tick
+// history scrubbing (current tick only) — both deliberately out of scope up front (see
+// DESIGN_DOCUMENT.md §9). Deliberately NOT gated by the structural
+// computeSignature/syncSceneData rebuild: a continuous Run calls app.render() on every
+// tick (~every 500ms) without touching any part/connector/filter field that signature
+// tracks, so syncSimOverlay keeps its own, much cheaper signature built only from the
+// small set of currently-visible parts' runtime values, and only ever rebuilds its own
+// couple of small marker InstancedMeshes — never the big type/connector meshes — on a
+// tick.
 //
 // Deliberately the ONLY module that imports the vendored Three.js/OrbitControls — every
 // other module stays free of a 3D dependency, and canvas.js only ever reaches this file
@@ -51,7 +67,7 @@ import * as THREE from './vendor/three.module.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { ciEq } from './state.js';
 import { elementByType } from './rules.js';
-import { groupFill } from './render.js';
+import { groupFill, escapeHtml } from './render.js';
 import { passesStreamFilter, passesElementTypeFilter } from './canvas.js';
 
 // tab.id -> { renderer, scene, camera, controls, container, resizeObserver, animId,
@@ -65,11 +81,24 @@ const GROUP_LAYER_GAP = 1.2;    // EXTRA Z gap inserted at each element-group bo
 const ZOOM_JUMP_DISTANCE = NODE_SIZE * 4; // camera-to-target distance that counts as "zoomed in on it"
 const CLICK_DRAG_TOLERANCE = 5; // px of pointer movement still treated as a click, not a drag
 const FOCUS_HIGHLIGHT_COLOR = 0xffcc00;
+const SIM_BADGE_RADIUS = NODE_SIZE * 0.22;
+const SIM_BADGE_HEIGHT = NODE_SIZE * 0.7; // floats above the node's own top face
+// Mirrors css/styles.css' .fnode-sim-badge colors exactly (normal/error/changed) — the 2D
+// canvas's own encoding, not a new one invented for 3D.
+const SIM_STATE_COLORS = { normal: 0x2f8f4e, changed: 0x2f6fed, error: 0xc0392b };
+const SIM_PULSE_PERIOD_MS = 260;
+const SIM_PULSE_AMPLITUDE = 0.35; // +/- fraction of the marker's base scale
 
 // Scratch objects reused across picks (no per-call allocation) — Raycaster/Vector2 hold
 // no state between calls, safe to share at module scope.
 const raycaster = new THREE.Raycaster();
 const pointerNDC = new THREE.Vector2();
+// Scratch objects reused across every animation frame's pulse update, across every open
+// 3D tab — safe to share since rAF callbacks run one at a time, never interleaved.
+const pulseMatrix = new THREE.Matrix4();
+const pulsePosition = new THREE.Vector3();
+const pulseScaleVec = new THREE.Vector3();
+const pulseQuaternion = new THREE.Quaternion();
 
 /** Raycasts from the camera through a client-space (clientX/clientY) point into the
  * scene's InstancedMeshes, returning the nearest hit's partId (or null). Used by both
@@ -109,10 +138,13 @@ function clearFocusHighlight(inst) {
   if (inst.focusMarker) inst.focusMarker.visible = false;
 }
 
-/** Focuses partId: recenters OrbitControls' orbit target on it and shows the highlight
- * marker there. Silently does nothing if the part isn't currently in the scene (filtered
- * out, or removed). Re-usable both from a click and from syncSceneData's own "restore
- * focus after a resync" step. */
+/** Focuses partId: shows the highlight marker on it and remembers its world position
+ * (inst.focusedPartPosition, used by the zoom-jump distance check below) — deliberately
+ * does NOT move OrbitControls' own orbit target, so clicking a node never yanks the
+ * camera/recenters the view; it just clicks "where it already is" on screen, same as
+ * selecting a node on the 2D canvas doesn't recenter the canvas either. Silently does
+ * nothing if the part isn't currently in the scene (filtered out, or removed). Re-usable
+ * both from a click and from syncSceneData's own "restore focus after a resync" step. */
 function focusPart(inst, partId) {
   for (const mesh of inst.typeMeshes.values()) {
     const instanceId = mesh.userData.partIds.indexOf(partId);
@@ -120,7 +152,7 @@ function focusPart(inst, partId) {
     const matrix = new THREE.Matrix4();
     mesh.getMatrixAt(instanceId, matrix);
     const position = new THREE.Vector3().setFromMatrixPosition(matrix);
-    inst.controls.target.copy(position);
+    inst.focusedPartPosition = position.clone();
     const marker = ensureFocusMarker(inst);
     marker.position.copy(position);
     marker.visible = true;
@@ -272,6 +304,162 @@ function jumpToMatching2DView(app, tabId, partId) {
   if (tab3d) selectPartInPanel(app, tab3d, partId);
 }
 
+/** Right-click node context menu: a small self-contained floating menu (the same
+ * .edge-popover class + inline-style/manual-hover pattern main.js's showRelationPicker/
+ * showEdgePopover already use for lightweight popups — NOT the .dropdown-menu/.dd-item
+ * combo, which is for actual header-bar dropdowns) built directly here rather than routed
+ * through the canvas's command registry (runCommand), since none of its commands apply
+ * to a raw part/3D context. Two things, both answering "quick filter, scoped to what I
+ * just right-clicked":
+ *   - Filter to Streams: sets tab.activeStreams to exactly this part's own streams — the
+ *     same field the toolbar's Stream filter reads, so opening that dropdown afterward
+ *     shows exactly this selection already checked.
+ *   - Connector Type: tab.connectorTypeFilter (null/'c'/'s') — the 3D view draws BOTH
+ *     connectorType 'c' (Connectors) and 's' (Streams) together with no distinction by
+ *     default, unlike the 2D canvas's own per-view chkShowConnectorType/chkShowStreamType
+ *     checkboxes; since a 3D tab isn't backed by a view, this is the tab-scoped
+ *     equivalent instead, offered here rather than as its own toolbar control. */
+function showNodeContextMenu(app, tab, partId, clientX, clientY) {
+  document.querySelectorAll('.view3d-context-menu').forEach((m) => m.remove());
+  const store = app.store;
+  const part = store.findPart(partId);
+  if (!part) return;
+
+  const streams = part.streams || [];
+  const connectorTypeOptions = [
+    { value: null, label: 'All' },
+    { value: 'c', label: 'Connectors' },
+    { value: 's', label: 'Streams' },
+  ];
+  const items = [
+    { header: true, label: part.label },
+    {
+      label: streams.length ? `Filter to Streams: ${streams.join(', ')}` : 'This node has no streams',
+      disabled: streams.length === 0,
+      onClick: () => { tab.activeStreams = [...streams]; app.render(); },
+    },
+    ...(tab.activeStreams != null ? [{ label: 'Clear Stream Filter', onClick: () => { tab.activeStreams = null; app.render(); } }] : []),
+    { separator: true },
+    { header: true, label: 'Connector Type' },
+    ...connectorTypeOptions.map((opt) => ({
+      label: `${(tab.connectorTypeFilter ?? null) === opt.value ? '✓' : '  '} ${opt.label}`,
+      onClick: () => { tab.connectorTypeFilter = opt.value; app.render(); },
+    })),
+  ];
+
+  const menu = document.createElement('div');
+  menu.className = 'edge-popover view3d-context-menu';
+  menu.style.left = `${clientX}px`;
+  menu.style.top = `${clientY}px`;
+  menu.innerHTML = items.map((it, i) => {
+    if (it.separator) return '<div style="height:1px;margin:4px 0;background:var(--border);"></div>';
+    if (it.header) return `<div style="font-weight:600;margin:${i === 0 ? '0' : '6px'} 0 4px 0;">${escapeHtml(it.label)}</div>`;
+    return `<div class="v3d-ctx-item" data-idx="${i}" style="padding:4px 6px;border-radius:4px;cursor:${it.disabled ? 'default' : 'pointer'};opacity:${it.disabled ? '0.4' : '1'};">${escapeHtml(it.label)}</div>`;
+  }).join('');
+  document.getElementById('modal-root').appendChild(menu);
+
+  menu.querySelectorAll('.v3d-ctx-item').forEach((el) => {
+    const it = items[Number(el.dataset.idx)];
+    if (it.disabled) return;
+    el.addEventListener('mouseenter', () => { el.style.background = 'var(--accent-soft)'; });
+    el.addEventListener('mouseleave', () => { el.style.background = ''; });
+    el.addEventListener('click', () => { it.onClick(); menu.remove(); document.removeEventListener('pointerdown', closer); });
+  });
+  const closer = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('pointerdown', closer); } };
+  setTimeout(() => document.addEventListener('pointerdown', closer), 10);
+}
+
+/** Removes and disposes every marker InstancedMesh the sim overlay currently owns — a
+ * no-op if nothing's showing. Called both to clear stale markers before a rebuild and
+ * when there's nothing left to show (no simRuntime data, or nothing currently visible). */
+function clearSimOverlay(inst) {
+  for (const mesh of inst.simMeshes.values()) {
+    inst.scene.remove(mesh);
+    mesh.geometry.dispose();
+    mesh.material.dispose();
+  }
+  inst.simMeshes.clear();
+}
+
+/** Refreshes the small colored "simulation state" marker floating above each currently-
+ * visible part that has a live store.simRuntime entry for its own model — see this file's
+ * own Stage 5 header comment for the full design rationale (shared color encoding,
+ * pulse-not-recolor for "changed", why this bypasses the structural rebuild signature).
+ * Reads inst.partPositions, populated by the last syncSceneData call — this only ever
+ * reflects parts already resolved as currently visible, so the overlay automatically
+ * respects the same Stream/Type filters and inherits the "hide it, its overlay marker
+ * disappears too" convention for free. */
+function syncSimOverlay(app, tab, inst) {
+  const { store } = app;
+  if (store.simRuntime.size === 0 || !inst.partPositions || inst.partPositions.size === 0) {
+    if (inst.simMeshes.size > 0) clearSimOverlay(inst);
+    inst.lastSimSignature = null;
+    return;
+  }
+
+  // pos.model was stashed directly by syncSceneData's own placement loop — deliberately
+  // NOT store.findPart(partId) here, which is an Array.find (linear scan) over every part
+  // in the whole document; calling it once per currently-visible part turned this into an
+  // O(n^2) scan (a real regression found and fixed via a real-scale test: ~16s for a
+  // single no-op render() at 22,399 parts, versus single-digit ms once fixed).
+  const entries = []; // { pos, state }
+  const sigParts = [];
+  for (const [partId, pos] of inst.partPositions) {
+    const runtime = store.simRuntime.get(pos.model);
+    const entry = runtime ? runtime.values.get(partId) : null;
+    if (!entry) continue; // this part's model has no runtime yet, or hasn't reached it
+    const state = entry.lastError ? 'error' : (entry.changed ? 'changed' : 'normal');
+    entries.push({ pos, state });
+    sigParts.push(`${partId}:${state}:${entry.lastTick}`);
+  }
+
+  const signature = sigParts.join(',');
+  if (signature === inst.lastSimSignature) return;
+  inst.lastSimSignature = signature;
+
+  clearSimOverlay(inst);
+  if (entries.length === 0) return;
+
+  const byState = { normal: [], changed: [], error: [] };
+  for (const { pos, state } of entries) byState[state].push(pos);
+
+  const matrix = new THREE.Matrix4();
+  for (const [state, positions] of Object.entries(byState)) {
+    if (positions.length === 0) continue;
+    const geometry = new THREE.SphereGeometry(SIM_BADGE_RADIUS, 8, 6);
+    const material = new THREE.MeshStandardMaterial({ color: SIM_STATE_COLORS[state] });
+    const mesh = new THREE.InstancedMesh(geometry, material, positions.length);
+    positions.forEach((p, i) => {
+      matrix.setPosition(p.x, p.y + SIM_BADGE_HEIGHT, p.z);
+      mesh.setMatrixAt(i, matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.userData.simState = state;
+    mesh.userData.positions = positions;
+    inst.scene.add(mesh);
+    inst.simMeshes.set(state, mesh);
+  }
+}
+
+/** Makes the 'changed' state's markers pulse in place every animation frame (their shared
+ * scale oscillates around 1.0) — called from the per-tab animate() loop regardless of
+ * whether anything actually needs pulsing right now (a Map.get + early return when
+ * there's no 'changed' mesh, negligible per-frame cost). */
+function updateSimPulse(inst) {
+  const mesh = inst.simMeshes.get('changed');
+  if (!mesh) return;
+  const scale = 1 + SIM_PULSE_AMPLITUDE * Math.sin(performance.now() / SIM_PULSE_PERIOD_MS);
+  pulseScaleVec.set(scale, scale, scale);
+  const positions = mesh.userData.positions;
+  for (let i = 0; i < positions.length; i++) {
+    const p = positions[i];
+    pulsePosition.set(p.x, p.y + SIM_BADGE_HEIGHT, p.z);
+    pulseMatrix.compose(pulsePosition, pulseQuaternion, pulseScaleVec);
+    mesh.setMatrixAt(i, pulseMatrix);
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+}
+
 function createInstance(app, tab, container) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(themeBackgroundColor());
@@ -289,19 +477,19 @@ function createInstance(app, tab, container) {
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.target.set(0, 0, 0);
+  // OrbitControls' own default binds RIGHT-drag to panning, which would fight the node
+  // right-click context menu added below (a right-click-then-tiny-move is easy to trigger
+  // by accident, and OrbitControls still suppresses the native browser context menu
+  // unconditionally via its own 'contextmenu' listener regardless of this mapping — see
+  // its onContextMenu). Freeing RIGHT for the context menu and moving pan to MIDDLE-drag
+  // (a common desktop-3D-app convention) avoids that conflict entirely, rather than
+  // needing a click-vs-drag tolerance check for the right button too.
+  controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: null };
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.6));
   const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
   dirLight.position.set(5, 10, 7);
   scene.add(dirLight);
-
-  let animId = null;
-  const animate = () => {
-    animId = requestAnimationFrame(animate);
-    controls.update();
-    renderer.render(scene, camera);
-  };
-  animate();
 
   const resizeObserver = new ResizeObserver(() => {
     const w = container.clientWidth || 1, h = container.clientHeight || 1;
@@ -312,10 +500,26 @@ function createInstance(app, tab, container) {
   resizeObserver.observe(container);
 
   const inst = {
-    renderer, scene, camera, controls, container, resizeObserver, animId,
+    renderer, scene, camera, controls, container, resizeObserver, animId: null,
     typeMeshes: new Map(), connectorLines: null, hasFramedOnce: false, lastSignature: null,
-    focusMarker: null, focusedPartId: null, jumpedForPartId: null,
+    focusMarker: null, focusedPartId: null, jumpedForPartId: null, focusedPartPosition: null,
+    simMeshes: new Map(), lastSimSignature: null, partPositions: null,
   };
+
+  // inst.animId is written directly here (not a separate outer variable captured once
+  // into inst at construction time) — an earlier version used `let animId` and copied its
+  // value into inst.animId as a one-time snapshot, which went stale after the very first
+  // frame (a later requestAnimationFrame call only ever updated the outer variable, never
+  // inst.animId again); disposeInstance's cancelAnimationFrame(inst.animId) was then
+  // cancelling an already-fired, harmless id every time, never the actual pending frame —
+  // silently leaking a forever-running render loop on every closed 3D tab.
+  const animate = () => {
+    inst.animId = requestAnimationFrame(animate);
+    controls.update();
+    updateSimPulse(inst);
+    renderer.render(scene, camera);
+  };
+  animate();
 
   // Click-vs-drag: OrbitControls' own rotate/pan drag still ends with the browser firing
   // a native 'click' at the release point, so a raw 'click' listener can't be trusted
@@ -330,6 +534,7 @@ function createInstance(app, tab, container) {
     const hit = pickPartAtClientXY(inst, e.clientX, e.clientY);
     if (hit) {
       focusPart(inst, hit.partId);
+      selectPartInPanel(app, tab, hit.partId);
     }
   });
   renderer.domElement.addEventListener('dblclick', (e) => {
@@ -337,13 +542,22 @@ function createInstance(app, tab, container) {
     const hit = pickPartAtClientXY(inst, e.clientX, e.clientY);
     if (hit) jumpToMatching2DView(app, tab.id, hit.partId);
   });
+  renderer.domElement.addEventListener('contextmenu', (e) => {
+    e.preventDefault(); // OrbitControls also does this unconditionally; harmless twice
+    const hit = pickPartAtClientXY(inst, e.clientX, e.clientY);
+    if (hit) showNodeContextMenu(app, tab, hit.partId, e.clientX, e.clientY);
+  });
 
   // The actual "zoom in past a threshold" trigger — OrbitControls fires 'change' on
   // every camera/target update (including its own damped-zoom animation frames), so this
   // reacts as the zoom happens rather than needing an unconditional per-frame poll.
+  // Measured against the focused part's own position (inst.focusedPartPosition), NOT
+  // controls.target — focusing a part no longer recenters the orbit target (see
+  // focusPart's own comment), so target and "the thing you're actually zoomed in on"
+  // are no longer the same point in general.
   controls.addEventListener('change', () => {
-    if (!inst.focusedPartId) return;
-    const distance = camera.position.distanceTo(controls.target);
+    if (!inst.focusedPartId || !inst.focusedPartPosition) return;
+    const distance = camera.position.distanceTo(inst.focusedPartPosition);
     if (distance < ZOOM_JUMP_DISTANCE) {
       if (inst.jumpedForPartId !== inst.focusedPartId) {
         inst.jumpedForPartId = inst.focusedPartId;
@@ -389,6 +603,7 @@ function computeSignature(app, tab) {
     store.doc.connectors.map((c) => `${c.id}:${c.from}:${c.to}`).join(','),
     tab.activeStreams,
     tab.activeElementTypes,
+    tab.connectorTypeFilter,
     preferredStreamTemplateName(),
     document.body.dataset.theme,
   ]);
@@ -415,7 +630,7 @@ function syncSceneData(app, tab, inst) {
   inst.scene.background = new THREE.Color(themeBackgroundColor());
 
   const parts = store.doc.parts.filter((p) => passesStreamFilter(tab, p.streams) && passesElementTypeFilter(tab, p.type));
-  if (parts.length === 0) return;
+  if (parts.length === 0) { inst.partPositions = new Map(); return; }
 
   const { groupOrder, templateTypeOrder, cubeTypeOrder } = resolveLayerOrder(store);
 
@@ -471,7 +686,7 @@ function syncSceneData(app, tab, inst) {
       const y = (row - (rows - 1) / 2) * NODE_SPACING;
       matrix.setPosition(x, y, z);
       mesh.setMatrixAt(i, matrix);
-      partPositions.set(part.id, { x, y, z });
+      partPositions.set(part.id, { x, y, z, model: part.model });
       minX = Math.min(minX, x); maxX = Math.max(maxX, x);
       minY = Math.min(minY, y); maxY = Math.max(maxY, y);
     });
@@ -483,10 +698,11 @@ function syncSceneData(app, tab, inst) {
   }
 
   // A resync rebuilds every mesh from scratch, so a part focused before this rebuild
-  // needs its highlight marker repositioned to its NEW instance position — without
-  // touching controls.target (the person isn't re-clicking, don't yank their camera) or
-  // jumpedForPartId (if they'd already zoomed in and jumped once, an unrelated resync
-  // shouldn't re-arm and immediately jump them away again).
+  // needs its highlight marker (and remembered position, for the zoom-jump distance
+  // check) repositioned to its NEW instance position — without touching controls.target
+  // (focusing never did, see focusPart's own comment) or jumpedForPartId (if they'd
+  // already zoomed in and jumped once, an unrelated resync shouldn't re-arm and
+  // immediately jump them away again).
   if (inst.focusedPartId) {
     let stillPresent = false;
     for (const mesh of inst.typeMeshes.values()) {
@@ -496,21 +712,25 @@ function syncSceneData(app, tab, inst) {
       const marker = ensureFocusMarker(inst);
       marker.position.setFromMatrixPosition(matrix);
       marker.visible = true;
+      inst.focusedPartPosition = marker.position.clone();
       stillPresent = true;
       break;
     }
     if (!stillPresent) {
       clearFocusHighlight(inst);
-      inst.focusedPartId = null; inst.jumpedForPartId = null;
+      inst.focusedPartId = null; inst.jumpedForPartId = null; inst.focusedPartPosition = null;
     }
   }
 
   // Connector lines: one visible iff BOTH endpoints are currently visible (same
-  // convention the 2D canvas already uses — see passesStreamFilter's own comment).
-  // A single LineSegments/BufferGeometry for every visible connector, one draw call
-  // total, the line-drawing equivalent of the InstancedMesh approach above.
+  // convention the 2D canvas already uses — see passesStreamFilter's own comment), AND
+  // it matches tab.connectorTypeFilter if one is set (null = both 'c'/Connectors and
+  // 's'/Streams together, the default — see showNodeContextMenu's own comment for where
+  // this gets set). A single LineSegments/BufferGeometry for every visible connector, one
+  // draw call total, the line-drawing equivalent of the InstancedMesh approach above.
   const linePositions = [];
   for (const c of store.doc.connectors) {
+    if (tab.connectorTypeFilter != null && c.connectorType !== tab.connectorTypeFilter) continue;
     const fromPos = partPositions.get(c.from);
     const toPos = partPositions.get(c.to);
     if (!fromPos || !toPos) continue;
@@ -538,6 +758,8 @@ function syncSceneData(app, tab, inst) {
     inst.camera.updateProjectionMatrix();
     inst.hasFramedOnce = true;
   }
+
+  inst.partPositions = partPositions;
 }
 
 /**
@@ -546,7 +768,9 @@ function syncSceneData(app, tab, inst) {
  * re-syncs scene data on every subsequent call — never tears down and rebuilds the WebGL
  * context on every store change the way the 2D canvas page rebuilds its DOM, since that
  * would both be wasteful and would reset the camera/rotation the person is mid-interacting
- * with.
+ * with. syncSimOverlay runs unconditionally after syncSceneData (not gated by the same
+ * structural signature) since simulation ticks need to refresh it every call — see this
+ * file's own Stage 5 header comment.
  */
 function renderView3D(app, tab, container) {
   let inst = instances.get(tab.id);
@@ -555,6 +779,7 @@ function renderView3D(app, tab, container) {
     instances.set(tab.id, inst);
   }
   syncSceneData(app, tab, inst);
+  syncSimOverlay(app, tab, inst);
 }
 
 /** Called from App.closeTab (main.js, via canvas.js's disposeView3DTab) so a closed 3D
@@ -587,6 +812,8 @@ function getDebugSceneInfo(tabId) {
     }
     types[type] = { count: mesh.count, z: mesh.userData.z, group: mesh.userData.group, meshUuid: mesh.uuid, positions };
   }
+  const simOverlay = {};
+  for (const [state, mesh] of inst.simMeshes) simOverlay[state] = { count: mesh.count, meshUuid: mesh.uuid };
   return {
     types,
     meshCount: inst.typeMeshes.size,
@@ -597,6 +824,8 @@ function getDebugSceneInfo(tabId) {
     jumpedForPartId: inst.jumpedForPartId,
     focusMarkerVisible: inst.focusMarker ? inst.focusMarker.visible : false,
     cameraTargetDistance: inst.camera.position.distanceTo(inst.controls.target),
+    controlsTarget: { x: inst.controls.target.x, y: inst.controls.target.y, z: inst.controls.target.z },
+    simOverlay,
   };
 }
 
@@ -624,10 +853,58 @@ function debugJumpToMatching2DView(app, tabId, partId) {
 function debugSetCameraDistance(tabId, distance) {
   const inst = instances.get(tabId);
   if (!inst) return;
-  const dir = new THREE.Vector3().subVectors(inst.camera.position, inst.controls.target).normalize();
+  // Repositions relative to the focused part's own position (what the real zoom-jump
+  // check now measures against — see the 'change' listener's own comment), falling back
+  // to controls.target if nothing's focused (matters only for tests exercising this with
+  // no focus at all, which never trigger the jump check anyway).
+  const referencePoint = inst.focusedPartPosition || inst.controls.target;
+  const dir = new THREE.Vector3().subVectors(inst.camera.position, referencePoint).normalize();
   if (dir.lengthSq() === 0) dir.set(1, 1, 1).normalize();
-  inst.camera.position.copy(inst.controls.target).addScaledVector(dir, distance);
+  inst.camera.position.copy(referencePoint).addScaledVector(dir, distance);
   inst.controls.dispatchEvent({ type: 'change' });
 }
 
-export { renderView3D, disposeView3D, getDebugSceneInfo, debugFocusPart, debugJumpToMatching2DView, debugSetCameraDistance };
+/** Reads a sim overlay marker's current instance scale (the 'changed' state's markers are
+ * the only ones ever animated — see updateSimPulse) — lets the regression suite confirm
+ * the pulse animation is actually varying the rendered scale over time, without needing
+ * to simulate real animation-frame timing or compare screenshot pixels. */
+function debugGetSimMarkerScale(tabId, state) {
+  const inst = instances.get(tabId);
+  if (!inst) return null;
+  const mesh = inst.simMeshes.get(state);
+  if (!mesh || mesh.count === 0) return null;
+  const matrix = new THREE.Matrix4();
+  mesh.getMatrixAt(0, matrix);
+  const position = new THREE.Vector3(), quaternion = new THREE.Quaternion(), scale = new THREE.Vector3();
+  matrix.decompose(position, quaternion, scale);
+  return scale.x;
+}
+
+/** Projects a part's current world position to on-screen client coordinates (relative to
+ * the viewport, exactly what a real page.mouse.click(x, y) expects) — lets the regression
+ * suite drive GENUINE mouse events (real click/right-click, not a debug-hook shortcut)
+ * against a specific, known part regardless of where the layout actually placed it. This
+ * matters: a debug hook that duplicates a real listener's logic can silently drift from
+ * what the real listener actually does (found exactly this drift once already — see
+ * debugFocusPart's own history) — real click tests using this catch that class of bug,
+ * hook-only tests structurally cannot. */
+function debugGetScreenPosition(tabId, partId) {
+  const inst = instances.get(tabId);
+  if (!inst) return null;
+  for (const mesh of inst.typeMeshes.values()) {
+    const instanceId = mesh.userData.partIds.indexOf(partId);
+    if (instanceId === -1) continue;
+    const matrix = new THREE.Matrix4();
+    mesh.getMatrixAt(instanceId, matrix);
+    const worldPos = new THREE.Vector3().setFromMatrixPosition(matrix);
+    const projected = worldPos.clone().project(inst.camera);
+    const rect = inst.renderer.domElement.getBoundingClientRect();
+    return {
+      x: rect.left + (projected.x * 0.5 + 0.5) * rect.width,
+      y: rect.top + (-projected.y * 0.5 + 0.5) * rect.height,
+    };
+  }
+  return null;
+}
+
+export { renderView3D, disposeView3D, getDebugSceneInfo, debugFocusPart, debugJumpToMatching2DView, debugSetCameraDistance, debugGetSimMarkerScale, debugGetScreenPosition };

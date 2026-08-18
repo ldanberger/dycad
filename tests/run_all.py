@@ -995,6 +995,72 @@ def check_modal_no_close_on_outside_click(page):
     return True, "modal stays open on an outside click and only closes via its own Cancel button"
 
 
+def check_stream_filter_select_all_exclude_all(page):
+    """Regression guard: the Stream filter menu's Select All / Exclude All top-row
+    checkbox (new — added to match the pre-existing Element Type filter's own version).
+    Unchecking it should hide every streamed node (tab.activeStreams becomes an explicit
+    [] -> passesStreamFilter's "exclude all" case, not the old "empty array means
+    unfiltered" convention this filter used to have on its own), and re-checking it
+    should reset tab.activeStreams to null (unfiltered) — the exact same null-vs-[]
+    convention passesElementTypeFilter already used, now shared by both filters."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.findView(store.currentView) || store.doc.views[0];
+      const canvasTab = store.tabs.find(t => t.type === 'canvas') || app.createCanvasTab(view);
+      app.switchToTab(canvasTab.id); // Instructions opens active on startup, not a canvas tab
+      const mk = (label, streams) => {
+        const part = store.createPart({ type: 'GeneralActor', label, model: store.defaultModel, streams: streams || [] });
+        store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: Math.random() * 400, y: Math.random() * 400 });
+        return part;
+      };
+      mk('Streamed1', ['S1']);
+      mk('Streamed2', ['S1']);
+      mk('Unstreamed', []);
+      app.render();
+      await new Promise(r => setTimeout(r, 100));
+      const tab = store.activeTab();
+      const initialCount = document.querySelectorAll('.fnode').length;
+
+      document.getElementById('stream-filter-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      const selectAllCb = document.getElementById('stream-select-all');
+      const initiallyChecked = selectAllCb ? selectAllCb.checked : null;
+
+      selectAllCb.checked = false;
+      selectAllCb.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 60));
+      const afterExcludeAll = { activeStreams: tab.activeStreams, visibleCount: document.querySelectorAll('.fnode').length };
+
+      document.getElementById('stream-filter-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      const selectAllCb2 = document.getElementById('stream-select-all');
+      selectAllCb2.checked = true;
+      selectAllCb2.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 60));
+      const afterSelectAll = { activeStreams: tab.activeStreams, visibleCount: document.querySelectorAll('.fnode').length };
+
+      return { initialCount, initiallyChecked, afterExcludeAll, afterSelectAll };
+    }
+    """)
+    problems = []
+    if not result["initiallyChecked"]:
+        problems.append(f"expected the Select All checkbox to start checked (unfiltered), got {result}")
+    ax = result["afterExcludeAll"]
+    if ax["activeStreams"] != []:
+        problems.append(f"expected unchecking Select All to set tab.activeStreams to an explicit [] (exclude all), got {ax['activeStreams']}")
+    if ax["visibleCount"] != 0:
+        problems.append(f"expected excluding all streams to hide every node, got {ax['visibleCount']} still visible")
+    asel = result["afterSelectAll"]
+    if asel["activeStreams"] is not None:
+        problems.append(f"expected re-checking Select All to reset tab.activeStreams to null (unfiltered), got {asel['activeStreams']}")
+    if asel["visibleCount"] != result["initialCount"]:
+        problems.append(f"expected re-selecting all to restore every node, got {asel['visibleCount']} visible vs {result['initialCount']} originally")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "the Stream filter's Select All / Exclude All checkbox correctly toggles tab.activeStreams between null (unfiltered) and [] (exclude all), matching the Element Type filter's own convention"
+
+
 def check_dropdown_scrollable(page):
     """Regression guard: any dropdown (tested here via the Stream filter) should be
     capped to a sane viewport-relative height with scrolling, rather than growing
@@ -1908,8 +1974,9 @@ def check_view3d_layers_and_filters(page):
       await new Promise(r => setTimeout(r, 100));
       const streamFiltered = view3d.getDebugSceneInfo(tab.id);
 
-      // clear stream filter, apply type filter instead
-      tab.activeStreams = [];
+      // clear stream filter (null = unfiltered; [] now means "exclude all", distinct —
+      // see canvas.js's passesStreamFilter), apply type filter instead
+      tab.activeStreams = null;
       tab.activeElementTypes = ['BusinessCapability'];
       app.render();
       await new Promise(r => setTimeout(r, 100));
@@ -2236,6 +2303,289 @@ def check_sfce_array_field_survives_deeper_nesting(page):
     return True, "an array-of-primitives field (sections) sitting above a deeper nested array-of-objects field (entities) survives flattening intact, on every resulting record, instead of being silently dropped"
 
 
+def check_view3d_sim_overlay(page):
+    """Regression guard for 3D View Stage 5 (live simulation overlay): a currently-visible
+    part with a store.simRuntime entry for its own model gets a small colored marker above
+    it — green/blue/red for normal/changed/error, the exact palette css/styles.css'
+    .fnode-sim-badge already uses for the 2D canvas (SIM_STATE_COLORS), not a new encoding.
+    Covers: three parts (steady/unscripted, a script that changes value every tick, a
+    script that throws) each land in the correct one of the three marker meshes after two
+    ticks; the 'changed' marker's scale actually oscillates over real elapsed time
+    (debugGetSimMarkerScale sampled twice with a real wait in between — proves the pulse
+    animation is live, not just a static bigger sphere); and filtering a simulated part
+    out removes its marker too, the same "hide the node, its overlay disappears" convention
+    already established for connectors."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+      const view3d = await import('./js/view3d.js');
+
+      const steady = store.createPart({ type: 'GeneralActor', label: 'Steady', model: store.defaultModel, streams: [] });
+      const changing = store.createPart({ type: 'GeneralActor', label: 'Changing', model: store.defaultModel, streams: [] });
+      changing.scriptEnabled = true;
+      changing.script = 'return { value: ctx.tick };';
+      const erroring = store.createPart({ type: 'GeneralActor', label: 'Erroring', model: store.defaultModel, streams: [] });
+      erroring.scriptEnabled = true;
+      erroring.script = 'throw new Error(\\"boom\\");';
+
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 200));
+      const beforeAnyTick = view3d.getDebugSceneInfo(tab.id).simOverlay;
+
+      sim.stepSimulation(app, store.defaultModel);
+      sim.stepSimulation(app, store.defaultModel);
+      await new Promise(r => setTimeout(r, 150));
+      const afterTicks = view3d.getDebugSceneInfo(tab.id).simOverlay;
+
+      const scaleA = view3d.debugGetSimMarkerScale(tab.id, 'changed');
+      await new Promise(r => setTimeout(r, 220));
+      const scaleB = view3d.debugGetSimMarkerScale(tab.id, 'changed');
+
+      // filter out every part's type entirely -> every overlay marker should disappear too
+      tab.activeElementTypes = ['BusinessCapability']; // a type none of these parts have
+      app.render();
+      await new Promise(r => setTimeout(r, 150));
+      const afterFilteredOut = view3d.getDebugSceneInfo(tab.id).simOverlay;
+
+      return { beforeAnyTick, afterTicks, scaleA, scaleB, afterFilteredOut };
+    }
+    """)
+    problems = []
+    if len(result["beforeAnyTick"]) != 0:
+        problems.append(f"expected no sim overlay markers before any simulation tick has run, got {result['beforeAnyTick']}")
+    at = result["afterTicks"]
+    for state, expectedCount in [("normal", 1), ("changed", 1), ("error", 1)]:
+        if at.get(state, {}).get("count") != expectedCount:
+            problems.append(f"expected exactly {expectedCount} '{state}' marker after ticking (1 steady/1 changing/1 erroring part), got {at.get(state)}: full {at}")
+    if result["scaleA"] is None or result["scaleB"] is None:
+        problems.append(f"expected debugGetSimMarkerScale to find the 'changed' marker both times, got {result['scaleA']} then {result['scaleB']}")
+    elif abs(result["scaleA"] - result["scaleB"]) < 0.05:
+        problems.append(f"expected the 'changed' marker's scale to visibly pulse (oscillate) over ~220ms of real elapsed time, got barely-different samples {result['scaleA']} and {result['scaleB']}")
+    af = result["afterFilteredOut"]
+    if len(af) != 0:
+        problems.append(f"expected every sim overlay marker to disappear once its part is filtered out (Type filter set to a type none of these parts have), got {af}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "sim overlay markers use the 2D canvas's own normal/changed/error color encoding, the 'changed' marker visibly pulses over real elapsed time, and filtering a part out removes its overlay marker too"
+
+
+def check_view3d_dispose_cancels_current_animation_frame(page):
+    """Regression guard for a real bug found while building Stage 5: createInstance used
+    to capture inst.animId as a one-time snapshot of an outer `animId` variable at object-
+    construction time (`const inst = { ..., animId, ... }`), but every SUBSEQUENT
+    requestAnimationFrame call inside animate() only reassigned that outer variable, never
+    inst.animId again — so inst.animId went stale after the very first frame. disposeInstance's
+    cancelAnimationFrame(inst.animId) was then always cancelling an already-fired, harmless
+    id, never the actual currently-pending frame, silently leaking a forever-running render
+    loop (against a disposed renderer/scene) on every closed 3D tab. Verified here by
+    intercepting the real window.requestAnimationFrame/cancelAnimationFrame, letting
+    several real frames elapse (so the first- and most-recently-requested ids differ), then
+    confirming the id actually passed to cancelAnimationFrame at tab-close time matches the
+    LAST id requested, not the first."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const requestedIds = [];
+      const cancelledIds = [];
+      const origRAF = window.requestAnimationFrame.bind(window);
+      const origCAF = window.cancelAnimationFrame.bind(window);
+      window.requestAnimationFrame = (cb) => { const id = origRAF(cb); requestedIds.push(id); return id; };
+      window.cancelAnimationFrame = (id) => { cancelledIds.push(id); return origCAF(id); };
+
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 400)); // let several real animation frames elapse
+
+      const idsBeforeClose = [...requestedIds];
+      app.closeTab(tab.id);
+      await new Promise(r => setTimeout(r, 50));
+
+      window.requestAnimationFrame = origRAF;
+      window.cancelAnimationFrame = origCAF;
+
+      return {
+        requestedCount: idsBeforeClose.length,
+        firstRequestedId: idsBeforeClose[0],
+        lastRequestedId: idsBeforeClose[idsBeforeClose.length - 1],
+        cancelledIds,
+      };
+    }
+    """)
+    problems = []
+    if result["requestedCount"] < 2:
+        problems.append(f"expected multiple real animation frames to have elapsed before closing the tab (so first vs. last id actually differ), only saw {result['requestedCount']} — increase the wait if this is flaky")
+    elif result["lastRequestedId"] not in result["cancelledIds"]:
+        problems.append(f"expected the MOST RECENTLY requested animation frame id ({result['lastRequestedId']}) to be the one cancelled on tab close, but cancelAnimationFrame was called with {result['cancelledIds']} — the render loop's actual pending frame was never cancelled, leaking it")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, f"closing a 3D tab cancels its actually-current pending animation frame ({result['lastRequestedId']}), not a stale id from the first frame ever scheduled"
+
+
+def check_view3d_real_click_shows_panel_and_no_recenter(page):
+    """Regression guard for a real bug found via genuine mouse-click testing: the click
+    listener only ever called focusPart, never selectPartInPanel — so "click shows this
+    part's properties in the panel" (a feature added earlier, and already covered by a
+    regression check) silently never worked for an ACTUAL mouse click, only for the
+    debugFocusPart test hook, which has its own separate, correct call to
+    selectPartInPanel. A hook-only test structurally cannot catch this class of drift
+    between a debug shortcut and the real listener it stands in for — this check drives a
+    genuine page.mouse.click(), positioned via debugGetScreenPosition (world-to-screen
+    projection), and would have caught the bug immediately. Also confirms focusing a part
+    via click does NOT recenter/move OrbitControls' own orbit target (a deliberate
+    change — clicking a node shows its properties and highlights it in place, not yanks
+    the camera to center on it)."""
+    setup = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      const part = store.createPart({ type: 'GeneralActor', label: 'ClickTarget', model: store.defaultModel, streams: [] });
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 250));
+      const before = view3d.getDebugSceneInfo(tab.id).controlsTarget;
+      const pos = view3d.debugGetScreenPosition(tab.id, part.id);
+      return { partId: part.id, before, pos };
+    }
+    """)
+    if not setup["pos"]:
+        return False, f"debugGetScreenPosition couldn't find the part on screen: {setup}"
+
+    page.mouse.click(setup["pos"]["x"], setup["pos"]["y"])
+    page.wait_for_timeout(200)
+    after = js(page, """
+    async () => {
+      const view3d = await import('./js/view3d.js');
+      const app = window.dycadApp, store = app.store;
+      const tab = store.tabs.find(t => t.type === '3d');
+      const info = view3d.getDebugSceneInfo(tab.id);
+      return {
+        controlsTarget: info.controlsTarget,
+        focusedPartId: info.focusedPartId,
+        focusMarkerVisible: info.focusMarkerVisible,
+        selectedCatalogRow: tab.selectedCatalogRow,
+        panelHtml: document.getElementById('properties-body').innerHTML,
+      };
+    }
+    """)
+    problems = []
+    if after["focusedPartId"] != setup["partId"] or not after["focusMarkerVisible"]:
+        problems.append(f"expected a real click to focus the part and show its marker, got {after}")
+    if not after["selectedCatalogRow"] or after["selectedCatalogRow"].get("id") != setup["partId"]:
+        problems.append(f"expected a real click to select the part in the Properties panel via tab.selectedCatalogRow, got {after['selectedCatalogRow']}")
+    if "ClickTarget" not in after["panelHtml"]:
+        problems.append(f"expected the Properties panel to actually render the clicked part's own fields (its label 'ClickTarget'), got HTML that doesn't mention it: {after['panelHtml'][:300]}")
+    before, targetAfter = setup["before"], after["controlsTarget"]
+    moved = any(abs(before[k] - targetAfter[k]) > 1e-9 for k in ("x", "y", "z"))
+    if moved:
+        problems.append(f"expected clicking a node NOT to move OrbitControls' own orbit target (no camera recenter), got it move from {before} to {targetAfter}")
+    if problems:
+        return False, "; ".join(problems) + f" (setup: {setup}, after: {after})"
+    return True, "a genuine mouse click focuses the part, shows its properties in the panel, and does not recenter the camera"
+
+
+def check_view3d_node_context_menu(page):
+    """Regression guard for the 3D node right-click context menu (Filter to Streams +
+    Connector Type quick filter — 3D draws connectorType 'c' Connectors and 's' Streams
+    together with no distinction by default, unlike the 2D canvas's per-view checkboxes).
+    Uses genuine page.mouse.click(..., button='right') events, positioned via
+    debugGetScreenPosition, against a fixture with a distinguishable 'c' and 's'
+    connector from the same source part, so switching the Connector Type filter produces
+    a directly observable, different connectorCount — not just a changed field value."""
+    setup = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      const a = store.createPart({ type: 'GeneralActor', label: 'CtxSource', model: store.defaultModel, streams: ['S1', 'S2'] });
+      // b/c also carry S1 so the earlier "Filter to Streams: S1, S2" step (tested first,
+      // in the same flow) doesn't hide them and, with them, their connectors — that would
+      // confound the later connector-type-filter assertions with an unrelated cause.
+      const b = store.createPart({ type: 'BusinessCapability', label: 'CtxRel', model: store.defaultModel, streams: ['S1'] });
+      const c = store.createPart({ type: 'ApplicationComponent', label: 'CtxStream', model: store.defaultModel, streams: ['S1'] });
+      store.createConnector({ from: a.id, to: b.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      store.createConnector({ from: a.id, to: c.id, model: store.defaultModel, connectorType: 's', relationship: 'Association', streams: ['S1'] });
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 250));
+      const pos = view3d.debugGetScreenPosition(tab.id, a.id);
+      const initialConnectorCount = view3d.getDebugSceneInfo(tab.id).connectorCount;
+      return { pos, initialConnectorCount };
+    }
+    """)
+    if not setup["pos"]:
+        return False, f"debugGetScreenPosition couldn't find the source part on screen: {setup}"
+    if setup["initialConnectorCount"] != 2:
+        return False, f"expected 2 connectors initially (1 'c' + 1 's'), got {setup['initialConnectorCount']}"
+
+    x, y = setup["pos"]["x"], setup["pos"]["y"]
+    page.mouse.click(x, y, button="right")
+    page.wait_for_timeout(200)
+    menu1 = js(page, "async () => [...document.querySelectorAll('.view3d-context-menu .v3d-ctx-item')].map(e => e.textContent.trim())")
+
+    js(page, "async () => { [...document.querySelectorAll('.view3d-context-menu .v3d-ctx-item')].find(el => el.textContent.includes('Filter to Streams'))?.click(); }")
+    page.wait_for_timeout(150)
+    afterStreamFilter = js(page, "async () => window.dycadApp.store.tabs.find(t => t.type === '3d').activeStreams")
+
+    page.mouse.click(x, y, button="right")
+    page.wait_for_timeout(200)
+    afterConnectorsOnly = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      [...document.querySelectorAll('.view3d-context-menu .v3d-ctx-item')].find(el => el.textContent.trim().endsWith('Connectors'))?.click();
+      await new Promise(r => setTimeout(r, 150));
+      const tab = store.tabs.find(t => t.type === '3d');
+      return { connectorTypeFilter: tab.connectorTypeFilter, connectorCount: view3d.getDebugSceneInfo(tab.id).connectorCount };
+    }
+    """)
+
+    page.mouse.click(x, y, button="right")
+    page.wait_for_timeout(200)
+    afterStreamsOnly = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      [...document.querySelectorAll('.view3d-context-menu .v3d-ctx-item')].find(el => { const t = el.textContent.trim(); return t.endsWith('Streams') && !t.includes('Filter'); })?.click();
+      await new Promise(r => setTimeout(r, 150));
+      const tab = store.tabs.find(t => t.type === '3d');
+      return { connectorTypeFilter: tab.connectorTypeFilter, connectorCount: view3d.getDebugSceneInfo(tab.id).connectorCount };
+    }
+    """)
+
+    page.mouse.click(x, y, button="right")
+    page.wait_for_timeout(200)
+    afterAll = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      [...document.querySelectorAll('.view3d-context-menu .v3d-ctx-item')].find(el => el.textContent.trim().endsWith('All'))?.click();
+      await new Promise(r => setTimeout(r, 150));
+      const tab = store.tabs.find(t => t.type === '3d');
+      return { connectorTypeFilter: tab.connectorTypeFilter, connectorCount: view3d.getDebugSceneInfo(tab.id).connectorCount };
+    }
+    """)
+
+    problems = []
+    if not any("Filter to Streams" in t for t in menu1):
+        problems.append(f"expected the right-click menu to offer a 'Filter to Streams' item, got {menu1}")
+    if not any(t.endswith("Connectors") for t in menu1):
+        problems.append(f"expected a 'Connectors' connector-type option, got {menu1}")
+    if not any(t.endswith("Streams") and "Filter" not in t for t in menu1):
+        problems.append(f"expected a 'Streams' connector-type option, got {menu1}")
+    if afterStreamFilter != ["S1", "S2"]:
+        problems.append(f"expected clicking 'Filter to Streams' to set tab.activeStreams to the part's own streams ['S1','S2'], got {afterStreamFilter}")
+    if afterConnectorsOnly["connectorTypeFilter"] != "c" or afterConnectorsOnly["connectorCount"] != 1:
+        problems.append(f"expected picking 'Connectors' to filter to connectorType 'c' only (1 connector), got {afterConnectorsOnly}")
+    if afterStreamsOnly["connectorTypeFilter"] != "s" or afterStreamsOnly["connectorCount"] != 1:
+        problems.append(f"expected picking 'Streams' to filter to connectorType 's' only (1 connector), got {afterStreamsOnly}")
+    if afterAll["connectorTypeFilter"] is not None or afterAll["connectorCount"] != 2:
+        problems.append(f"expected picking 'All' to clear the connector-type filter (both connectors visible again), got {afterAll}")
+    if problems:
+        return False, "; ".join(problems) + f" (menu1: {menu1})"
+    return True, "the 3D node right-click context menu offers a working Filter-to-Streams quick filter and a working Connector Type filter (All/Connectors/Streams), driven via genuine right-click mouse events"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
@@ -2408,6 +2758,7 @@ CHECKS = [
     check_enterprise_template_is_short_default,
     check_generate_industry_selection_cap,
     check_modal_no_close_on_outside_click,
+    check_stream_filter_select_all_exclude_all,
     check_dropdown_scrollable,
     check_sfce_catalog_page,
     check_routing_style_per_connector_type,
@@ -2428,6 +2779,10 @@ CHECKS = [
     check_view3d_cube_order_fallback,
     check_view3d_focus_and_zoom_jump,
     check_sfce_array_field_survives_deeper_nesting,
+    check_view3d_sim_overlay,
+    check_view3d_dispose_cancels_current_animation_frame,
+    check_view3d_real_click_shows_panel_and_no_recenter,
+    check_view3d_node_context_menu,
 ]
 
 

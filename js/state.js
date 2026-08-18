@@ -419,11 +419,10 @@ class Store {
       history: { past: [], present: this.snapshot(), future: [] },
       viewport: { x: 0, y: 0, zoom: 1 },
       selection: new Set(),
-      activeStreams: [],
       // null = no filter configured yet (show everything) — distinct from an explicit
-      // empty array [], which (after the type filter's "exclude all" is used) means
-      // "show nothing". Kept separate from activeStreams' own empty-means-unfiltered
-      // convention since that filter has no "exclude all" concept to support.
+      // empty array [], which (via either filter menu's "Select All / Exclude All" top
+      // row) means "show nothing". Both filters share this same convention.
+      activeStreams: null,
       activeElementTypes: null,
       // "Connector levels" (numeric, null = unlimited/"All") — only takes effect while
       // a stream or type filter is actively narrowing the view; controls how many hops
@@ -432,6 +431,12 @@ class Store {
       // change the existing filter behavior for anyone already using it.
       connectorLevels: 0,
       selectedSectionId: null,
+      // 3D-tab-only: which connectorType(s) to draw — null = both 'c' (Connectors) and
+      // 's' (Streams) together, the default; set via the 3D node right-click menu's
+      // Connector Type quick filter. A 3D tab isn't backed by a view, so this can't live
+      // on view.chkShowConnectorType/chkShowStreamType the way the 2D canvas's own
+      // equivalent does — this is the 3D-only counterpart, tab-scoped instead.
+      connectorTypeFilter: null,
     };
     this.tabs.push(tab);
     return tab;

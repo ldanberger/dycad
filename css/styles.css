@@ -171,8 +171,8 @@ button, select, input { font-family: inherit; font-size: inherit; color: inherit
 .dropdown-menu .dd-empty { padding: 6px 8px; color: var(--text-muted); }
 .dropdown-menu .dd-separator { height: 1px; margin: 4px 2px; background: var(--border); }
 .menu-item-wrap .dropdown-menu { left: 0; right: auto; }
-#element-type-filter-menu .dd-item-list { max-height: 540px; overflow-y: auto; }
-#element-type-filter-menu .dd-select-all { border-bottom: 1px solid var(--border); margin-bottom: 4px; padding-bottom: 6px; font-weight: 600; }
+#element-type-filter-menu .dd-item-list, #stream-filter-menu .dd-item-list { max-height: 540px; overflow-y: auto; }
+#element-type-filter-menu .dd-select-all, #stream-filter-menu .dd-select-all { border-bottom: 1px solid var(--border); margin-bottom: 4px; padding-bottom: 6px; font-weight: 600; }
 #stream-filter-menu { left: 0; right: auto; }
 .menu-bar-center-group { display: flex; gap: 6px; }
 .cmd-context-item { display: flex; align-items: center; gap: 8px; }

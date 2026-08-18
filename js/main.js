@@ -1780,7 +1780,7 @@ class App {
         const fakeTab = {
           id: `print-${view.id}`, type: 'canvas', viewId: view.id,
           viewport: { x: 0, y: 0, zoom: 1 }, selection: new Set(),
-          activeStreams: [], activeElementTypes: null, connectorLevels: 0, selectedSectionId: null,
+          activeStreams: null, activeElementTypes: null, connectorLevels: 0, selectedSectionId: null,
         };
         const offscreen = document.createElement('div'); // never attached to the document — absolute-positioned content needs no live layout to build correctly
         renderCanvasPage(this, fakeTab, offscreen);
@@ -3154,22 +3154,54 @@ function wireGlobalEvents(app) {
       }
     }
     const sorted = [...availableStreams].sort();
-    menu.innerHTML = sorted.length
-      ? sorted.map((s) => `<div class="dd-item"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" value="${escapeHtml(s)}" ${tab.activeStreams.includes(s) ? 'checked' : ''} />${escapeHtml(s)}</label></div>`).join('')
-      : `<div class="dd-empty">No streams in ${is3D ? 'the model' : 'this view'}</div>`;
-    menu.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
-      cb.addEventListener('change', () => {
-        tab.activeStreams = [...menu.querySelectorAll('input[type="checkbox"]:checked')].map((c) => c.value);
-        // The auto-select-matching-nodes side effect only makes sense for a canvas tab's
-        // own viewMember-backed selection — the 3D tab has no such selection concept yet.
-        if (!is3D && tab.activeStreams.length > 0) {
-          tab.selection.clear();
-          for (const vm of store.viewMembersForView(tab.viewId)) {
-            const obj = vm.objectType === 'part' ? store.findPart(vm.objectId) : store.findConnector(vm.objectId);
-            if (obj && (obj.streams || []).some((s) => tab.activeStreams.includes(s))) tab.selection.add(vm.id);
-          }
+
+    // Same null/empty-array convention the element-type filter below already uses: null
+    // = unfiltered (every item displays checked), an explicit array (including an empty
+    // one, from "Exclude All") reflects exactly what's in it.
+    const isFilterActive = tab.activeStreams != null;
+    const checkedStreams = isFilterActive ? new Set(tab.activeStreams) : new Set(sorted);
+    const allChecked = sorted.length > 0 && sorted.every((s) => checkedStreams.has(s));
+
+    if (sorted.length === 0) {
+      menu.innerHTML = `<div class="dd-empty">No streams in ${is3D ? 'the model' : 'this view'}</div>`;
+    } else {
+      menu.innerHTML = `
+        <div class="dd-item dd-select-all">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="stream-select-all" ${allChecked ? 'checked' : ''} />Select All / Exclude All
+          </label>
+        </div>
+        <div class="dd-item-list">
+          ${sorted.map((s) => `<div class="dd-item"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" value="${escapeHtml(s)}" ${checkedStreams.has(s) ? 'checked' : ''} />${escapeHtml(s)}</label></div>`).join('')}
+        </div>`;
+    }
+
+    const applyStreams = () => {
+      // The auto-select-matching-nodes side effect only makes sense for a canvas tab's
+      // own viewMember-backed selection — the 3D tab has no such selection concept yet.
+      if (!is3D && tab.activeStreams && tab.activeStreams.length > 0) {
+        tab.selection.clear();
+        for (const vm of store.viewMembersForView(tab.viewId)) {
+          const obj = vm.objectType === 'part' ? store.findPart(vm.objectId) : store.findConnector(vm.objectId);
+          if (obj && (obj.streams || []).some((s) => tab.activeStreams.includes(s))) tab.selection.add(vm.id);
         }
-        app.render();
+      }
+      app.render();
+    };
+    const itemCheckboxes = () => [...menu.querySelectorAll('.dd-item-list input[type="checkbox"]')];
+    const selectAllCb = document.getElementById('stream-select-all');
+    if (selectAllCb) {
+      selectAllCb.addEventListener('change', () => {
+        tab.activeStreams = selectAllCb.checked ? null : []; // null = unfiltered; [] = explicit "exclude all"
+        itemCheckboxes().forEach((cb) => { cb.checked = selectAllCb.checked; });
+        applyStreams();
+      });
+    }
+    itemCheckboxes().forEach((cb) => {
+      cb.addEventListener('change', () => {
+        tab.activeStreams = itemCheckboxes().filter((c) => c.checked).map((c) => c.value);
+        if (selectAllCb) selectAllCb.checked = itemCheckboxes().every((c) => c.checked);
+        applyStreams();
       });
     });
     menu.classList.toggle('hidden');

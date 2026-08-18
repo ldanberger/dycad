@@ -1628,4 +1628,66 @@
 // arbitrarily many further nesting levels. New permanent regression check
 // (check_sfce_array_field_survives_deeper_nesting) confirmed to catch the exact
 // regression via temporarily reverting the fix before restoring it. Full suite 46/46.
-export const APP_VERSION = '0.811';
+// 0.812: Stage 5 of the 3D View (Explore menu) — live simulation overlay. Every
+// currently-visible part with a store.simRuntime entry for its own model gets a small
+// colored marker floating above its cube — green/blue/red for normal/changed/error,
+// SIM_STATE_COLORS mirroring .fnode-sim-badge's own CSS colors exactly, the SAME encoding
+// the 2D canvas's Show Simulation Values badge already uses. A 'changed' marker
+// additionally pulses (its scale oscillates every animation frame) — 3D's stand-in for
+// the 2D badge's static "changed" border color, since a static color reads less clearly
+// in a scene you're also free to rotate. Current-tick only, color+pulse only (no numeric
+// text) — both decided up front. Deliberately bypasses the structural rebuild signature
+// (a continuous Run calls app.render() every ~500ms without touching anything that
+// signature tracks), keeping its own much cheaper signature instead.
+// Two real bugs found and fixed along the way, both via real-scale testing (22,399
+// parts): (1) the overlay's first version called store.findPart per visible part — an
+// Array.find, linear scan over the whole document — turning a routine no-op render() into
+// an O(n^2) scan, ~16 SECONDS at real scale once any simulation had been stepped; fixed by
+// having syncSceneData's own placement loop stash each part's model directly onto its
+// partPositions entry, so the overlay never needs a store lookup at all. (2)
+// createInstance captured inst.animId as a one-time snapshot at object-construction time,
+// so it went stale after the very first animation frame — disposeInstance's
+// cancelAnimationFrame(inst.animId) was then always cancelling an already-fired, harmless
+// id, never the actual pending frame, silently leaking a forever-running render loop on
+// every closed 3D tab; fixed by writing inst.animId directly inside animate() itself.
+// Two new permanent regression checks (check_view3d_sim_overlay,
+// check_view3d_dispose_cancels_current_animation_frame), each confirmed to catch its own
+// deliberately-reintroduced regression before being trusted. Full suite 48/48.
+// 0.813: new File > Load Example, "smart factory 3d demo.json" — a 21-part/20-connector
+// smart-factory monitoring model spanning every ArchiMate layer and two sections (Plant
+// North/South), built specifically to show off the 3D View end to end: a real layered
+// cube with cross-layer connectors, click-to-focus/properties and double-click-to-2D-jump
+// (Stage 4), and a live simulation overlay (Stage 5) — five Device sensors emit noisy
+// periodic readings, one intermittently faults (drops offline every 5th tick), two
+// Gateways + an Analytics Engine average the signal through a real multi-hop propagation
+// chain, and an edge-triggered anomaly check raises a script badge + logs a Message Log
+// alert when the combined score swings away from its own recent trend. Verified end to
+// end via a real browser: both a direct store.loadFromJSON and the actual File > Load
+// Example menu flow, confirmed zero console errors, confirmed the anomaly/alert path
+// actually fires over enough ticks. Full suite unaffected, still 48/48 (this is a new
+// data asset, not a code change).
+// 0.814: 3D View usability follow-ups. Clicking a part no longer recenters the camera
+// (focusPart used to controls.target.copy(position) on every click; now it only
+// remembers the part's world position for the zoom-jump distance check, leaving
+// controls.target alone — click highlights in place, same as a 2D canvas selection
+// doesn't recenter the canvas). New node right-click context menu: "Filter to Streams"
+// (tab.activeStreams) and a Connector Type quick filter (tab.connectorTypeFilter:
+// null/'c'/'s' — the 3D view previously drew every connectorType together with no way to
+// narrow it, unlike the 2D canvas's own chkShowConnectorType/chkShowStreamType view
+// checkboxes). OrbitControls' RIGHT button (default: pan) remapped to null and MIDDLE to
+// pan, freeing right-click for the menu. Stream filter menu gained the same Select All /
+// Exclude All top row the Element Type filter already had — required unifying
+// tab.activeStreams onto the same null(unfiltered)-vs-[](exclude all) convention
+// passesElementTypeFilter already used (was: empty array always meant unfiltered, with
+// no way to represent "show nothing").
+// Also fixes a real bug found in ALREADY-SHIPPED v0.813: the click listener called
+// focusPart but never selectPartInPanel, so "click shows properties in the panel" (added
+// the version before) silently never worked for a genuine mouse click — only
+// debugFocusPart (the test hook, with its own separate correct call) exercised it, so
+// the existing test passed despite the real path being broken. Found via a new
+// debugGetScreenPosition test hook (projects a part's world position to on-screen client
+// coordinates) that let a permanent check drive a genuine page.mouse.click() for the
+// first time instead of only the debug shortcut. Four new/updated permanent regression
+// checks, each confirmed to catch its own deliberately-reintroduced regression. Full
+// suite 51/51.
+export const APP_VERSION = '0.814';

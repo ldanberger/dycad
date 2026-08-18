@@ -1,0 +1,613 @@
+[
+  {
+    "function": "Client Acquisition & Business Development",
+    "capabilities": [
+      {
+        "name": "RFP & Pitch Management",
+        "description": "Manages client proposals, pitch materials, and formal legal tender submissions.",
+        "applicationCapabilities": [
+          {
+            "name": "Proposal & RFP Automation",
+            "description": "Assembles tailored legal pitches using curated firm experience and rate structures.",
+            "sections": ["Marketing & Business Development", "Practice Group Leadership"],
+            "entities": [
+              {
+                "name": "Legal Pitch Proposal",
+                "description": "Customized pitch document detailing proposed legal team, approach, and fee structures."
+              },
+              {
+                "name": "RFP Response Record",
+                "description": "Structured answers to prospective client procurement questions and legal requirements."
+              },
+              {
+                "name": "Firm Representative Experience Record",
+                "description": "Anonymized record of past case outcomes and deal histories used for marketing credentials."
+              }
+            ]
+          },
+          {
+            "name": "Pursuit & Opportunity Tracking",
+            "description": "Tracks prospective client pursuits, proposal stages, and pitch outcome metrics.",
+            "sections": ["Marketing & Business Development"],
+            "entities": [
+              {
+                "name": "Legal Business Opportunity",
+                "description": "Targeted prospective legal engagement or panel opportunity."
+              },
+              {
+                "name": "Pitch Win/Loss Record",
+                "description": "Captured feedback and post-pitch evaluation metrics from client procurement decisions."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Client Relationship Intelligence",
+        "description": "Tracks client organizational networks, cross-selling touchpoints, and relationship health.",
+        "applicationCapabilities": [
+          {
+            "name": "Legal CRM Data Enrichment",
+            "description": "Aggregates corporate key contact data and market news with firm relationship histories.",
+            "sections": ["Marketing & Business Development", "Executive Leadership"],
+            "entities": [
+              {
+                "name": "Corporate Client Profile",
+                "description": "Master organization entity containing parent-subsidiary hierarchies and industry classifications."
+              },
+              {
+                "name": "Client Contact Record",
+                "description": "Individual legal sponsor or in-house counsel contact details and interaction history."
+              },
+              {
+                "name": "Relationship Intersect Score",
+                "description": "Calculated score reflecting executive and attorney relationship strength across client touchpoints."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Client Intake & Conflict Clearance",
+    "capabilities": [
+      {
+        "name": "Conflicts Analysis & Resolution",
+        "description": "Identifies legal, ethical, and commercial conflicts of interest before undertaking representation.",
+        "applicationCapabilities": [
+          {
+            "name": "Automated Entity Searching",
+            "description": "Scans internal databases and public corporate registries for adverse parties and corporate affiliates.",
+            "sections": ["Conflicts & Ethics", "General Counsel's Office"],
+            "entities": [
+              {
+                "name": "Conflict Search Request",
+                "description": "Initiated search query containing proposed client name, adverse parties, and corporate affiliates."
+              },
+              {
+                "name": "Adverse Party Record",
+                "description": "Opposing party, subsidiary, or related entity flagged for ethical screening."
+              },
+              {
+                "name": "Conflict Clearance Decision",
+                "description": "Formal sign-off or conditional clearance record issued by the ethics partner."
+              }
+            ]
+          },
+          {
+            "name": "Ethical Barrier Administration",
+            "description": "Establishes and enforces system-level information barriers around restricted matters.",
+            "sections": ["Conflicts & Ethics", "IT Security"],
+            "entities": [
+              {
+                "name": "Ethical Wall Order",
+                "description": "Policy directive specifying restricted attorneys and firewalled legal matters."
+              },
+              {
+                "name": "Screening Acknowledgment Record",
+                "description": "Signed confirmation from individual personnel agreeing to ethical wall boundaries."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Matter Engagement & Onboarding",
+        "description": "Executes regulatory client checks and issues formal terms of engagement.",
+        "applicationCapabilities": [
+          {
+            "name": "AML & KYC Compliance",
+            "description": "Performs identity verification and anti-money laundering screening against sanctions lists.",
+            "sections": ["Conflicts & Ethics", "Finance & Accounting"],
+            "entities": [
+              {
+                "name": "KYC Verification File",
+                "description": "Documentation verifying client identity, beneficial ownership, and source of funds."
+              },
+              {
+                "name": "Sanctions Screening Result",
+                "description": "Automated match report from PEP and global sanctions database checks."
+              }
+            ]
+          },
+          {
+            "name": "Engagement Contracting",
+            "description": "Generates, negotiates, and archives binding engagement letters and retainer terms.",
+            "sections": ["Conflicts & Ethics", "Practice Management", "Finance & Accounting"],
+            "entities": [
+              {
+                "name": "Engagement Letter",
+                "description": "Executed contract defining scope of legal representation, fee arrangements, and standard terms."
+              },
+              {
+                "name": "Retainer Trust Account Record",
+                "description": "Initial advance payment deposit ledger entry linked to a specific engagement."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Legal Matter Execution & Workflows",
+    "capabilities": [
+      {
+        "name": "Matter Project Management",
+        "description": "Coordinates legal team tasks, milestones, and client status deliverables for open engagements.",
+        "applicationCapabilities": [
+          {
+            "name": "Legal Project Workspace",
+            "description": "Tracks matter phases, task assignments, court deadlines, and deliverable status.",
+            "sections": ["Legal Project Management", "Practice Group Leadership"],
+            "entities": [
+              {
+                "name": "Legal Matter Master",
+                "description": "Core entity containing unique matter number, assigned billing partner, client code, and practice area."
+              },
+              {
+                "name": "Matter Phase Work Breakdown",
+                "description": "Structured project plan breaking legal work down into phases, tasks, and estimated hours."
+              },
+              {
+                "name": "Critical Legal Deadline",
+                "description": "Statutory limitation date, court appearance, or contractual milestone."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Document Assembly & Drafting Automation",
+        "description": "Generates complex legal instruments and agreements using standardized logic and clause libraries.",
+        "applicationCapabilities": [
+          {
+            "name": "Clause Library Management",
+            "description": "Maintains curated fallback clauses, standard provisions, and commentary for contract assembly.",
+            "sections": ["Knowledge Management", "Corporate Practice Group"],
+            "entities": [
+              {
+                "name": "Standard Legal Clause",
+                "description": "Approved template provision with variable placeholders and legal guidance notes."
+              },
+              {
+                "name": "Fallback Provision Variance",
+                "description": "Pre-approved alternative clause wording for negotiation boundaries."
+              }
+            ]
+          },
+          {
+            "name": "Automated Contract Generation",
+            "description": "Populates matter variables into complex legal document templates.",
+            "sections": ["Corporate Practice Group", "Paralegal Services"],
+            "entities": [
+              {
+                "name": "Document Assembly Questionnaire",
+                "description": "Structured interview input form driving contract generation rules."
+              },
+              {
+                "name": "Draft Contract File",
+                "description": "Generated preliminary agreement ready for attorney review and negotiations."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "E-Discovery & Litigation Support",
+    "capabilities": [
+      {
+        "name": "Legal Hold & Data Preservation",
+        "description": "Manages legal hold obligations to preserve potential evidence across client custodians.",
+        "applicationCapabilities": [
+          {
+            "name": "Legal Hold Notice Automation",
+            "description": "Issues, tracks, and escalates spoliation warning notices to data custodians.",
+            "sections": ["Litigation Practice Group", "General Counsel's Office"],
+            "entities": [
+              {
+                "name": "Legal Hold Notice",
+                "description": "Formal communication instructing custodians to preserve relevant documents and electronic data."
+              },
+              {
+                "name": "Custodian Compliance Log",
+                "description": "Tracking record of custodian acknowledgments, interview notes, and hold exceptions."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "EDRM Processing & Analysis",
+        "description": "Ingests, deduplicates, and applies machine learning models to analyze collected evidence.",
+        "applicationCapabilities": [
+          {
+            "name": "Technology-Assisted Review (TAR)",
+            "description": "Uses predictive coding to classify documents for relevance and privilege.",
+            "sections": ["Litigation Support / Practice Support", "Litigation Practice Group"],
+            "entities": [
+              {
+                "name": "Discovery Document Item",
+                "description": "Individual ingested file, email, or message container subject to review."
+              },
+              {
+                "name": "Predictive Coding Tag",
+                "description": "Machine learning probability score for document responsiveness or privilege."
+              },
+              {
+                "name": "Production Volume Log",
+                "description": "Bates-stamped electronic document package exported for court or opposing counsel delivery."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Trial Preparation & Presentation",
+        "description": "Organizes trial exhibits, witness designations, and deposition materials for hearing proceedings.",
+        "applicationCapabilities": [
+          {
+            "name": "Deposition & Transcript Management",
+            "description": "Indexes, annotates, and links video media with deposition transcripts.",
+            "sections": ["Litigation Practice Group", "Paralegal Services"],
+            "entities": [
+              {
+                "name": "Deposition Transcript",
+                "description": "Official court reporter transcript with linked audio, video, and attorney annotations."
+              },
+              {
+                "name": "Trial Exhibit Master",
+                "description": "Numbered evidence item indexed with admissibility objections and foundation witness links."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Knowledge Management & Legal Research",
+    "capabilities": [
+      {
+        "name": "Legal Research & Precedent Analysis",
+        "description": "Provides access to authoritative legal sources, statutory interpretation, and judicial precedents.",
+        "applicationCapabilities": [
+          {
+            "name": "Case Law Analytics & Citations",
+            "description": "Analyzes court decisions, judge ruling behaviors, and citation histories across jurisdictions.",
+            "sections": ["Knowledge Management", "Library Services", "Litigation Practice Group"],
+            "entities": [
+              {
+                "name": "Judicial Authority Citation",
+                "description": "Reference entry for reported case law or regulatory statute with authority status verification."
+              },
+              {
+                "name": "Legal Research Memorandum",
+                "description": "Internal legal opinion analyzing specific statutory or case law questions for a matter."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Work Product Curation",
+        "description": "Captures, sanitizes, and indexes high-value internal legal opinions and transaction models.",
+        "applicationCapabilities": [
+          {
+            "name": "Semantic Work Product Indexing",
+            "description": "Extracts concepts and indexes historic firm briefs, memo, and transactional structures.",
+            "sections": ["Knowledge Management", "Corporate Practice Group"],
+            "entities": [
+              {
+                "name": "Anonymized Precedent Document",
+                "description": "Sanitized work product file stripped of confidential client information for firm-wide reuse."
+              },
+              {
+                "name": "Knowledge Taxonomy Node",
+                "description": "Categorized legal topic concept tag used for legal content classification."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Time Capture, Billing & Revenue Cycle",
+    "capabilities": [
+      {
+        "name": "Time Recording & Activity Capture",
+        "description": "Captures fee-earner billable hours, fee descriptions, and activity task codes.",
+        "applicationCapabilities": [
+          {
+            "name": "Contemporaneous Time Capture",
+            "description": "Records attorney activity across emails, documents, and meetings to generate time entries.",
+            "sections": ["Finance & Accounting", "Practice Management"],
+            "entities": [
+              {
+                "name": "Billable Time Entry",
+                "description": "Recorded duration log with associated lawyer, client matter, rate, and narrative description."
+              },
+              {
+                "name": "UTBMS/LEDES Task Code",
+                "description": "Standardized activity code classifying legal work for client billing compliance."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "E-Billing & Invoicing",
+        "description": "Generates, reviews, and submits client invoices electronically via vendor portals.",
+        "applicationCapabilities": [
+          {
+            "name": "Pre-Bill Review & Workflow",
+            "description": "Routes draft invoices to billing partners for adjustments, write-offs, and narrative updates.",
+            "sections": ["Legal Billing Services", "Practice Management"],
+            "entities": [
+              {
+                "name": "Pre-Bill Draft",
+                "description": "Unbilled draft ledger showing accumulated fees and costs for partner review."
+              },
+              {
+                "name": "Fee Write-Off Authorization",
+                "description": "Approved discount or adjustment record reducing billable value prior to invoicing."
+              }
+            ]
+          },
+          {
+            "name": "LEDES File Generation & Transmission",
+            "description": "Formats and validates electronic invoices against client Outside Counsel Guidelines.",
+            "sections": ["Legal Billing Services", "Finance & Accounting"],
+            "entities": [
+              {
+                "name": "Client Invoice",
+                "description": "Final rendered billing statement containing summary fees, disbursements, and tax."
+              },
+              {
+                "name": "LEDES E-Bill File",
+                "description": "Formatted text file (e.g. LEDES 1998B) formatted for electronic portal ingestion."
+              },
+              {
+                "name": "E-Billing Rejection Notice",
+                "description": "Automated portal rejection message detailing guideline non-compliance errors."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Trust Accounting & Accounts Receivable",
+        "description": "Manages client trust accounts, unbilled WIP aging, and fee collections.",
+        "applicationCapabilities": [
+          {
+            "name": "IOLTA / Trust Ledger Management",
+            "description": "Maintains compliant fiduciary accounting records for client retainer and escrow funds.",
+            "sections": ["Finance & Accounting"],
+            "entities": [
+              {
+                "name": "IOLTA Trust Ledger Account",
+                "description": "Individual client trust sub-ledger showing client deposits, interest, and invoice transfers."
+              },
+              {
+                "name": "Trust Disbursement Voucher",
+                "description": "Authorization record for withdrawing client funds from trust for fee application."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Legal Pricing & Profitability Management",
+    "capabilities": [
+      {
+        "name": "Alternative Fee Arrangement (AFA) Pricing",
+        "description": "Models, prices, and structures fixed fee, capped, or success-based legal rate structures.",
+        "applicationCapabilities": [
+          {
+            "name": "Matter Budget & Pricing Modeling",
+            "description": "Constructs predictive budget scenarios using historical matter cost data.",
+            "sections": ["Pricing & Profitability", "Legal Project Management"],
+            "entities": [
+              {
+                "name": "AFA Rate Agreement",
+                "description": "Approved non-standard pricing structure such as fixed fee, contingency, or capped arrangement."
+              },
+              {
+                "name": "Baseline Matter Budget",
+                "description": "Phase-by-phase financial expenditure forecast for legal representation."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Profitability & Realization Analytics",
+        "description": "Measures matter margins, lawyer contribution ratios, and client profitability metrics.",
+        "applicationCapabilities": [
+          {
+            "name": "Margin & Contribution Reporting",
+            "description": "Calculates direct labor costs, overhead allocation, and net margin per matter.",
+            "sections": ["Pricing & Profitability", "Executive Leadership", "Finance & Accounting"],
+            "entities": [
+              {
+                "name": "Matter Profitability Statement",
+                "description": "Financial report showing gross billings, write-downs, direct costs, and net margin."
+              },
+              {
+                "name": "Partner Realization Metric",
+                "description": "Calculated percentage comparing collected revenue against standard billable rate values."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Information Governance & File Management",
+    "capabilities": [
+      {
+        "name": "Document & Work Product Repositories",
+        "description": "Maintains centralized matter file structures, metadata, and versioning control.",
+        "applicationCapabilities": [
+          {
+            "name": "Matter-Centric Storage Workspace",
+            "description": "Organizes electronic documents, emails, and notes within matter-specific security boundaries.",
+            "sections": ["IT Operations", "Records & Information Governance"],
+            "entities": [
+              {
+                "name": "Matter Workspace",
+                "description": "Central secure folder repository provisioned specifically for a client matter."
+              },
+              {
+                "name": "Legal Document Record",
+                "description": "Filed electronic document item with assigned metadata, access permissions, and version numbers."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Records Lifecycle & Disposition",
+        "description": "Applies retention policies and manages defensible destruction of physical and digital records.",
+        "applicationCapabilities": [
+          {
+            "name": "Defensible Disposition Processing",
+            "description": "Tracks retention schedules and handles client authorization for physical box and file destruction.",
+            "sections": ["Records & Information Governance", "General Counsel's Office"],
+            "entities": [
+              {
+                "name": "Physical Box Archive Record",
+                "description": "Indexed metadata record for physical paper file boxes stored offsite."
+              },
+              {
+                "name": "Disposition Certificate",
+                "description": "Legal confirmation record validating permanent destruction of expired client files."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Professional Development & Attorney Talent",
+    "capabilities": [
+      {
+        "name": "Legal Staff Work Allocation",
+        "description": "Balances associate billable availability with specialized practice skill requirements.",
+        "applicationCapabilities": [
+          {
+            "name": "Associate Capacity & Assignment Management",
+            "description": "Monitors lawyer work commitments to assign incoming matters efficiently.",
+            "sections": ["Practice Group Leadership", "Legal Professional Development"],
+            "entities": [
+              {
+                "name": "Associate Capacity Profile",
+                "description": "Real-time log of attorney unallocated billable hours and ongoing matter commitments."
+              },
+              {
+                "name": "Skill & Language Competency Record",
+                "description": "Tagging record detailing attorney industry focus, jurisdictional bar admissions, and language skills."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Bar Compliance & Mandatory Education",
+        "description": "Tracks Continuing Legal Education (CLE) requirements and attorney bar licenses.",
+        "applicationCapabilities": [
+          {
+            "name": "CLE & Bar License Management",
+            "description": "Monitors jurisdiction-specific mandatory education credits and license renewals.",
+            "sections": ["Legal Professional Development", "Human Resources"],
+            "entities": [
+              {
+                "name": "Attorney Bar License Record",
+                "description": "State/jurisdiction licensing record detailing bar numbers, admission dates, and good standing status."
+              },
+              {
+                "name": "CLE Attendance Certificate",
+                "description": "Accredited course completion document verifying earned legal education hours."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Risk Management & Office of General Counsel",
+    "capabilities": [
+      {
+        "name": "Outside Counsel Guidelines Management",
+        "description": "Analyzes and monitors client-imposed operational, staffing, and billing rules.",
+        "applicationCapabilities": [
+          {
+            "name": "OCG Rule Extraction & Enforcement",
+            "description": "Extracts billing restrictions and staffing rules from signed client contracts.",
+            "sections": ["General Counsel's Office", "Conflicts & Ethics", "Legal Billing Services"],
+            "entities": [
+              {
+                "name": "Outside Counsel Guideline Document",
+                "description": "Ingested client terms restricting rates, block billing, travel expenses, and legal staffing."
+              },
+              {
+                "name": "Guideline Violation Exception",
+                "description": "Flagged non-compliant time entry or expense items failing client OCG rules."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Firm Legal Risk & Professional Liability",
+        "description": "Oversees internal legal claims, malpractice insurance coverage, and ethics inquiries.",
+        "applicationCapabilities": [
+          {
+            "name": "Malpractice Claim & Notice Tracking",
+            "description": "Logs internal notifications of potential legal error, client disputes, and insurer reporting.",
+            "sections": ["General Counsel's Office", "Executive Leadership"],
+            "entities": [
+              {
+                "name": "Internal Risk Notification",
+                "description": "Confidential report logging potential legal error or client dissatisfaction incident."
+              },
+              {
+                "name": "Professional Indemnity Policy",
+                "description": "Legal malpractice insurance coverage record and claims history ledger."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

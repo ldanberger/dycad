@@ -110,8 +110,16 @@ function renderToolbar(app) {
   const filtersApply = !!(tab && (tab.type === 'canvas' || tab.type === '3d'));
 
   const streamBtn = document.getElementById('stream-filter-btn');
-  const activeStreams = filtersApply ? (tab.activeStreams || []) : [];
-  streamBtn.textContent = activeStreams.length === 0 ? 'All streams' : activeStreams.length === 1 ? activeStreams[0] : `${activeStreams.length} streams`;
+  const rawActiveStreams = filtersApply ? tab.activeStreams : null;
+  if (rawActiveStreams == null) {
+    streamBtn.textContent = 'All streams';
+  } else if (rawActiveStreams.length === 0) {
+    streamBtn.textContent = 'No streams'; // explicit "exclude all"
+  } else if (rawActiveStreams.length === 1) {
+    streamBtn.textContent = rawActiveStreams[0];
+  } else {
+    streamBtn.textContent = `${rawActiveStreams.length} streams`;
+  }
   streamBtn.disabled = !filtersApply;
 
   const typeBtn = document.getElementById('element-type-filter-btn');

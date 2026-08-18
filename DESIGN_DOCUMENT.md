@@ -301,7 +301,7 @@ subsequent calls; `disposeView3D(tabId)` (called from `App.closeTab`) tears the 
 context and animation loop down explicitly, since browsers cap how many live contexts a
 page may hold.
 
-Staged build-out (Stages 0-4 shipped; this is the plan for what's still ahead, kept here
+Staged build-out (Stages 0-5 shipped; this is the plan for what's still ahead, kept here
 so a future session doesn't have to re-derive it from scratch):
 
 - **Stage 0 (done)** — plumbing only: persistent per-tab renderer/camera/`OrbitControls`,
@@ -387,10 +387,85 @@ so a future session doesn't have to re-derive it from scratch):
   per-GEOMETRY-VERTEX `color` attribute (absent on plain `BoxGeometry`), an entirely
   different mechanism from `InstancedMesh`'s own separate `instanceColor`. The wireframe
   marker mesh sidesteps the whole question and is simpler besides.
-- **Stage 5** — live simulation overlay: color/pulse each node from `store.simRuntime`'s
-  current per-part value/state (same encoding the 2D canvas's "Show Simulation Values"
-  toggle already uses). Current-tick only, no history scrubbing — that would need
-  `simRuntime` to retain a tick history it doesn't today, a separate piece of scope.
+- **Stage 5 (done)** — live simulation overlay: every currently-visible part with a
+  `store.simRuntime` entry for its own model gets a small colored marker
+  (`syncSimOverlay`) floating just above its cube — green/blue/red for
+  normal/changed/error, `SIM_STATE_COLORS` mirroring `.fnode-sim-badge`'s CSS colors
+  exactly, the SAME encoding the 2D canvas's "Show Simulation Values" badge already uses,
+  not a new one. A 'changed' marker additionally pulses (`updateSimPulse`, its scale
+  oscillates every animation frame via `performance.now()`) — 3D's stand-in for the 2D
+  badge's static "changed" border color, since a static color swap reads less clearly in a
+  scene you're also free to rotate. Current-tick only, no history scrubbing (that would
+  need `simRuntime` to retain a tick history it doesn't today, a separate piece of scope),
+  and color+pulse only — no numeric value text, both decided up front. Rendered as up to 3
+  small `InstancedMesh`es (one per state actually present, sized/positioned from
+  `inst.partPositions`, itself now stashing each part's own `model` so this never needs a
+  `store.findPart` lookup — see the real bug below), matching the type/connector meshes'
+  own "one InstancedMesh, not one object per instance" approach. Deliberately NOT gated by
+  `syncSceneData`'s own structural rebuild signature: a continuous Run calls `app.render()`
+  on every tick (~500ms) without touching any part/connector/filter field that signature
+  tracks, so `syncSimOverlay` keeps its own, much cheaper signature (built only from
+  currently-visible parts' runtime values) and only ever rebuilds its own couple of small
+  marker meshes on a tick, never the big type/connector meshes.
+
+  Two real bugs found and fixed while building this, both via real-scale testing (22,399
+  parts) rather than a small fixture, per this doc's own testing convention:
+  - `syncSimOverlay`'s first version called `store.findPart(partId)` — an `Array.find`
+    (linear scan over every part in the whole document) — once per currently-VISIBLE part,
+    turning a routine no-op `app.render()` into an O(n²) scan: ~16 SECONDS for a single
+    no-op render at 22,399 parts, once any simulation had ever been stepped. Fixed by
+    having `syncSceneData`'s own placement loop stash each part's `model` directly onto
+    its `partPositions` entry (it already has the `part` object right there), so
+    `syncSimOverlay` never needs a store lookup at all — O(n) with only `Map.get` calls.
+  - `createInstance` used to capture `inst.animId` as a one-time snapshot of an outer
+    `animId` variable at object-construction time (`const inst = { ..., animId, ... }`),
+    but every SUBSEQUENT `requestAnimationFrame` call inside `animate()` only reassigned
+    that outer variable, never `inst.animId` again — so `inst.animId` went stale after the
+    very first frame. `disposeInstance`'s `cancelAnimationFrame(inst.animId)` was then
+    always cancelling an already-fired, harmless id, never the actual currently-pending
+    frame — silently leaking a forever-running render loop (against a disposed
+    renderer/scene) on every closed 3D tab. Fixed by writing `inst.animId` directly inside
+    `animate()` (moving `const inst = {...}`'s construction earlier, before `animate` is
+    defined/first called, so it can close over `inst` itself).
+
+- **Stage 5.1 (done)** — usability follow-ups requested after using Stage 4/5 for real:
+  - **No camera recenter on click.** `focusPart` used to `controls.target.copy(position)`
+    on every click, yanking the camera to center on whatever was clicked. It now only
+    remembers the part's world position (`inst.focusedPartPosition`) and leaves
+    `controls.target` alone — clicking highlights a part and shows its properties in
+    place, the same way selecting a node on the 2D canvas doesn't recenter the canvas.
+    The zoom-jump distance check (Stage 4) now measures `camera.position` to
+    `inst.focusedPartPosition` instead of to `controls.target`, since those two points are
+    no longer the same in general.
+  - **Node right-click context menu** (`showNodeContextMenu`): "Filter to Streams" (sets
+    `tab.activeStreams` to exactly the right-clicked part's own streams) and a Connector
+    Type quick filter (`tab.connectorTypeFilter`: null/'c'/'s' — see below). Required
+    remapping `OrbitControls.mouseButtons` (`RIGHT` defaults to `MOUSE.PAN`) to free the
+    right button for the menu: `LEFT: ROTATE, MIDDLE: PAN, RIGHT: null`.
+  - **Connector Type filter.** Previously the 3D view drew every connector regardless of
+    `connectorType` ('c' Connectors vs 's' Streams — the same distinction the 2D canvas's
+    own `chkShowConnectorType`/`chkShowStreamType` view checkboxes gate) with no way to
+    narrow it. `tab.connectorTypeFilter` (tab-scoped, since a 3D tab isn't backed by a
+    `view`) is now folded into both `computeSignature` and the connector-line-building
+    loop, set via the new context menu.
+  - **Stream filter Select All / Exclude All.** The Stream filter menu lacked the
+    Select-All/Exclude-All top row the Element Type filter already had, because
+    `tab.activeStreams`'s old convention (empty array = unfiltered) had no way to
+    represent "show nothing." Unified both filters onto the SAME null-vs-`[]` convention
+    (`passesStreamFilter`/`passesElementTypeFilter` now read identically): `null` =
+    unfiltered (the new default, was `[]`), an explicit `[]` = exclude all.
+  - A real bug found via this work, in ALREADY-SHIPPED code (v0.813): the "click shows
+    properties in the panel" feature (added the session before) had `selectPartInPanel`
+    wired into `debugFocusPart` (the test-only hook) but never into the REAL click
+    listener — so it silently never worked for a genuine mouse click, only for the debug
+    hook standing in for it. The existing permanent test used only the debug hook, so it
+    passed despite the real path being broken — a hook that duplicates a real listener's
+    logic can drift from it undetected. Caught by testing with a genuine
+    `page.mouse.click()` for the first time (via a new `debugGetScreenPosition` test hook
+    that projects a part's world position to on-screen client coordinates, so a real click
+    can target a specific part regardless of layout) — now the standing discipline for any
+    new 3D click-driven feature: exercise it with a real mouse event, not only its debug
+    shortcut.
 
 ## 10. Testing strategy
 
