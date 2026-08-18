@@ -1598,4 +1598,19 @@
 // re-arming after zooming back out and in, and the no-placement toast path — each
 // assertion confirmed to catch its own deliberately-reintroduced regression before being
 // trusted. Full suite 45/45.
-export const APP_VERSION = '0.809';
+// 0.810: 3D View click now shows the clicked part's own properties in the Properties
+// panel — via tab.selectedCatalogRow, the exact same mechanism the Parts Catalog table's
+// row selection already drives (render.js's renderProperties dispatch extended to also
+// fire renderCatalogRowProperties for a '3d' tab, not just 'table'), so it's the
+// identical "Part" editor a canvas node click or catalog row gets, no new rendering
+// path. Previously a click only recentered the camera and showed the wireframe marker —
+// no properties appeared anywhere. Also fixes double-clicking a part with no view
+// placement: it used to just toast "isn't placed on any view yet" and leave the panel
+// empty; now it shows that part's own properties instead (the same thing a plain click
+// already shows), which is more useful than a dead-end toast — and the zoom-triggered
+// jump falls back the same way for an unplaced focused part. jumpToMatching2DView now
+// takes the 3D tab's id so it can reach that tab's own selectedCatalogRow for this
+// fallback. Permanent regression check updated to assert the panel actually renders the
+// clicked/unplaced part's fields (not just that the state field got set), confirmed to
+// catch a deliberately-reintroduced regression before being trusted. Full suite 45/45.
+export const APP_VERSION = '0.810';

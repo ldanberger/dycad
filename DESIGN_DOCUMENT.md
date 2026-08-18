@@ -356,13 +356,20 @@ so a future session doesn't have to re-derive it from scratch):
   (`cubeOrder`) fallbacks actually disagree on group order rather than coincidentally
   matching, so the regression check proves real behavior, not an incidental pass.
 - **Stage 4 (done)** — zoom-to-detail: clicking a part (`pickPartAtClientXY`, a raycast
-  against every `InstancedMesh`) focuses it — recenters `OrbitControls.target` on it and
+  against every `InstancedMesh`) focuses it — recenters `OrbitControls.target` on it,
   shows a reusable wireframe marker (`EdgesGeometry`+`LineBasicMaterial`, `ensureFocusMarker`)
-  around it. Zooming in past `ZOOM_JUMP_DISTANCE` (`NODE_SIZE * 4`) while a part is focused
-  jumps to a 2D canvas view that already has it placed (opening/switching to that view and
-  selecting the matching viewMember there) — a JUMP, not a continuous 3D→2D morph, the
-  deliberately cheaper option chosen up front; a seamless morph may be explored later. A
-  part with no view placement yet just toasts rather than jumping anywhere. Double-clicking
+  around it, and shows that part's own properties in the Properties panel
+  (`selectPartInPanel` sets `tab.selectedCatalogRow` to `{catalogType: 'parts', id}`, the
+  exact same field the Parts Catalog table's row selection already drives — `render.js`'s
+  `renderProperties` dispatch was extended to also fire `renderCatalogRowProperties` for a
+  `'3d'` tab, not just `'table'`, so the panel is the identical "Part" editor with no new
+  rendering path). Zooming in past `ZOOM_JUMP_DISTANCE` (`NODE_SIZE * 4`) while a part is
+  focused jumps to a 2D canvas view that already has it placed (opening/switching to that
+  view and selecting the matching viewMember there) — a JUMP, not a continuous 3D→2D
+  morph, the deliberately cheaper option chosen up front; a seamless morph may be explored
+  later. A part with no view placement yet keeps showing its own properties instead of
+  jumping anywhere (an earlier version just toasted "isn't placed on any view yet" and left
+  the panel empty — less useful than showing what's actually clickable). Double-clicking
   a part jumps immediately, skipping the zoom gesture. Click/double-click are told apart
   from an `OrbitControls` rotate/pan drag release (which still fires a native browser
   `click` at the drag's end point) by checking the pointer barely moved between its own

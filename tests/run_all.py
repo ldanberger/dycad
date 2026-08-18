@@ -2063,8 +2063,11 @@ def check_view3d_cube_order_fallback(page):
 def check_view3d_focus_and_zoom_jump(page):
     """Regression guard for 3D View Stage 4 (zoom-to-2D-detail): focusing a part (driven
     here via view3d.js's debugFocusPart, since real mouse/wheel events are unreliable
-    against a headless WebGL canvas — see that function's own comment) sets focusedPartId
-    and shows the wireframe highlight marker; zooming in past ZOOM_JUMP_DISTANCE while
+    against a headless WebGL canvas — see that function's own comment) sets focusedPartId,
+    shows the wireframe highlight marker, AND shows that part's own properties in the
+    Properties panel — via tab.selectedCatalogRow, the same mechanism the Parts Catalog
+    table's row selection already drives, so a 3D click gets the identical "Part" editor a
+    canvas node click or catalog row would. Zooming in past ZOOM_JUMP_DISTANCE while
     focused (driven via debugSetCameraDistance, which repositions the camera and dispatches
     the same 'change' event a real zoom would) switches to the matching 2D view and selects
     the right viewMember there — exactly once per crossing, checked directly via
@@ -2072,7 +2075,8 @@ def check_view3d_focus_and_zoom_jump(page):
     frame while still inside the threshold would be caught even though it'd look
     superficially the same (still ends up on the right view); zooming back out past the
     threshold re-arms it so zooming back in jumps again; and a focused part with no view
-    placement anywhere toasts to the Message Log instead of jumping or throwing."""
+    placement anywhere keeps showing its own properties (the same thing the initial focus
+    already showed) instead of navigating anywhere or throwing."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -2095,8 +2099,9 @@ def check_view3d_focus_and_zoom_jump(page):
       const origOpenOrSwitchView = app.openOrSwitchView.bind(app);
       app.openOrSwitchView = (...args) => { switchCalls++; return origOpenOrSwitchView(...args); };
 
-      const focusOk = view3d.debugFocusPart(tab3d.id, placed.id);
+      const focusOk = view3d.debugFocusPart(app, tab3d.id, placed.id);
       const afterFocus = view3d.getDebugSceneInfo(tab3d.id);
+      const afterFocusSelectedRow = { ...tab3d.selectedCatalogRow };
 
       // zoom in past the threshold -> should jump to ZoomJumpDemo and select vm
       view3d.debugSetCameraDistance(tab3d.id, 0.5);
@@ -2122,21 +2127,23 @@ def check_view3d_focus_and_zoom_jump(page):
       const at2 = store.activeTab();
       const secondJump = { type: at2 ? at2.type : null, viewId: at2 ? at2.viewId : null };
 
-      // a focused part with NO view placement should toast, not navigate or throw
+      // a focused part with NO view placement should show its own properties, not
+      // navigate or throw — and the Properties panel should actually render them (not
+      // just tab.selectedCatalogRow being set), since renderProperties' 3D-tab dispatch
+      // is a separate piece of wiring (render.js) from view3d.js setting the field.
       app.switchToTab(tab3d.id);
-      const beforeLogLen = store.messageLog.length;
-      view3d.debugFocusPart(tab3d.id, orphan.id);
+      view3d.debugFocusPart(app, tab3d.id, orphan.id);
       view3d.debugSetCameraDistance(tab3d.id, 0.5);
       await new Promise(r => setTimeout(r, 100));
       const at3 = store.activeTab();
       const orphanResult = {
         activeTabType: at3 ? at3.type : null,
-        logGrew: store.messageLog.length > beforeLogLen,
-        lastLogMsg: store.messageLog.length ? store.messageLog[store.messageLog.length - 1].message : '',
+        selectedCatalogRow: { ...tab3d.selectedCatalogRow },
+        panelHtml: document.getElementById('properties-body').innerHTML,
       };
 
       app.openOrSwitchView = origOpenOrSwitchView;
-      return { focusOk, afterFocus, afterJump, jumpedForBefore, jumpedForAfterRepeat, switchCallsAfterFirstJump, switchCallsAfterRepeat, rearmed, secondJump, orphanResult, vmId: vm.id, viewId: view.id, partId: placed.id, orphanId: orphan.id };
+      return { focusOk, afterFocus, afterFocusSelectedRow, afterJump, jumpedForBefore, jumpedForAfterRepeat, switchCallsAfterFirstJump, switchCallsAfterRepeat, rearmed, secondJump, orphanResult, vmId: vm.id, viewId: view.id, partId: placed.id, orphanId: orphan.id };
     }
     """)
     problems = []
@@ -2146,6 +2153,9 @@ def check_view3d_focus_and_zoom_jump(page):
     af = result["afterFocus"]
     if af["focusedPartId"] != partId or not af["focusMarkerVisible"]:
         problems.append(f"expected focusPart to set focusedPartId and show the highlight marker, got {af}")
+    afsr = result["afterFocusSelectedRow"]
+    if afsr.get("catalogType") != "parts" or afsr.get("id") != partId:
+        problems.append(f"expected focusing a part to select it in the Properties panel via tab.selectedCatalogRow (catalogType 'parts', id {partId}), got {afsr}")
     aj = result["afterJump"]
     if aj["type"] != "canvas" or aj["viewId"] != result["viewId"] or result["vmId"] not in aj["selection"]:
         problems.append(f"zooming past the threshold while focused should jump to view '{result['viewId']}' and select viewMember {result['vmId']}, got {aj}")
@@ -2167,11 +2177,13 @@ def check_view3d_focus_and_zoom_jump(page):
     orp = result["orphanResult"]
     if orp["activeTabType"] != "3d":
         problems.append(f"a focused part with no view placement should NOT navigate anywhere, got active tab type {orp['activeTabType']}")
-    if not orp["logGrew"] or "isn't placed on any view yet" not in orp["lastLogMsg"]:
-        problems.append(f"a focused part with no view placement should toast (logged to the Message Log) instead of silently doing nothing or throwing, got {orp}")
+    if orp["selectedCatalogRow"].get("catalogType") != "parts" or orp["selectedCatalogRow"].get("id") != result["orphanId"]:
+        problems.append(f"a focused part with no view placement should keep showing its own properties (tab.selectedCatalogRow), got {orp['selectedCatalogRow']}")
+    if "Orphan" not in orp["panelHtml"]:
+        problems.append(f"the Properties panel should actually render the unplaced part's own fields (e.g. its label 'Orphan'), got panel HTML that doesn't mention it: {orp['panelHtml'][:300]}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "click-to-focus sets state and shows the marker, zooming past the threshold jumps to the matching 2D view and selects the right node exactly once per crossing, zooming back out re-arms it so zooming back in jumps again, and an unplaced part toasts instead of jumping or throwing"
+    return True, "click-to-focus sets state, shows the marker, and shows the part's properties in the panel; zooming past the threshold jumps to the matching 2D view and selects the right node exactly once per crossing; zooming back out re-arms it so zooming back in jumps again; and an unplaced part keeps showing its own properties instead of navigating or throwing"
 
 
 def check_load_sfcce(page):

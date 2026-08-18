@@ -359,7 +359,7 @@ function renderCommands(app) {
 function renderProperties(app) {
   const body = document.getElementById('properties-body');
   const tab = app.store.activeTab();
-  if (tab && tab.type === 'table' && tab.catalogType && tab.selectedCatalogRow) {
+  if (tab && tab.selectedCatalogRow && (tab.type === '3d' || (tab.type === 'table' && tab.catalogType))) {
     renderCatalogRowProperties(app, tab);
     return;
   }

@@ -27,16 +27,20 @@
 // the active stream template's value[] doesn't mention (see resolveLayerOrder below).
 // The template's own choices still always win; cubeOrder only fills in what it left
 // unordered, which for a typical handful-of-types template is most of the 74 known types.
-// Stage 4 (done): zoom-to-2D-detail. Click a part to focus it (recenters
-// OrbitControls' orbit target on it and highlights it); zooming in past a distance
-// threshold while focused jumps to a 2D canvas view that already has that part placed
-// (selecting it there) — a JUMP, not a continuous 3D->2D morph, the deliberately cheaper
-// option chosen up front (see DESIGN_DOCUMENT.md §9). Double-click a part to jump
-// immediately, skipping the zoom gesture. A part placed on no view yet just toasts
-// rather than jumping anywhere. Click/double-click are hand-distinguished from an
-// OrbitControls drag-to-rotate release (which still fires a native 'click' at the drag's
-// end point) by checking the pointer barely moved between its own pointerdown and the
-// click, not by trusting the browser's click/dblclick events alone.
+// Stage 4 (done): zoom-to-2D-detail. Click a part to focus it (recenters OrbitControls'
+// orbit target on it, highlights it) and shows its properties in the Properties panel —
+// via tab.selectedCatalogRow, the exact same mechanism the Parts Catalog table's row
+// selection already drives, so the panel is the identical "Part" editor, no new
+// rendering path. Zooming in past a distance threshold while focused jumps to a 2D
+// canvas view that already has that part placed (selecting it there) — a JUMP, not a
+// continuous 3D->2D morph, the deliberately cheaper option chosen up front (see
+// DESIGN_DOCUMENT.md §9). Double-click a part to jump immediately, skipping the zoom
+// gesture. A part placed on no view yet just keeps showing its own properties (the same
+// thing a click already shows) rather than jumping anywhere. Click/double-click are
+// hand-distinguished from an OrbitControls drag-to-rotate release (which still fires a
+// native 'click' at the drag's end point) by checking the pointer barely moved between
+// its own pointerdown and the click, not by trusting the browser's click/dblclick events
+// alone.
 // Still ahead: a live simulation-value overlay (Stage 5). Full plan: DESIGN_DOCUMENT.md §9.
 //
 // Deliberately the ONLY module that imports the vendored Three.js/OrbitControls — every
@@ -231,13 +235,26 @@ function resolveLayerOrder(store) {
   return { template, groupOrder, templateTypeOrder, cubeTypeOrder };
 }
 
+/** Shows partId's own properties in the Properties panel while the 3D tab stays active —
+ * reuses the exact same catalog-row mechanism the Parts Catalog table's row selection
+ * already drives (tab.selectedCatalogRow -> renderCatalogRowProperties in render.js ->
+ * renderPartOnlyProperties), so the 3D tab gets the identical "same controls as a Part
+ * row" panel with no new rendering path. Called on every click-to-focus (so a click
+ * always populates the panel, matching a canvas node click) and as jumpToMatching2DView's
+ * fallback when there's nowhere to jump to. */
+function selectPartInPanel(app, tab, partId) {
+  tab.selectedCatalogRow = { catalogType: 'parts', id: partId };
+  app.render();
+}
+
 /** Stage 4's actual "zoom-to-detail" destination: finds a 2D canvas view that already
  * has partId placed on it (the FIRST one found in store.doc.views order — no attempt to
  * prefer an already-open tab over a closed one; simplest thing that works), switches to
- * it, and selects that part's node there. A part that isn't placed on any view yet just
- * gets a toast — this jumps to EXISTING placements, it doesn't create one (that's what
- * Add Existing is for, a separate, deliberate action). */
-function jumpToMatching2DView(app, partId) {
+ * it, and selects that part's node there. A part that isn't placed on any view yet shows
+ * its own properties in the 3D tab's own panel instead (selectPartInPanel) — this jumps
+ * to EXISTING placements, it doesn't create one (that's what Add Existing is for, a
+ * separate, deliberate action), but there's still something useful to show either way. */
+function jumpToMatching2DView(app, tabId, partId) {
   const { store } = app;
   const part = store.findPart(partId);
   if (!part) return;
@@ -251,7 +268,8 @@ function jumpToMatching2DView(app, partId) {
       return;
     }
   }
-  app.toast(`"${part.label}" isn't placed on any view yet.`, true);
+  const tab3d = store.tabs.find((t) => t.id === tabId);
+  if (tab3d) selectPartInPanel(app, tab3d, partId);
 }
 
 function createInstance(app, tab, container) {
@@ -310,12 +328,14 @@ function createInstance(app, tab, container) {
   renderer.domElement.addEventListener('click', (e) => {
     if (!wasClick(e)) return;
     const hit = pickPartAtClientXY(inst, e.clientX, e.clientY);
-    if (hit) focusPart(inst, hit.partId);
+    if (hit) {
+      focusPart(inst, hit.partId);
+    }
   });
   renderer.domElement.addEventListener('dblclick', (e) => {
     if (!wasClick(e)) return;
     const hit = pickPartAtClientXY(inst, e.clientX, e.clientY);
-    if (hit) jumpToMatching2DView(app, hit.partId);
+    if (hit) jumpToMatching2DView(app, tab.id, hit.partId);
   });
 
   // The actual "zoom in past a threshold" trigger — OrbitControls fires 'change' on
@@ -327,7 +347,7 @@ function createInstance(app, tab, container) {
     if (distance < ZOOM_JUMP_DISTANCE) {
       if (inst.jumpedForPartId !== inst.focusedPartId) {
         inst.jumpedForPartId = inst.focusedPartId;
-        jumpToMatching2DView(app, inst.focusedPartId);
+        jumpToMatching2DView(app, tab.id, inst.focusedPartId);
       }
     } else {
       inst.jumpedForPartId = null; // back out past the threshold re-arms it
@@ -586,15 +606,20 @@ function getDebugSceneInfo(tabId) {
  * exercise focusPart/jumpToMatching2DView/the zoom-threshold check for real, on the
  * genuine internal scene state, same "no mocks" testing philosophy as the rest of the
  * app (see DESIGN_DOCUMENT.md §10). Not used by the app itself. */
-function debugFocusPart(tabId, partId) {
+function debugFocusPart(app, tabId, partId) {
   const inst = instances.get(tabId);
   if (!inst) return false;
-  return focusPart(inst, partId);
+  const ok = focusPart(inst, partId);
+  if (ok) {
+    const tab = app.store.tabs.find((t) => t.id === tabId);
+    if (tab) selectPartInPanel(app, tab, partId);
+  }
+  return ok;
 }
 function debugJumpToMatching2DView(app, tabId, partId) {
   const inst = instances.get(tabId);
   if (!inst) return;
-  jumpToMatching2DView(app, partId);
+  jumpToMatching2DView(app, tabId, partId);
 }
 function debugSetCameraDistance(tabId, distance) {
   const inst = instances.get(tabId);
