@@ -3033,6 +3033,597 @@ def check_generate_industry_propagates_section_to_whole_chain(page):
     return True, f"all {len(parts)} parts generated from one stream (function, capability, application capability, entity, and passive nodes) correctly inherited the function's own section"
 
 
+def check_level_down_single_creates_new_part(page):
+    """Regression guard: single-node Level Down (double-click a node with no
+    linkedViewName yet) used to place a SECOND viewMember of the SAME part as the new
+    view's own anchor — meaning editing/renaming/retyping the decomposition's own anchor
+    silently edited the summary-level node too, since they were the identical Part
+    underneath. Reported directly from a real scenario: DataEntity 'in' --flow-->
+    Process 'process1' --flow--> DataEntity 'out'; leveling down on 'process1' should
+    create a genuinely NEW Process part (same type/label as a starting point, distinct
+    identity — same approach Split Node already uses) wired up with NEW connectors to
+    external copies of 'in'/'out' (the real neighbor parts, correctly reused — only the
+    leveled-down node itself needs to be new), while the ORIGINAL 'process1' and its
+    original connectors up at the parent level stay completely untouched."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.findView(store.currentView) || store.doc.views[0];
+      const tab = store.tabs.find(t => t.type === 'canvas') || app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const inPart = store.createPart({ type: 'DataDataEntity', label: 'in', model: store.defaultModel, streams: [] });
+      const proc = store.createPart({ type: 'ApplicationProcess', label: 'process1', model: store.defaultModel, streams: [] });
+      const outPart = store.createPart({ type: 'DataDataEntity', label: 'out', model: store.defaultModel, streams: [] });
+      const inVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: inPart.id, x: 40, y: 40 });
+      const procVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: proc.id, x: 240, y: 40 });
+      const outVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: outPart.id, x: 440, y: 40 });
+      const conn1 = store.createConnector({ from: inPart.id, to: proc.id, model: store.defaultModel, connectorType: 'c', relationship: 'Flow', streams: [] });
+      const conn2 = store.createConnector({ from: proc.id, to: outPart.id, model: store.defaultModel, connectorType: 'c', relationship: 'Flow', streams: [] });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn1.id, fromVmId: inVm.id, toVmId: procVm.id });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn2.id, fromVmId: procVm.id, toVmId: outVm.id });
+
+      app.openOrCreateLinkedView(tab, procVm.id);
+      await new Promise(r => setTimeout(r, 150));
+
+      const newView = store.findView('process1');
+      const newViewMembers = newView ? store.viewMembersForView(newView.id) : [];
+      const newPartVms = newViewMembers.filter(v => v.objectType === 'part');
+      const anchorVm = newPartVms.find(v => !v.isExternal);
+      const anchorPart = anchorVm ? store.findPart(anchorVm.objectId) : null;
+      const externalParts = newPartVms.filter(v => v.isExternal).map(v => store.findPart(v.objectId));
+      const newConns = newViewMembers.filter(v => v.objectType === 'connector').map(v => store.findConnector(v.objectId));
+
+      return {
+        newViewExists: !!newView,
+        origProcLinkedViewName: procVm.linkedViewName,
+        anchorPartId: anchorPart ? anchorPart.id : null,
+        anchorLabel: anchorPart ? anchorPart.label : null,
+        anchorType: anchorPart ? anchorPart.type : null,
+        procId: proc.id,
+        externalIds: externalParts.map(p => p.id).sort(),
+        inOutIds: [inPart.id, outPart.id].sort(),
+        newConnFromTo: newConns.map(c => ({ from: c.from, to: c.to })),
+        newConnIds: newConns.map(c => c.id),
+        origConnIds: [conn1.id, conn2.id],
+        origConn1: store.findConnector(conn1.id),
+        origConn2: store.findConnector(conn2.id),
+        origProcStillInParentView: store.viewMembersForView(view.id).some(v => v.objectType === 'part' && v.objectId === proc.id),
+      };
+    }
+    """)
+    problems = []
+    if not result["newViewExists"]:
+        problems.append("expected a new view named 'process1' to be created")
+    if result["origProcLinkedViewName"] != "process1":
+        problems.append(f"expected the original process1 viewMember's linkedViewName to be set to the new view, got {result['origProcLinkedViewName']}")
+    if not result["anchorPartId"]:
+        problems.append("expected the new view to have a non-external anchor part")
+    elif result["anchorPartId"] == result["procId"]:
+        problems.append("expected the new view's anchor to be a GENUINELY NEW part, but it reused the original process1's own part id")
+    if result["anchorLabel"] != "process1" or result["anchorType"] != "ApplicationProcess":
+        problems.append(f"expected the new anchor part to copy the original's label/type ('process1'/'ApplicationProcess'), got label={result['anchorLabel']} type={result['anchorType']}")
+    if result["externalIds"] != result["inOutIds"]:
+        problems.append(f"expected the external copies to reuse the REAL 'in'/'out' parts (only the leveled-down node itself should be new), got {result['externalIds']} vs expected {result['inOutIds']}")
+    if len(result["newConnFromTo"]) != 2 or not all(result["anchorPartId"] in (c["from"], c["to"]) for c in result["newConnFromTo"]):
+        problems.append(f"expected exactly 2 new connectors, each touching the new anchor part, got {result['newConnFromTo']}")
+    if any(result["procId"] in (c["from"], c["to"]) for c in result["newConnFromTo"]):
+        problems.append(f"expected the new view's connectors to point at the NEW anchor part, not the original process1, got {result['newConnFromTo']}")
+    if any(cid in result["origConnIds"] for cid in result["newConnIds"]):
+        problems.append(f"expected genuinely NEW connector objects (not reusing the original connectors' identity, which would leave their from/to pointing at the old part), got {result['newConnIds']} overlapping {result['origConnIds']}")
+    origEndpoints = (result["origConn1"]["from"], result["origConn1"]["to"], result["origConn2"]["from"], result["origConn2"]["to"])
+    if result["procId"] not in origEndpoints:
+        problems.append(f"expected the ORIGINAL connectors (up at the parent level) to still reference process1's real id, untouched, got origConn1={result['origConn1']} origConn2={result['origConn2']} procId={result['procId']}")
+    if not result["origProcStillInParentView"]:
+        problems.append("expected the original process1 part to remain in the parent view, untouched")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "single-node Level Down now creates a genuinely new Part for the decomposition anchor (with new connectors pointing at it), reusing only the real external neighbor parts, and leaves the original node/connectors at the parent level untouched"
+
+
+def check_level_down_downstream_external_placed_near_anchor(page):
+    """Regression guard: Level Down used to place a downstream ("to" side) external
+    neighbor at a fixed x=900, regardless of the anchor's own position or the view's
+    node size — reported directly as "placed far right" when it should sit close to the
+    decomposition it's actually next to. Now placed one node width to the right of the
+    anchor (the only non-external node on a freshly leveled-down view) instead. The
+    upstream ("from" side) external neighbor's placement near the left edge (x=20) is
+    unaffected — only the "to" side was reported as a problem."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const view = store.addView('RegrExtPlacement_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const inPart = store.createPart({ type: 'DataDataEntity', label: 'in', model: store.defaultModel, streams: [] });
+      const proc = store.createPart({ type: 'ApplicationProcess', label: 'PlaceProc', model: store.defaultModel, streams: [] });
+      const outPart = store.createPart({ type: 'DataDataEntity', label: 'out', model: store.defaultModel, streams: [] });
+      const inVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: inPart.id, x: 40, y: 40 });
+      const procVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: proc.id, x: 240, y: 40 });
+      const outVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: outPart.id, x: 440, y: 40 });
+      const conn1 = store.createConnector({ from: inPart.id, to: proc.id, model: store.defaultModel, connectorType: 'c', relationship: 'Flow', streams: [] });
+      const conn2 = store.createConnector({ from: proc.id, to: outPart.id, model: store.defaultModel, connectorType: 'c', relationship: 'Flow', streams: [] });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn1.id, fromVmId: inVm.id, toVmId: procVm.id });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn2.id, fromVmId: procVm.id, toVmId: outVm.id });
+
+      app.openOrCreateLinkedView(tab, procVm.id);
+      await new Promise(r => setTimeout(r, 150));
+      const newView = store.findView('PlaceProc');
+      const newVms = store.viewMembersForView(newView.id).filter(v => v.objectType === 'part');
+      const anchorVm = newVms.find(v => !v.isExternal);
+      const outVmNew = newVms.find(v => v.isExternal && v.objectId === outPart.id);
+      const inVmNew = newVms.find(v => v.isExternal && v.objectId === inPart.id);
+      return {
+        anchorX: anchorVm.x,
+        outX: outVmNew ? outVmNew.x : null,
+        inX: inVmNew ? inVmNew.x : null,
+        nodeWidth: newView.nodeWidth,
+      };
+    }
+    """)
+    problems = []
+    # Not exact-equality against anchorX + nodeWidth: levelDownSingle's own placement
+    # runs BEFORE its trailing redrawAndResolveLayout call, which can resize/reflow
+    # nodes afterward (e.g. a label needing a wider box than the view's current
+    # default) — so the FINAL nodeWidth/positions legitimately drift a bit from what
+    # was placed. Assert the qualitative property actually reported instead: close to
+    # the anchor, not clumped on top of it, and nowhere near the old fixed x=900.
+    offset = None if result["outX"] is None else result["outX"] - result["anchorX"]
+    if result["outX"] is None:
+        problems.append("expected an external copy of 'out' (downstream neighbor) on the new view")
+    elif not (result["nodeWidth"] * 0.5 <= offset <= result["nodeWidth"] * 2):
+        problems.append(f"expected the downstream external neighbor roughly one node width right of the anchor (anchorX={result['anchorX']}, nodeWidth={result['nodeWidth']}), got outX={result['outX']} (offset {offset})")
+    if result["outX"] is not None and result["outX"] >= 900:
+        problems.append(f"expected the downstream external neighbor to NOT be placed at the old fixed far-right position (900+), got outX={result['outX']}")
+    if result["inX"] != 20:
+        problems.append(f"expected the upstream external neighbor's placement (x=20, near the left edge) to be unaffected, got inX={result['inX']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Level Down places a downstream ('to' side) external neighbor roughly one node width right of the anchor instead of a fixed far-right x=900, leaving the upstream ('from' side) placement unchanged"
+
+
+def check_level_down_creates_composition_link(page):
+    """Regression guard: single-node Level Down now creates an explicit 'Composition'
+    connector from the parent-level part to the new decomposition anchor (not placed on
+    any view — there's no view showing both levels at once), giving Smart Check
+    View/Node a durable structural link between the two levels. Without this, a
+    connector added to the parent part AFTER leveling down had no way to be recognized
+    as relevant to the child view at all (see check_smart_check_composition_top_down and
+    check_smart_check_node_composition_redirect, which depend on this link existing)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.findView(store.currentView) || store.doc.views[0];
+      const tab = store.tabs.find(t => t.type === 'canvas') || app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const proc = store.createPart({ type: 'ApplicationProcess', label: 'CompLinkProc', model: store.defaultModel, streams: [] });
+      const procVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: proc.id, x: 40, y: 40 });
+      app.openOrCreateLinkedView(tab, procVm.id);
+      await new Promise(r => setTimeout(r, 150));
+      const newView = store.findView('CompLinkProc');
+      const anchorVm = newView ? store.viewMembersForView(newView.id).find(v => v.objectType === 'part' && !v.isExternal) : null;
+      const anchorPart = anchorVm ? store.findPart(anchorVm.objectId) : null;
+      const compConn = anchorPart ? store.doc.connectors.find(c => c.relationship === 'Composition' && c.from === proc.id && c.to === anchorPart.id) : null;
+      const placedOnAnyView = compConn ? store.doc.viewMembers.some(v => v.objectType === 'connector' && v.objectId === compConn.id) : null;
+      return { anchorFound: !!anchorPart, compConnExists: !!compConn, placedOnAnyView };
+    }
+    """)
+    problems = []
+    if not result["anchorFound"]:
+        problems.append("expected Level Down to create a new decomposition anchor")
+    if not result["compConnExists"]:
+        problems.append("expected a Composition connector from the parent part to the new anchor")
+    if result["placedOnAnyView"]:
+        problems.append("expected the Composition connector to NOT be placed on any view (no view shows both levels at once)")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Level Down creates an unplaced Composition connector linking the parent part to its new decomposition anchor"
+
+
+def check_smart_check_composition_top_down(page):
+    """Regression guard: after Level Down (see check_level_down_creates_composition_link),
+    adding a NEW part at the PARENT level and connecting it to the leveled-down part used
+    to be invisible from the child view — reported directly: "if I add a dataentity...
+    and connect it to the process, the new part does not show up in the lower level as an
+    external part." Also covers the flip side of the same report: "smart check view
+    brings in the part process, which we don't want as we're in that process" — Smart
+    Check View must redirect the parent's own connections onto the child anchor instead
+    of duplicating the parent itself as a node on its own decomposition view. Uses a part
+    (X) connected to the parent AFTER Level Down, with no other path onto the child
+    view, so this can only pass via the proactive composition scan (organic BFS
+    connectivity alone can't reach it)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const view = store.addView('RegrCompTD_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const proc = store.createPart({ type: 'ApplicationProcess', label: 'TDProc', model: store.defaultModel, streams: [] });
+      const procVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: proc.id, x: 40, y: 40 });
+      app.openOrCreateLinkedView(tab, procVm.id);
+      await new Promise(r => setTimeout(r, 150));
+      const childView = store.findView('TDProc');
+      const childTab = store.tabs.find(t => t.type === 'canvas' && t.viewId === childView.id);
+      const anchorVm = store.viewMembersForView(childView.id).find(v => v.objectType === 'part' && !v.isExternal);
+      const anchorPart = store.findPart(anchorVm.objectId);
+
+      const xPart = store.createPart({ type: 'GeneralActor', label: 'TDExternal', model: store.defaultModel, streams: [] });
+      const xVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: xPart.id, x: 400, y: 40 });
+      const connX = store.createConnector({ from: proc.id, to: xPart.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: connX.id, fromVmId: procVm.id, toVmId: xVm.id });
+
+      const res = commands.smartCheckView(app, childTab, { missingConnectors: true, missingConnectorsAndNodes: true, levels: null });
+      const childPartVms = store.viewMembersForView(childView.id).filter(v => v.objectType === 'part');
+      const procOnChildView = childPartVms.some(v => v.objectId === proc.id);
+      const xVmOnChild = childPartVms.find(v => v.objectId === xPart.id);
+      const mirroredConn = store.viewMembersForView(childView.id).filter(v => v.objectType === 'connector').map(v => store.findConnector(v.objectId))
+        .find(c => (c.from === anchorPart.id && c.to === xPart.id) || (c.to === anchorPart.id && c.from === xPart.id));
+      const selfLoops = store.doc.connectors.filter(c => c.from === c.to);
+      return {
+        nodesAdded: res.nodesAdded, connectorsAdded: res.connectorsAdded,
+        procOnChildView, xOnChildView: !!xVmOnChild, xIsExternal: xVmOnChild ? xVmOnChild.isExternal : null,
+        mirroredConnRelationship: mirroredConn ? mirroredConn.relationship : null,
+        selfLoopCount: selfLoops.length,
+      };
+    }
+    """)
+    problems = []
+    if result["procOnChildView"]:
+        problems.append("expected the parent part NOT to be duplicated onto its own decomposition view")
+    if not result["xOnChildView"] or not result["xIsExternal"]:
+        problems.append(f"expected the new parent-level part to be pulled into the child view as external, got xOnChildView={result['xOnChildView']} xIsExternal={result['xIsExternal']}")
+    if result["mirroredConnRelationship"] != "Association":
+        problems.append(f"expected a mirrored connector (anchor<->new part) carrying the original relationship, got {result['mirroredConnRelationship']}")
+    if result["selfLoopCount"] != 0:
+        problems.append(f"expected no self-loop connectors, got {result['selfLoopCount']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Smart Check View redirects a parent's new connection onto the decomposition anchor instead of duplicating the parent, with no self-loops"
+
+
+def check_smart_check_composition_bottom_up(page):
+    """Regression guard for the bottom-up half of the user's own stated rule: "if the
+    part has a connector to another part that is not of the same parent, then it is
+    external and a connector added to the parent as well; if the part has connectors to
+    other parts that are connected to the same parent, then it does not need to be added
+    to the parent as well." Connects the child anchor to a genuinely external new part
+    (Y) and to a sibling (S, also composed under the same parent via its own Composition
+    connector) — only Y's connection should get mirrored up to the parent; S's should
+    not, since it's purely internal to this decomposition."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const view = store.addView('RegrCompBU_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const proc = store.createPart({ type: 'ApplicationProcess', label: 'BUProc', model: store.defaultModel, streams: [] });
+      const procVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: proc.id, x: 40, y: 40 });
+      app.openOrCreateLinkedView(tab, procVm.id);
+      await new Promise(r => setTimeout(r, 150));
+      const childView = store.findView('BUProc');
+      const childTab = store.tabs.find(t => t.type === 'canvas' && t.viewId === childView.id);
+      const anchorVm = store.viewMembersForView(childView.id).find(v => v.objectType === 'part' && !v.isExternal);
+      const anchorPart = store.findPart(anchorVm.objectId);
+
+      const yPart = store.createPart({ type: 'GeneralActor', label: 'BUExternal', model: store.defaultModel, streams: [] });
+      const yVm = store.createViewMember({ view: childView.id, objectType: 'part', objectId: yPart.id, x: 400, y: 300 });
+      const connY = store.createConnector({ from: anchorPart.id, to: yPart.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      store.createViewMember({ view: childView.id, objectType: 'connector', objectId: connY.id, fromVmId: anchorVm.id, toVmId: yVm.id });
+
+      const sPart = store.createPart({ type: 'GeneralActor', label: 'BUSibling', model: store.defaultModel, streams: [] });
+      const compSibling = store.createConnector({ from: proc.id, to: sPart.id, model: store.defaultModel, connectorType: 'c', relationship: 'Composition' });
+      const sVm = store.createViewMember({ view: childView.id, objectType: 'part', objectId: sPart.id, x: 400, y: 500 });
+      const connS = store.createConnector({ from: anchorPart.id, to: sPart.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      store.createViewMember({ view: childView.id, objectType: 'connector', objectId: connS.id, fromVmId: anchorVm.id, toVmId: sVm.id });
+
+      const res = commands.smartCheckView(app, childTab, { missingConnectors: true, missingConnectorsAndNodes: false, levels: null });
+      const parentYConn = store.doc.connectors.find(c => c.relationship !== 'Composition' && ((c.from === proc.id && c.to === yPart.id) || (c.from === yPart.id && c.to === proc.id)));
+      const parentSConn = store.doc.connectors.find(c => c.id !== compSibling.id && c.relationship !== 'Composition' && ((c.from === proc.id && c.to === sPart.id) || (c.from === sPart.id && c.to === proc.id)));
+      return { parentConnectorsAdded: res.parentConnectorsAdded, parentYConnExists: !!parentYConn, parentSConnExists: !!parentSConn };
+    }
+    """)
+    problems = []
+    if not result["parentYConnExists"]:
+        problems.append("expected the child anchor's connection to a genuinely external part to be mirrored up to the parent")
+    if result["parentSConnExists"]:
+        problems.append("expected the child anchor's connection to a SIBLING (composed under the same parent) NOT to be mirrored up — it's internal to this decomposition")
+    if result["parentConnectorsAdded"] != 1:
+        problems.append(f"expected exactly 1 connector mirrored up (the external one only), got {result['parentConnectorsAdded']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Smart Check View mirrors a decomposition's external connections up to the parent, correctly skipping connections to siblings under the same parent"
+
+
+def check_smart_check_node_composition_redirect(page):
+    """Regression guard for the other half of the user's report: "Smart check node
+    doesn't see the new connection to its parent" — Smart Check Node run ON the
+    decomposition's own anchor part must also pick up a brand new connection made to the
+    PARENT part after Level Down (via the same composition-awareness Smart Check View
+    uses), pulling the new part in and connecting it to the anchor rather than finding
+    nothing (the anchor and the parent are now genuinely different parts, so a plain
+    connectivity walk from the anchor's own id could never reach it on its own)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const view = store.addView('RegrCompNode_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const proc = store.createPart({ type: 'ApplicationProcess', label: 'NodeProc', model: store.defaultModel, streams: [] });
+      const procVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: proc.id, x: 40, y: 40 });
+      app.openOrCreateLinkedView(tab, procVm.id);
+      await new Promise(r => setTimeout(r, 150));
+      const childView = store.findView('NodeProc');
+      const childTab = store.tabs.find(t => t.type === 'canvas' && t.viewId === childView.id);
+      const anchorVm = store.viewMembersForView(childView.id).find(v => v.objectType === 'part' && !v.isExternal);
+      const anchorPart = store.findPart(anchorVm.objectId);
+
+      const zPart = store.createPart({ type: 'GeneralActor', label: 'NodeExternal', model: store.defaultModel, streams: [] });
+      const connZ = store.createConnector({ from: zPart.id, to: proc.id, model: store.defaultModel, connectorType: 'c', relationship: 'Triggering', streams: [] });
+
+      const res = commands.smartCheckNode(app, childTab, anchorPart.id, { missingConnectors: true, missingConnectorsAndNodes: true, levels: null, upstream: true, downstream: true });
+      const childPartVms = store.viewMembersForView(childView.id).filter(v => v.objectType === 'part');
+      const procOnChildView = childPartVms.some(v => v.objectId === proc.id);
+      const zOnChildView = childPartVms.some(v => v.objectId === zPart.id);
+      return { nodesAdded: res.nodesAdded, procOnChildView, zOnChildView };
+    }
+    """)
+    problems = []
+    if not result["zOnChildView"]:
+        problems.append("expected Smart Check Node (run on the anchor) to discover and pull in the part newly connected to the parent")
+    if result["procOnChildView"]:
+        problems.append("expected the parent part NOT to be pulled in as a duplicate node")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Smart Check Node, run on a Level Down anchor, discovers a brand-new connection made at the parent level via the Composition link, without duplicating the parent"
+
+
+def check_smart_check_sync_with_inventory_checkbox(page):
+    """Regression guard for Smart Check View/Node's new "Sync existing connectors with
+    inventory" checkbox (unchecked by default) — the REPLACEMENT for an earlier,
+    automatic bidirectional recency-based sync that turned out to be too surprising
+    (silently overwriting either side with no warning). Reported directly, twice: first
+    "smart check does not update the connector type... when will it change?", then
+    after the automatic fix, "still not working... let's change approach... add a new
+    checkbox 'sync existing connectors with inventory'... when it is checked compare
+    current view or node connectors against the related part to part connector, and if
+    different update the view." Covers: (1) with the checkbox OFF, a drifted view
+    connector (Level Down's own crossing connector) stays drifted even after a normal
+    Smart Check run — no more silent auto-sync; (2) with it ON, the view connector is
+    updated to match its inventory (parent-level) counterpart, one direction only; (3)
+    editing the view connector afterward and running Smart Check WITHOUT the checkbox
+    again does NOT push that edit back up to the inventory connector — confirming there
+    is no automatic bidirectional behavior left at all, only this explicit, opt-in,
+    one-directional (inventory -> view) sync. Checks both Smart Check View and Smart
+    Check Node."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const view = store.addView('RegrSyncCheckbox_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const proc = store.createPart({ type: 'ApplicationProcess', label: 'CkboxProc', model: store.defaultModel, streams: [] });
+      const procVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: proc.id, x: 40, y: 40 });
+      const xPart = store.createPart({ type: 'GeneralActor', label: 'CkboxExternal', model: store.defaultModel, streams: [] });
+      const xVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: xPart.id, x: 300, y: 40 });
+      const connP = store.createConnector({ from: proc.id, to: xPart.id, model: store.defaultModel, connectorType: 'c', relationship: 'Flow', streams: [] });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: connP.id, fromVmId: procVm.id, toVmId: xVm.id });
+
+      app.openOrCreateLinkedView(tab, procVm.id);
+      await new Promise(r => setTimeout(r, 150));
+      const childView = store.findView('CkboxProc');
+      const childTab = store.tabs.find(t => t.type === 'canvas' && t.viewId === childView.id);
+      const anchorVm = store.viewMembersForView(childView.id).find(v => v.objectType === 'part' && !v.isExternal);
+      const anchorPart = store.findPart(anchorVm.objectId);
+      const connC = store.doc.connectors.find(c => c.mirrorOf === connP.id);
+
+      // Edit the PARENT-level (inventory) connector directly.
+      connP.relationship = 'Serving';
+      connP.streams = ['Beta'];
+      store.touchConnector(connP);
+
+      // (1) Checkbox OFF: normal Smart Check run should NOT auto-sync anymore.
+      const res1 = commands.smartCheckView(app, childTab, { missingConnectors: true, missingConnectorsAndNodes: true, syncWithInventory: false });
+      const connCAfterOff = { relationship: connC.relationship, streams: [...connC.streams] };
+
+      // (2) Checkbox ON: now it should sync, one direction (inventory -> view).
+      const res2 = commands.smartCheckView(app, childTab, { missingConnectors: true, syncWithInventory: true });
+      const connCAfterOn = { relationship: connC.relationship, streams: [...connC.streams] };
+
+      // (3) Edit the VIEW connector, run Smart Check WITHOUT the checkbox -- should
+      // NOT push back up to the inventory connector (no automatic bidirectionality).
+      connC.relationship = 'Triggering';
+      connC.streams = ['Gamma'];
+      store.touchConnector(connC);
+      const res3 = commands.smartCheckView(app, childTab, { missingConnectors: true, syncWithInventory: false });
+      const connPAfterChildEdit = { relationship: connP.relationship, streams: [...connP.streams] };
+
+      // Smart Check Node: same checkbox, scoped to the anchor's own connectors.
+      const resNodeOff = commands.smartCheckNode(app, childTab, anchorPart.id, { missingConnectors: true, syncWithInventory: false });
+      const connCAfterNodeOff = { relationship: connC.relationship, streams: [...connC.streams] };
+      const resNodeOn = commands.smartCheckNode(app, childTab, anchorPart.id, { missingConnectors: true, syncWithInventory: true });
+      const connCAfterNodeOn = { relationship: connC.relationship, streams: [...connC.streams] };
+
+      return {
+        res1connectorsUpdated: res1.connectorsUpdated, connCAfterOff,
+        res2connectorsUpdated: res2.connectorsUpdated, connCAfterOn,
+        res3connectorsUpdated: res3.connectorsUpdated, connPAfterChildEdit,
+        resNodeOffConnectorsUpdated: resNodeOff.connectorsUpdated, connCAfterNodeOff,
+        resNodeOnConnectorsUpdated: resNodeOn.connectorsUpdated, connCAfterNodeOn,
+      };
+    }
+    """)
+    problems = []
+    if result["connCAfterOff"] != {"relationship": "Flow", "streams": []}:
+        problems.append(f"expected the view connector to stay UNCHANGED with the checkbox off (no more automatic sync), got {result['connCAfterOff']}")
+    if result["res1connectorsUpdated"] != 0:
+        problems.append(f"expected 0 resynced with the checkbox off, got {result['res1connectorsUpdated']}")
+    if result["connCAfterOn"] != {"relationship": "Serving", "streams": ["Beta"]}:
+        problems.append(f"expected the view connector to be updated to match the inventory connector with the checkbox ON, got {result['connCAfterOn']}")
+    if result["res2connectorsUpdated"] != 1:
+        problems.append(f"expected 1 resynced with the checkbox on, got {result['res2connectorsUpdated']}")
+    if result["connPAfterChildEdit"] != {"relationship": "Serving", "streams": ["Beta"]}:
+        problems.append(f"expected editing the VIEW connector NOT to propagate back up to the inventory connector (no automatic bidirectionality), got {result['connPAfterChildEdit']}")
+    if result["res3connectorsUpdated"] != 0:
+        problems.append(f"expected 0 resynced for the view-side edit with the checkbox off, got {result['res3connectorsUpdated']}")
+    if result["connCAfterNodeOff"] != {"relationship": "Triggering", "streams": ["Gamma"]}:
+        problems.append(f"expected Smart Check Node with the checkbox off to leave the connector unchanged, got {result['connCAfterNodeOff']}")
+    if result["connCAfterNodeOn"] != {"relationship": "Serving", "streams": ["Beta"]}:
+        problems.append(f"expected Smart Check Node with the checkbox on to sync the connector to the inventory connector, got {result['connCAfterNodeOn']}")
+    if result["resNodeOnConnectorsUpdated"] != 1:
+        problems.append(f"expected Smart Check Node's checkbox-on run to report 1 resynced, got {result['resNodeOnConnectorsUpdated']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Smart Check View/Node's new 'Sync existing connectors with inventory' checkbox is opt-in and one-directional (inventory -> view); with it off, nothing auto-syncs in either direction"
+
+
+def check_prompt_sync_inventory_connector(page):
+    """Regression guard for App.promptSyncInventoryConnector — the new confirm-dialog
+    mechanism hooked into the property panel's Relationship/Streams setters and the
+    on-canvas edge popover (NOT the multi-select bulk-edit path). Reported directly:
+    "when changing a view connector (either in property panel or on canvas), ask user
+    if they want the inventory (ie part to part) connector to also be updated, and if
+    they say yes then also update the related part to part connector." Covers: a
+    connector WITH an inventory counterpart shows a confirm dialog and, on OK, updates
+    the counterpart's relationship/streams to match; on Cancel, the counterpart is left
+    untouched; a connector with NO counterpart (the common case — most connectors have
+    no Composition-crossing relationship at all) shows no dialog at all."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.addView('RegrPromptSync_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const proc = store.createPart({ type: 'ApplicationProcess', label: 'PromptProc', model: store.defaultModel, streams: [] });
+      const procVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: proc.id, x: 40, y: 40 });
+      const xPart = store.createPart({ type: 'GeneralActor', label: 'PromptExternal', model: store.defaultModel, streams: [] });
+      const xVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: xPart.id, x: 300, y: 40 });
+      const connP = store.createConnector({ from: proc.id, to: xPart.id, model: store.defaultModel, connectorType: 'c', relationship: 'Flow', streams: [] });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: connP.id, fromVmId: procVm.id, toVmId: xVm.id });
+      app.openOrCreateLinkedView(tab, procVm.id);
+      await new Promise(r => setTimeout(r, 150));
+      const childView = store.findView('PromptProc');
+      const connC = store.doc.connectors.find(c => c.mirrorOf === connP.id);
+
+      // No counterpart at all: should show no dialog.
+      const plainPart1 = store.createPart({ type: 'GeneralActor', label: 'Plain1', model: store.defaultModel, streams: [] });
+      const plainPart2 = store.createPart({ type: 'GeneralActor', label: 'Plain2', model: store.defaultModel, streams: [] });
+      const plainConn = store.createConnector({ from: plainPart1.id, to: plainPart2.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      app.promptSyncInventoryConnector(plainConn);
+      await new Promise(r => setTimeout(r, 60));
+      const noDialogForPlainConn = !document.querySelector('.modal-overlay');
+
+      // Has a counterpart, click OK.
+      connC.relationship = 'Serving';
+      connC.streams = ['Beta'];
+      store.touchConnector(connC);
+      app.promptSyncInventoryConnector(connC);
+      await new Promise(r => setTimeout(r, 60));
+      const dialogShown = !!document.querySelector('.modal-overlay');
+      const dialogText = document.querySelector('.modal-overlay')?.textContent || '';
+      document.querySelector('.modal-overlay .submit')?.click();
+      await new Promise(r => setTimeout(r, 60));
+      const connPAfterOk = { relationship: connP.relationship, streams: [...connP.streams] };
+
+      // Edit again, click Cancel this time.
+      connC.relationship = 'Triggering';
+      connC.streams = ['Gamma'];
+      store.touchConnector(connC);
+      app.promptSyncInventoryConnector(connC);
+      await new Promise(r => setTimeout(r, 60));
+      document.querySelector('.modal-overlay .cancel')?.click();
+      await new Promise(r => setTimeout(r, 60));
+      const connPAfterCancel = { relationship: connP.relationship, streams: [...connP.streams] };
+
+      return { noDialogForPlainConn, dialogShown, dialogText, connPAfterOk, connPAfterCancel };
+    }
+    """)
+    problems = []
+    if not result["noDialogForPlainConn"]:
+        problems.append("expected NO dialog for a connector with no inventory counterpart (the common case)")
+    if not result["dialogShown"]:
+        problems.append("expected a confirm dialog for a connector WITH an inventory counterpart")
+    if "inventory" not in result["dialogText"].lower():
+        problems.append(f"expected the dialog text to mention 'inventory', got: {result['dialogText']}")
+    if result["connPAfterOk"] != {"relationship": "Serving", "streams": ["Beta"]}:
+        problems.append(f"expected clicking OK to update the inventory connector to match, got {result['connPAfterOk']}")
+    if result["connPAfterCancel"] != {"relationship": "Serving", "streams": ["Beta"]}:
+        problems.append(f"expected clicking Cancel to leave the inventory connector UNCHANGED (still the OK'd value from before), got {result['connPAfterCancel']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "promptSyncInventoryConnector shows a confirm dialog only when a related inventory connector exists, updates it on OK, and leaves it alone on Cancel"
+
+
+def check_property_panel_relationship_edit_triggers_sync_prompt(page):
+    """Regression guard proving the confirm-dialog mechanism is genuinely WIRED into the
+    real property panel (not just callable directly, as check_prompt_sync_inventory_connector
+    verifies) — selects the Level Down anchor's own crossing connector on the actual
+    canvas, opens its real property panel, changes the real Relationship <select>
+    element the same way a person would, and confirms a '.modal-overlay' with the
+    inventory-sync prompt appears as a result."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      // Guarantee at least 2 valid relationship options for this type pair, regardless
+      // of custom.json's actual configured pairs (a real pair might allow only 1,
+      // which would make it impossible to pick a genuinely DIFFERENT option below) --
+      // reassigning (not mutating in place) so findRelationshipPair's cache invalidates.
+      store.mergedRelationshipPairs = [...store.mergedRelationshipPairs, { typeA: 'ApplicationProcess', typeB: 'GeneralActor', relations: 'fa', default: 'f' }];
+      const view = store.addView('RegrPanelWiring_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const proc = store.createPart({ type: 'ApplicationProcess', label: 'WiringProc', model: store.defaultModel, streams: [] });
+      const procVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: proc.id, x: 40, y: 40 });
+      const xPart = store.createPart({ type: 'GeneralActor', label: 'WiringExternal', model: store.defaultModel, streams: [] });
+      const xVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: xPart.id, x: 300, y: 40 });
+      const connP = store.createConnector({ from: proc.id, to: xPart.id, model: store.defaultModel, connectorType: 'c', relationship: 'Flow', streams: [] });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: connP.id, fromVmId: procVm.id, toVmId: xVm.id });
+      app.openOrCreateLinkedView(tab, procVm.id);
+      await new Promise(r => setTimeout(r, 150));
+      const childView = store.findView('WiringProc');
+      const childTab = store.tabs.find(t => t.type === 'canvas' && t.viewId === childView.id);
+      app.switchToTab(childTab.id);
+      const connCVm = store.viewMembersForView(childView.id).find(v => v.objectType === 'connector');
+
+      app.selectOnly(connCVm.id);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      const select = [...document.querySelectorAll('#properties-body select')].find(s => [...s.options].some(o => /flow|serving|association/i.test(o.textContent)));
+      const selectFound = !!select;
+      if (select) {
+        const targetOption = [...select.options].find(o => !/flow/i.test(o.textContent));
+        select.value = targetOption.value;
+        select.dispatchEvent(new Event('change'));
+      }
+      await new Promise(r => setTimeout(r, 100));
+      const dialogAppeared = !!document.querySelector('.modal-overlay');
+      document.querySelector('.modal-overlay .cancel')?.click();
+
+      return { selectFound, dialogAppeared };
+    }
+    """)
+    problems = []
+    if not result["selectFound"]:
+        problems.append("expected to find the Relationship <select> in the real property panel")
+    if not result["dialogAppeared"]:
+        problems.append("expected changing the real Relationship select to trigger the inventory-sync confirm dialog")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "changing the real Relationship field in the property panel genuinely triggers the inventory-sync confirm prompt, not just the direct function call"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
@@ -3238,6 +3829,15 @@ CHECKS = [
     check_view3d_disposed_on_full_document_load,
     check_view3d_section_boundaries,
     check_generate_industry_propagates_section_to_whole_chain,
+    check_level_down_single_creates_new_part,
+    check_level_down_downstream_external_placed_near_anchor,
+    check_level_down_creates_composition_link,
+    check_smart_check_composition_top_down,
+    check_smart_check_composition_bottom_up,
+    check_smart_check_node_composition_redirect,
+    check_smart_check_sync_with_inventory_checkbox,
+    check_prompt_sync_inventory_connector,
+    check_property_panel_relationship_edit_triggers_sync_prompt,
 ]
 
 

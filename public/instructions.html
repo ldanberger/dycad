@@ -151,7 +151,13 @@ canvas. Availability depends on what's selected — greyed out means the current
     build a higher-level diagram that this one nests under.</td></tr>
     <tr><td><strong>Level Down</strong></td><td>Pushes two or more selected nodes into a new sub-view,
     replacing them here with a single node linked down to that detail view (double-click to navigate down;
-    double-click the linked placeholder to come back up).</td></tr>
+    double-click the linked placeholder to come back up). Double-clicking a single node that has no linked
+    view yet does the same thing for just that one node: creates a new sub-view, links this node down to it,
+    and gives the sub-view a genuinely new part of the same type/label to build the decomposition around
+    (not the same part reused — renaming or retyping it there won't rename the node up here) — its immediate
+    neighbors carry down too, as external context nodes. A structural Composition link (parent part &rarr; new
+    anchor) is created behind the scenes so Smart Check View/Node can keep the two levels in sync later — see
+    below.</td></tr>
     <tr><td><strong>Merge</strong></td><td>Combines two or more selected nodes into one, keeping their
     combined connections.</td></tr>
     <tr><td><strong>Copy / Paste</strong></td><td>Standard copy-paste for selected nodes, within or across
@@ -172,15 +178,27 @@ canvas. Availability depends on what's selected — greyed out means the current
     already tagged on a part in the current model and checks each one against a chosen stream template — it
     shows a review list of every missing (stream, type, label) position with checkboxes for Part and View (a
     node can't be created without its part, so unchecking Part also unchecks and disables View); nothing is
-    created until you click Proceed.</td></tr>
+    created until you click Proceed. Both this and Smart Check Node are also <strong>Composition-aware</strong>:
+    if the current view was created by Level Down, a connector added to the parent-level part afterward shows
+    up here automatically (connected to this view's own anchor, not the parent — the parent itself is never
+    duplicated as a node), and a connector you add here to something outside this decomposition is mirrored
+    back up to the parent for its own next Smart Check run. A connection to a sibling under the same parent
+    stays purely internal and isn't mirrored. A fourth option, <strong>Sync existing connectors with
+    inventory</strong> (off by default), compares every connector already on the view (or, for Smart Check
+    Node, touching that one node) against its related part-to-part "inventory" connector — e.g. Level Down's
+    own original crossing connector, or one Smart Check itself created — and updates the view's copy to match
+    wherever they differ. This only runs when checked; nothing about relationship/type/streams is kept in sync
+    automatically otherwise. To push a change the OTHER way — from a view connector back up to its inventory
+    connector — see the prompt described under <a href="#properties">Property Panels</a> below.</td></tr>
     <tr><td><strong>Smart Check Node</strong></td><td>(Advanced menu, or right-click a single node) The
     single-node version of Smart Check View — same "missing connectors" / "missing connectors and nodes, N
-    levels" idea, but starting from just the node you right-clicked instead of the whole view. Two extra
-    options this scope adds: <strong>Upstream</strong>/<strong>Downstream</strong> (which direction to follow
-    connectors relative to that node), and <strong>By Stream</strong> (only follow connectors tagged with the
-    node's own stream(s) — pick one or more if it has several). The stream filter stays fixed to whatever you
-    picked from the original node: if a node it pulls in turns out to also carry some other stream, that other
-    stream is not used to keep expanding the search.</td></tr>
+    levels" idea (including the same Composition-awareness described above), but starting from just the node
+    you right-clicked instead of the whole view. Two extra options this scope adds:
+    <strong>Upstream</strong>/<strong>Downstream</strong> (which direction to follow connectors relative to that
+    node), and <strong>By Stream</strong> (only follow connectors tagged with the node's own stream(s) — pick
+    one or more if it has several). The stream filter stays fixed to whatever you picked from the original
+    node: if a node it pulls in turns out to also carry some other stream, that other stream is not used to
+    keep expanding the search.</td></tr>
     <tr><td><strong>Generate Industry / Generate Inventory View</strong></td><td>(Advanced menu) Bulk-generate
     a starter set of parts/connectors for a named industry, or a summary inventory view of everything in the
     model. The built-in "general" industry data can be supplemented with your own via <strong>File &gt; Load
@@ -336,6 +354,12 @@ default). Panning uses middle-click-drag here (right-click is reserved for that 
 </ul>
 <p>The same split applies to the Parts/Connectors catalog tables, which show only the Root Properties side
 (there's no "view placement" to speak of when you're not looking at a specific diagram).</p>
+<p>Changing a connector's Relationship or Streams — whether from Root Properties or the quick relationship
+picker you get by clicking a connector on canvas — also checks whether that connector has a related
+part-to-part "inventory" connector elsewhere in the model (see Level Down and Smart Check View's own
+Composition-awareness, above). If it does, you're asked whether to update that inventory connector to match
+too. Say yes to keep both in sync; say no to let them intentionally diverge. Most connectors have no such
+counterpart and are edited with no extra prompt at all.</p>
 <p><strong>A few fields exist in the panel but currently have no visible effect</strong> — Font Color, Font
 Size, and Border Color on a node, and Margin on a view. They're stored if you set them, but nothing in the
 current build reads them back to change how anything looks. Worth knowing so you don't spend time tuning a

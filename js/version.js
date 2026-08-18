@@ -1764,4 +1764,143 @@
 // regression check (check_generate_industry_propagates_section_to_whole_chain, using the
 // built-in SFCCE template's 9-type chain + 2 passive pairs), confirmed to catch the
 // regression via a temporary revert. Full suite 59/59.
-export const APP_VERSION = '0.818';
+// 0.819: fix single-node Level Down (double-click a node with no linked view yet)
+// reusing the SAME part as the new sub-view's own anchor — a second viewMember of the
+// identical Part, not a new one — meaning editing/renaming/retyping the decomposition's
+// own anchor there silently edited the summary-level node too. Reported directly from a
+// real scenario: DataEntity 'in' -flow-> Process 'process1' -flow-> DataEntity 'out';
+// leveling down on 'process1' should create a genuinely new Process part to build the
+// decomposition around. levelDownSingle now creates a new Part (type/label/model/
+// streams/note/order/other copied from the original, as a starting point — same
+// approach Split Node already uses) for the anchor, and NEW connectors (copying the
+// original's model/connectorType/relationship/streams as a template) pointing at it —
+// reusing the ORIGINAL connectors here would leave their from/to referencing the old
+// part even though the view visually shows them attached to the new one. The external
+// copies of the crossing connectors' neighbors (the real 'in'/'out' parts) are still
+// correctly reused as-is — only the leveled-down node itself needed to become new. The
+// original node and its original connectors up at the parent level are untouched either
+// way. New permanent regression check (check_level_down_single_creates_new_part),
+// confirmed to catch the regression via a temporary revert. Full suite 60/60.
+// 0.820: v0.819 fixed Level Down to give the new sub-view a genuinely separate anchor
+// Part — but that meant a connector added to the PARENT-level part afterward had no
+// relationship to the child anchor at all. Reported directly: "if I add a dataentity
+// and connect it to the process, the new part does not show up in the lower level as an
+// external part. Smart check view brings in the part process, which we don't want as
+// we're in that process. Smart check node doesn't see the new connection to its
+// parent." Fixed with a Composition connector (parent -> anchor, created unplaced by
+// levelDownSingle) plus new composition-awareness in Smart Check View/Node:
+// pullInCompositionParentConnections proactively mirrors the parent's own connections
+// onto the child anchor (creating + placing a mirrored connector, pulling the other end
+// in as external if missing-nodes is checked); redirectViaCompositionChild is a BFS
+// safety net that stops the classic "missing node" walk from independently
+// rediscovering and duplicating the parent itself via some other already-on-view shared
+// neighbor (guards against a self-loop when the BFS reaches the Composition link
+// itself); mirrorCompositionChildConnectorsUp handles the reverse direction — a new
+// connection made AT the child level to something genuinely external gets mirrored back
+// up to the parent, while a connection to a sibling under the same parent (purely
+// internal to this decomposition) is correctly left alone, per the user's own stated
+// rule. Four new permanent regression checks (check_level_down_creates_composition_link,
+// check_smart_check_composition_top_down, check_smart_check_composition_bottom_up,
+// check_smart_check_node_composition_redirect), each confirmed to catch its own
+// regression via a temporary revert. Full suite 64/64.
+// 0.821: fix v0.820's composition-mirrored connectors going stale after their SOURCE
+// changed. Reported directly: "smart check does not update the connector type, end
+// points etc. if external->child connector is different than external->parent." The
+// mirror lookup matched an existing mirror by its CURRENT from/to/connectorType — so
+// once the source connector's relationship, streams, or other endpoint changed, that
+// lookup simply failed to find the now-stale mirror and would have created a SECOND,
+// orphaned one instead of updating it in place. Fixed with a persistent `mirrorOf`
+// field on Connector (js/state.js: added to createConnector's params/object literal
+// and migrateDoc's connector whitelist) pointing at the source connector's id — a link
+// that survives the source's endpoint moving, unlike a from/to match. New
+// syncMirroredConnector (js/commands.js) finds-or-creates a mirror via this field and,
+// if found with drifted fields, updates + restyles it via a new Store.restyleConnector
+// (factored out of createConnector's own style-lookup, now shared as
+// connectorStyleFields in state.js) rather than leaving it untouched or duplicating it.
+// pullInCompositionParentConnections/redirectViaCompositionChild (top-down) also now
+// repair a placed connector viewMember's fromVmId/toVmId if the source's endpoint
+// moved; mirrorCompositionChildConnectorsUp (bottom-up) resyncs the same way. Smart
+// Check's return value and toast gained a `connectorsUpdated`/"N resynced" count.
+// Deliberately still never DELETES a mirror whose source no longer qualifies (e.g.
+// retargeted onto a sibling) — stays additive/corrective, not destructive, like the
+// rest of Smart Check. New permanent regression check
+// (check_smart_check_composition_mirror_resyncs, covering relationship+streams drift
+// and a full endpoint retarget, asserting exactly one mirror ever exists per source),
+// confirmed to catch the regression via a temporary revert. Full suite 65/65.
+// 0.822: v0.821's sync fix only covered connectors SMART CHECK ITSELF creates — Level
+// Down's own crossing connectors (the "external neighbor" copies it makes at level-down
+// time, for context that existed BEFORE leveling down) were never tagged with
+// mirrorOf, so they were completely invisible to the sync mechanism. Reported directly,
+// with the user's own exact scenario: dataentity_p1 -> connector_p1 -> businessprocess_
+// p1 -> connector_p2 -> dataentity_p2; leveling down creates dataentity_p1 (external)
+// -> connector_c1 -> businessprocess_c1 -> connector_c2 -> dataentity_p2 (external);
+// "if I change connector_c2, connector_p2 never changes... when will it change?".
+// Fixed levelDownSingle to tag each crossing connector with mirrorOf pointing at the
+// original it was copied from. That alone would have made things WORSE, though: the
+// existing sync direction (source always wins onto mirror) is fixed parent-authoritative
+// — tagging connector_c2 as "a mirror of connector_p2" without also making sync
+// bidirectional would mean editing connector_c2 and running Smart Check silently
+// REVERTS it back to match the untouched connector_p2, instead of just failing to
+// propagate. So syncMirroredConnector (js/commands.js) is now genuinely bidirectional —
+// findCrossingCounterpart looks up a pair's other half regardless of which side
+// mirrorOf is recorded on, and whichever side was touched more recently pushes its
+// relationship/connectorType/streams onto the other (endpoints stay one-directional,
+// source's own from/to always wins onto its mirror — retargeting a connector's
+// placement on some OTHER, not-currently-open view isn't safe to do from here).
+// "More recently" needed a real fix of its own: comparing `updatedAt` (nowStamp,
+// SECOND-level precision) meant two edits in the same real-world second — an entirely
+// normal occurrence, not just a fast test — compared as a tie and picked the wrong
+// direction, confirmed via a temporary revert that failed 5/5 runs. Replaced with a new
+// monotonic `_touchSeq` counter (Store constructor's `_connectorTouchSeq`, stamped by
+// createConnector/touchConnector) — deliberately NOT part of migrateDoc's persisted
+// whitelist, so it simply resets to a fresh, all-tied baseline after a save/reload
+// rather than needing to survive across sessions. Two new permanent regression checks
+// (check_smart_check_level_down_crossing_connectors_sync_bidirectionally, and a fix to
+// check_smart_check_composition_mirror_resyncs which needed its own missing
+// touchConnector call to keep passing under the new recency logic), each confirmed to
+// catch its own regression via a temporary revert (including 5 repeated runs for the
+// same-second timestamp case specifically, given its previously nondeterministic
+// nature). Full suite 66/66.
+// 0.823: replaced v0.822's automatic bidirectional recency-based Composition-crossing
+// connector sync with an explicit, user-driven design, per direct feedback: "still not
+// working... let's change approach." The automatic version was too easy to distrust —
+// a Smart Check run could silently rewrite either side's relationship/streams with no
+// warning, and there was no way to tell it to leave things alone. Now: (1)
+// App.promptSyncInventoryConnector (main.js), hooked into the property panel's
+// Relationship/Streams setters (both connector panels) and the on-canvas edge popover
+// — NOT the multi-select bulk-edit path — asks "update the related inventory connector
+// too?" right at edit time via the existing confirmModal, and only pushes the change if
+// you say yes; silent no-op for the common case of a connector with no counterpart. (2)
+// Smart Check View/Node gained a new "Sync existing connectors with inventory"
+// checkbox, off by default: only when checked does it compare each connector already
+// on the view (or, for Node, touching that node) against its inventory counterpart and
+// pull relationship/connectorType/streams from the inventory side into the view side —
+// one direction only, never automatic. syncMirroredConnector (js/commands.js) is
+// simplified back down to find-or-create-plus-endpoint-repair only; the recency
+// comparison and its `_touchSeq` plumbing (js/state.js) are removed entirely as
+// unused. The underlying `mirrorOf` linkage (added in 0.822, letting Level Down's own
+// crossing connectors and Smart-Check-created ones both be found via the new
+// findCrossingCounterpart, now exported) is unchanged and still what both new
+// mechanisms use to find "the related inventory connector." Three new permanent
+// regression checks (check_smart_check_sync_with_inventory_checkbox,
+// check_prompt_sync_inventory_connector, and
+// check_property_panel_relationship_edit_triggers_sync_prompt — the last driving the
+// REAL property-panel <select> element, not just a direct function call) replace the
+// two checks for the removed automatic mechanism, each confirmed to catch its own
+// regression via a temporary revert. Full suite 67/67.
+// 0.824: fix Level Down placing a downstream ("to" side) external neighbor at a fixed
+// x=900 regardless of the anchor's own position or the view's node size — reported
+// directly as "placed far right... can this be updated to place it closer, one node
+// width to the right of the right-most node that is not external." At the point this
+// runs, the anchor (selfVm) is always the only non-external node on the freshly
+// leveled-down view, so "right-most non-external node" simplifies to selfVm itself:
+// now placed at selfVm.x + getNodeSize(view).w instead of the hardcoded 900. The
+// upstream ("from" side) neighbor's placement (x=20, near the left edge) was never
+// reported as a problem and is unchanged. Also fixed a stale doc comment nearby still
+// describing 0.822's automatic "whichever was touched more recently wins" mirrorOf
+// sync, which 0.823 replaced with the explicit confirm-prompt/checkbox design. New
+// permanent regression check (check_level_down_downstream_external_placed_near_anchor
+// — assertions are tolerance-based, not exact-equality, since levelDownSingle's own
+// trailing redrawAndResolveLayout call can resize/reflow nodes after this placement
+// runs), confirmed to catch the regression via a temporary revert. Full suite 68/68.
+export const APP_VERSION = '0.824';

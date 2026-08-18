@@ -851,9 +851,17 @@ function levelUp(app, tab, newViewName) {
 // ===================== LEVEL DOWN =====================
 /**
  * Single-node variant used by double-click when a node has no linkedViewName yet:
- * creates a new (blank) view and links the node to it, without altering the node itself
- * (unlike the multi-select Level Down, which replaces the moved selection with an
- * 'Unknown' placeholder — here the original node's type/identity must stay untouched).
+ * creates a new (blank) view, links the ORIGINAL node down to it (linkedViewName), and
+ * populates the new view with a genuinely NEW Part representing this node's own
+ * decomposition — same type/label/model/streams/note/order/other as the original
+ * (copied once, as a starting point), but a distinct identity, exactly the same
+ * new-Part-not-a-shared-reference approach Split Node already uses. This used to place a
+ * second viewMember of the SAME part (only a new placement, not a new Part) as the new
+ * view's anchor — meaning editing/renaming/retyping the decomposition's own anchor node
+ * silently edited the summary-level node too, since they were the identical Part
+ * underneath; reported directly from using it ("it should create a new process part").
+ * The original node's own viewMember (up at the parent level) is untouched either way —
+ * its type/identity never changes, only linkedViewName gets set.
  */
 function levelDownSingle(app, tab, vmId) {
   const { store } = app;
@@ -871,25 +879,43 @@ function levelDownSingle(app, tab, vmId) {
   const newTab = app.createCanvasTab(view);
   vm.linkedViewName = view.id;
 
-  // Place a copy of the double-clicked node itself as the anchor of the new view — the
-  // ORIGINAL vm is untouched (it stays put in the old view; unlike multi-node Level
-  // Down, this node's own identity/type never changes), but the crossing-connector
-  // recreation below needs something on this side to attach to inside the new view.
+  // A new, distinct Part for the new view's own anchor — NOT the same part.id as the
+  // node being leveled down from (see this function's own doc comment for why). Keeps
+  // the original's label unchanged (unlike Split Node's "(split)" suffix) since the new
+  // view is already named after it and conceptually still represents "this node, one
+  // level of detail down" — not a sibling needing visual disambiguation.
+  const newPart = store.createPart({ type: part.type, label: part.label, model: part.model, streams: [...(part.streams || [])], note: part.note, order: part.order, other: part.other });
   const selfVm = store.createViewMember({
-    view: view.id, objectType: 'part', objectId: part.id,
+    view: view.id, objectType: 'part', objectId: newPart.id,
     x: 200, y: 150, fillColor: vm.fillColor,
   });
+
+  // Structural whole/part link, parent -> new child anchor, not placed on any view
+  // (there's no view showing both levels at once). This is what lets Smart Check
+  // View/Node recognize afterward that this decomposition already represents `part` —
+  // so a connector added to `part` at the parent level later doesn't get treated as
+  // "pull the whole parent process in again" down here, and a connector added to
+  // newPart down here that reaches genuinely outside this decomposition gets mirrored
+  // back up to `part`. See smartCheckView/smartCheckNode.
+  store.createConnector({ from: part.id, to: newPart.id, model: part.model, connectorType: 'c', relationship: 'Composition' });
 
   // Crossing connectors: with a single node "selected", exactly-one-endpoint-selected
   // means any connector touching this node but not a self-loop on it. For each one,
   // create an isExternal copy of the OTHER-side neighbor in the new view (deduplicated
   // — multiple crossing edges to the same neighbor share one copy), positioned at a
-  // fixed x (900 if this node was the from side, 20 if the to side) stacked vertically,
-  // then recreate the connector inside the new view pointing at that external copy.
-  // Same approach as a portion of multi-node Level Down (step 3).
+  // fixed x (one node width right of the anchor if this node was the from side, so a
+  // downstream "to" neighbor sits just past it rather than off in empty space; 20 if
+  // the to side, i.e. an upstream "from" neighbor, which already reads fine close to
+  // the left edge) stacked vertically, then create a NEW connector (same model/
+  // connectorType/relationship/streams as the original, as a template — see Split
+  // Node's identical pattern) between the external copy and newPart, since a
+  // Connector's own from/to are part ids: reusing the ORIGINAL connector's identity
+  // here would leave it pointing at the OLD part even though this view visually shows
+  // it attached to the NEW one, a real from/to mismatch.
   const vmsInOldView = store.viewMembersForView(tab.viewId);
   const connVmsInOldView = vmsInOldView.filter((v) => v.objectType === 'connector');
   const crossingConnVms = connVmsInOldView.filter((cv) => (cv.fromVmId === vm.id) !== (cv.toVmId === vm.id));
+  const { w: nodeW } = getNodeSize(view);
 
   const neighborCopyByOldVmId = new Map(); // old neighbor vmId -> new external copy vm (in new view)
   let offsetI = 0;
@@ -903,15 +929,31 @@ function levelDownSingle(app, tab, vmId) {
       offsetI += 1;
       copy = store.createViewMember({
         view: view.id, objectType: 'part', objectId: neighborVm.objectId,
-        x: movedEndIsFrom ? 900 : 20, y: 60 + offsetI * 90,
+        x: movedEndIsFrom ? selfVm.x + nodeW : 20, y: 60 + offsetI * 90,
         fillColor: neighborVm.fillColor, isExternal: true,
       });
       neighborCopyByOldVmId.set(neighborVmId, copy);
     }
     const conn = store.findConnector(cv.objectId);
     if (conn) {
+      // mirrorOf links this crossing connector back to the original it was copied
+      // from, so Smart Check View/Node's composition-awareness (see
+      // syncMirroredConnector in the Smart Check section below) can find this exact
+      // pair again later: creating a new part-level connection at either level (Smart
+      // Check's own "Missing connectors and nodes"/"Sync existing connectors with
+      // inventory") or editing either connector's relationship/streams (the "update
+      // the related inventory connector too?" prompt) can find its counterpart
+      // through this link. Without it, the two connectors would be completely
+      // unrelated objects as far as any of that is concerned. Reported directly:
+      // "connector_p2 never changes... when will it change?"
+      const newConn = store.createConnector({
+        from: movedEndIsFrom ? newPart.id : neighborVm.objectId,
+        to: movedEndIsFrom ? neighborVm.objectId : newPart.id,
+        model: conn.model, connectorType: conn.connectorType, relationship: conn.relationship, streams: [...(conn.streams || [])],
+        mirrorOf: conn.id,
+      });
       store.createViewMember({
-        view: view.id, objectType: 'connector', objectId: conn.id,
+        view: view.id, objectType: 'connector', objectId: newConn.id,
         fromVmId: movedEndIsFrom ? selfVm.id : copy.id,
         toVmId: movedEndIsFrom ? copy.id : selfVm.id,
       });
@@ -1282,14 +1324,295 @@ function remapSortValue(store, template, part, key, connectionOrderMap, viewRele
  * itself, not just what's currently visible.
  * Returns { connectorsAdded, nodesAdded }.
  */
+/** Composition connector where `partId` is the "to" (composed/child) side, if any —
+ * e.g. the one levelDownSingle creates from a parent part to its new decomposition
+ * anchor. Shared by smartCheckView/smartCheckNode's composition-awareness below. */
+function findCompositionParentConn(store, partId) {
+  return store.doc.connectors.find((c) => ciEq(c.relationship, 'Composition') && ciEq(c.to, partId));
+}
+
+/**
+ * Finds the existing counterpart of `conn` in a Composition-crossing connector pair,
+ * regardless of which side the `mirrorOf` link happens to be recorded on — a pair can
+ * be established from either direction's own code path (levelDownSingle's initial
+ * crossing connectors, pullInCompositionParentConnections creating a child-side mirror
+ * for a brand-new parent connection, or mirrorCompositionChildConnectorsUp creating a
+ * parent-side mirror for a brand-new child connection), so lookup has to work both
+ * ways to always find the SAME pair no matter which one is asking. */
+function findCrossingCounterpart(store, conn) {
+  return store.doc.connectors.find((c) => (c.mirrorOf && ciEq(c.mirrorOf, conn.id)) || (conn.mirrorOf && ciEq(conn.mirrorOf, c.id)));
+}
+
+/**
+ * Finds-or-creates the mirror of `sourceConn` (see findCrossingCounterpart — lookup is
+ * bidirectional, NOT by matching current from/to/connectorType, specifically so a
+ * mirror can still be found after either side's own endpoint changes; a from/to lookup
+ * would simply fail to find the old one and create a second, stale-orphan connector
+ * instead).
+ *
+ * Only ENDPOINTS (sourceConn's own from/to, substituted onto the mirror) are kept in
+ * sync automatically here — that's structural discovery (the parent's connection now
+ * points somewhere new), the same territory as the rest of this composition-awareness
+ * section. relationship/connectorType/streams are deliberately NOT auto-synced here
+ * anymore: an earlier version tried "whichever side was edited more recently wins,"
+ * but that's surprising (a Smart Check run can silently rewrite either side with no
+ * warning) and depends on precise edit-recency tracking that's easy to get subtly
+ * wrong. Keeping an existing pair's relationship/type/streams in sync is now always
+ * EXPLICIT: either right at edit time (see App.promptSyncInventoryConnector, main.js —
+ * "update the inventory connector too?") or via Smart Check's own opt-in "Sync existing
+ * connectors with inventory" checkbox (syncViewConnectorsWithInventory below, one
+ * direction only: inventory -> view). Reported directly: "if I add a dataentity and
+ * connect it to the process, the new part does not show up in the lower level" [why
+ * this function exists at all] and "connector_p2 never changes... when will it
+ * change?" [why the answer is now "when you say so," not "silently, eventually"].
+ *
+ * Returns { mirror, isNew, changed } — changed is true if a pre-existing mirror's own
+ * endpoint needed correcting. Deliberately never DELETES a mirror whose counterpart has
+ * been removed entirely or rewired to no longer qualify (e.g. bottom-up: a connection
+ * retargeted from an external part onto a sibling) — Smart Check stays
+ * additive/corrective, not destructive, consistent with the rest of this file. */
+function syncMirroredConnector(store, sourceConn, mirroredFrom, mirroredTo) {
+  let mirror = findCrossingCounterpart(store, sourceConn);
+  if (!mirror) {
+    mirror = store.createConnector({ from: mirroredFrom, to: mirroredTo, model: sourceConn.model, connectorType: sourceConn.connectorType, relationship: sourceConn.relationship, streams: [...(sourceConn.streams || [])], mirrorOf: sourceConn.id });
+    return { mirror, isNew: true, changed: true };
+  }
+
+  const changed = !ciEq(mirror.from, mirroredFrom) || !ciEq(mirror.to, mirroredTo);
+  if (changed) {
+    mirror.from = mirroredFrom;
+    mirror.to = mirroredTo;
+    store.touchConnector(mirror);
+  }
+  return { mirror, isNew: false, changed };
+}
+
+/**
+ * Top-down half of Smart Check's composition-awareness. Called while a BFS is about to
+ * treat `missingPart` as a brand-new node to pull onto the view, discovered via `conn`
+ * which touches `presentPartId` (already on view). If something already on this view is
+ * `missingPart`'s own Composition child, this view already represents `missingPart`'s
+ * decomposition — pulling `missingPart` itself in as a plain new node would be a
+ * redundant, wrong-level duplicate of the process/thing this view is already "inside"
+ * (reported directly: "smart check view brings in the part process, which we don't
+ * want as we're in that process"). In that case, redirect: ensure a connector from
+ * presentPartId to that Composition child exists (mirroring conn's own
+ * relationship/connectorType/streams, creating + placing it if needed, or resyncing it
+ * if it already exists but has drifted) instead, and return the count of NEWLY PLACED
+ * or UPDATED connector viewMembers so the caller can fold it into its own stats.
+ * Returns null if `missingPart` has no Composition child already on this view — caller
+ * proceeds with its normal pull-in.
+ */
+function redirectViaCompositionChild(store, view, conn, missingPart, partIdToVmId, placedConnectorIds, log, describePart) {
+  let childPartId = null;
+  for (const pid of partIdToVmId.keys()) {
+    const pc = findCompositionParentConn(store, pid);
+    if (pc && ciEq(pc.from, missingPart.id)) { childPartId = pid; break; }
+  }
+  if (!childPartId) return null;
+
+  const mirroredFrom = conn.from === missingPart.id ? childPartId : conn.from;
+  const mirroredTo = conn.to === missingPart.id ? childPartId : conn.to;
+  // `conn` is itself the Composition connector that makes childPartId missingPart's
+  // child (the on-view end IS childPartId, discovered via this very link) — the
+  // substitution above collapses to a self-loop. Suppress the pull-in (still correct:
+  // missingPart shouldn't be added) without fabricating a connector to nowhere.
+  if (ciEq(mirroredFrom, mirroredTo)) return { added: 0, updated: 0 };
+
+  return placeOrRepairMirror(store, view, conn, mirroredFrom, mirroredTo, partIdToVmId, placedConnectorIds, log, describePart,
+    `${describePart(missingPart.id)} is already represented on this view by ${describePart(childPartId)}`);
+}
+
+/** Shared placement step for the top-down direction: sync `sourceConn`'s mirror (via
+ * syncMirroredConnector), then ensure it's placed on `view` pointing at the CURRENT
+ * mirroredFrom/mirroredTo viewMembers — repairing an existing placement's fromVmId/
+ * toVmId if the source's other endpoint has moved since the mirror was placed. Returns
+ * { added, updated }. */
+function placeOrRepairMirror(store, view, sourceConn, mirroredFrom, mirroredTo, partIdToVmId, placedConnectorIds, log, describePart, contextMsg) {
+  const SMART_CHECK_NOTE = 'Smart Check created.';
+  const { mirror, isNew, changed } = syncMirroredConnector(store, sourceConn, mirroredFrom, mirroredTo);
+  const targetFromVmId = partIdToVmId.get(mirroredFrom), targetToVmId = partIdToVmId.get(mirroredTo);
+  let updated = 0;
+
+  if (!placedConnectorIds.has(mirror.id)) {
+    mirror.note = mirror.note ? `${mirror.note}\n${SMART_CHECK_NOTE} (composition-redirected.)` : `${SMART_CHECK_NOTE} (composition-redirected.)`;
+    store.createViewMember({ view: view.id, objectType: 'connector', objectId: mirror.id, fromVmId: targetFromVmId, toVmId: targetToVmId });
+    store.touchConnector(mirror);
+    placedConnectorIds.add(mirror.id);
+    log(`Composition redirect: ${contextMsg} — connected ${describePart(mirroredFrom)} -> ${describePart(mirroredTo)} (${mirror.relationship || mirror.connectorType}) instead of adding a duplicate node.`);
+    return { added: 1, updated };
+  }
+
+  const placedVm = store.viewMembersForView(view.id).find((v) => v.objectType === 'connector' && v.objectId === mirror.id);
+  const endpointDrifted = placedVm && (placedVm.fromVmId !== targetFromVmId || placedVm.toVmId !== targetToVmId);
+  if (endpointDrifted) { placedVm.fromVmId = targetFromVmId; placedVm.toVmId = targetToVmId; }
+  if (changed || endpointDrifted) {
+    if (isNew === false) {
+      mirror.note = mirror.note ? `${mirror.note}\n${SMART_CHECK_NOTE} (composition-resynced.)` : `${SMART_CHECK_NOTE} (composition-resynced.)`;
+    }
+    log(`Composition redirect: resynced the mirrored connector for ${contextMsg} to ${describePart(mirroredFrom)} -> ${describePart(mirroredTo)} (${mirror.relationship || mirror.connectorType}).`);
+    updated += 1;
+  }
+  return { added: 0, updated };
+}
+
+/**
+ * Bottom-up half of Smart Check's composition-awareness. For every part already on
+ * this view that is itself a Composition child (composed under some higher-level
+ * parent, e.g. a level-down anchor), mirrors any of ITS OWN connectors that reach
+ * genuinely outside this decomposition as a doc-level connector on the PARENT too, so a
+ * later Smart Check run on the parent's own view can surface it there. A connector to a
+ * SIBLING — something else already composed under the very same parent — is purely
+ * internal to this decomposition and is deliberately left alone (per the user's own
+ * stated rule: only propagate connections to parts that don't share the same parent).
+ * Doesn't place anything on any view (the parent view isn't the one being checked here)
+ * — just ensures the connector object exists at the doc level and stays in sync
+ * (relationship/connectorType/streams/endpoint) with whatever it mirrors. Returns
+ * { added, updated }, kept separate from the view's own connectorsAdded since nothing
+ * was added to THIS view.
+ */
+function mirrorCompositionChildConnectorsUp(store, onViewPartIds, log, describePart) {
+  let added = 0, updated = 0;
+  for (const childPartId of onViewPartIds) {
+    const parentConn = findCompositionParentConn(store, childPartId);
+    if (!parentConn) continue;
+    const parentId = parentConn.from;
+    for (const conn of [...store.doc.connectors]) {
+      if (ciEq(conn.id, parentConn.id)) continue;
+      if (ciEq(conn.relationship, 'Composition')) continue;
+      if (conn.mirrorOf) continue; // don't re-mirror something that's already a mirror
+      if (conn.from !== childPartId && conn.to !== childPartId) continue;
+      const otherId = conn.from === childPartId ? conn.to : conn.from;
+      if (ciEq(otherId, parentId)) continue; // points straight back at its own parent already
+      const otherParentConn = findCompositionParentConn(store, otherId);
+      if (otherParentConn && ciEq(otherParentConn.from, parentId)) continue; // sibling under the same parent — internal, no mirror needed
+      const mirroredFrom = conn.from === childPartId ? parentId : conn.from;
+      const mirroredTo = conn.to === childPartId ? parentId : conn.to;
+      const { mirror, isNew, changed } = syncMirroredConnector(store, conn, mirroredFrom, mirroredTo);
+      const NOTE = isNew ? 'Smart Check created (mirrored to parent via Composition link.)' : 'Smart Check updated (mirrored to parent via Composition link.)';
+      if (isNew) {
+        mirror.note = NOTE;
+        added += 1;
+        log(`Composition mirror: ${describePart(childPartId)}'s connection to ${describePart(otherId)} also mirrored up to its parent ${describePart(parentId)} (${mirror.relationship || mirror.connectorType}).`);
+      } else if (changed) {
+        mirror.note = mirror.note ? `${mirror.note}\n${NOTE}` : NOTE;
+        updated += 1;
+        log(`Composition mirror: resynced ${describePart(parentId)}'s mirrored connection to ${describePart(otherId)} (now ${mirror.relationship || mirror.connectorType}).`);
+      }
+    }
+  }
+  return { added, updated };
+}
+
+/**
+ * Proactive top-down half of Smart Check's composition-awareness, run once per check
+ * (not per BFS hop). redirectViaCompositionChild above only catches a parent's
+ * connection when the classic BFS independently rediscovers it via some OTHER shared,
+ * already-on-view neighbor (e.g. an external copy of 'in' still touching the original
+ * parent-level connector) — a brand new connector added at the parent level AFTER
+ * level-down, to a part with no other path onto this view, is otherwise completely
+ * unreachable by connectivity walk, since the parent itself is deliberately never
+ * placed here. This function closes that gap directly: for every part already on this
+ * view that is a Composition child, it scans its PARENT's own connectors (not this
+ * view's connectivity) and mirrors each one onto the child anchor instead — creating,
+ * placing, or resyncing (relationship/connectorType/streams/endpoint) a connector to
+ * the other end, pulling that other end in as an external node first if it isn't on
+ * view yet and allowNodePull is set. Reported directly: "if I add a dataentity and
+ * connect it to the process, the new part does not show up in the lower level as an
+ * external part" — and later: "smart check does not update the connector type, end
+ * points etc. if external->child connector is different than external->parent".
+ */
+function pullInCompositionParentConnections(store, view, partIdToVmId, placedConnectorIds, allowNodePull, log, describePart) {
+  let connectorsAdded = 0, nodesAdded = 0, connectorsUpdated = 0;
+  const typeToFill = new Map();
+  for (const def of store.settings.elements || []) {
+    const fill = (store.settings.elementGroups || []).find((g) => ciEq(g.group, def.group))?.fill;
+    typeToFill.set(def.type, fill || '#cccccc');
+  }
+  let autoPlacedCount = 0;
+  const compChildren = [...partIdToVmId.keys()].filter((pid) => !!findCompositionParentConn(store, pid));
+  for (const childId of compChildren) {
+    const parentConn = findCompositionParentConn(store, childId);
+    const parentId = parentConn.from;
+    const childVm = store.findViewMember(partIdToVmId.get(childId));
+    for (const conn of [...store.doc.connectors]) {
+      if (ciEq(conn.id, parentConn.id)) continue;
+      if (conn.mirrorOf) continue; // don't re-mirror something that's already a mirror
+      if (conn.from !== parentId && conn.to !== parentId) continue;
+      const otherId = conn.from === parentId ? conn.to : conn.from;
+      if (ciEq(otherId, childId)) continue;
+      let otherOnView = partIdToVmId.has(otherId);
+      if (!otherOnView) {
+        if (!allowNodePull) continue;
+        const otherPart = store.findPart(otherId);
+        if (!otherPart) continue;
+        autoPlacedCount += 1;
+        const fillColor = typeToFill.get(otherPart.type) || '#cccccc';
+        const newVm = store.createViewMember({
+          view: view.id, objectType: 'part', objectId: otherPart.id,
+          x: (childVm ? childVm.x : 60) + 200, y: (childVm ? childVm.y : 40) + (autoPlacedCount * 70),
+          fillColor, isExternal: true,
+        });
+        partIdToVmId.set(otherId, newVm.id);
+        otherOnView = true;
+        nodesAdded += 1;
+        log(`Added missing node: ${describePart(otherId)}, pulled in via its connection to ${describePart(parentId)} (composed here as ${describePart(childId)}).`);
+      }
+      const mirroredFrom = conn.from === parentId ? childId : conn.from;
+      const mirroredTo = conn.to === parentId ? childId : conn.to;
+      const result = placeOrRepairMirror(store, view, conn, mirroredFrom, mirroredTo, partIdToVmId, placedConnectorIds, log, describePart,
+        `${describePart(parentId)}'s connection to ${describePart(otherId)}, mirrored onto its decomposition anchor ${describePart(childId)}`);
+      connectorsAdded += result.added;
+      connectorsUpdated += result.updated;
+    }
+  }
+  return { connectorsAdded, nodesAdded, connectorsUpdated };
+}
+
+/**
+ * "Sync existing connectors with inventory" — Smart Check View/Node's own opt-in
+ * checkbox, unchecked by default. Deliberately NOT automatic (unlike the
+ * discovery/placement functions above): for each connector already placed on this view
+ * (View: every one; Node: only those touching the seed part), if it has a related
+ * part-to-part "inventory" counterpart across a Composition boundary (see
+ * findCrossingCounterpart — covers both Level Down's own original crossing connectors
+ * and ones Smart Check itself created) whose relationship/connectorType/streams
+ * differ, pulls those fields from the counterpart into THIS view's own connector.
+ * One direction only — the inventory connector wins, since this is the explicit
+ * "make my view match the model" action; the opposite direction (pushing a view edit
+ * up to the inventory connector) is App.promptSyncInventoryConnector's job, prompted
+ * right at edit time instead. Endpoints are never touched here — a view connector's
+ * own from/to are its own placement's business, not something this checkbox second-
+ * guesses. Reported directly: "changing the node to node connector type does not
+ * change the related part to part connector type... let's change approach." Returns
+ * the count synced.
+ */
+function syncViewConnectorsWithInventory(store, connIds, log, describePart) {
+  let synced = 0;
+  for (const connId of connIds) {
+    const conn = store.findConnector(connId);
+    if (!conn) continue;
+    const counterpart = findCrossingCounterpart(store, conn);
+    if (!counterpart) continue;
+    const drifted = !ciEq(conn.relationship, counterpart.relationship) || !ciEq(conn.connectorType, counterpart.connectorType)
+      || JSON.stringify(conn.streams || []) !== JSON.stringify(counterpart.streams || []);
+    if (!drifted) continue;
+    store.restyleConnector(conn, { from: conn.from, to: conn.to, model: conn.model, connectorType: counterpart.connectorType, relationship: counterpart.relationship, streams: [...(counterpart.streams || [])] });
+    store.touchConnector(conn);
+    synced += 1;
+    log(`Synced with inventory: ${describePart(conn.from)} -> ${describePart(conn.to)} updated to match its inventory connector (now ${conn.relationship || conn.connectorType}).`);
+  }
+  return synced;
+}
+
 function smartCheckView(app, tab, options = {}) {
-  const { missingConnectors = true, missingConnectorsAndNodes = false, levels = null } = options;
+  const { missingConnectors = true, missingConnectorsAndNodes = false, levels = null, syncWithInventory = false } = options;
   const { store } = app;
   const viewId = tab.viewId;
   const view = store.findView(viewId);
   if (!view) return null;
 
-  let connectorsAdded = 0, nodesAdded = 0;
+  let connectorsAdded = 0, nodesAdded = 0, parentConnectorsAdded = 0, connectorsUpdated = 0;
   const log = (msg) => pushMessageLog(store, `[Smart Check View: ${view.viewName}] ${msg}`);
   const describePart = (id) => { const p = store.findPart(id); return p ? `"${p.label}" (${p.type})` : id; };
   const SMART_CHECK_NOTE = 'Smart Check created.';
@@ -1300,6 +1623,13 @@ function smartCheckView(app, tab, options = {}) {
   const connVms = vms.filter((vm) => vm.objectType === 'connector');
   const partIdToVmId = new Map(partVms.map((vm) => [vm.objectId, vm.id]));
   const placedConnectorIds = new Set(connVms.map((vm) => vm.objectId));
+
+  if (missingConnectors || missingConnectorsAndNodes) {
+    const pulled = pullInCompositionParentConnections(store, view, partIdToVmId, placedConnectorIds, missingConnectorsAndNodes, log, describePart);
+    connectorsAdded += pulled.connectorsAdded;
+    nodesAdded += pulled.nodesAdded;
+    connectorsUpdated += pulled.connectorsUpdated;
+  }
 
   if (missingConnectors) {
     const onViewPartIds = new Set(partIdToVmId.keys());
@@ -1357,6 +1687,8 @@ function smartCheckView(app, tab, options = {}) {
         const missingId = fromOnView ? conn.to : conn.from;
         const missingPart = store.findPart(missingId);
         if (!missingPart) continue;
+        const redirected = redirectViaCompositionChild(store, view, conn, missingPart, partIdToVmId, placedConnectorIds, log, describePart);
+        if (redirected != null) { connectorsAdded += redirected.added; connectorsUpdated += redirected.updated; continue; }
         toAdd.push({ missingPart, anchorPartId: presentId });
       }
       if (toAdd.length === 0) break;
@@ -1395,10 +1727,23 @@ function smartCheckView(app, tab, options = {}) {
     }
   }
 
-  if (connectorsAdded === 0 && nodesAdded === 0) log('No missing connectors or nodes found.');
-  else log(`Done: ${connectorsAdded} connector${connectorsAdded === 1 ? '' : 's'} added, ${nodesAdded} node${nodesAdded === 1 ? '' : 's'} added.`);
+  let parentConnectorsUpdated = 0;
+  if (missingConnectors) {
+    const mirroredUp = mirrorCompositionChildConnectorsUp(store, partIdToVmId.keys(), log, describePart);
+    parentConnectorsAdded += mirroredUp.added;
+    parentConnectorsUpdated += mirroredUp.updated;
+  }
 
-  return { connectorsAdded, nodesAdded };
+  let inventorySynced = 0;
+  if (syncWithInventory) {
+    inventorySynced = syncViewConnectorsWithInventory(store, placedConnectorIds, log, describePart);
+  }
+
+  const totalUpdated = connectorsUpdated + parentConnectorsUpdated + inventorySynced;
+  if (connectorsAdded === 0 && nodesAdded === 0 && parentConnectorsAdded === 0 && totalUpdated === 0) log('No missing connectors or nodes found.');
+  else log(`Done: ${connectorsAdded} connector${connectorsAdded === 1 ? '' : 's'} added, ${nodesAdded} node${nodesAdded === 1 ? '' : 's'} added${parentConnectorsAdded ? `, ${parentConnectorsAdded} mirrored up to a parent view` : ''}${totalUpdated ? `, ${totalUpdated} resynced` : ''}.`);
+
+  return { connectorsAdded, nodesAdded, parentConnectorsAdded, connectorsUpdated: totalUpdated };
 }
 
 /**
@@ -1433,9 +1778,14 @@ function smartCheckView(app, tab, options = {}) {
  * direction from the seed, it's tidying up edges between two nodes that both just became
  * visible, neither of which is uniquely "the reference point" a direction could be
  * relative to. Stream filtering DOES still apply to phase 2, same as everywhere else.
+ *
+ * Also shares smartCheckView's Composition-awareness (pullInCompositionParentConnections
+ * / redirectViaCompositionChild / mirrorCompositionChildConnectorsUp, above) unmodified,
+ * including its choice to run unfiltered by direction/stream — it's syncing THIS
+ * decomposition against its own parent, not walking outward from the seed.
  */
 function smartCheckNode(app, tab, partId, options = {}) {
-  const { missingConnectors = true, missingConnectorsAndNodes = false, levels = null, upstream = true, downstream = true, byStream = false, streams = [] } = options;
+  const { missingConnectors = true, missingConnectorsAndNodes = false, levels = null, upstream = true, downstream = true, byStream = false, streams = [], syncWithInventory = false } = options;
   const { store } = app;
   const viewId = tab.viewId;
   const view = store.findView(viewId);
@@ -1443,7 +1793,7 @@ function smartCheckNode(app, tab, partId, options = {}) {
   const seedPart = store.findPart(partId);
   if (!seedPart) return null;
 
-  let connectorsAdded = 0, nodesAdded = 0;
+  let connectorsAdded = 0, nodesAdded = 0, parentConnectorsAdded = 0, connectorsUpdated = 0;
   const log = (msg) => pushMessageLog(store, `[Smart Check Node: ${seedPart.label}] ${msg}`);
   const describePart = (id) => { const p = store.findPart(id); return p ? `"${p.label}" (${p.type})` : id; };
   const SMART_CHECK_NOTE = 'Smart Check created.';
@@ -1458,6 +1808,16 @@ function smartCheckNode(app, tab, partId, options = {}) {
 
   const passesStream = (conn) => !byStream || (conn.streams || []).some((s) => streams.includes(s));
   const passesDirection = (edgeIsDownstream) => (edgeIsDownstream ? downstream : upstream);
+
+  // Composition-awareness runs unconditionally, not direction/stream-filtered like the
+  // rest of this function — it's a structural sync (this part's own decomposition
+  // staying consistent with its parent), not a "walk outward from the seed" step.
+  if (missingConnectors || missingConnectorsAndNodes) {
+    const pulled = pullInCompositionParentConnections(store, view, partIdToVmId, placedConnectorIds, missingConnectorsAndNodes, log, describePart);
+    connectorsAdded += pulled.connectorsAdded;
+    nodesAdded += pulled.nodesAdded;
+    connectorsUpdated += pulled.connectorsUpdated;
+  }
 
   if (missingConnectors) {
     for (const conn of store.doc.connectors) {
@@ -1518,6 +1878,8 @@ function smartCheckNode(app, tab, partId, options = {}) {
         const missingId = fromOnView ? conn.to : conn.from;
         const missingPart = store.findPart(missingId);
         if (!missingPart) continue;
+        const redirected = redirectViaCompositionChild(store, view, conn, missingPart, partIdToVmId, placedConnectorIds, log, describePart);
+        if (redirected != null) { connectorsAdded += redirected.added; connectorsUpdated += redirected.updated; continue; }
         toAdd.push({ missingPart, anchorPartId: presentId });
       }
       if (toAdd.length === 0) break;
@@ -1553,10 +1915,28 @@ function smartCheckNode(app, tab, partId, options = {}) {
     }
   }
 
-  if (connectorsAdded === 0 && nodesAdded === 0) log('No missing connectors or nodes found.');
-  else log(`Done: ${connectorsAdded} connector${connectorsAdded === 1 ? '' : 's'} added, ${nodesAdded} node${nodesAdded === 1 ? '' : 's'} added.`);
+  let parentConnectorsUpdated = 0;
+  if (missingConnectors) {
+    const mirroredUp = mirrorCompositionChildConnectorsUp(store, partIdToVmId.keys(), log, describePart);
+    parentConnectorsAdded += mirroredUp.added;
+    parentConnectorsUpdated += mirroredUp.updated;
+  }
 
-  return { connectorsAdded, nodesAdded };
+  let inventorySynced = 0;
+  if (syncWithInventory) {
+    // Scoped to THIS node's own connectors (not every placed connector on the view,
+    // unlike Smart Check View's equivalent step) — matches Node's existing "on-view
+    // membership looks at the whole view, but the operation itself is scoped to one
+    // node" convention (see this function's own doc comment above).
+    const ownConnIds = [...placedConnectorIds].filter((id) => { const c = store.findConnector(id); return c && (ciEq(c.from, partId) || ciEq(c.to, partId)); });
+    inventorySynced = syncViewConnectorsWithInventory(store, ownConnIds, log, describePart);
+  }
+
+  const totalUpdated = connectorsUpdated + parentConnectorsUpdated + inventorySynced;
+  if (connectorsAdded === 0 && nodesAdded === 0 && parentConnectorsAdded === 0 && totalUpdated === 0) log('No missing connectors or nodes found.');
+  else log(`Done: ${connectorsAdded} connector${connectorsAdded === 1 ? '' : 's'} added, ${nodesAdded} node${nodesAdded === 1 ? '' : 's'} added${parentConnectorsAdded ? `, ${parentConnectorsAdded} mirrored up to a parent view` : ''}${totalUpdated ? `, ${totalUpdated} resynced` : ''}.`);
+
+  return { connectorsAdded, nodesAdded, parentConnectorsAdded, connectorsUpdated: totalUpdated };
 }
 
 /**
@@ -2450,4 +2830,4 @@ function duplicateSection(app, tab, sectionInstanceId) {
   app.toast(`Duplicated section "${originalName}" as "${newSection.name}" (${oldVmToNewVm.size} node${oldVmToNewVm.size === 1 ? '' : 's'}, ${connDupCount} connector${connDupCount === 1 ? '' : 's'}).`);
 }
 
-export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames };
+export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart };

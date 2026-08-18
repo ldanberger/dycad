@@ -4,7 +4,7 @@ import { parseArchimateXml } from './archimate.js';
 import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
-import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames } from './commands.js';
+import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart } from './commands.js';
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
@@ -735,7 +735,7 @@ class App {
     pop.style.top = `${clientY}px`;
     pop.innerHTML = `<div style="font-weight:600;margin-bottom:4px;">${escapeHtml(conn.relationship || 'Connector')}</div><select>${relOptions}</select>`;
     document.getElementById('modal-root').appendChild(pop);
-    pop.querySelector('select').addEventListener('change', (e) => { this.applyRelationToConnector(conn, e.target.value); this.recordAndRender(); pop.remove(); });
+    pop.querySelector('select').addEventListener('change', (e) => { this.applyRelationToConnector(conn, e.target.value); this.store.touchConnector(conn); this.recordAndRender(); pop.remove(); this.promptSyncInventoryConnector(conn); });
     const closer = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('pointerdown', closer); } };
     setTimeout(() => document.addEventListener('pointerdown', closer), 10);
   }
@@ -1023,6 +1023,7 @@ class App {
       <div class="prop-row" id="scv-levels-row" style="margin-left:22px;"><label>Levels</label><input type="number" id="scv-levels-input" class="tb-select" style="width:60px;" min="0" step="1" value="" placeholder="All" title="How many hops of missing connected nodes to pull in. Blank = unlimited." /></div>
       <div class="prop-row checkbox"><input type="checkbox" id="scv-autocomplete" /><label for="scv-autocomplete">Auto-complete streams in model — find existing stream names and fill in any missing parts/nodes for them, following a stream template</label></div>
       <div class="prop-row" id="scv-autocomplete-template-row" style="margin-left:22px;"><label>Stream Template</label><select id="scv-autocomplete-template">${templateNames.map((n) => `<option value="${escapeHtml(n)}" ${n === defaultTemplate ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></div>
+      <div class="prop-row checkbox"><input type="checkbox" id="scv-sync-inventory" /><label for="scv-sync-inventory">Sync existing connectors with inventory — update this view's connectors to match their related part-to-part connector where they differ</label></div>
       <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Check</button></div>`;
     overlay.appendChild(box);
     root.appendChild(overlay);
@@ -1047,17 +1048,20 @@ class App {
       const levels = rawLevels === '' ? null : Math.max(0, Math.floor(Number(rawLevels)) || 0);
       const doAutoComplete = autoCompleteCheckbox.checked;
       const autoCompleteTemplate = box.querySelector('#scv-autocomplete-template').value;
+      const syncWithInventory = box.querySelector('#scv-sync-inventory').checked;
       overlay.remove();
 
-      if (!missingConnectors && !missingConnectorsAndNodes && !doAutoComplete) { this.toast('Nothing selected to check.'); return; }
+      if (!missingConnectors && !missingConnectorsAndNodes && !doAutoComplete && !syncWithInventory) { this.toast('Nothing selected to check.'); return; }
 
-      if (missingConnectors || missingConnectorsAndNodes) {
-        const result = smartCheckView(this, tab, { missingConnectors, missingConnectorsAndNodes, levels });
+      if (missingConnectors || missingConnectorsAndNodes || syncWithInventory) {
+        const result = smartCheckView(this, tab, { missingConnectors, missingConnectorsAndNodes, levels, syncWithInventory });
         if (!result) { this.toast('Smart Check failed — view not found.', true); return; }
         this.recordAndRender();
         const parts = [];
         if (result.connectorsAdded) parts.push(`${result.connectorsAdded} connector${result.connectorsAdded === 1 ? '' : 's'}`);
         if (result.nodesAdded) parts.push(`${result.nodesAdded} node${result.nodesAdded === 1 ? '' : 's'}`);
+        if (result.parentConnectorsAdded) parts.push(`${result.parentConnectorsAdded} mirrored to a parent view`);
+        if (result.connectorsUpdated) parts.push(`${result.connectorsUpdated} resynced`);
         this.toast(parts.length ? `Smart Check added ${parts.join(' and ')}.` : 'Smart Check found nothing missing.');
       }
 
@@ -1101,6 +1105,7 @@ class App {
       <div class="prop-row checkbox"><input type="checkbox" id="scn-missing-connectors" checked /><label for="scn-missing-connectors">Missing connectors — add connectors between nodes already on this view</label></div>
       <div class="prop-row checkbox"><input type="checkbox" id="scn-missing-connectors-nodes" /><label for="scn-missing-connectors-nodes">Missing connectors and nodes — also pull in connected nodes not yet on this view</label></div>
       <div class="prop-row" id="scn-levels-row" style="margin-left:22px;"><label>Levels</label><input type="number" id="scn-levels-input" class="tb-select" style="width:60px;" min="0" step="1" value="" placeholder="All" title="How many hops of missing connected nodes to pull in. Blank = unlimited." /></div>
+      <div class="prop-row checkbox"><input type="checkbox" id="scn-sync-inventory" /><label for="scn-sync-inventory">Sync existing connectors with inventory — update this node's connectors to match their related part-to-part connector where they differ</label></div>
       <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Check</button></div>`;
     overlay.appendChild(box);
     root.appendChild(overlay);
@@ -1121,7 +1126,8 @@ class App {
     box.querySelector('.submit').addEventListener('click', () => {
       const missingConnectors = box.querySelector('#scn-missing-connectors').checked;
       const missingConnectorsAndNodes = nodesCheckbox.checked;
-      if (!missingConnectors && !missingConnectorsAndNodes) { this.toast('Nothing selected to check.'); return; }
+      const syncWithInventory = box.querySelector('#scn-sync-inventory').checked;
+      if (!missingConnectors && !missingConnectorsAndNodes && !syncWithInventory) { this.toast('Nothing selected to check.'); return; }
       const upstream = box.querySelector('#scn-upstream').checked;
       const downstream = box.querySelector('#scn-downstream').checked;
       if (!upstream && !downstream) { this.toast('Select at least one direction (Upstream/Downstream).', true); return; }
@@ -1132,12 +1138,14 @@ class App {
       const levels = rawLevels === '' ? null : Math.max(0, Math.floor(Number(rawLevels)) || 0);
       overlay.remove();
 
-      const result = smartCheckNode(this, tab, part.id, { missingConnectors, missingConnectorsAndNodes, levels, upstream, downstream, byStream, streams });
+      const result = smartCheckNode(this, tab, part.id, { missingConnectors, missingConnectorsAndNodes, levels, upstream, downstream, byStream, streams, syncWithInventory });
       if (!result) { this.toast('Smart Check Node failed — node not found on this view.', true); return; }
       this.recordAndRender();
       const parts = [];
       if (result.connectorsAdded) parts.push(`${result.connectorsAdded} connector${result.connectorsAdded === 1 ? '' : 's'}`);
       if (result.nodesAdded) parts.push(`${result.nodesAdded} node${result.nodesAdded === 1 ? '' : 's'}`);
+      if (result.parentConnectorsAdded) parts.push(`${result.parentConnectorsAdded} mirrored to a parent view`);
+      if (result.connectorsUpdated) parts.push(`${result.connectorsUpdated} resynced`);
       this.toast(parts.length ? `Smart Check Node added ${parts.join(' and ')}.` : 'Smart Check Node found nothing missing.');
     });
   }
@@ -1615,6 +1623,35 @@ class App {
       root.appendChild(overlay);
       box.querySelector('.cancel').addEventListener('click', () => { overlay.remove(); resolve(false); });
       box.querySelector('.submit').addEventListener('click', () => { overlay.remove(); resolve(true); });
+    });
+  }
+
+  /** Hooked from the property panel's Relationship/Streams setters (both connector
+   * panels) and the on-canvas edge popover — NOT the multi-select bulk-edit path,
+   * where prompting once per selected connector would be unusable. If the just-edited
+   * connector has a related "inventory" (part-to-part) counterpart across a
+   * Composition boundary — see findCrossingCounterpart, commands.js: covers both Level
+   * Down's own original crossing connectors and ones Smart Check itself created —
+   * asks whether to update that counterpart's relationship/streams to match too,
+   * rather than silently leaving it stale (or silently overwriting it, which an
+   * earlier automatic version of this did). No-op (no prompt) if this connector has no
+   * such counterpart, which is the common case. Reported directly: "when changing a
+   * view connector..., ask user if they want the inventory... connector to also be
+   * updated." See also promptSmartCheckView/promptSmartCheckNode's own new "Sync
+   * existing connectors with inventory" checkbox for the opposite, on-demand
+   * direction (inventory -> view, for connectors not just-edited). */
+  promptSyncInventoryConnector(conn) {
+    const counterpart = findCrossingCounterpart(this.store, conn);
+    if (!counterpart) return;
+    const fromPart = this.store.findPart(counterpart.from);
+    const toPart = this.store.findPart(counterpart.to);
+    const desc = `"${fromPart ? fromPart.label : counterpart.from}" -> "${toPart ? toPart.label : counterpart.to}"`;
+    this.confirmModal(`This connector also has a related inventory connector (${desc}). Update it to match this one's relationship/streams too?`).then((confirmed) => {
+      if (!confirmed) return;
+      this.store.restyleConnector(counterpart, { from: counterpart.from, to: counterpart.to, model: counterpart.model, connectorType: conn.connectorType, relationship: conn.relationship, streams: [...(conn.streams || [])] });
+      this.store.touchConnector(counterpart);
+      this.recordAndRender();
+      this.toast(`Updated the inventory connector (${desc}) to match.`);
     });
   }
 

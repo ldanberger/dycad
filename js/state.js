@@ -250,24 +250,30 @@ class Store {
   /** Same as touchPart, for connectors. */
   touchConnector(conn) { if (conn) conn.updatedAt = nowStamp(); }
 
-  createConnector({ from, to, model, connectorType = 'c', relationship = '', streams = [], note = '' }) {
-    const style = (this.settings.relationshipStyles || []).find((s) => ciEq(s.code, relationCodeFor(relationship, this.settings)));
-    const lineEnds = this.settings.lineEnds || {};
-    const fromLE = lineEnds[style?.fromLineEndSettingType] || { path: '', stroke: 'black', strokeNormal: 'black', strokeWidth: 2, strokeWidthNormal: 2, fill: 'red' };
-    const toLE = lineEnds[style?.toLineEndSettingType] || { path: '', stroke: 'black', strokeNormal: 'black', strokeWidth: 2, strokeWidthNormal: 2, fill: 'black' };
+  createConnector({ from, to, model, connectorType = 'c', relationship = '', streams = [], note = '', mirrorOf = null }) {
+    const styleFields = connectorStyleFields(relationship, this.settings);
     const stamp = nowStamp();
     const connector = {
-      id: newId(), from, to, model, streams, note,
-      connectorType, relationship: style?.type || relationship,
-      fromLineEndSettings: { ...fromLE },
-      toLineEndSettings: { ...toLE },
-      stroke: style?.stroke || '#333', strokeWidth: style?.strokeWidth ?? 2,
-      strokeNormal: style?.stroke || '#333', strokeWidthNormal: style?.strokeWidth ?? 2,
-      dash: style?.dash || [], fill: style?.fill || '#333',
+      id: newId(), from, to, model, streams, note, mirrorOf,
+      connectorType,
+      ...styleFields,
       createdAt: stamp, updatedAt: stamp,
     };
     this.doc.connectors.push(connector);
     return connector;
+  }
+
+  /** Updates an EXISTING connector's from/to/relationship/connectorType/streams and
+   * restyles it (stroke/dash/fill/line-ends) in place, using the same
+   * settings.relationshipStyles lookup createConnector uses — for keeping a
+   * derived/mirrored connector (see commands.js's Composition-awareness in Smart Check
+   * View/Node) in sync after whatever it was cloned from changes. Caller is responsible
+   * for touchConnector() and any viewMember placement. */
+  restyleConnector(conn, { from, to, model, connectorType = 'c', relationship = '', streams }) {
+    const styleFields = connectorStyleFields(relationship, this.settings);
+    conn.from = from; conn.to = to; conn.model = model; conn.connectorType = connectorType;
+    if (streams) conn.streams = streams;
+    Object.assign(conn, styleFields);
   }
 
   deletePart(id) { this.doc.parts = this.doc.parts.filter((p) => !ciEq(p.id, id)); }
@@ -569,6 +575,7 @@ function migrateDoc(obj, nodeSizeMultiplier = 1.2) {
       stroke: c.stroke ?? '#333', strokeWidth: c.strokeWidth ?? 2,
       strokeNormal: c.strokeNormal ?? c.stroke ?? '#333', strokeWidthNormal: c.strokeWidthNormal ?? c.strokeWidth ?? 2,
       dash: c.dash ?? [], fill: c.fill ?? '#333',
+      mirrorOf: c.mirrorOf ?? null,
       createdAt: c.createdAt ?? '', updatedAt: c.updatedAt ?? '',
     })),
     viewMembers: (obj.viewMembers || []).map((vm) => ({
@@ -594,6 +601,23 @@ function migrateDoc(obj, nodeSizeMultiplier = 1.2) {
 function relationCodeFor(relationshipTypeOrCode, settings) {
   const rel = (settings.relations || []).find((r) => ciEq(r.name, relationshipTypeOrCode) || ciEq(r.key, relationshipTypeOrCode));
   return rel ? rel.key : relationshipTypeOrCode;
+}
+
+/** The relationship/line-style fields a Connector derives from settings.relationshipStyles
+ * — shared by createConnector and restyleConnector so both compute them identically. */
+function connectorStyleFields(relationship, settings) {
+  const style = (settings.relationshipStyles || []).find((s) => ciEq(s.code, relationCodeFor(relationship, settings)));
+  const lineEnds = settings.lineEnds || {};
+  const fromLE = lineEnds[style?.fromLineEndSettingType] || { path: '', stroke: 'black', strokeNormal: 'black', strokeWidth: 2, strokeWidthNormal: 2, fill: 'red' };
+  const toLE = lineEnds[style?.toLineEndSettingType] || { path: '', stroke: 'black', strokeNormal: 'black', strokeWidth: 2, strokeWidthNormal: 2, fill: 'black' };
+  return {
+    relationship: style?.type || relationship,
+    fromLineEndSettings: { ...fromLE },
+    toLineEndSettings: { ...toLE },
+    stroke: style?.stroke || '#333', strokeWidth: style?.strokeWidth ?? 2,
+    strokeNormal: style?.stroke || '#333', strokeWidthNormal: style?.strokeWidth ?? 2,
+    dash: style?.dash || [], fill: style?.fill || '#333',
+  };
 }
 
 export { Store, newId, ciEq, migrateDoc, relationCodeFor, nowStamp };
