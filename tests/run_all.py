@@ -1193,6 +1193,152 @@ def check_stream_filter_select_all_exclude_all(page):
     return True, "the Stream filter's Select All / Exclude All checkbox correctly toggles tab.activeStreams between null (unfiltered) and [] (exclude all), matching the Element Type filter's own convention"
 
 
+def check_section_filter(page):
+    """Regression guard for the new Section filter (toolbar, between Types and Levels —
+    same two places Stream/Type already apply: canvas AND 3D tabs). Covers: the menu
+    lists every distinct Part.section value, sorted alphabetically with a
+    '(no section)' option (for parts with no section at all) always last; filtering to
+    one section hides everything else on the 2D canvas; the SAME fixture read directly
+    via store.doc.parts (not any one view's viewMembers) filters correctly in the 3D
+    scene too, via tab.activeSections — the exact null(unfiltered)-vs-[](exclude all)
+    convention Stream/Type already use."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.findView(store.currentView) || store.doc.views[0];
+      const canvasTab = store.tabs.find(t => t.type === 'canvas') || app.createCanvasTab(view);
+      app.switchToTab(canvasTab.id);
+      const mk = (label, section) => {
+        const part = store.createPart({ type: 'GeneralActor', label, model: store.defaultModel, streams: [], section: section || '' });
+        store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: Math.random() * 600, y: Math.random() * 400 });
+        return part;
+      };
+      mk('North1', 'North');
+      mk('North2', 'North');
+      mk('South1', 'South');
+      mk('NoSection', '');
+      app.render();
+      await new Promise(r => setTimeout(r, 100));
+      const initialCount = document.querySelectorAll('.fnode').length;
+
+      document.getElementById('section-filter-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      const menuLabels = [...document.querySelectorAll('#section-filter-menu .dd-item-list label')].map(l => l.textContent.trim());
+
+      // filter to only 'North'
+      const selectAllCb = document.getElementById('section-select-all');
+      selectAllCb.checked = false;
+      selectAllCb.dispatchEvent(new Event('change'));
+      const northCb = [...document.querySelectorAll('#section-filter-menu .dd-item-list input[type=\\"checkbox\\"]')].find(c => c.value === 'North');
+      northCb.checked = true;
+      northCb.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 60));
+      const visibleAfterFilter = [...document.querySelectorAll('.fnode .fnode-label')].map(e => e.textContent.trim());
+      const activeSectionsAfterFilter = canvasTab.activeSections;
+
+      // now check the same fixture's data reaches the 3D scene
+      app.openOrSwitch3DView();
+      const view3d = await import('./js/view3d.js');
+      const tab3d = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 300));
+      const info3dUnfiltered = view3d.getDebugSceneInfo(tab3d.id);
+      tab3d.activeSections = ['North'];
+      app.render();
+      await new Promise(r => setTimeout(r, 150));
+      const info3dFiltered = view3d.getDebugSceneInfo(tab3d.id);
+
+      return { initialCount, menuLabels, visibleAfterFilter, activeSectionsAfterFilter, info3dUnfiltered, info3dFiltered };
+    }
+    """)
+    problems = []
+    if result["menuLabels"] != ["North", "South", "(no section)"]:
+        problems.append(f"expected section options sorted alphabetically with '(no section)' last, got {result['menuLabels']}")
+    if sorted(result["visibleAfterFilter"]) != ["North1", "North2"]:
+        problems.append(f"expected filtering to 'North' to leave only North1/North2 visible on the canvas, got {result['visibleAfterFilter']}")
+    if result["activeSectionsAfterFilter"] != ["North"]:
+        problems.append(f"expected tab.activeSections to be ['North'] after the filter, got {result['activeSectionsAfterFilter']}")
+    unf = result["info3dUnfiltered"]["types"].get("GeneralActor", {}).get("count")
+    if unf != 4:
+        problems.append(f"expected all 4 parts visible in 3D before any section filter, got {unf}")
+    filt = result["info3dFiltered"]["types"].get("GeneralActor", {}).get("count")
+    if filt != 2:
+        problems.append(f"expected the 3D scene to also respect tab.activeSections (only the 2 'North' parts), got {filt}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "the Section filter lists every distinct section with '(no section)' last, filters the 2D canvas correctly, and the same tab.activeSections field also filters the 3D scene"
+
+
+def check_catalog_row_copy_includes_all_part_fields(page):
+    """Regression guard: the Parts Catalog row's Copy button (buildCatalogRowCopyText,
+    also what the 3D View's node properties panel uses via the same catalog-row
+    mechanism) used to copy only Type/Label/Model/Note/Streams — a hand-picked handful
+    from an earlier version of the panel that was never updated as more part fields were
+    added. Confirms every showFields.part field that has a value now makes it into the
+    copied text, via the browser's real clipboard API (not a mock)."""
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const part = store.createPart({
+        type: 'GeneralActor', label: 'CopyTest', model: store.defaultModel,
+        streams: ['S1'], section: 'North', order: 5, note: 'a note',
+        xIds: 'xid1', description: 'a desc',
+      });
+      part.scriptEnabled = true;
+      part.script = 'return { value: 1 };';
+
+      app.openOrSwitchCatalog('parts', 'Parts Catalog');
+      await new Promise(r => setTimeout(r, 100));
+      document.querySelector(`.catalog-row[data-id="${part.id}"]`).click();
+      await new Promise(r => setTimeout(r, 100));
+      document.getElementById('catalog-row-copy-btn').click();
+      await new Promise(r => setTimeout(r, 150));
+      const text = await navigator.clipboard.readText();
+      return { text, partId: part.id };
+    }
+    """)
+    text = result["text"]
+    expectations = [
+        ("Id", f"Id: {result['partId']}"),
+        ("Section", "Section: North"),
+        ("Order", "Order: 5"),
+        ("Script Enabled", "Script Enabled: true"),
+        ("Script body", "return { value: 1 };"),
+        ("Created timestamp", "Created:"),
+        ("Updated timestamp", "Updated:"),
+        # the originally-copied fields should still be there too
+        ("Type", "GeneralActor"),
+        ("Label", "Label: CopyTest"),
+        ("Streams", "Streams: S1"),
+    ]
+    missing = [name for name, needle in expectations if needle not in text]
+    if missing:
+        return False, f"expected the copied text to include {missing}, got: {text}"
+    return True, "the Copy button now includes every showFields.part field with a value, not just the original Type/Label/Model/Note/Streams handful"
+
+
+def check_generate_industry_place_on_view_defaults_unchecked(page):
+    """Regression guard: Generate Industry's "Place on current view" checkbox now
+    defaults unchecked (was checked) — generating industry data without placing it on a
+    view first is much faster for a large dataset and is the more common intended use
+    (review via Catalogs > Parts, then Add Existing), so unchecked is now the default."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      store.industryData['CopyCheckIndustry'] = [];
+      app.promptGenerateIndustry();
+      await new Promise(r => setTimeout(r, 60));
+      const cb = document.getElementById('gi-place-view');
+      return { exists: !!cb, checked: cb ? cb.checked : null };
+    }
+    """)
+    if not result["exists"]:
+        return False, f"expected the Generate Industry dialog's 'Place on current view' checkbox to exist, got {result}"
+    if result["checked"]:
+        return False, f"expected 'Place on current view' to default UNCHECKED, got checked={result['checked']}"
+    return True, "Generate Industry's 'Place on current view' checkbox now defaults unchecked"
+
+
 def check_dropdown_scrollable(page):
     """Regression guard: any dropdown (tested here via the Stream filter) should be
     capped to a sane viewport-relative height with scrolling, rather than growing
@@ -2775,6 +2921,118 @@ def check_view3d_disposed_on_full_document_load(page):
     return True, "a genuine File > Load disposes the open 3D tab's WebGL instance before replacing the document, instead of leaking it"
 
 
+def check_view3d_section_boundaries(page):
+    """Regression guard for the 3D View's Section boundary + label: each Part.section's
+    own cluster within a TYPE's grid (the same row-break clustering
+    layoutGridWithSectionBreaks has always done, per-type — see its own Stage 2 history)
+    gets a visible rectangle outline plus a billboarded text-sprite label with the
+    section's name, at that type's own Z. Covers: one boundary+label per (type, section)
+    pair actually present (GeneralActor/North, GeneralActor/South, ApplicationComponent/
+    North here — 3, not fewer/more); an unsectioned part contributes NO boundary (nothing
+    to box around a blank section); the boundary's
+    recorded bounds genuinely enclose every part actually in that section (not some
+    unrelated placeholder rectangle); and the Section filter narrowing to one section
+    removes the OTHER section's boundary too (same filter pipeline that already hides its
+    parts)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      const mk = (label, type, section) => store.createPart({ type, label, model: store.defaultModel, streams: [], section: section || '' });
+      const n1 = mk('N1', 'GeneralActor', 'North');
+      const n2 = mk('N2', 'GeneralActor', 'North');
+      const s1 = mk('S1', 'GeneralActor', 'South');
+      mk('U1', 'GeneralActor', ''); // no section -> should get no boundary
+      mk('AppN1', 'ApplicationComponent', 'North');
+
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 300));
+      const info = view3d.getDebugSceneInfo(tab.id);
+
+      const northGA = info.sectionBoundaries.find(b => b.sectionName === 'North' && b.z === info.types['GeneralActor'].z);
+      const gaPositions = info.types['GeneralActor'].positions;
+
+      tab.activeSections = ['North'];
+      app.render();
+      await new Promise(r => setTimeout(r, 150));
+      const infoFiltered = view3d.getDebugSceneInfo(tab.id);
+
+      return {
+        boundaryCount: info.sectionBoundaries.length,
+        labelCount: info.sectionLabels.length,
+        sectionNames: info.sectionBoundaries.map(b => b.sectionName).sort(),
+        northGA,
+        n1Pos: gaPositions[n1.id], n2Pos: gaPositions[n2.id], s1Pos: gaPositions[s1.id],
+        filteredBoundaryCount: infoFiltered.sectionBoundaries.length,
+        filteredSectionNames: infoFiltered.sectionBoundaries.map(b => b.sectionName),
+      };
+    }
+    """)
+    def inside(bounds, pos):
+        return bounds["x0"] <= pos["x"] <= bounds["x1"] and bounds["y0"] <= pos["y"] <= bounds["y1"]
+    problems = []
+    if result["boundaryCount"] != 3:
+        problems.append(f"expected 3 boundaries (GeneralActor/North, GeneralActor/South, ApplicationComponent/North), got {result['boundaryCount']}: {result['sectionNames']}")
+    if result["labelCount"] != 3:
+        problems.append(f"expected 3 labels matching the 3 boundaries, got {result['labelCount']}")
+    nb = result["northGA"]
+    if not nb:
+        problems.append("expected to find a 'North' boundary at GeneralActor's own Z layer")
+    else:
+        if not inside(nb["bounds"], result["n1Pos"]) or not inside(nb["bounds"], result["n2Pos"]):
+            problems.append(f"expected N1/N2 (actually in 'North') to fall inside the 'North' boundary's own bounds, got bounds={nb['bounds']} n1={result['n1Pos']} n2={result['n2Pos']}")
+        if inside(nb["bounds"], result["s1Pos"]):
+            problems.append(f"expected S1 (in 'South', a different section) to fall OUTSIDE the 'North' boundary, got bounds={nb['bounds']} s1={result['s1Pos']}")
+    if result["filteredBoundaryCount"] != 2:
+        problems.append(f"expected the Section filter (narrowed to 'North') to also hide the 'South' boundaries, leaving 2 (one per type), got {result['filteredBoundaryCount']}: {result['filteredSectionNames']}")
+    if any(n != "North" for n in result["filteredSectionNames"]):
+        problems.append(f"expected only 'North' boundaries to remain after filtering, got {result['filteredSectionNames']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "each Part.section's cluster within a type's grid gets its own boundary+label, an unsectioned part contributes none, and the Section filter also hides non-matching boundaries"
+
+
+def check_generate_industry_propagates_section_to_whole_chain(page):
+    """Regression guard: Section used to only ever land on the function-level part
+    (BusinessFunction) a stream generates — every other part in that same stream
+    (capability, application capability, entity, and every supporting/passive node in
+    between) got section: '' regardless of the function's own section. That meant
+    filtering the 3D View (or 2D canvas) to one section only ever showed the lone
+    function node, hiding the entire rest of the chain it belongs to. Uses the built-in
+    'SFCCE' template (9 value[] types + 2 passive pairs — BusinessFunction->BusinessProcess,
+    ApplicationApplication->ApplicationPhysicalComponent) so this covers both the main
+    chain AND the passive-node path in one fixture."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sfce = await import('./js/sfce.js');
+      const commands = await import('./js/commands.js');
+      const row = {
+        section: 'Agriculture', functionName: 'Crop Planning',
+        capabilityName: 'Yield Forecasting', applicationCapabilityName: 'Forecast Engine',
+        applicationCapabilityDescription: '', entityName: 'Forecast Record', entityDescription: '',
+      };
+      const { tree } = sfce.buildIndustryTree([row]);
+      store.industryData['SectionPropagationTest'] = tree;
+      store.industryTemplates['SectionPropagationTest'] = 'SFCCE';
+      await commands.generateIndustry(app, 'SectionPropagationTest', null, false);
+
+      // A fresh page starts with no parts, so everything in the document now is exactly
+      // what this one generateIndustry call created.
+      const allParts = store.doc.parts.map((p) => ({ label: p.label, type: p.type, section: p.section }));
+      return { allParts };
+    }
+    """)
+    parts = result["allParts"]
+    if len(parts) == 0:
+        return False, f"expected Generate Industry to create at least one part, got none (full: {result})"
+    wrongSection = [p for p in parts if p["section"] != "Agriculture"]
+    if wrongSection:
+        return False, f"expected EVERY part generated from this one stream to inherit the function's own section 'Agriculture' (capability/application capability/entity/passive nodes included, not just the BusinessFunction), but these didn't: {wrongSection} (full: {parts})"
+    return True, f"all {len(parts)} parts generated from one stream (function, capability, application capability, entity, and passive nodes) correctly inherited the function's own section"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
@@ -2950,6 +3208,9 @@ CHECKS = [
     check_generate_industry_selection_cap,
     check_modal_no_close_on_outside_click,
     check_stream_filter_select_all_exclude_all,
+    check_section_filter,
+    check_catalog_row_copy_includes_all_part_fields,
+    check_generate_industry_place_on_view_defaults_unchecked,
     check_dropdown_scrollable,
     check_sfce_catalog_page,
     check_routing_style_per_connector_type,
@@ -2975,6 +3236,8 @@ CHECKS = [
     check_view3d_real_click_shows_panel_and_no_recenter,
     check_view3d_node_context_menu,
     check_view3d_disposed_on_full_document_load,
+    check_view3d_section_boundaries,
+    check_generate_industry_propagates_section_to_whole_chain,
 ]
 
 

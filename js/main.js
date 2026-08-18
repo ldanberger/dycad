@@ -921,7 +921,7 @@ class App {
     box.className = 'modal-box';
     box.innerHTML = `<h3>Generate Industry</h3>
       <div class="prop-row"><label>Industry</label><select id="gi-industry">${industries.map((i) => `<option value="${escapeHtml(i)}">${escapeHtml(i)}</option>`).join('')}</select></div>
-      <div class="prop-row checkbox"><input type="checkbox" id="gi-place-view" checked /><label for="gi-place-view">Place on current view</label></div>
+      <div class="prop-row checkbox"><input type="checkbox" id="gi-place-view" /><label for="gi-place-view">Place on current view</label></div>
       <div style="font-size:11px;color:var(--text-muted);margin:-4px 0 12px 0;">Unchecked: creates the parts/connectors only — much faster for a large dataset, but nothing is placed on any view. Review via Catalogs &gt; Parts, then Add Existing to bring chosen ones into a view.</div>
       <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Generate</button></div>`;
     overlay.appendChild(box);
@@ -1833,7 +1833,7 @@ class App {
         const fakeTab = {
           id: `print-${view.id}`, type: 'canvas', viewId: view.id,
           viewport: { x: 0, y: 0, zoom: 1 }, selection: new Set(),
-          activeStreams: null, activeElementTypes: null, connectorLevels: 0, selectedSectionId: null,
+          activeStreams: null, activeElementTypes: null, activeSections: null, connectorLevels: 0, selectedSectionId: null,
         };
         const offscreen = document.createElement('div'); // never attached to the document — absolute-positioned content needs no live layout to build correctly
         renderCanvasPage(this, fakeTab, offscreen);
@@ -3341,6 +3341,72 @@ function wireGlobalEvents(app) {
   document.addEventListener('click', (e) => {
     const menu = document.getElementById('element-type-filter-menu');
     if (!menu.contains(e.target) && e.target.id !== 'element-type-filter-btn') menu.classList.add('hidden');
+  });
+
+  // Section multi-select filter (Part.section, a plain string field — distinct from
+  // selectedSectionId, the 2D Section-view header-click selection) — same structure as
+  // the Type filter above: pure visibility filtering, no auto-select side effect. A part
+  // with no section is offered as its own '(no section)' option (empty-string value)
+  // rather than being silently unreachable once a section filter is active.
+  document.getElementById('section-filter-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const menu = document.getElementById('section-filter-menu');
+    const tab = store.activeTab();
+    if (!tab || (tab.type !== 'canvas' && tab.type !== '3d')) return;
+    const is3D = tab.type === '3d';
+
+    const availableSections = new Set();
+    if (is3D) {
+      for (const p of store.doc.parts) availableSections.add(p.section || '');
+    } else {
+      for (const vm of store.viewMembersForView(tab.viewId)) {
+        if (vm.objectType !== 'part') continue;
+        const part = store.findPart(vm.objectId);
+        if (part) availableSections.add(part.section || '');
+      }
+    }
+    // real section names sorted alphabetically first, '(no section)' always last
+    const sorted = [...availableSections].sort((a, b) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)));
+
+    const isFilterActive = tab.activeSections != null;
+    const checkedSections = isFilterActive ? new Set(tab.activeSections) : new Set(sorted);
+    const allChecked = sorted.length > 0 && sorted.every((s) => checkedSections.has(s));
+
+    if (sorted.length === 0) {
+      menu.innerHTML = `<div class="dd-empty">No sections in ${is3D ? 'the model' : 'this view'}</div>`;
+    } else {
+      menu.innerHTML = `
+        <div class="dd-item dd-select-all">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="section-select-all" ${allChecked ? 'checked' : ''} />Select All / Exclude All
+          </label>
+        </div>
+        <div class="dd-item-list">
+          ${sorted.map((s) => `<div class="dd-item"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" value="${escapeHtml(s)}" ${checkedSections.has(s) ? 'checked' : ''} />${escapeHtml(s || '(no section)')}</label></div>`).join('')}
+        </div>`;
+    }
+
+    const itemCheckboxes = () => [...menu.querySelectorAll('.dd-item-list input[type="checkbox"]')];
+    const selectAllCb = document.getElementById('section-select-all');
+    if (selectAllCb) {
+      selectAllCb.addEventListener('change', () => {
+        tab.activeSections = selectAllCb.checked ? null : []; // null = unfiltered; [] = explicit "exclude all"
+        itemCheckboxes().forEach((cb) => { cb.checked = selectAllCb.checked; });
+        app.render();
+      });
+    }
+    itemCheckboxes().forEach((cb) => {
+      cb.addEventListener('change', () => {
+        tab.activeSections = itemCheckboxes().filter((c) => c.checked).map((c) => c.value);
+        if (selectAllCb) selectAllCb.checked = itemCheckboxes().every((c) => c.checked);
+        app.render();
+      });
+    });
+    menu.classList.toggle('hidden');
+  });
+  document.addEventListener('click', (e) => {
+    const menu = document.getElementById('section-filter-menu');
+    if (!menu.contains(e.target) && e.target.id !== 'section-filter-btn') menu.classList.add('hidden');
   });
 
   // Connector levels — blank input means null ("All"/unlimited); any non-negative

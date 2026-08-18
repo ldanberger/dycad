@@ -100,12 +100,12 @@ function renderToolbar(app) {
   viewSel.innerHTML = store.doc.views.map((v) => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.viewName)}</option>`).join('');
   viewSel.value = store.currentView || '';
 
-  // Stream/Type filters apply to canvas AND 3d tabs (3d reads store.doc.parts directly,
-  // not any one view's viewMembers, but the same tab.activeStreams/activeElementTypes
-  // fields already exist on every tab type — see the filter-menu click handlers below
-  // for the two tab types' different available-options sourcing). Connector Levels stays
-  // canvas-only below — it expands via THIS view's own viewMember-connectors, a concept
-  // the 3D scene (parts/connectors directly, Stage 1 draws no connectors yet) doesn't
+  // Stream/Type/Section filters apply to canvas AND 3d tabs (3d reads store.doc.parts
+  // directly, not any one view's viewMembers, but the same tab.activeStreams/
+  // activeElementTypes/activeSections fields already exist on every tab type — see the
+  // filter-menu click handlers below for the two tab types' different available-options
+  // sourcing). Connector Levels stays canvas-only below — it expands via THIS view's own
+  // viewMember-connectors, a concept the 3D scene (parts/connectors directly) doesn't
   // share the same way.
   const filtersApply = !!(tab && (tab.type === 'canvas' || tab.type === '3d'));
 
@@ -135,6 +135,19 @@ function renderToolbar(app) {
     typeBtn.textContent = `${rawActiveTypes.length} types`;
   }
   typeBtn.disabled = !filtersApply;
+
+  const sectionBtn = document.getElementById('section-filter-btn');
+  const rawActiveSections = filtersApply ? tab.activeSections : null;
+  if (rawActiveSections == null) {
+    sectionBtn.textContent = 'All sections';
+  } else if (rawActiveSections.length === 0) {
+    sectionBtn.textContent = 'No sections'; // explicit "exclude all"
+  } else if (rawActiveSections.length === 1) {
+    sectionBtn.textContent = rawActiveSections[0] || '(no section)';
+  } else {
+    sectionBtn.textContent = `${rawActiveSections.length} sections`;
+  }
+  sectionBtn.disabled = !filtersApply;
 
   const levelsInput = document.getElementById('connector-levels-input');
   if (document.activeElement !== levelsInput) { // don't clobber the value while the user is actively typing in it
@@ -770,13 +783,24 @@ function buildCatalogRowCopyText(app, catalogType, id) {
   if (catalogType === 'parts' || (catalogType === 'viewMembers' && store.findViewMember(id)?.objectType === 'part')) {
     const part = catalogType === 'parts' ? store.findPart(id) : store.findPart(store.findViewMember(id).objectId);
     if (!part) return '';
+    // Every showFields.part field, not just the handful originally copied — same order
+    // Root Properties renders them in, so this reads like the whole panel.
+    lines.push(`Id: ${part.id}`);
     lines.push(`Type: ${elTitle(part.type)} (${part.type})`);
     lines.push(`Label: ${part.label}`);
-    if (part.description) lines.push(`Description: ${part.description}`);
+    if (part.rawLabel && part.rawLabel !== part.label) lines.push(`Raw Label: ${part.rawLabel}`);
     lines.push(`Model: ${part.model}`);
-    if (part.note) lines.push(`Note: ${part.note}`);
+    if (part.section) lines.push(`Section: ${part.section}`);
     if ((part.streams || []).length) lines.push(`Streams: ${part.streams.join(', ')}`);
+    if (part.note) lines.push(`Note: ${part.note}`);
+    if (part.order) lines.push(`Order: ${part.order}`);
+    if (part.other && Object.keys(part.other).length) lines.push(`Other: ${JSON.stringify(part.other)}`);
     if (part.xIds) lines.push(`xIds: ${part.xIds}`);
+    if (part.description) lines.push(`Description: ${part.description}`);
+    if (part.scriptEnabled) lines.push(`Script Enabled: true`);
+    if (part.script) lines.push(`Script:\n${part.script}`);
+    if (part.createdAt) lines.push(`Created: ${part.createdAt}`);
+    if (part.updatedAt) lines.push(`Updated: ${part.updatedAt}`);
   } else if (catalogType === 'connectors' || (catalogType === 'viewMembers' && store.findViewMember(id)?.objectType === 'connector')) {
     const conn = catalogType === 'connectors' ? store.findConnector(id) : store.findConnector(store.findViewMember(id).objectId);
     if (!conn) return '';

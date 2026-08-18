@@ -188,10 +188,19 @@ function createStream(app, {
     const catXId = isPreciseCategoryMatch
       ? (category === 'function' ? functionxIds : category === 'capability' ? capabilityxIds : category === 'applicationCapability' ? applicationCapabilityxIds : entityxIds)
       : '';
-    // Section only applies at the function level — it's where Load SFCE's imported
-    // Section identifier lives on the generated data (see js/sfce.js's module doc for
-    // why: Section groups Functions, not Capabilities or Entities).
-    const catSection = (isPreciseCategoryMatch && category === 'function') ? functionSection : '';
+    // The Section identifier itself only ever lives on the FUNCTION level in the source
+    // data (see js/sfce.js's module doc: Section groups Functions, not Capabilities or
+    // Entities) — but every part this one createStream call creates (capability,
+    // application capability, entity, and every supporting node in between) belongs to
+    // that same function's own stream, so all of them inherit its section too. This is
+    // what makes filtering the 3D View (or the 2D canvas) to one section show the WHOLE
+    // related chain, not just the top-level function node — the original narrower
+    // behavior (function-only) meant a Section filter hid everything downstream of it.
+    // Only applied when actually CREATING a part, never when reusing an existing one
+    // (below) — a shared part (e.g. a capability referenced by streams from two
+    // different sections) keeps whatever section it was first created with, rather than
+    // silently flipping to whichever stream happens to run last.
+    const catSection = functionSection;
 
     step += 1;
     const isUnknownFallback = ciEq(resolvedType, 'Unknown') && !ciEq(rawType, 'Unknown');
@@ -664,7 +673,10 @@ function createPassiveNode(app, viewId, type, streamName, modelName, functionNam
     part = store.createPart({
       type: resolvedType, label, model: modelName, streams: [streamName], note: fullNote, other: { src: type },
       description: isFunctionWithXId ? functionDescription : undefined, xIds: isFunctionWithXId ? functionxIds : undefined,
-      section: isFunctionType ? functionSection : undefined,
+      // Every passive node belongs to this same function's own stream (see the matching
+      // comment at the main value[] loop's catSection above) — not just the function-type
+      // one — so a Section filter shows the whole related chain, not only its top.
+      section: functionSection,
     });
     if (lookupCache) cacheRegisterPart(lookupCache, part);
   }

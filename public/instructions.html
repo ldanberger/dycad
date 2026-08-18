@@ -99,8 +99,8 @@ capability flow, you generate the whole pattern from a template and a few names.
   Good for "just show me how this is actually connected" rather than a prescribed row order. Doesn't use sort
   order or column limits, since the layout is driven by connectivity instead.</li>
 </ul>
-<p>Remap also has an "only remap filtered nodes" option — combine it with the Stream or Type filter to
-reorganize just a subset of a busy view without disturbing everything else.</p>
+<p>Remap also has an "only remap filtered nodes" option — combine it with the Stream, Type, or Section filter
+to reorganize just a subset of a busy view without disturbing everything else.</p>
 <p>Remap's own choices (pattern, options, sort priority order) are remembered as your defaults the next
 time you open it on any view. The Stream Template you pick is remembered too, and shared as the default
 across every dialog that offers one (Remap, Generate Stream, Smart Check View's Auto-Complete Streams) —
@@ -191,7 +191,9 @@ canvas. Availability depends on what's selected — greyed out means the current
     capability concept just as well as data with a distinct Business/Application Capability split. A Domain,
     Business Capability, or Application Capability that ends up spanning more than one Section can
     independently be collapsed into one shared node or kept as separate numbered copies, one question per
-    level. Review the result via <strong>Catalogs &gt; SFCCE</strong> before generating.</td></tr>
+    level. Review the result via <strong>Catalogs &gt; SFCCE</strong> before generating. Every part a Section's
+    Function generates (capability, application capability, entity, and any supporting nodes) inherits that
+    same Section, so the Section filter shows the whole related chain, not just the Function itself.</td></tr>
   </tbody>
 </table>
 
@@ -280,12 +282,16 @@ doesn't also delete the selected node) and require the current tab to be a canva
 
 <h2 id="filtering">4. Filtering, Streams &amp; Catalogs</h2>
 <ul>
-  <li><strong>Stream filter</strong> — show only nodes/connectors tagged with a chosen stream.</li>
+  <li><strong>Stream filter</strong> — show only nodes/connectors tagged with a chosen stream; select-all/
+  exclude-all and scrollable for models with many streams.</li>
   <li><strong>Type filter</strong> — show only chosen element types; select-all/exclude-all and scrollable for
   toolkits with many types.</li>
-  <li><strong>Connector levels</strong> — when a Stream or Type filter is active, how many extra hops of
-  connected nodes to also show beyond the ones that directly match (blank = unlimited). Lets you see a filtered
-  node's immediate context instead of it floating in isolation.</li>
+  <li><strong>Section filter</strong> — show only parts tagged with a chosen Section (the plain text field, not
+  a Section-view's own structural grid); a part with no section at all is offered as its own "(no section)"
+  option. Same select-all/exclude-all as Stream and Type.</li>
+  <li><strong>Connector levels</strong> — when a Stream, Type, or Section filter is active, how many extra hops
+  of connected nodes to also show beyond the ones that directly match (blank = unlimited). Lets you see a
+  filtered node's immediate context instead of it floating in isolation.</li>
   <li><strong>Toolkit filters</strong> (left sidebar) — Source chips (TOGAF/ArchiMate/Other) and Group chips
   (Application/Business/Data/etc., shown in light blue) narrow which element types appear in the drag-and-drop
   toolkit itself.</li>
@@ -297,10 +303,12 @@ doesn't also delete the selected node) and require the current tab to be a canva
 <p><strong>Explore &gt; 3D View</strong> — a rotatable/zoomable 3D scene over your Parts and Connectors
 directly (not any one 2D view's placement of them). Parts are grouped into layers by
 element type, stacked into broader bands by element group, colored the same as the toolbox/canvas; within a
-layer, parts cluster into their own band by Section, then by Stream. Connector lines are drawn between
-Parts the same way they'd be hidden on the 2D canvas — a connector only shows once both its ends are
-visible. The Stream and Type filters (top toolbar) work here too, narrowing which parts (and their
-connectors) appear. Layer order follows your current Stream Template where it says anything about a type,
+layer, parts cluster into their own band by Section, then by Stream — each Section's own cluster within a
+type's layer gets a visible boundary outline and a floating text label with its name, always facing you as
+you rotate. Connector lines are drawn between Parts the same way they'd be hidden on the 2D canvas — a
+connector only shows once both its ends are visible. The Stream, Type, and Section filters (top toolbar)
+work here too, narrowing which parts (and their connectors, and their section boundaries) appear. Layer
+order follows your current Stream Template where it says anything about a type,
 and a built-in fallback order for everything else. Click a part to focus it (a yellow outline highlights
 it) and show its properties in the panel on the right, with the same controls as selecting it in a 2D
 view. Zoom in further while it's focused and you'll jump straight to a 2D view that already has it placed,

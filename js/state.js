@@ -424,6 +424,11 @@ class Store {
       // row) means "show nothing". Both filters share this same convention.
       activeStreams: null,
       activeElementTypes: null,
+      // Same null-vs-[] convention as the two above — filters on Part.section (a plain
+      // string field, distinct from selectedSectionId below, which is the 2D Section-view
+      // header-click selection, an unrelated concept). A part with no section is offered
+      // as its own selectable "(no section)" option, not silently unfilterable.
+      activeSections: null,
       // "Connector levels" (numeric, null = unlimited/"All") — only takes effect while
       // a stream or type filter is actively narrowing the view; controls how many hops
       // of connector+node expansion to reveal beyond the directly-matching nodes.

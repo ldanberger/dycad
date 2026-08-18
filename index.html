@@ -81,9 +81,14 @@
         <button id="element-type-filter-btn" class="tb-select" style="text-align:left;">All types</button>
         <div id="element-type-filter-menu" class="dropdown-menu hidden"></div>
       </div>
+      <div class="toolbar-group" style="position:relative;">
+        <label class="tb-label" for="section-filter-btn">Section</label>
+        <button id="section-filter-btn" class="tb-select" style="text-align:left;">All sections</button>
+        <div id="section-filter-menu" class="dropdown-menu hidden"></div>
+      </div>
       <div class="toolbar-group">
         <label class="tb-label" for="connector-levels-input">Levels</label>
-        <input type="number" id="connector-levels-input" class="tb-select" style="width:60px;" min="0" step="1" placeholder="All" title="Connector levels: how many hops of connected nodes/connectors to also show beyond the matching ones (blank = unlimited). Only applies while Stream or Types is filtering." />
+        <input type="number" id="connector-levels-input" class="tb-select" style="width:60px;" min="0" step="1" placeholder="All" title="Connector levels: how many hops of connected nodes/connectors to also show beyond the matching ones (blank = unlimited). Only applies while Stream, Types, or Section is filtering." />
       </div>
       <div class="toolbar-group">
         <button id="undo-btn" class="tb-btn" title="Undo (Ctrl+Z)">↶ Undo</button>

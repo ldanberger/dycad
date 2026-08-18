@@ -92,11 +92,21 @@ function passesElementTypeFilter(tab, type) {
   return tab.activeElementTypes.includes(type);
 }
 
-/** "Connector levels" — whether either visibility filter above is actively narrowing
+/** Part.section visibility filter (distinct from stream/type above, same null-vs-
+ * empty-array convention). A part with no section (`''`/undefined) is filtered as the
+ * empty string, matching the '(no section)' option the filter menu offers for it —
+ * unfiltered-by-default, but not silently unreachable once a section filter IS active.
+ * Connectors need no separate check, same reasoning as passesElementTypeFilter above. */
+function passesSectionFilter(tab, section) {
+  if (tab.activeSections == null) return true;
+  return tab.activeSections.includes(section || '');
+}
+
+/** "Connector levels" — whether any visibility filter above is actively narrowing
  * the view right now (as opposed to sitting in its default "show everything" state).
  * Connector-levels expansion only has any effect while this is true. */
 function isAnyVisibilityFilterActive(tab) {
-  return tab.activeStreams != null || tab.activeElementTypes != null;
+  return tab.activeStreams != null || tab.activeElementTypes != null || tab.activeSections != null;
 }
 
 /** BFS-expands a seed set of visible part-viewMember ids outward by `levels` hops,
@@ -167,7 +177,7 @@ function renderCanvasPage(app, tab, container) {
   const seedVmIds = new Set();
   for (const vm of allPartVmsInView) {
     const part = app.store.findPart(vm.objectId) || {};
-    if (passesStreamFilter(tab, part.streams) && passesElementTypeFilter(tab, part.type)) seedVmIds.add(vm.id);
+    if (passesStreamFilter(tab, part.streams) && passesElementTypeFilter(tab, part.type) && passesSectionFilter(tab, part.section)) seedVmIds.add(vm.id);
   }
 
   let partVms, connVms;
@@ -1177,4 +1187,4 @@ function renderDocsPage(app, tab, container) {
     });
 }
 
-export { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, getNodeSize, redrawAndResolveLayout, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab };
+export { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, getNodeSize, redrawAndResolveLayout, passesStreamFilter, passesElementTypeFilter, passesSectionFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab };

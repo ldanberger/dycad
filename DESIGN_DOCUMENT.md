@@ -478,6 +478,48 @@ so a future session doesn't have to re-derive it from scratch):
     replacing — correct-by-design, not a bug — but this leak was real and independently
     worth fixing). Fixed via a new `App.disposeAllOpenView3DTabs()`, called before the tab
     wipe in all three load paths.
+  - **Section filter** (`tab.activeSections`, `passesSectionFilter` in `canvas.js`) — a
+    third toolbar filter alongside Stream/Type, on the same `Part.section` string field
+    3D's row-break clustering already groups by (`layoutGridWithSectionBreaks`, Stage 2).
+    Applies to canvas AND 3D, same null(unfiltered)-vs-`[]`(exclude all) convention the
+    other two share. A part with no section is offered as its own selectable
+    `'(no section)'` option rather than being silently unreachable once a section filter
+    is active.
+  - **Section boundary + label in 3D** (`addSectionBoundary`, `makeSectionLabelSprite`) —
+    a flat rectangle outline (`THREE.LineLoop`) plus a billboarded canvas-texture text
+    sprite (`THREE.Sprite`, the standard dependency-free way to put readable text into a
+    vanilla-Three.js scene — always faces the camera, so it stays legible through
+    rotation) around each section's own cluster within a type's grid, at that type's own
+    Z. One boundary+label per (type, section) pair actually present — section clustering
+    has always been per-TYPE, never aggregated across types/Z-layers, so this visualizes
+    the SAME grouping that already exists rather than inventing new cross-layer
+    aggregation. Color is a neutral theme-aware `--border-strong` (matching the 2D
+    canvas's own `.section-box` styling — there's no existing per-section color scheme
+    anywhere in the app to instead echo). Verified clean at real scale (22,399 parts).
+  - **Copy button now includes every part field.** The Parts Catalog row's Copy button
+    (`buildCatalogRowCopyText` — also what the 3D View's node properties panel uses, via
+    the same catalog-row mechanism) only ever copied a hand-picked handful
+    (Type/Label/Model/Note/Streams) from an earlier version of the panel, never updated as
+    more fields were added. Now includes every `showFields.part` field that has a value
+    (Id, Section, Order, Script Enabled/Script, Created/Updated, ...), in Root Properties'
+    own field order.
+  - **Generate Industry's "Place on current view" now defaults unchecked** — the faster,
+    more common path for a large dataset (create parts/connectors only, review via
+    Catalogs > Parts + Add Existing) is now the default instead of requiring an extra
+    click to opt into it every time.
+  - **Section now propagates to a whole generated chain, not just the function node.**
+    `createStream`'s Section identifier only ever exists on the source data at the
+    function level (Load SFCE's own semantics: Section groups Functions, not
+    Capabilities/Entities), but the OLD code applied it only to the part actually typed
+    as the function — every other part the SAME `createStream` call creates (capability,
+    application capability, entity, and every passive node) got `section: ''`. Since the
+    new Section filter (and its 3D boundary/label) is exactly the feature that makes this
+    visible, filtering to one section used to show just the lone function node, hiding
+    the entire rest of its own chain. Both `createStream`'s main `value[]` loop and
+    `createPassiveNode` now set `section: functionSection` unconditionally for every part
+    THEY create — but never touch it when reusing an existing part (a capability shared
+    across streams from two different sections keeps whichever section it was first
+    created with, rather than flipping to whichever stream runs last).
 
 ## 10. Testing strategy
 

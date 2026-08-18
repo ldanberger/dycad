@@ -1729,4 +1729,39 @@
 // New/updated permanent regression checks (check_multiselect_shows_entity_level_fields,
 // check_code_summary), each confirmed to catch its own deliberately-reintroduced
 // regression before being trusted. Full suite 54/54.
-export const APP_VERSION = '0.816';
+// 0.817: four requests. (1) The Parts Catalog / 3D View node Copy button now includes
+// every showFields.part field with a value (was a hand-picked handful: Type/Label/Model/
+// Note/Streams, never updated as more fields were added) — Id, Section, Order, Script
+// Enabled/Script, Created/Updated, etc. (2) Generate Industry's "Place on current view"
+// checkbox now defaults unchecked — the faster, more common path for a large dataset.
+// (3) A new Section filter (tab.activeSections, passesSectionFilter) alongside Stream/
+// Type, same two places (toolbar, canvas AND 3D), same null(unfiltered)-vs-[](exclude
+// all) convention, with a '(no section)' option for parts with no section at all; Remap's
+// "only filtered nodes" option and Connector Levels both pick it up for free via
+// isAnyVisibilityFilterActive. (4) The 3D View now draws a visible boundary (a flat
+// rectangle outline) plus a billboarded text-sprite label around each Part.section's own
+// cluster within a type's grid, at that type's own Z — one per (type, section) pair
+// actually present, mirroring the row-break clustering layoutGridWithSectionBreaks has
+// always done per-type (never aggregated across types/Z-layers). Verified clean at real
+// scale (22,399 parts, zero console errors, negligible render-time impact).
+// New/updated permanent regression checks (check_catalog_row_copy_includes_all_part_fields,
+// check_generate_industry_place_on_view_defaults_unchecked, check_section_filter,
+// check_view3d_section_boundaries), each confirmed to catch its own deliberately-
+// reintroduced regression before being trusted. Full suite 58/58.
+// 0.818: fix Section not propagating to a whole generated chain. createStream's Section
+// identifier only ever lives on the source data at the function level (Load SFCE's own
+// semantics), but the code applied it only to the part actually typed as the function —
+// every other part the SAME createStream call creates (capability, application
+// capability, entity, every passive node) got section: '' regardless. Since the new
+// Section filter (and its 3D boundary/label, v0.817) is exactly what makes this visible,
+// filtering to one section used to show just the lone function node, hiding the rest of
+// its own chain — reported directly from using it: "if I filter to Agriculture, I want
+// to see all the nodes related to the section, not just the business function nodes."
+// Both createStream's main value[] loop and createPassiveNode now set
+// section: functionSection unconditionally for every part THEY create, but never touch
+// it when reusing an existing part (a capability shared across streams from two
+// different sections keeps whichever section it was first created with). New permanent
+// regression check (check_generate_industry_propagates_section_to_whole_chain, using the
+// built-in SFCCE template's 9-type chain + 2 passive pairs), confirmed to catch the
+// regression via a temporary revert. Full suite 59/59.
+export const APP_VERSION = '0.818';

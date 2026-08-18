@@ -58,6 +58,17 @@
 // small set of currently-visible parts' runtime values, and only ever rebuilds its own
 // couple of small marker InstancedMeshes — never the big type/connector meshes — on a
 // tick.
+// Stage 5.1 (done): usability follow-ups from actually using Stages 4/5 (full detail:
+// DESIGN_DOCUMENT.md §9) — clicking a part no longer recenters the camera (only
+// inst.focusedPartPosition is tracked, controls.target is left alone); a node right-click
+// context menu (showNodeContextMenu) offering a Filter-to-Streams quick filter and a
+// Connector Type filter (tab.connectorTypeFilter); and a Section filter
+// (tab.activeSections, passesSectionFilter in canvas.js) alongside Stream/Type. Also adds
+// a visible boundary + billboarded text label (makeSectionLabelSprite,
+// addSectionBoundary) around each Part.section's own cluster within each type's grid —
+// one per (type, section) pair, at that type's own Z, matching the row-break clustering
+// layoutGridWithSectionBreaks already does (never aggregated across types/Z-layers,
+// consistent with how that clustering has always worked).
 //
 // Deliberately the ONLY module that imports the vendored Three.js/OrbitControls — every
 // other module stays free of a 3D dependency, and canvas.js only ever reaches this file
@@ -68,7 +79,7 @@ import { OrbitControls } from './vendor/OrbitControls.js';
 import { ciEq } from './state.js';
 import { elementByType } from './rules.js';
 import { groupFill, escapeHtml } from './render.js';
-import { passesStreamFilter, passesElementTypeFilter } from './canvas.js';
+import { passesStreamFilter, passesElementTypeFilter, passesSectionFilter } from './canvas.js';
 
 // tab.id -> { renderer, scene, camera, controls, container, resizeObserver, animId,
 //             typeMeshes: Map<type, InstancedMesh>, hasFramedOnce, lastSignature }
@@ -88,6 +99,10 @@ const SIM_BADGE_HEIGHT = NODE_SIZE * 0.7; // floats above the node's own top fac
 const SIM_STATE_COLORS = { normal: 0x2f8f4e, changed: 0x2f6fed, error: 0xc0392b };
 const SIM_PULSE_PERIOD_MS = 260;
 const SIM_PULSE_AMPLITUDE = 0.35; // +/- fraction of the marker's base scale
+const SECTION_BOUNDARY_PADDING = NODE_SIZE * 0.5 + 0.15; // gap between a section's outermost cubes and its boundary line
+const SECTION_LABEL_GAP = 0.35; // how far above the boundary's top edge the label sprite floats
+const SECTION_LABEL_FONT_PX = 48; // canvas font size the label texture is rasterized at (before world-scale below)
+const SECTION_LABEL_WORLD_SCALE = 0.0035; // world units per texture pixel — tuned against NODE_SIZE so labels read clearly without dwarfing the cubes
 
 // Scratch objects reused across picks (no per-call allocation) — Raycaster/Vector2 hold
 // no state between calls, safe to share at module scope.
@@ -175,6 +190,14 @@ function themeConnectorColor() {
   // Same reasoning as themeBackgroundColor — a muted, theme-aware neutral so a dense
   // web of connectors doesn't visually fight the colorful element-group node layers.
   const raw = getComputedStyle(document.body).getPropertyValue('--text-muted').trim();
+  return raw || '#888888';
+}
+
+function themeSectionBoundaryColor() {
+  // Matches the 2D canvas's own Section-view boundary styling (.section-box's dashed
+  // border), which is a neutral, theme-aware color rather than a per-section hue — there
+  // is no existing per-section color scheme anywhere in the app to instead echo here.
+  const raw = getComputedStyle(document.body).getPropertyValue('--border-strong').trim();
   return raw || '#888888';
 }
 
@@ -460,6 +483,85 @@ function updateSimPulse(inst) {
   mesh.instanceMatrix.needsUpdate = true;
 }
 
+/** Rasterizes text onto an offscreen canvas and wraps it as a THREE.Sprite (a
+ * CanvasTexture-backed billboard that always faces the camera) — the standard
+ * dependency-free way to put readable text into a vanilla-Three.js scene, with no extra
+ * vendored library. Sized in canvas-pixel space first (so the font renders crisply),
+ * then scaled down into world units by SECTION_LABEL_WORLD_SCALE. */
+function makeSectionLabelSprite(text, color) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const font = `bold ${SECTION_LABEL_FONT_PX}px sans-serif`;
+  ctx.font = font;
+  const padding = SECTION_LABEL_FONT_PX * 0.3;
+  canvas.width = Math.ceil(ctx.measureText(text).width) + padding * 2;
+  canvas.height = SECTION_LABEL_FONT_PX + padding * 2;
+  ctx.font = font; // sizing the canvas resets its 2D context state, so re-apply
+  ctx.fillStyle = color;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  const material = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(canvas.width * SECTION_LABEL_WORLD_SCALE, canvas.height * SECTION_LABEL_WORLD_SCALE, 1);
+  return sprite;
+}
+
+/** Draws one section's boundary — a flat rectangle outline (LineLoop, no fill) around
+ * its cluster of cubes within THIS type's own grid at THIS type's own Z, padded by
+ * SECTION_BOUNDARY_PADDING so it doesn't clip through the cubes — plus a billboarded
+ * text-sprite label floating just above its top edge. Section clustering (the row-break
+ * grouping this boundary visualizes) has always been per-TYPE, never aggregated across
+ * types/Z-layers (see layoutGridWithSectionBreaks and its Stage 2 history) — so a
+ * section spanning multiple types gets one boundary+label per type it appears in, at
+ * that type's own Z, matching the clustering it's actually outlining rather than
+ * inventing a new cross-layer aggregation this file has never done. Both objects are
+ * tracked on inst.sectionBoundaries for clearSectionBoundaries to dispose on the next
+ * resync. */
+function addSectionBoundary(inst, sectionName, bounds, z) {
+  const x0 = bounds.minX - SECTION_BOUNDARY_PADDING, x1 = bounds.maxX + SECTION_BOUNDARY_PADDING;
+  const y0 = bounds.minY - SECTION_BOUNDARY_PADDING, y1 = bounds.maxY + SECTION_BOUNDARY_PADDING;
+  const color = themeSectionBoundaryColor();
+
+  const points = [
+    new THREE.Vector3(x0, y0, z), new THREE.Vector3(x1, y0, z),
+    new THREE.Vector3(x1, y1, z), new THREE.Vector3(x0, y1, z),
+  ];
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({ color: new THREE.Color(color) });
+  const loop = new THREE.LineLoop(geometry, material);
+  loop.userData.sectionName = sectionName;
+  loop.userData.z = z;
+  loop.userData.bounds = { x0, x1, y0, y1 };
+  inst.scene.add(loop);
+  inst.sectionBoundaries.push(loop);
+
+  const label = makeSectionLabelSprite(sectionName, color);
+  label.position.set((x0 + x1) / 2, y1 + SECTION_LABEL_GAP, z);
+  label.userData.sectionName = sectionName;
+  inst.scene.add(label);
+  inst.sectionBoundaries.push(label);
+}
+
+/** Removes and disposes every section boundary/label currently in the scene — called
+ * before syncSceneData rebuilds (section membership is already part of computeSignature,
+ * via each part's own `:${p.section||''}` component, so this runs exactly when the
+ * structural rebuild it belongs to does; no separate signature needed). */
+function clearSectionBoundaries(inst) {
+  for (const obj of inst.sectionBoundaries) {
+    inst.scene.remove(obj);
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) {
+      if (obj.material.map) obj.material.map.dispose();
+      obj.material.dispose();
+    }
+  }
+  inst.sectionBoundaries = [];
+}
+
 function createInstance(app, tab, container) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(themeBackgroundColor());
@@ -504,6 +606,7 @@ function createInstance(app, tab, container) {
     typeMeshes: new Map(), connectorLines: null, hasFramedOnce: false, lastSignature: null,
     focusMarker: null, focusedPartId: null, jumpedForPartId: null, focusedPartPosition: null,
     simMeshes: new Map(), lastSimSignature: null, partPositions: null,
+    sectionBoundaries: [],
   };
 
   // inst.animId is written directly here (not a separate outer variable captured once
@@ -603,6 +706,7 @@ function computeSignature(app, tab) {
     store.doc.connectors.map((c) => `${c.id}:${c.from}:${c.to}`).join(','),
     tab.activeStreams,
     tab.activeElementTypes,
+    tab.activeSections,
     tab.connectorTypeFilter,
     preferredStreamTemplateName(),
     document.body.dataset.theme,
@@ -627,9 +731,10 @@ function syncSceneData(app, tab, inst) {
     inst.connectorLines.material.dispose();
     inst.connectorLines = null;
   }
+  clearSectionBoundaries(inst);
   inst.scene.background = new THREE.Color(themeBackgroundColor());
 
-  const parts = store.doc.parts.filter((p) => passesStreamFilter(tab, p.streams) && passesElementTypeFilter(tab, p.type));
+  const parts = store.doc.parts.filter((p) => passesStreamFilter(tab, p.streams) && passesElementTypeFilter(tab, p.type) && passesSectionFilter(tab, p.section));
   if (parts.length === 0) { inst.partPositions = new Map(); return; }
 
   const { groupOrder, templateTypeOrder, cubeTypeOrder } = resolveLayerOrder(store);
@@ -681,6 +786,7 @@ function syncSceneData(app, tab, inst) {
 
     const cols = Math.ceil(Math.sqrt(count));
     const { placements, rows } = layoutGridWithSectionBreaks(typeParts, cols);
+    const sectionBounds = new Map(); // section name -> {minX, maxX, minY, maxY}, this type's own grid only
     placements.forEach(({ part, col, row }, i) => {
       const x = (col - (cols - 1) / 2) * NODE_SPACING;
       const y = (row - (rows - 1) / 2) * NODE_SPACING;
@@ -689,11 +795,20 @@ function syncSceneData(app, tab, inst) {
       partPositions.set(part.id, { x, y, z, model: part.model });
       minX = Math.min(minX, x); maxX = Math.max(maxX, x);
       minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+
+      const sectionName = part.section || '';
+      if (sectionName) {
+        let b = sectionBounds.get(sectionName);
+        if (!b) { b = { minX: x, maxX: x, minY: y, maxY: y }; sectionBounds.set(sectionName, b); }
+        b.minX = Math.min(b.minX, x); b.maxX = Math.max(b.maxX, x);
+        b.minY = Math.min(b.minY, y); b.maxY = Math.max(b.maxY, y);
+      }
     });
     mesh.instanceMatrix.needsUpdate = true;
 
     inst.scene.add(mesh);
     inst.typeMeshes.set(entry.type, mesh);
+    for (const [sectionName, b] of sectionBounds) addSectionBoundary(inst, sectionName, b, z);
     z += TYPE_LAYER_GAP;
   }
 
@@ -814,6 +929,12 @@ function getDebugSceneInfo(tabId) {
   }
   const simOverlay = {};
   for (const [state, mesh] of inst.simMeshes) simOverlay[state] = { count: mesh.count, meshUuid: mesh.uuid };
+  const sectionBoundaries = inst.sectionBoundaries
+    .filter((obj) => obj.type === 'LineLoop')
+    .map((obj) => ({ sectionName: obj.userData.sectionName, z: obj.userData.z, bounds: obj.userData.bounds }));
+  const sectionLabels = inst.sectionBoundaries
+    .filter((obj) => obj.type === 'Sprite')
+    .map((obj) => ({ sectionName: obj.userData.sectionName, position: { x: obj.position.x, y: obj.position.y, z: obj.position.z } }));
   return {
     types,
     meshCount: inst.typeMeshes.size,
@@ -826,6 +947,8 @@ function getDebugSceneInfo(tabId) {
     cameraTargetDistance: inst.camera.position.distanceTo(inst.controls.target),
     controlsTarget: { x: inst.controls.target.x, y: inst.controls.target.y, z: inst.controls.target.z },
     simOverlay,
+    sectionBoundaries,
+    sectionLabels,
   };
 }
 
