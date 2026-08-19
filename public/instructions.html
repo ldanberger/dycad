@@ -87,6 +87,8 @@ capability flow, you generate the whole pattern from a template and a few names.
   occupied cell finds the next free one, and a completely full section automatically grows by a row rather
   than let two nodes overlap.</li>
 </ul>
+<p><strong>File &gt; Export View as Image</strong> (SVG or PNG) reproduces what's on the real canvas, including
+section boxes and their header labels for a section-based view — not just the nodes and connectors inside them.</p>
 
 <h3>Remap</h3>
 <p>Reorganizes a view's layout. Three patterns:</p>
@@ -166,7 +168,12 @@ canvas. Availability depends on what's selected — greyed out means the current
     <tr><td><strong>Redraw</strong></td><td>Recalculates the best node size for the current view based on its
     content.</td></tr>
     <tr><td><strong>Add Existing</strong></td><td>Brings parts that already exist elsewhere in the model into
-    this view (optionally including their connectors), instead of creating duplicates.</td></tr>
+    this view (optionally including their connectors), instead of creating duplicates. On a section-based view
+    (e.g. Org Chart), right-clicking inside a specific section pre-filters the list to types that section
+    actually allows, and the parts you add land in that same section — not just wherever the first
+    type-matching section elsewhere in the view happens to be. Right-clicking elsewhere on the view (outside any
+    one section) pre-filters to the union of every section's allowed types instead, and falls back to whichever
+    section you last clicked the header of (if any) for placement. A freeform view is never filtered.</td></tr>
     <tr><td><strong>Populate From Template</strong></td><td>Fills a view from a page template matching its
     view type (e.g. a full "Enterprise Functions" section layout) — reuses existing parts by label/type/model
     match where possible rather than duplicating them.</td></tr>
@@ -291,7 +298,10 @@ Output ONLY the JSON array, valid and complete -- no commentary.</pre>
     <tr><td><code>Ctrl/Cmd + Shift + Z</code> or <code>Ctrl/Cmd + Y</code></td><td>Redo.</td></tr>
     <tr><td><code>Ctrl/Cmd + C</code></td><td>Copy the current canvas selection.</td></tr>
     <tr><td><code>Ctrl/Cmd + V</code></td><td>Paste (prompts to create new parts or reuse existing ones).</td></tr>
-    <tr><td><code>Delete</code> / <code>Backspace</code></td><td>Delete the current canvas selection.</td></tr>
+    <tr><td><code>Delete</code> / <code>Backspace</code></td><td>Delete the current canvas selection — always removes
+    just this view's placement(s). If that leaves a part or connector with no other placement anywhere (and, for a
+    part, nothing still connected to it), you're separately asked whether to delete it from the model entirely, not
+    just this view. Declining leaves it exactly as before.</td></tr>
     <tr><td><code>Ctrl/Cmd + Enter</code></td><td>Run the current entry in the Script Console (Simulation menu).</td></tr>
   </tbody>
 </table>

@@ -1,0 +1,9 @@
+# Claude Code's local session/config/permissions state — machine-specific, never
+# source. Conversation history itself lives outside the repo (~/.claude/projects/...),
+# not here, but this folder can still carry local settings/paths that shouldn't be
+# version controlled.
+.claude/
+
+# Python bytecode cache (tests/run_all.py)
+__pycache__/
+*.pyc

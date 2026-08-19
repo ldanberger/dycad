@@ -1268,6 +1268,71 @@ def check_section_filter(page):
     return True, "the Section filter lists every distinct section with '(no section)' last, filters the 2D canvas correctly, and the same tab.activeSections field also filters the 3D scene"
 
 
+def check_export_svg_includes_sections(page):
+    """Regression guard: File > Export View as Image (buildViewSvgString) only ever drew
+    connectors and part nodes — for a section-based view type (anything other than
+    'ff', e.g. 'org'), the section boxes and header labels visible on the real canvas
+    (buildSectionsOverlay) were completely absent from the exported SVG/PNG. Reported
+    directly: "'export view to image' for a view of type 'org' doesn't also export the
+    section markers or headers." Covers: both section names appear in the exported SVG
+    string; a section with NO parts placed in it still gets exported (the overall
+    bounding box has to fold in section bounds, not just part positions, or an empty
+    section's box/header would get silently clipped out of frame); a plain 'ff'
+    (freeform) view — which has no sections at all — is completely unaffected."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sections = await import('./js/sections.js');
+
+      const view = store.addView('RegrExportSections_' + Date.now());
+      view.viewType = 'org';
+      view.sections = [
+        { id: 'sec1', sectionId: 'sec1', name: 'Leadership', order: 0, rowCount: 1, columnCount: 2, elementTypes: ['*'] },
+        { id: 'sec2', sectionId: 'sec2', name: 'EmptySection', order: 1, rowCount: 1, columnCount: 2, elementTypes: ['*'] },
+      ];
+      const layout = sections.computeSectionLayout(view);
+      const l1 = layout.find(e => e.section.id === 'sec1');
+      const pos1 = sections.gridToPixel(l1, 0, 0);
+      const part = store.createPart({ type: 'BusinessActor', label: 'CEO', model: store.defaultModel, streams: [] });
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: pos1.x, y: pos1.y, sectionId: 'sec1' });
+
+      const built = app.buildViewSvgString(view);
+
+      // A plain freeform view (no sections at all) should be completely unaffected.
+      const ffView = store.addView('RegrExportSectionsFF_' + Date.now());
+      ffView.viewType = 'ff';
+      const ffPart = store.createPart({ type: 'GeneralActor', label: 'Solo', model: store.defaultModel, streams: [] });
+      store.createViewMember({ view: ffView.id, objectType: 'part', objectId: ffPart.id, x: 40, y: 40 });
+      const builtFF = app.buildViewSvgString(ffView);
+
+      return {
+        hasSvg: !!built,
+        includesLeadership: built.svgString.includes('Leadership'),
+        includesEmptySection: built.svgString.includes('EmptySection'),
+        dashedElementCount: (built.svgString.match(/stroke-dasharray/g) || []).length,
+        ffIncludesDasharray: builtFF.svgString.includes('stroke-dasharray'),
+        ffHasSvg: !!builtFF,
+      };
+    }
+    """)
+    problems = []
+    if not result["hasSvg"]:
+        problems.append("expected an SVG to be built for the section-based view")
+    if not result["includesLeadership"]:
+        problems.append("expected the exported SVG to include the 'Leadership' section's header label")
+    if not result["includesEmptySection"]:
+        problems.append("expected the exported SVG to include the EMPTY section's header label too (bounding box must fold in section bounds, not just part positions)")
+    if result["dashedElementCount"] < 4:
+        problems.append(f"expected at least 4 dashed section-boundary/header-separator elements (2 sections x 2 each), got {result['dashedElementCount']}")
+    if not result["ffHasSvg"]:
+        problems.append("expected a plain freeform view to still export normally")
+    if result["ffIncludesDasharray"]:
+        problems.append("expected a plain freeform view (no sections) to have NO dashed section elements at all")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Export View as Image now includes section boxes and header labels for section-based view types, including an entirely empty section, while a plain freeform view is unaffected"
+
+
 def check_catalog_row_copy_includes_all_part_fields(page):
     """Regression guard: the Parts Catalog row's Copy button (buildCatalogRowCopyText,
     also what the 3D View's node properties panel uses via the same catalog-row
@@ -3661,6 +3726,241 @@ def check_property_panel_relationship_edit_triggers_sync_prompt(page):
     return True, "changing the real Relationship field in the property panel genuinely triggers the inventory-sync confirm prompt, not just the direct function call"
 
 
+def check_delete_offers_inventory_cleanup(page):
+    """Regression guard/new-feature check for keyboard Delete's new "also delete from the
+    model?" prompt. Reported directly: "check if underlying part or connector is used
+    elsewhere, and if it is not then ask user if it should be deleted from inventory as
+    well, and if they confirm then delete it from parts or connectors as well." Covers
+    four cases via app.deleteSelection (the same method the real Delete/Backspace
+    keydown handler calls): (A) a part placed on ANOTHER view too — no prompt, deleting
+    its viewMember here must never touch the shared Part; (B) a part placed only here
+    with no connectors — prompts, and confirming removes it from store.doc.parts; (C) a
+    part placed only here but STILL referenced by a connector's from/to (even though
+    that connector itself isn't placed on any view) — no prompt, since deleting the
+    part would leave the connector's from/to dangling; (D) a connector placed only
+    here — prompts, and confirming removes it from store.doc.connectors WITHOUT
+    touching the parts it connects. In every prompted case, declining/no-op must leave
+    the underlying record untouched — this is strictly an added option, never forced."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view1 = store.addView('DelViewA_' + Date.now());
+      view1.viewType = 'ff';
+      const view2 = store.addView('DelViewB_' + Date.now());
+      view2.viewType = 'ff';
+      const tab1 = app.createCanvasTab(view1);
+      app.createCanvasTab(view2);
+      app.switchToTab(tab1.id);
+
+      const sharedPart = store.createPart({ type: 'GeneralActor', label: 'Shared', model: store.defaultModel, streams: [] });
+      const vmA1 = store.createViewMember({ view: view1.id, objectType: 'part', objectId: sharedPart.id, x: 40, y: 40 });
+      store.createViewMember({ view: view2.id, objectType: 'part', objectId: sharedPart.id, x: 40, y: 40 });
+
+      const soloPart = store.createPart({ type: 'GeneralActor', label: 'Solo', model: store.defaultModel, streams: [] });
+      const vmB = store.createViewMember({ view: view1.id, objectType: 'part', objectId: soloPart.id, x: 200, y: 40 });
+
+      const connectedPart = store.createPart({ type: 'GeneralActor', label: 'Connected', model: store.defaultModel, streams: [] });
+      const otherPart = store.createPart({ type: 'GeneralActor', label: 'Other', model: store.defaultModel, streams: [] });
+      const vmC = store.createViewMember({ view: view1.id, objectType: 'part', objectId: connectedPart.id, x: 400, y: 40 });
+      store.createConnector({ from: connectedPart.id, to: otherPart.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+
+      const p1 = store.createPart({ type: 'GeneralActor', label: 'P1', model: store.defaultModel, streams: [] });
+      const p2 = store.createPart({ type: 'GeneralActor', label: 'P2', model: store.defaultModel, streams: [] });
+      const p1vm = store.createViewMember({ view: view1.id, objectType: 'part', objectId: p1.id, x: 600, y: 40 });
+      const p2vm = store.createViewMember({ view: view1.id, objectType: 'part', objectId: p2.id, x: 600, y: 140 });
+      const connD = store.createConnector({ from: p1.id, to: p2.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      const connDvm = store.createViewMember({ view: view1.id, objectType: 'connector', objectId: connD.id, fromVmId: p1vm.id, toVmId: p2vm.id });
+
+      const results = {};
+
+      tab1.selection.clear(); tab1.selection.add(vmA1.id);
+      app.deleteSelection(tab1);
+      await new Promise(r => setTimeout(r, 60));
+      results.caseA_dialogShown = !!document.querySelector('.modal-overlay');
+      results.caseA_vmGone = !store.findViewMember(vmA1.id);
+      results.caseA_partStillExists = !!store.findPart(sharedPart.id);
+      document.querySelector('.modal-overlay .cancel')?.click();
+
+      tab1.selection.clear(); tab1.selection.add(vmB.id);
+      app.deleteSelection(tab1);
+      await new Promise(r => setTimeout(r, 60));
+      results.caseB_dialogShown = !!document.querySelector('.modal-overlay');
+      document.querySelector('.modal-overlay .submit')?.click();
+      await new Promise(r => setTimeout(r, 60));
+      results.caseB_partDeletedAfterConfirm = !store.findPart(soloPart.id);
+
+      tab1.selection.clear(); tab1.selection.add(vmC.id);
+      app.deleteSelection(tab1);
+      await new Promise(r => setTimeout(r, 60));
+      results.caseC_dialogShown = !!document.querySelector('.modal-overlay');
+      results.caseC_partStillExists = !!store.findPart(connectedPart.id);
+      document.querySelector('.modal-overlay .cancel')?.click();
+
+      tab1.selection.clear(); tab1.selection.add(connDvm.id);
+      app.deleteSelection(tab1);
+      await new Promise(r => setTimeout(r, 60));
+      results.caseD_dialogShown = !!document.querySelector('.modal-overlay');
+      document.querySelector('.modal-overlay .submit')?.click();
+      await new Promise(r => setTimeout(r, 60));
+      results.caseD_connDeletedAfterConfirm = !store.findConnector(connD.id);
+      results.caseD_partsStillExist = !!store.findPart(p1.id) && !!store.findPart(p2.id);
+
+      return results;
+    }
+    """)
+    problems = []
+    if result["caseA_dialogShown"]:
+        problems.append("case A: expected NO prompt for a part still placed on another view")
+    if not result["caseA_vmGone"] or not result["caseA_partStillExists"]:
+        problems.append(f"case A: expected the viewMember removed but the shared Part untouched, got {result}")
+    if not result["caseB_dialogShown"]:
+        problems.append("case B: expected a prompt for a part placed only here with no connectors")
+    if not result["caseB_partDeletedAfterConfirm"]:
+        problems.append("case B: expected confirming the prompt to delete the part from store.doc.parts")
+    if result["caseC_dialogShown"]:
+        problems.append("case C: expected NO prompt for a part still referenced by a connector's from/to (would dangle if deleted)")
+    if not result["caseC_partStillExists"]:
+        problems.append("case C: expected the connected part to remain untouched")
+    if not result["caseD_dialogShown"]:
+        problems.append("case D: expected a prompt for a connector placed only here")
+    if not result["caseD_connDeletedAfterConfirm"]:
+        problems.append("case D: expected confirming the prompt to delete the connector from store.doc.connectors")
+    if not result["caseD_partsStillExist"]:
+        problems.append("case D: expected deleting the connector to NOT cascade-delete the parts it connects")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "keyboard Delete offers to also remove an orphaned part/connector from the model, skips parts still referenced elsewhere (including by a connector), and never cascades a connector deletion onto its parts"
+
+
+def check_add_existing_prefiltered_by_section(page):
+    """Regression guard/new-feature check for Add Existing (right-click > Add Existing on
+    a section-based view, e.g. 'org') pre-filtering its row list by the section the
+    pointer landed in, AND — the actual bug reported after the list-filter alone
+    shipped — actually PLACING added parts into that section, not wherever
+    createSectionPlacer's generic first-type-matching-section rule would otherwise put
+    them: "add existing ignores mouse location or selected section, always adds to
+    first section." Covers: right-clicking genuinely INSIDE a section shows only
+    matching-type parts (with a subtitle naming it) AND the part added from there lands
+    in THAT section specifically — using two sections that both allow the SAME element
+    type, the one case that actually exposes "always lands in the first section" (since
+    createSectionPlacer would happily accept either); a right-click outside any
+    specific section (but still on a section-based view) falls back to the view-wide
+    union of every section's allowed types, and — with no specific section resolved —
+    to the SELECTED section (tab.selectedSectionId, from clicking a header) for
+    placement if one is set, or the generic placer otherwise; a plain 'ff' view stays
+    completely unfiltered/generically placed regardless of position."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sections = await import('./js/sections.js');
+
+      const view = store.addView('RegrAddExistingFilter_' + Date.now());
+      view.viewType = 'org';
+      view.sections = [
+        { id: 'sec1', sectionId: 'sec1', name: 'Leadership', order: 0, rowCount: 1, columnCount: 2, elementTypes: ['BusinessActor'] },
+        { id: 'sec2', sectionId: 'sec2', name: 'Delivery', order: 1, rowCount: 1, columnCount: 2, elementTypes: ['BusinessRole'] },
+      ];
+      const layout = sections.computeSectionLayout(view);
+      const l1 = layout.find(e => e.section.id === 'sec1');
+      const l2 = layout.find(e => e.section.id === 'sec2');
+
+      const actor = store.createPart({ type: 'BusinessActor', label: 'ActorPart', model: store.defaultModel, streams: [] });
+      const role = store.createPart({ type: 'BusinessRole', label: 'RolePart', model: store.defaultModel, streams: [] });
+      const other = store.createPart({ type: 'GeneralActor', label: 'OtherPart', model: store.defaultModel, streams: [] });
+
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const results = {};
+
+      const check = (checkboxId) => { const cb = document.querySelector(checkboxId); cb.checked = true; cb.dispatchEvent(new Event('change')); };
+
+      app.promptAddExisting(tab, { x: l1.left + 10, y: l1.top + 10 });
+      await new Promise(r => setTimeout(r, 60));
+      results.insideSection = [...document.querySelectorAll('#ae-tbody tr td:nth-child(2)')].map(td => td.textContent.trim());
+      results.subtitle = document.querySelector('.modal-box div[style*="margin:-4px"]')?.textContent || '';
+      document.querySelector('.modal-overlay .cancel')?.click();
+
+      app.promptAddExisting(tab, { x: l2.left + 10, y: l2.top + l2.height + 200 });
+      await new Promise(r => setTimeout(r, 60));
+      results.outsideAnySection = [...document.querySelectorAll('#ae-tbody tr td:nth-child(2)')].map(td => td.textContent.trim());
+      document.querySelector('.modal-overlay .cancel')?.click();
+
+      const ffView = store.addView('RegrAddExistingFilterFF_' + Date.now());
+      ffView.viewType = 'ff';
+      const ffTab = app.createCanvasTab(ffView);
+      app.switchToTab(ffTab.id);
+      app.promptAddExisting(ffTab, { x: 10, y: 10 });
+      await new Promise(r => setTimeout(r, 60));
+      results.freeformView = [...document.querySelectorAll('#ae-tbody tr td:nth-child(2)')].map(td => td.textContent.trim());
+      document.querySelector('.modal-overlay .cancel')?.click();
+      app.switchToTab(tab.id);
+
+      app.promptAddExisting(tab, undefined);
+      await new Promise(r => setTimeout(r, 60));
+      results.noCanvasPos = [...document.querySelectorAll('#ae-tbody tr td:nth-child(2)')].map(td => td.textContent.trim());
+      document.querySelector('.modal-overlay .cancel')?.click();
+
+      // The actual reported bug: two sections that both allow the SAME type
+      // (GeneralActor) -- createSectionPlacer would always pick the first one
+      // regardless of where the user clicked. Right-click inside the SECOND section
+      // specifically and confirm the added part actually lands there.
+      const view2 = store.addView('RegrAddExistingPlacement_' + Date.now());
+      view2.viewType = 'org';
+      view2.sections = [
+        { id: 'p1', sectionId: 'p1', name: 'First', order: 0, rowCount: 2, columnCount: 2, elementTypes: ['GeneralActor'] },
+        { id: 'p2', sectionId: 'p2', name: 'Second', order: 1, rowCount: 2, columnCount: 2, elementTypes: ['GeneralActor'] },
+      ];
+      const layout2 = sections.computeSectionLayout(view2);
+      const p1entry = layout2.find(e => e.section.id === 'p1');
+      const p2entry = layout2.find(e => e.section.id === 'p2');
+      const genericPart = store.createPart({ type: 'GeneralActor', label: 'GenericPart', model: store.defaultModel, streams: [] });
+      const tab2 = app.createCanvasTab(view2);
+      app.switchToTab(tab2.id);
+
+      app.promptAddExisting(tab2, { x: p2entry.left + 10, y: p2entry.top + 10 });
+      await new Promise(r => setTimeout(r, 60));
+      check('[data-id="' + genericPart.id + '"]');
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 60));
+      const placedVm = store.viewMembersForView(view2.id).find(v => v.objectType === 'part' && v.objectId === genericPart.id);
+      results.placedInSectionId = placedVm ? placedVm.sectionId : null;
+
+      // Selected-section fallback: click doesn't land in any specific section, but one
+      // is already selected via header-click (app.selectSection) -- placement should
+      // still go to the SELECTED section, not the generic (first-match) placer.
+      const genericPart2 = store.createPart({ type: 'GeneralActor', label: 'GenericPart2', model: store.defaultModel, streams: [] });
+      app.selectSection(tab2, 'p2');
+      app.promptAddExisting(tab2, { x: p2entry.left + 10, y: p2entry.top + p2entry.height + 300 });
+      await new Promise(r => setTimeout(r, 60));
+      check('[data-id="' + genericPart2.id + '"]');
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 60));
+      const placedVm2 = store.viewMembersForView(view2.id).find(v => v.objectType === 'part' && v.objectId === genericPart2.id);
+      results.selectedSectionPlacedInSectionId = placedVm2 ? placedVm2.sectionId : null;
+
+      return results;
+    }
+    """)
+    problems = []
+    if sorted(result["insideSection"]) != ["ActorPart"]:
+        problems.append(f"expected only the BusinessActor part when right-clicking inside 'Leadership' (elementTypes: ['BusinessActor']), got {result['insideSection']}")
+    if "Leadership" not in result["subtitle"]:
+        problems.append(f"expected a subtitle naming the section, got {result['subtitle']!r}")
+    if sorted(result["outsideAnySection"]) != ["ActorPart", "RolePart"]:
+        problems.append(f"expected the view-wide union (BusinessActor + BusinessRole, not GeneralActor) when right-clicking outside any specific section, got {result['outsideAnySection']}")
+    if sorted(result["freeformView"]) != ["ActorPart", "OtherPart", "RolePart"]:
+        problems.append(f"expected a plain freeform view to be completely unfiltered, got {result['freeformView']}")
+    if sorted(result["noCanvasPos"]) != ["ActorPart", "RolePart"]:
+        problems.append(f"expected no canvasPos at all (but still a section-based view) to still apply the view-wide union filter, got {result['noCanvasPos']}")
+    if result["placedInSectionId"] != "p2":
+        problems.append(f"expected the part added after right-clicking inside the SECOND of two same-type-allowing sections to actually be PLACED there, got sectionId={result['placedInSectionId']}")
+    if result["selectedSectionPlacedInSectionId"] != "p2":
+        problems.append(f"expected placement to fall back to the currently SELECTED section when the click itself didn't land in any specific section, got sectionId={result['selectedSectionPlacedInSectionId']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Add Existing pre-filters its row list AND places added parts based on the section right-clicked on (or currently selected), not wherever the generic first-type-matching-section placer would otherwise put them"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
@@ -3837,6 +4137,7 @@ CHECKS = [
     check_modal_no_close_on_outside_click,
     check_stream_filter_select_all_exclude_all,
     check_section_filter,
+    check_export_svg_includes_sections,
     check_catalog_row_copy_includes_all_part_fields,
     check_generate_industry_place_on_view_defaults_unchecked,
     check_dropdown_scrollable,
@@ -3876,6 +4177,8 @@ CHECKS = [
     check_smart_check_sync_with_inventory_checkbox,
     check_prompt_sync_inventory_connector,
     check_property_panel_relationship_edit_triggers_sync_prompt,
+    check_delete_offers_inventory_cleanup,
+    check_add_existing_prefiltered_by_section,
 ]
 
 

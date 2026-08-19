@@ -1957,4 +1957,51 @@
 // screen") body text, right before the "Continue anyway" link. Cosmetic text-only
 // change, verified in a real browser at a sub-800px viewport width; full suite
 // unaffected (69/69, no new check — nothing here is application logic to regress).
-export const APP_VERSION = '0.828';
+// 0.829: three requests.
+// (1) Fix: Export View as Image (buildViewSvgString, main.js) only ever drew
+// connectors and part nodes — a section-based view's (e.g. 'org') section boxes and
+// header labels, visible on the real canvas, were completely absent from the exported
+// SVG/PNG. Reproduced the same visual (dashed rounded box, faint fill, dashed header
+// separator, muted bold label) in plain SVG. Also had to fold section bounds into the
+// overall bounding box computation, not just part positions — an empty section (or one
+// extending past its placed nodes) was otherwise silently clipped out of frame.
+// (2) Enhancement: keyboard Delete/Backspace (App.deleteSelection) now offers, via a
+// single confirm after the viewMember(s) are already removed from the current view, to
+// also delete the underlying part/connector from the model entirely — but ONLY when it
+// just lost its last placement anywhere, and for a part specifically, only if nothing
+// still connects to it (deleting a part some connector still references would leave
+// that connector's from/to dangling). Declining leaves it exactly as before — this is
+// purely an added option, the old view-only deletion is unchanged when declined.
+// (3) Enhancement: Add Existing (right-click on a section-based view) now pre-filters
+// its row list to types valid for the section the pointer landed in; right-clicking
+// outside any one specific section (but still on a section-based view) falls back to
+// the union of every section's own allowed types (getAllowedTypesForView) instead of
+// the whole model; a plain freeform view is never filtered, matching how
+// dropNewPart/getAllowedTypesForView already gate a NEW node's drop target.
+// Three new permanent regression checks (check_export_svg_includes_sections,
+// check_delete_offers_inventory_cleanup, check_add_existing_prefiltered_by_section),
+// each confirmed to catch its own regression via a temporary revert. Full suite 72/72.
+// 0.830: fix 0.829's Add Existing pre-filter — it correctly filtered the ROW LIST by
+// the clicked section, but never touched WHERE added parts actually get placed, which
+// is a completely separate code path (addExistingPartsToView's createSectionPlacer,
+// commands.js) that only ever asks "does ANY section (in view order) allow this type,"
+// with no notion of where the user clicked at all. Reported directly: "ignores mouse
+// location or selected section, always adds to first section." Fixed by threading the
+// resolved target section through as a new targetSectionInstanceId param —
+// addExistingPartsToView now places every added part directly into that section (via
+// findFreeCellOrGrowSection, the same grow-rather-than-overlap search drag-and-drop
+// already uses) instead of deferring to the generic placer, whenever one was
+// resolved. promptAddExisting (main.js) also gained a fallback the original pass
+// didn't have: if the click itself didn't land inside any specific section, but one is
+// already selected (tab.selectedSectionId, from clicking a header), that's used for
+// both the list filter AND placement before falling back further to the view-wide
+// union. Also fixed an inconsistency the fallback logic exposed: with NO canvasPos at
+// all, a section-based view now still applies the view-wide union filter (nothing in
+// any of its sections could ever accept a type none of them allow, regardless of
+// whether you clicked) — previously true only when canvasPos was present. Rewrote
+// check_add_existing_prefiltered_by_section to cover actual PLACEMENT (not just the
+// list) using two sections that both allow the same type — the one case that exposes
+// "always lands in the first section," since the generic placer would happily accept
+// either — plus the selected-section fallback; confirmed the rewritten check catches
+// the regression via a temporary revert. Full suite 72/72.
+export const APP_VERSION = '0.830';

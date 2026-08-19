@@ -1,7 +1,7 @@
 // commands.js — Duplicate Stream, Split Node, Level Up, Level Down, Generate (createStream)
 import { ciEq } from './state.js';
 import { elementByType, findRelationshipPair } from './rules.js';
-import { isSectionViewType, createSectionPlacer, computeSectionLayout, isTypeAllowedInSection, findFreeCellInSection, duplicateSectionDefinition, BASE_X, BASE_Y, SECTION_GAP, NODE_INSET_X, NODE_INSET_Y } from './sections.js';
+import { isSectionViewType, createSectionPlacer, computeSectionLayout, isTypeAllowedInSection, findFreeCellInSection, findFreeCellOrGrowSection, duplicateSectionDefinition, BASE_X, BASE_Y, SECTION_GAP, NODE_INSET_X, NODE_INSET_Y } from './sections.js';
 import { redrawNodeSizes, redrawAndResolveLayout, getNodeSize } from './canvas.js';
 import { computeClusteredGridLayout } from './layout.js';
 import { pushMessageLog } from './simulation.js';
@@ -2107,13 +2107,23 @@ async function generateIndustry(app, industryKey, onProgress, placeInView = true
  * connector (matching the current Default Model) whose both endpoints are now in the
  * view — either already there, or just added — skipping any already present.
  */
-function addExistingPartsToView(app, tab, partIds, includeConnectors) {
+function addExistingPartsToView(app, tab, partIds, includeConnectors, targetSectionInstanceId = '') {
   const { store } = app;
   const view = store.findView(tab.viewId);
   if (!view) return;
   const { w: nodeW, h: nodeH } = getNodeSize(view);
   const sectioned = isSectionViewType(view.viewType);
   const placer = sectioned ? createSectionPlacer(store, view) : null;
+  // If the caller resolved a SPECIFIC section (right-clicked inside one, or it was
+  // already selected) — see promptAddExisting, main.js — every part goes there
+  // directly instead of createSectionPlacer's generic "first section anywhere in the
+  // view whose elementTypes allows this type" rule, which had no way to know the user
+  // was pointing at a particular section at all. Reported directly: "add existing
+  // ignores mouse location or selected section, always adds to first section." Falls
+  // back to the generic placer for any part whose type the target section doesn't
+  // actually allow (shouldn't normally happen — the dialog's own list is pre-filtered
+  // to valid types — but stays correct if it ever does).
+  const targetLayoutEntry = (sectioned && targetSectionInstanceId) ? computeSectionLayout(view).find((entry) => entry.section.id === targetSectionInstanceId) : null;
 
   const vmByPartId = new Map();
   for (const vm of store.viewMembersForView(view.id)) {
@@ -2126,7 +2136,10 @@ function addExistingPartsToView(app, tab, partIds, includeConnectors) {
     if (!part || vmByPartId.has(partId)) continue;
 
     let x, y, sectionId = '';
-    if (placer) {
+    if (targetLayoutEntry && isTypeAllowedInSection(targetLayoutEntry.section, part.type)) {
+      const free = findFreeCellOrGrowSection(store, view.id, targetLayoutEntry, 0, 0, null);
+      x = free.x; y = free.y; sectionId = targetLayoutEntry.section.sectionId;
+    } else if (placer) {
       const pos = placer(part.type);
       x = pos.x; y = pos.y; sectionId = pos.sectionId;
     } else {

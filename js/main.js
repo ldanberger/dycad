@@ -6,7 +6,7 @@ import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDef
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
 import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart } from './commands.js';
 import { APP_VERSION } from './version.js';
-import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection } from './sections.js';
+import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection, computeSectionLayout, getAllowedTypesForView } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
 import { flattenJsonRecords, buildRowsFromRecords, detectSharedFunctions, resolveSharedFunctions, detectSharedCapabilities, resolveSharedCapabilities, detectSharedApplicationCapabilities, resolveSharedApplicationCapabilities, buildIndustryTree, flattenIndustryTree } from './sfce.js';
 
@@ -577,10 +577,50 @@ class App {
     duplicateSectionCommand(this, tab, sectionInstanceId);
   }
 
+  /** Keyboard Delete/Backspace on the current view's selection. Always removes just the
+   * viewMember placement(s) first — a part/connector can legitimately appear on many
+   * views, so removing it from THIS one is never destructive on its own. THEN checks
+   * whether any of the underlying parts/connectors just lost their LAST placement
+   * anywhere (and, for a part specifically, also has no connector still referencing it
+   * — deleting a part that's still connected to something would leave that
+   * connector's from/to dangling), and if so, offers a single confirm to also delete
+   * those from the model entirely (Catalogs > Parts/Connectors), not just this view.
+   * Declining leaves them as orphaned-but-real parts/connectors, exactly like today's
+   * behavior — this is purely an added option, never a forced cleanup. Reported
+   * directly: "check if underlying part or connector is used elsewhere, and if it is
+   * not then ask user if it should be deleted from inventory as well." */
   deleteSelection(tab) {
-    for (const id of tab.selection) this.store.deleteViewMember(id);
+    const selectedVmIds = [...tab.selection];
+    const vms = selectedVmIds.map((id) => this.store.findViewMember(id)).filter(Boolean);
+    const partIds = new Set(vms.filter((vm) => vm.objectType === 'part').map((vm) => vm.objectId));
+    const connIds = new Set(vms.filter((vm) => vm.objectType === 'connector').map((vm) => vm.objectId));
+
+    for (const id of selectedVmIds) this.store.deleteViewMember(id);
     tab.selection.clear();
     this.recordAndRender();
+
+    const orphanedConnIds = [...connIds].filter((id) => !this.store.doc.viewMembers.some((vm) => vm.objectType === 'connector' && ciEq(vm.objectId, id)));
+    const orphanedPartIds = [...partIds].filter((id) => {
+      const stillPlaced = this.store.doc.viewMembers.some((vm) => vm.objectType === 'part' && ciEq(vm.objectId, id));
+      if (stillPlaced) return false;
+      const stillConnected = this.store.doc.connectors.some((c) => ciEq(c.from, id) || ciEq(c.to, id));
+      return !stillConnected;
+    });
+    if (orphanedConnIds.length === 0 && orphanedPartIds.length === 0) return;
+
+    const describePart = (id) => { const p = this.store.findPart(id); return p ? `"${p.label}" (${p.type})` : id; };
+    const describeConn = (id) => { const c = this.store.findConnector(id); return c ? `${describePart(c.from)} → ${describePart(c.to)}` : id; };
+    const names = [...orphanedPartIds.map(describePart), ...orphanedConnIds.map(describeConn)];
+    const preview = names.length > 5 ? `${names.slice(0, 5).join(', ')}, and ${names.length - 5} more` : names.join(', ');
+    const noun = names.length === 1 ? "isn't" : "aren't";
+
+    this.confirmModal(`${preview} ${noun} used anywhere else in the model. Also delete from the model (not just this view)?`).then((confirmed) => {
+      if (!confirmed) return;
+      for (const id of orphanedConnIds) this.store.deleteConnectorAndMembers(id);
+      for (const id of orphanedPartIds) this.store.deletePart(id);
+      this.recordAndRender();
+      this.toast(`Deleted ${names.length} item${names.length === 1 ? '' : 's'} from the model.`);
+    });
   }
 
   // ===================== DROP / CREATE =====================
@@ -790,7 +830,7 @@ class App {
       }
       else this.toast('No nodes in this view to measure.', true);
     } else if (key === 'addExisting') {
-      this.promptAddExisting(tab);
+      this.promptAddExisting(tab, canvasPos);
     } else if (key === 'populateFromTemplate') {
       this.promptPopulateFromTemplate(tab);
     } else if (key === 'smartCheckNode') {
@@ -1361,11 +1401,53 @@ class App {
     });
   }
 
-  promptAddExisting(tab) {
+  /** `canvasPos` (the right-click point, when opened via the canvas context menu) lets
+   * this pre-filter the row list to types actually valid where the user clicked, on a
+   * section-based view (e.g. 'org') — same rule dropNewPart already enforces when
+   * dropping a NEW node from the Toolbox, just applied here to the existing-parts list
+   * instead. Genuinely inside one specific section: filtered to that section's own
+   * elementTypes, and — critically, not just the list — every part added ends up
+   * PLACED in that exact section too (threaded through to addExistingPartsToView as
+   * targetSectionInstanceId), not wherever createSectionPlacer's generic
+   * first-type-matching-section rule would otherwise put it. Falls back to the
+   * currently SELECTED section (tab.selectedSectionId, from clicking a header) if the
+   * click itself didn't land inside any specific section but one is already selected.
+   * Genuinely outside any specific section on a section-based view: filtered to the
+   * union of every section's allowed types (getAllowedTypesForView) — still narrower
+   * than "everything in the model" — and placement falls back to the generic placer,
+   * same as before. This union fallback applies even with NO canvasPos at all, as long
+   * as the view itself is section-based — nothing in ANY of its sections could ever
+   * accept a type none of them allow, regardless of where (or whether) you clicked. A
+   * plain 'ff' view is the only case that's genuinely unfiltered and generically
+   * placed, exactly as before. Reported directly: "pre filter the 'Add Existing
+   * Parts' to parts of type valid for that section or view if view is not in a
+   * section," then: "ignores mouse location or selected section, always adds to first
+   * section" — the list filter alone didn't touch placement at all. */
+  promptAddExisting(tab, canvasPos) {
     const store = this.store;
+    const view = store.findView(tab.viewId);
     const inViewPartIds = new Set(store.viewMembersForView(tab.viewId).filter((vm) => vm.objectType === 'part').map((vm) => vm.objectId));
-    const availableParts = store.doc.parts.filter((p) => !inViewPartIds.has(p.id));
+    let availableParts = store.doc.parts.filter((p) => !inViewPartIds.has(p.id));
     if (availableParts.length === 0) { this.toast('No other parts available to add.', true); return; }
+
+    let sectionFilterLabel = '', targetSectionInstanceId = '';
+    if (view && isSectionViewType(view.viewType)) {
+      const layout = computeSectionLayout(view);
+      let targetEntry = canvasPos ? layout.find((entry) => canvasPos.x >= entry.left && canvasPos.x <= entry.left + entry.width && canvasPos.y >= entry.top && canvasPos.y <= entry.top + entry.height) : null;
+      if (!targetEntry && tab.selectedSectionId) targetEntry = layout.find((entry) => entry.section.id === tab.selectedSectionId);
+      if (targetEntry) {
+        availableParts = availableParts.filter((p) => isTypeAllowedInSection(targetEntry.section, p.type));
+        sectionFilterLabel = targetEntry.section.name || '(untitled section)';
+        targetSectionInstanceId = targetEntry.section.id;
+      } else {
+        const allowed = getAllowedTypesForView(view);
+        if (allowed) availableParts = availableParts.filter((p) => allowed.has(String(p.type).toLowerCase()));
+      }
+      if (availableParts.length === 0) {
+        this.toast(sectionFilterLabel ? `No existing parts of a type valid for section "${sectionFilterLabel}" available to add.` : 'No existing parts of a type valid for this view available to add.', true);
+        return;
+      }
+    }
 
     const elTitleFor = (type) => (store.settings.elements || []).find((e) => ciEq(e.type, type))?.title || type;
     const typeOptions = [...new Set(availableParts.map((p) => p.type))].sort();
@@ -1383,6 +1465,7 @@ class App {
     box.style.maxWidth = '92vw';
     box.innerHTML = `
       <h3>Add Existing Parts</h3>
+      ${sectionFilterLabel ? `<div style="font-size:11px;color:var(--text-muted);margin:-4px 0 12px 0;">Pre-filtered to types valid for section "${escapeHtml(sectionFilterLabel)}".</div>` : ''}
       <div style="display:flex; gap:8px; margin-bottom:10px;">
         <select id="ae-type"><option value="">All types</option>${typeOptions.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(elTitleFor(t))}</option>`).join('')}</select>
         <select id="ae-model"><option value="">All models</option>${modelOptions.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}</select>
@@ -1469,7 +1552,7 @@ class App {
       const partIds = [...uiState.selected];
       overlay.remove();
       if (partIds.length === 0) { this.toast('No parts selected.', true); return; }
-      addExistingPartsToView(this, tab, partIds, includeConnectors);
+      addExistingPartsToView(this, tab, partIds, includeConnectors, targetSectionInstanceId);
     });
   }
 
@@ -1991,12 +2074,22 @@ class App {
     const partVms = vms.filter((vm) => vm.objectType === 'part');
     if (partVms.length === 0) return null;
 
+    // Section boxes + headers (view types other than 'ff') — included in the exported
+    // image the same way they show on the real canvas (buildSectionsOverlay). Folded
+    // into the overall bounding box too, not just drawn: a section can legitimately
+    // extend past every node currently placed in it (empty cells, or an entirely empty
+    // section), and previously only partVms' own positions were considered, silently
+    // clipping those section boxes/headers out of the exported image. Reported
+    // directly: "'export view to image' for a view of type 'org' doesn't also export
+    // the section markers or headers."
+    const sectionLayout = isSectionViewType(view.viewType) ? computeSectionLayout(view) : [];
+
     const showTypes = view?.chkShowElementTypes;
     const showDescription = view?.chkShowDescription;
-    const minX = Math.min(...partVms.map((vm) => vm.x));
-    const minY = Math.min(...partVms.map((vm) => vm.y));
-    const maxX = Math.max(...partVms.map((vm) => vm.x + nodeW));
-    const maxY = Math.max(...partVms.map((vm) => vm.y + nodeH));
+    const xs = [...partVms.map((vm) => vm.x), ...partVms.map((vm) => vm.x + nodeW), ...sectionLayout.map((e) => e.left), ...sectionLayout.map((e) => e.left + e.width)];
+    const ys = [...partVms.map((vm) => vm.y), ...partVms.map((vm) => vm.y + nodeH), ...sectionLayout.map((e) => e.top), ...sectionLayout.map((e) => e.top + e.height)];
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
     const width = maxX - minX + PADDING * 2;
     const height = maxY - minY + PADDING * 2;
     const ox = minX - PADDING, oy = minY - PADDING; // shift so content starts at (0,0)
@@ -2013,6 +2106,20 @@ class App {
     }
     parts.push('</defs>');
     parts.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"/>`);
+
+    // Section boxes + header labels, drawn first so nodes/connectors layer on top —
+    // same visual as buildSectionsOverlay's .section-box/.section-header (dashed
+    // border, faint fill, dashed header separator, muted bold label), reproduced here
+    // in plain SVG rather than the CSS custom properties those classes reference.
+    for (const entry of sectionLayout) {
+      const bx = entry.left - ox, by = entry.top - oy;
+      parts.push(`<rect x="${bx}" y="${by}" width="${entry.width}" height="${entry.height}" rx="6" fill="rgba(0,0,0,0.015)" stroke="#c4cad2" stroke-width="1" stroke-dasharray="4,3"/>`);
+      if (entry.bodyHeight > 0) {
+        parts.push(`<line x1="${bx}" y1="${by + entry.headerHeight}" x2="${bx + entry.width}" y2="${by + entry.headerHeight}" stroke="#c4cad2" stroke-width="1" stroke-dasharray="4,3"/>`);
+      }
+      const label = entry.section.name || '(untitled section)';
+      parts.push(`<text x="${bx + 10}" y="${by + entry.headerHeight / 2 + 4}" font-size="11.5" font-weight="600" fill="#6b7280">${escapeHtml(label)}</text>`);
+    }
 
     const halfW = nodeW / 2, halfH = nodeH / 2;
     for (const cvm of vms.filter((vm) => vm.objectType === 'connector')) {
