@@ -136,6 +136,19 @@ function getCachedMaxScriptEntities() {
  * from the Load Local Settings file handler below). */
 function setCachedMaxScriptEntities(n) { setLocalSettingsCache({ maxScriptEntities: n }); }
 
+/** Reads the cached Script Console text (if any). Returns null if nothing valid is
+ * cached — bootstrapApp then leaves the Store constructor's own
+ * DEFAULT_BATCH_SCRIPT_CODE in place. */
+function getCachedBatchScriptCode() {
+  const v = getLocalSettingsCache().batchScriptCode;
+  return typeof v === 'string' && v ? v : null;
+}
+/** Writes the Script Console's current text to the localStorage cache so it survives a
+ * page refresh — called on every Run and on closing the console, not just from the
+ * Load Local Settings file handler (unlike maxScriptEntities/nodeSizeMultiplier, this
+ * one is meant to be edited freely, not just loaded from a file). */
+function setCachedBatchScriptCode(code) { setLocalSettingsCache({ batchScriptCode: code }); }
+
 /** Reads the cached nodeSizeMultiplier value (if any). Returns null if nothing valid is
  * cached (fresh browser, cache cleared, or never loaded) — bootstrapApp then falls back
  * to the Store constructor's own 1.2 default. Clamped to a sane 0.5-3 range so a bad or
@@ -416,16 +429,25 @@ class App {
     return tab;
   }
 
-  /** Simulation > Script Console: a REPL-style debugging aid, separate from any one
-   * Part's script — for poking at live simulation/document state interactively rather
-   * than round-tripping through a node's script field. Deliberately more powerful than
-   * the sandboxed ctx a Part's script receives (full `app`/`store` access, not just
-   * read-only findParts) since this is an explicit, opt-in debugging tool, not something
-   * a saved document can carry and re-execute unattended. Each entry is evaluated as an
-   * expression first (auto-wrapped in `return (...)`) so one-liners like
-   * `findParts({ type: 'BusinessCapability', model }).map(p => p.label)` don't need an
-   * explicit return; falls back to raw statement execution (the same contract node
-   * scripts use) if that doesn't parse, so multi-statement snippets still work. */
+  /** Advanced > Script Console: a persistent batch-script editor, separate from any one
+   * Part's script — for one-shot bulk operations (generate an industry, build a whole
+   * view, ...) rather than per-tick simulation behavior. Deliberately more powerful
+   * than the sandboxed ctx a Part's script receives (full `app`/`store` access, plus
+   * the raw command functions below, not just read-only findParts) since this is an
+   * explicit, opt-in tool a person runs on demand — not something a saved document
+   * carries and re-executes unattended.
+   *
+   * The editor's text IS store.batchScriptCode (Local Settings-persisted — see
+   * DEFAULT_BATCH_SCRIPT_CODE, state.js, and saveLocalSettings/loadLocalSettings,
+   * above/below) — not a one-off REPL entry. Run doesn't execute the text directly:
+   * it defines everything in the box (so `function foo() {...}` declarations become
+   * callable), then calls exactly one thing, a top-level `main()`, which is free to
+   * call whatever else you've defined alongside it (they all share the same closure
+   * over the bindings below, so a helper function doesn't need its own copy of
+   * `app`/`store` passed in — it just refers to them directly, same as main() does).
+   * This is what lets one script file hold several named batch operations
+   * (`BatchScript_<Name>` by convention) with main() picking which to run, without
+   * ever needing to rename anything to "the" entry point. */
   promptScriptConsole() {
     const modelName = this.store.simSelectedModel;
     const root = document.getElementById('modal-root');
@@ -437,17 +459,22 @@ class App {
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
         Bindings: <code>app</code>, <code>store</code>, <code>model</code>
         ${modelName ? '' : ' <span style="color:#c0392b;">(no simulation model selected — model will be null)</span>'},
-        <code>findParts({type, model})</code>, <code>log(...)</code>. Enter an expression, or full
-        statements ending in your own <code>return</code>. Ctrl+Enter (or the Run button) to execute.
+        <code>findParts({type, model})</code>, <code>log(...)</code> (prints below),
+        <code>messageLog(...)</code> (writes to the persistent Message Log),
+        <code>generateIndustry(app, industryKey, onProgress, placeInView)</code>,
+        <code>populateFromTemplate(app, tab, templateName)</code>. Run (or Ctrl+Enter) defines
+        everything below, then calls your top-level <code>main()</code> — it can call any other
+        functions you've defined alongside it. Edits are saved automatically (Local Settings).
       </div>
       <div id="console-output" style="height:220px;overflow-y:auto;background:var(--bg);border:1px solid var(--border-strong);border-radius:5px;padding:8px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;margin-bottom:8px;"></div>
-      <textarea id="console-input" spellcheck="false" placeholder="e.g. findParts({ type: 'BusinessCapability', model }).map(p => ({ id: p.id, label: p.label }))" style="width:100%;height:70px;font-family:var(--mono);font-size:12px;box-sizing:border-box;border:1px solid var(--border-strong);border-radius:5px;padding:8px;background:var(--bg);color:var(--text);resize:vertical;"></textarea>
-      <div class="modal-actions"><button class="cancel">Close</button><button class="primary run">Run (Ctrl+Enter)</button></div>`;
+      <textarea id="console-input" spellcheck="false" style="width:100%;height:260px;font-family:var(--mono);font-size:12px;box-sizing:border-box;border:1px solid var(--border-strong);border-radius:5px;padding:8px;background:var(--bg);color:var(--text);resize:vertical;"></textarea>
+      <div class="modal-actions"><button class="cancel">Close</button><button class="primary run">Run main() (Ctrl+Enter)</button></div>`;
     overlay.appendChild(box);
     root.appendChild(overlay);
 
     const outputEl = box.querySelector('#console-output');
     const inputEl = box.querySelector('#console-input');
+    inputEl.value = this.store.batchScriptCode || '';
     inputEl.focus();
 
     const appendOutput = (text, color) => {
@@ -463,40 +490,54 @@ class App {
       return this.store.doc.parts.filter((p) => (!type || ciEq(p.type, type)) && (!model || ciEq(p.model, model)));
     };
 
-    const run = () => {
+    /** Persists the editor's CURRENT text as store.batchScriptCode, both in memory and
+     * to the localStorage cache — called on every Run and on Close, so edits stick
+     * across reopening the console even before an explicit File > Save Local
+     * Settings. */
+    const persist = () => {
       const code = inputEl.value;
-      if (!code.trim()) return;
-      appendOutput(`> ${code}`, 'var(--accent)');
+      this.store.batchScriptCode = code;
+      setCachedBatchScriptCode(code);
+    };
 
-      const bindingNames = ['app', 'store', 'model', 'findParts', 'log'];
+    const run = async () => {
+      const code = inputEl.value;
+      persist();
+      if (!code.trim()) return;
+
+      const bindingNames = ['app', 'store', 'model', 'findParts', 'log', 'messageLog', 'generateIndustry', 'populateFromTemplate'];
       const bindingValues = [
         this, this.store, this.store.simSelectedModel || null,
         findPartsForConsole,
         (...args) => appendOutput(args.map((a) => (typeof a === 'string' ? a : stringifyForConsole(a))).join(' ')),
+        (msg) => pushMessageLog(this.store, typeof msg === 'string' ? msg : stringifyForConsole(msg)),
+        generateIndustry, populateFromTemplate,
       ];
 
       let result, threw = false, errMessage = '';
       try {
-        result = new Function(...bindingNames, `return (\n${code}\n)`)(...bindingValues);
-      } catch (exprErr) {
-        try {
-          result = new Function(...bindingNames, code)(...bindingValues);
-        } catch (stmtErr) {
+        const mainFn = new Function(...bindingNames, `${code}\n;return typeof main === 'function' ? main : null;`)(...bindingValues);
+        if (typeof mainFn !== 'function') {
           threw = true;
-          errMessage = (stmtErr && stmtErr.message) ? stmtErr.message : String(stmtErr);
+          errMessage = "No top-level main() function found — Run calls main(), which can call whatever else you've defined.";
+        } else {
+          result = await mainFn();
         }
+      } catch (err) {
+        threw = true;
+        errMessage = (err && err.message) ? err.message : String(err);
       }
       if (threw) {
         appendOutput(`Error: ${errMessage}`, '#c0392b');
-      } else if (result !== undefined) {
-        appendOutput(stringifyForConsole(result));
+      } else {
+        appendOutput(result !== undefined ? `main() returned: ${stringifyForConsole(result)}` : 'main() completed.', 'var(--accent)');
+        this.render();
       }
-      inputEl.value = '';
       inputEl.focus();
     };
 
     box.querySelector('.run').addEventListener('click', run);
-    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+    box.querySelector('.cancel').addEventListener('click', () => { persist(); overlay.remove(); });
     inputEl.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
     });
@@ -514,27 +555,37 @@ class App {
    * in a bigger read-only box" need. */
   promptCodeSummary() {
     const scripted = this.store.doc.parts.filter((p) => (p.script || '').trim().length > 0);
-    if (scripted.length === 0) {
-      this.promptTextEdit({ title: 'Code Summary', value: 'No parts in this document have a script.', readonly: true, onSave: () => {} });
+    const batchCode = (this.store.batchScriptCode || '').trim();
+    if (scripted.length === 0 && !batchCode) {
+      this.promptTextEdit({ title: 'Code Summary', value: 'No parts in this document have a script, and the Script Console is empty.', readonly: true, onSave: () => {} });
       return;
     }
-    const sorted = [...scripted].sort((a, b) =>
-      String(a.model || '').localeCompare(String(b.model || '')) || String(a.label || '').localeCompare(String(b.label || '')));
-
-    const modelCount = new Set(sorted.map((p) => p.model)).size;
     const lines = [
-      `Code Summary — ${sorted.length} part${sorted.length === 1 ? '' : 's'} with a script, across ${modelCount} model${modelCount === 1 ? '' : 's'}.`,
-      'Review before running any unfamiliar simulation: a script runs with full access to the document (createPart/createConnector/findParts) and to any configured API secrets.',
+      'Code Summary',
+      'Review before running any unfamiliar simulation or Script Console main(): either runs with full access to the document (createPart/createConnector/findParts) and to any configured API secrets.',
       '',
     ];
-    let currentModel;
-    for (const part of sorted) {
-      if (part.model !== currentModel) {
-        currentModel = part.model;
-        lines.push(`########## Model: ${currentModel || '(none)'} ##########`, '');
+    // Script Console's text (Advanced menu) — a personal toolkit of on-demand batch
+    // operations, independent of any one document (see store.batchScriptCode's own
+    // comment, state.js), shown first since it's a single, always-present block rather
+    // than one entry per matching part.
+    if (batchCode) {
+      lines.push('########## Script Console (Advanced menu) ##########', '', batchCode, '');
+    }
+    if (scripted.length > 0) {
+      const sorted = [...scripted].sort((a, b) =>
+        String(a.model || '').localeCompare(String(b.model || '')) || String(a.label || '').localeCompare(String(b.label || '')));
+      const modelCount = new Set(sorted.map((p) => p.model)).size;
+      lines.push(`########## Part Scripts — ${sorted.length} part${sorted.length === 1 ? '' : 's'} with a script, across ${modelCount} model${modelCount === 1 ? '' : 's'} ##########`, '');
+      let currentModel;
+      for (const part of sorted) {
+        if (part.model !== currentModel) {
+          currentModel = part.model;
+          lines.push(`==== Model: ${currentModel || '(none)'} ====`, '');
+        }
+        lines.push(`==== "${part.label}" (${part.type}, id: ${part.id}) — ${part.scriptEnabled ? 'ENABLED' : 'disabled'} ====`);
+        lines.push(part.script.trim(), '');
       }
-      lines.push(`==== "${part.label}" (${part.type}, id: ${part.id}) — ${part.scriptEnabled ? 'ENABLED' : 'disabled'} ====`);
-      lines.push(part.script.trim(), '');
     }
     this.promptTextEdit({ title: 'Code Summary', value: lines.join('\n'), readonly: true, onSave: () => {} });
   }
@@ -1809,17 +1860,18 @@ class App {
 
   /** File > Save Local Settings: bundles user PREFERENCES that deliberately live outside
    * the main save file — the pinned-fields config, maxScriptEntities (the
-   * ctx.createPart/ctx.createConnector safety cap, see simulation.js), and
+   * ctx.createPart/ctx.createConnector safety cap, see simulation.js),
    * nodeSizeMultiplier (the default node box size new views are created with, see
-   * state.js's defaultNodeSize) — into a single downloadable file, so they travel
-   * together between browsers/machines. Deliberately excludes secrets (see
-   * saveLocalSecrets above) — these two were bundled together in an earlier version of
-   * this feature; split apart because secrets must never be cached to localStorage while
-   * these settings now deliberately ARE (see loadLocalSettings's handler), so bundling
-   * them would have meant either caching secrets too (unacceptable) or a settings load
+   * state.js's defaultNodeSize), and batchScriptCode (the Script Console's persistent
+   * text, Advanced menu) — into a single downloadable file, so they travel together
+   * between browsers/machines. Deliberately excludes secrets (see saveLocalSecrets
+   * above) — these two were bundled together in an earlier version of this feature;
+   * split apart because secrets must never be cached to localStorage while these
+   * settings now deliberately ARE (see loadLocalSettings's handler), so bundling them
+   * would have meant either caching secrets too (unacceptable) or a settings load
    * leaving secrets in some ambiguous state. */
   saveLocalSettings() {
-    const data = { pinnedFields: getAllPinnedFields(), maxScriptEntities: this.store.maxScriptEntities, nodeSizeMultiplier: this.store.nodeSizeMultiplier };
+    const data = { pinnedFields: getAllPinnedFields(), maxScriptEntities: this.store.maxScriptEntities, nodeSizeMultiplier: this.store.nodeSizeMultiplier, batchScriptCode: this.store.batchScriptCode };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2831,6 +2883,8 @@ async function bootstrapApp() {
   // been cached yet (fresh browser, or the cache was cleared).
   const cachedCap = getCachedMaxScriptEntities();
   if (cachedCap !== null) store.maxScriptEntities = cachedCap;
+  const cachedBatchScript = getCachedBatchScriptCode();
+  if (cachedBatchScript !== null) store.batchScriptCode = cachedBatchScript;
 
   document.body.appendChild(buildMarkerDefs(store));
 
@@ -2947,8 +3001,6 @@ function wireGlobalEvents(app) {
   // Simulation model selector, entirely independent of store.defaultModel (used only
   // when creating new nodes) — never on the active tab/view.
   function runSimAction(action) {
-    if (action === 'scriptConsole') { app.promptScriptConsole(); return; } // works with no model selected
-    if (action === 'codeSummary') { app.promptCodeSummary(); return; } // reviews every model's scripts, no model selection needed
     const modelName = app.store.simSelectedModel;
     if (!modelName) { app.toast('No model selected.', true); return; }
     if (action === 'stepSimulation') {
@@ -3097,11 +3149,12 @@ function wireGlobalEvents(app) {
     }
   });
   // File > Load Local Settings: user PREFERENCES only (pinnedFields, maxScriptEntities,
-  // nodeSizeMultiplier) — separate from secrets above. Caches maxScriptEntities/
-  // nodeSizeMultiplier to localStorage (see setCachedMaxScriptEntities/
-  // setCachedNodeSizeMultiplier) so they survive a page refresh without re-loading this
-  // file; pinnedFields already caches itself the moment setAllPinnedFields runs. Same
-  // dual-shape acceptance as Load Local Secrets, for the same pre-split-file reason.
+  // nodeSizeMultiplier, batchScriptCode) — separate from secrets above. Caches
+  // maxScriptEntities/nodeSizeMultiplier/batchScriptCode to localStorage (see
+  // setCachedMaxScriptEntities/setCachedNodeSizeMultiplier/setCachedBatchScriptCode) so
+  // they survive a page refresh without re-loading this file; pinnedFields already
+  // caches itself the moment setAllPinnedFields runs. Same dual-shape acceptance as
+  // Load Local Secrets, for the same pre-split-file reason.
   document.getElementById('load-local-settings-input').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     e.target.value = '';
@@ -3124,11 +3177,17 @@ function wireGlobalEvents(app) {
         app.store.nodeSizeMultiplier = multNum;
         setCachedNodeSizeMultiplier(multNum);
       }
+      const hasBatchScript = typeof obj.batchScriptCode === 'string' && obj.batchScriptCode.length > 0;
+      if (hasBatchScript) {
+        app.store.batchScriptCode = obj.batchScriptCode;
+        setCachedBatchScriptCode(obj.batchScriptCode);
+      }
       app.render(); // picks up the new pin config immediately if a property panel is open
       const parts = [];
       if (obj.pinnedFields) parts.push('pinned fields');
       if (hasCap) parts.push(`max script entities: ${app.store.maxScriptEntities}`);
       if (hasMult) parts.push(`node size multiplier: ${app.store.nodeSizeMultiplier}`);
+      if (hasBatchScript) parts.push('script console text');
       app.toast(parts.length ? `Local settings loaded (${parts.join(', ')}).` : 'Local settings file had nothing recognized to load.');
     } catch (err) {
       app.toast(`Local settings load failed: ${err.message}`, true);
@@ -3199,6 +3258,9 @@ function wireGlobalEvents(app) {
     { label: 'Generate Industry', action: 'generateIndustry' },
     { label: 'Smart Check View', action: 'smartCheckView' },
     { label: 'Smart Check Node', action: 'smartCheckNode' },
+    { separator: true },
+    { label: 'Script Console...', action: 'scriptConsole' },
+    { label: 'Code Summary', action: 'codeSummary' },
   ];
   const advancedMenu = document.getElementById('advanced-menu');
   advancedMenu.innerHTML = ADVANCED_LINKS.map((l) => l.separator ? '<div class="dd-separator"></div>' : `<div class="dd-item" data-url="${l.url || ''}" data-action="${l.action || ''}">${l.label}</div>`).join('');
@@ -3212,6 +3274,10 @@ function wireGlobalEvents(app) {
         app.promptSmartCheckView();
       } else if (item.dataset.action === 'smartCheckNode') {
         app.promptSmartCheckNode(app.store.activeTab());
+      } else if (item.dataset.action === 'scriptConsole') {
+        app.promptScriptConsole();
+      } else if (item.dataset.action === 'codeSummary') {
+        app.promptCodeSummary();
       } else if (item.dataset.url) {
         window.open(item.dataset.url, '_blank', 'noopener');
       }
@@ -3220,7 +3286,10 @@ function wireGlobalEvents(app) {
   });
 
   // ===== Simulation menu (same actions as the toolbar Step/Run/Stop/Reset buttons,
-  // plus the log/snapshot commands that don't warrant their own toolbar button) =====
+  // plus the log/snapshot commands that don't warrant their own toolbar button) —
+  // Script Console and Code Summary moved to the Advanced menu, since neither one is
+  // actually a simulation action (Script Console works with no model selected at all,
+  // and Code Summary reviews every model's scripts, not the selected one). =====
   const SIMULATION_LINKS = [
     { label: 'Run Simulation', action: 'runSimulation' },
     { label: 'Pause Simulation', action: 'pauseSimulation' },
@@ -3231,11 +3300,9 @@ function wireGlobalEvents(app) {
     { label: 'Show Simulation Log', action: 'showSimLog' },
     { label: 'Save Simulation Snapshot', action: 'saveSimSnapshot' },
     { label: 'Load Simulation Snapshot', action: 'loadSimSnapshot' },
-    { label: 'Script Console...', action: 'scriptConsole' },
   ];
   const simulationMenu = document.getElementById('simulation-menu');
-  simulationMenu.innerHTML = SIMULATION_LINKS.map((l) => `<div class="dd-item" data-action="${l.action}">${l.label}</div>`).join('')
-    + '<div class="dd-separator"></div><div class="dd-item" data-action="codeSummary">Code Summary</div>';
+  simulationMenu.innerHTML = SIMULATION_LINKS.map((l) => `<div class="dd-item" data-action="${l.action}">${l.label}</div>`).join('');
   simulationMenu.querySelectorAll('.dd-item').forEach((item) => {
     item.addEventListener('click', () => {
       runSimAction(item.dataset.action);

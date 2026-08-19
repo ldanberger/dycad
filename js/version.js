@@ -2004,4 +2004,41 @@
 // "always lands in the first section," since the generic placer would happily accept
 // either — plus the selected-section fallback; confirmed the rewritten check catches
 // the regression via a temporary revert. Full suite 72/72.
-export const APP_VERSION = '0.830';
+// 0.831: four requests.
+// (1) Moved 'Script Console...' and 'Code Summary' from the Simulation menu to the
+// Advanced menu, after a separator — neither is actually a simulation action (Script
+// Console works with no model selected at all; Code Summary reviews every model's
+// scripts, not the selected one).
+// (2) New Store field batchScriptCode (state.js) — a persistent "batch script" text,
+// independent of any one document, defaulting to a ready-to-run starter
+// (DEFAULT_BATCH_SCRIPT_CODE). Local Settings-persisted exactly like
+// maxScriptEntities/nodeSizeMultiplier: cached to localStorage, bundled into File >
+// Save/Load Local Settings, auto-applied on boot. Also now shown in Code Summary
+// (a new top section, ahead of the existing per-part scripts listing) — "these can be
+// viewed in Code Summary and saved along with user local settings."
+// (3) Script Console (App.promptScriptConsole, main.js) reworked: the editor's text IS
+// store.batchScriptCode now — pre-filled on open, persisted on every Run AND on Close,
+// never cleared after Run — not a one-off REPL entry anymore. Run no longer evaluates
+// the text directly: it defines everything in the box, then calls a predetermined
+// top-level main() (new bindings besides the existing app/store/model/findParts/log:
+// messageLog, generateIndustry, populateFromTemplate). main() can call any other
+// function defined alongside it with no extra plumbing — every top-level function
+// declared in the box shares the same closure over the bindings, since they're all
+// parameters of the single generated wrapper function the whole box's text runs
+// inside. A script with no top-level main() reports a clear error instead of silently
+// no-op'ing.
+// (4) New default script: BatchScript_QuickStart, called by main() out of the box.
+// Generates the built-in "general" industry (parts/connectors only, not placed — the
+// template below does the placing), creates a new "Business Functions" view (viewType
+// 'org' = "Business Function Organization"), runs Populate From Template with
+// "Enterprise Functions" inside it, shrinks the "mof" (Mainstream Operational
+// Functions) section's rowCount from its default 2 down to 1, zooms that view's tab to
+// 60%, and writes "Done" to the persistent Message Log. Verified end-to-end in a real
+// browser (screenshot-checked) before writing tests.
+// Five new permanent regression checks
+// (check_script_console_and_code_summary_moved_to_advanced,
+// check_script_console_runs_main_function, check_batch_script_quickstart,
+// check_batch_script_code_persists_with_local_settings, plus check_code_summary
+// updated for the new menu location and the batch-script section), each confirmed to
+// catch its own regression via a temporary revert. Full suite 76/76.
+export const APP_VERSION = '0.831';

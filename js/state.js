@@ -1,5 +1,46 @@
 // state.js — central store for DyCAD.
 
+/** Store.batchScriptCode's out-of-the-box default — the Script Console's Run button
+ * calls whatever top-level `main()` this text defines (see App.promptScriptConsole,
+ * main.js), which can in turn call any number of other functions defined alongside it.
+ * This one gives a working starting point: main() calling a single starter batch
+ * script, BatchScript_QuickStart(), which builds a basic Business Functions
+ * organization view from the built-in "general" industry data end to end. Naming
+ * convention for future additions: `BatchScript_<Name>`, so main() can pick and choose
+ * which one(s) to run without renaming anything. */
+const DEFAULT_BATCH_SCRIPT_CODE = `// main() is what the Script Console's Run button actually calls. Define whatever
+// batch scripts you like below, and have main() call whichever one(s) you want to run.
+function main() {
+  return BatchScript_QuickStart();
+}
+
+// A starter batch script: builds a basic Business Functions organization view from the
+// built-in "general" industry data, ready to look at with one click.
+async function BatchScript_QuickStart() {
+  // Generate Industry (Advanced menu), default "General" industry -- parts/connectors
+  // only, not placed on any view (Populate From Template below does the placing).
+  await generateIndustry(app, 'general', null, false);
+
+  // New view: "Business Functions", type "Business Function Organization".
+  const view = store.addView('Business Functions', 'org');
+  const tab = app.createCanvasTab(view);
+  app.switchToTab(tab.id);
+
+  // Populate From Template, default "Enterprise Functions".
+  populateFromTemplate(app, tab, 'Enterprise Functions');
+
+  // Mainstream Operational Functions section defaults to 2 rows -- 1 is enough here.
+  const mof = (view.sections || []).find((s) => s.sectionId === 'mof');
+  if (mof) mof.rowCount = 1;
+
+  // Zoom out a bit so the whole thing is visible at a glance.
+  tab.viewport.zoom = 0.6;
+
+  app.recordAndRender();
+  messageLog('Done');
+}
+`;
+
 function newId() {
   return (crypto.randomUUID && crypto.randomUUID()) || `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -124,6 +165,14 @@ class Store {
     // here), so it survives a refresh without re-loading the file. Default here is just
     // the fresh-session fallback before any cached or loaded value is applied.
     this.maxScriptEntities = 5000;
+    // The Script Console's (Advanced menu) persistent script text — same Local
+    // Settings persistence story as maxScriptEntities above (cached to localStorage,
+    // bundled into File > Save/Load Local Settings, both handled in main.js). Unlike
+    // a Part's own per-tick simulation script, this isn't tied to any one document and
+    // survives across Save/Load JSON entirely — it's a personal toolkit of on-demand
+    // batch operations, not part of the model itself. Defaults to a ready-to-run
+    // starter script (DEFAULT_BATCH_SCRIPT_CODE, above) rather than blank.
+    this.batchScriptCode = DEFAULT_BATCH_SCRIPT_CODE;
     // Filename of the last file that fully replaced store.doc (Save/Load JSON's own
     // "Load JSON" button, File > Load, File > Load Example) — NOT set by Import Data,
     // which merges additively into whatever's already loaded rather than replacing it.

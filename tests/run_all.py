@@ -303,14 +303,16 @@ def check_multiselect_shows_entity_level_fields(page):
 
 
 def check_code_summary(page):
-    """Regression guard for Simulation > Code Summary: a read-only listing of every
-    part's own script, for reviewing what code exists in a file before running an
-    unfamiliar simulation. Covers: the menu has a separator before the item; a part with
-    NO script is excluded; a part with a script is included REGARDLESS of scriptEnabled
-    (a disabled script could always be re-enabled later, so this is a review of what code
-    exists, not just what's currently wired to run) and clearly marked
-    ENABLED/disabled; each block identifies its source part (label, type, id); grouped by
-    model; and the modal is genuinely read-only (no Save/Cancel, just Close)."""
+    """Regression guard for Advanced > Code Summary (moved here from the Simulation menu
+    — see check_script_console_and_code_summary_moved_to_advanced): a read-only listing
+    of every part's own script, for reviewing what code exists in a file before running
+    an unfamiliar simulation. Covers: a part with NO script is excluded; a part with a
+    script is included REGARDLESS of scriptEnabled (a disabled script could always be
+    re-enabled later, so this is a review of what code exists, not just what's
+    presently wired to run) and clearly marked ENABLED/disabled; each block identifies
+    its source part (label, type, id); grouped by model; the Script Console's own
+    persistent text (store.batchScriptCode) is ALSO included, not just per-part
+    scripts; and the modal is genuinely read-only (no Save/Cancel, just Close)."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -323,17 +325,14 @@ def check_code_summary(page):
       const p3 = store.createPart({ type: 'GeneralActor', label: 'NoScriptNode', model: store.defaultModel, streams: [] });
       // p3 has no script at all -- should not appear in the summary
 
-      document.getElementById('simulation-menu-btn').click();
+      document.getElementById('advanced-menu-btn').click();
       await new Promise(r => setTimeout(r, 60));
-      const menuItems = [...document.querySelectorAll('#simulation-menu .dd-item')].map(e => e.textContent.trim());
-      const separatorCount = document.querySelectorAll('#simulation-menu .dd-separator').length;
-      document.querySelector('#simulation-menu .dd-item[data-action=\\"codeSummary\\"]').click();
+      document.querySelector('#advanced-menu .dd-item[data-action=\\"codeSummary\\"]').click();
       await new Promise(r => setTimeout(r, 150));
 
       const textarea = document.getElementById('text-edit-area');
       const modalActions = document.querySelector('.modal-overlay .modal-actions');
       return {
-        menuItems, separatorCount,
         modalText: textarea ? textarea.value : null,
         readonly: textarea ? textarea.readOnly : null,
         actionButtonLabels: modalActions ? [...modalActions.querySelectorAll('button')].map(b => b.textContent.trim()) : [],
@@ -341,10 +340,6 @@ def check_code_summary(page):
     }
     """)
     problems = []
-    if "Code Summary" not in result["menuItems"]:
-        problems.append(f"expected 'Code Summary' in the Simulation menu, got {result['menuItems']}")
-    if result["separatorCount"] < 1:
-        problems.append("expected at least one separator in the Simulation menu (before Code Summary)")
     text = result["modalText"] or ""
     if "Requester" not in text or "GeneralActor" not in text or "ENABLED" not in text:
         problems.append(f"expected the summary to include the enabled scripted part, its type, and ENABLED marker, got: {text[:400]}")
@@ -354,13 +349,190 @@ def check_code_summary(page):
         problems.append("expected a part with no script at all to be excluded from the summary")
     if "Model: As-is" not in text or "Model:" not in text:
         problems.append(f"expected the summary to group scripts by model (a 'Model: As-is' section header, at least), got: {text[:400]}")
+    if "Script Console" not in text or "main()" not in text:
+        problems.append(f"expected the Script Console's own persistent text (store.batchScriptCode) to also appear in the summary, got: {text[:400]}")
     if not result["readonly"]:
         problems.append("expected the Code Summary textarea to be readonly")
     if result["actionButtonLabels"] != ["Close"]:
         problems.append(f"expected only a single 'Close' button (read-only modal), got {result['actionButtonLabels']}")
     if problems:
         return False, "; ".join(problems) + f" (full text: {text})"
-    return True, "Code Summary lists every scripted part (enabled or disabled) grouped by model, identifies its source part, excludes unscripted parts, and opens as a genuinely read-only modal"
+    return True, "Code Summary lists every scripted part (enabled or disabled) grouped by model, identifies its source part, excludes unscripted parts, includes the Script Console's own text, and opens as a genuinely read-only modal"
+
+
+def check_script_console_and_code_summary_moved_to_advanced(page):
+    """Regression guard: 'Script Console...' and 'Code Summary' moved from the
+    Simulation menu to the Advanced menu, after a separator — reported directly: "Move
+    'Script Console...' and 'Code Summary' to Advanced after a separator." Neither is
+    actually a simulation action (Script Console works with no model selected at all;
+    Code Summary reviews every model's scripts, not the selected one), so this also
+    checks they're genuinely GONE from the Simulation menu, not just duplicated."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp;
+      document.getElementById('advanced-menu-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      const advItems = [...document.querySelectorAll('#advanced-menu .dd-item')];
+      const scriptConsoleIdx = advItems.findIndex(e => e.dataset.action === 'scriptConsole');
+      const codeSummaryIdx = advItems.findIndex(e => e.dataset.action === 'codeSummary');
+      const advSeparators = [...document.querySelectorAll('#advanced-menu > *')];
+      const scriptConsoleEl = advItems[scriptConsoleIdx];
+      const precedingEl = scriptConsoleEl ? scriptConsoleEl.previousElementSibling : null;
+      const hasSeparatorBeforeScriptConsole = !!precedingEl && precedingEl.classList.contains('dd-separator');
+      document.getElementById('advanced-menu-btn').click();
+
+      document.getElementById('simulation-menu-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      const simItems = [...document.querySelectorAll('#simulation-menu .dd-item')].map(e => ({ text: e.textContent.trim(), action: e.dataset.action }));
+      document.getElementById('simulation-menu-btn').click();
+
+      return {
+        scriptConsoleInAdvanced: scriptConsoleIdx !== -1,
+        codeSummaryInAdvanced: codeSummaryIdx !== -1,
+        hasSeparatorBeforeScriptConsole,
+        simItemActions: simItems.map(i => i.action),
+      };
+    }
+    """)
+    problems = []
+    if not result["scriptConsoleInAdvanced"]:
+        problems.append("expected 'Script Console...' in the Advanced menu")
+    if not result["codeSummaryInAdvanced"]:
+        problems.append("expected 'Code Summary' in the Advanced menu")
+    if not result["hasSeparatorBeforeScriptConsole"]:
+        problems.append("expected a separator immediately before 'Script Console...' in the Advanced menu")
+    if 'scriptConsole' in result["simItemActions"]:
+        problems.append("expected 'Script Console...' to be GONE from the Simulation menu, not just duplicated")
+    if 'codeSummary' in result["simItemActions"]:
+        problems.append("expected 'Code Summary' to be GONE from the Simulation menu, not just duplicated")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Script Console and Code Summary now live in the Advanced menu, after a separator, and are gone from the Simulation menu"
+
+
+def check_script_console_runs_main_function(page):
+    """Regression guard for the Script Console's new execution model: Run no longer
+    executes the editor's text directly (the old REPL-style "evaluate this one entry"
+    behavior) — it defines everything in the box, then calls exactly one predetermined
+    top-level function, main(), which is free to call any other functions defined
+    alongside it (all sharing one closure over the same bindings, so a helper doesn't
+    need app/store re-passed to it). Reported directly: "change run command to run a
+    specific predetermined function within the script file, something like 'main'. The
+    users can then write multiple functions but run button only executes main, it in
+    turn will call the others as desired." Also covers: the editor's text is
+    store.batchScriptCode (a persistent "script file", not a one-off entry) — Run does
+    NOT clear it afterward, and both Run and Close persist whatever's currently typed
+    back to store.batchScriptCode (and its localStorage cache); missing a top-level
+    main() is a clear, reported error rather than silently doing nothing."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const results = {};
+
+      // main() calling a sibling function it didn't have to receive as a parameter --
+      // both close over the same `app`/`store` bindings automatically.
+      app.promptScriptConsole();
+      await new Promise(r => setTimeout(r, 60));
+      const box = document.querySelector('.modal-box.modal-box-textedit');
+      const textarea = box.querySelector('#console-input');
+      textarea.value = "function main() { return helper() + 1; }\\nfunction helper() { return store.doc.parts.length; }";
+      const partsBefore = store.doc.parts.length;
+      box.querySelector('.run').click();
+      await new Promise(r => setTimeout(r, 200));
+      const output1 = box.querySelector('#console-output').textContent;
+      results.calledSiblingFunction = output1.includes(String(partsBefore + 1));
+      results.textareaNotClearedAfterRun = textarea.value.includes('function main()');
+      results.persistedAfterRun = store.batchScriptCode.includes('function helper()');
+
+      // Missing main() -- clear, reported error, not silent.
+      textarea.value = 'function notMain() { return 1; }';
+      box.querySelector('.run').click();
+      await new Promise(r => setTimeout(r, 100));
+      const output2 = box.querySelector('#console-output').textContent;
+      results.missingMainReportsError = /error/i.test(output2) && /main/i.test(output2);
+
+      // Close persists too, not just Run.
+      textarea.value = 'function main() { return "closed-edit"; }';
+      box.querySelector('.cancel').click();
+      await new Promise(r => setTimeout(r, 60));
+      results.persistedAfterClose = store.batchScriptCode.includes('closed-edit');
+
+      return results;
+    }
+    """)
+    problems = []
+    if not result["calledSiblingFunction"]:
+        problems.append("expected main() to be able to call a sibling function defined in the same script, sharing the same app/store closure")
+    if not result["textareaNotClearedAfterRun"]:
+        problems.append("expected the editor's text to remain after Run — it's a persistent script file, not a one-off REPL entry")
+    if not result["persistedAfterRun"]:
+        problems.append("expected Run to persist the current text to store.batchScriptCode")
+    if not result["missingMainReportsError"]:
+        problems.append("expected a script with no top-level main() to report a clear error mentioning 'main'")
+    if not result["persistedAfterClose"]:
+        problems.append("expected Close to ALSO persist the current text to store.batchScriptCode, not just Run")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Script Console's Run button now calls a predetermined main() (which can call sibling functions), keeps the editor's text as a persistent script file, and persists edits on both Run and Close"
+
+
+def check_batch_script_quickstart(page):
+    """Regression guard/new-feature check for the built-in BatchScript_QuickStart script
+    (store.batchScriptCode's out-of-the-box default, DEFAULT_BATCH_SCRIPT_CODE in
+    state.js) — verifies it actually performs every step described when main() (which
+    calls it) is run via the real Script Console UI: (1) Generate Industry with the
+    default "general" industry, not placed on any view; (2) a new View "Business
+    Functions" of type "org" (Business Function Organization); (3) Populate From
+    Template using "Enterprise Functions" inside that view; (4) the "mof" (Mainstream
+    Operational Functions) section's rowCount changed from its default of 2 down to 1;
+    (5) the view's own tab zoomed to 60%; (6) "Done" written to the persistent Message
+    Log (not just the Script Console's own output area)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      app.promptScriptConsole();
+      await new Promise(r => setTimeout(r, 60));
+      // Each check runs on its own fresh page (see run_all.py's main()), so
+      // store.batchScriptCode is still the real, unmodified default here.
+      const box = document.querySelector('.modal-box.modal-box-textedit');
+
+      box.querySelector('.run').click();
+      await new Promise(r => setTimeout(r, 2000));
+      box.querySelector('.cancel').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      const view = store.findView('Business Functions');
+      const mof = view ? (view.sections || []).find(s => s.sectionId === 'mof') : null;
+      const tab = store.tabs.find(t => t.viewId === view?.id);
+      const genActor = store.doc.parts.find(p => p.type === 'BusinessCapability');
+
+      return {
+        viewCreated: !!view,
+        viewType: view ? view.viewType : null,
+        partsPlaced: view ? store.viewMembersForView(view.id).filter(v => v.objectType === 'part').length : 0,
+        mofRowCount: mof ? mof.rowCount : null,
+        zoom: tab ? tab.viewport.zoom : null,
+        industryGenerated: !!genActor,
+        messageLogHasDone: store.messageLog.some(e => JSON.stringify(e).includes('Done')),
+      };
+    }
+    """)
+    problems = []
+    if not result["viewCreated"] or result["viewType"] != "org":
+        problems.append(f"expected a new 'Business Functions' view of type 'org', got viewCreated={result['viewCreated']} viewType={result['viewType']}")
+    if result["partsPlaced"] != 29:
+        problems.append(f"expected all 29 'Enterprise Functions' template parts placed in the new view, got {result['partsPlaced']}")
+    if result["mofRowCount"] != 1:
+        problems.append(f"expected the 'mof' section's rowCount changed from its default 2 down to 1, got {result['mofRowCount']}")
+    if result["zoom"] != 0.6:
+        problems.append(f"expected the view's tab zoomed to 60% (0.6), got {result['zoom']}")
+    if not result["industryGenerated"]:
+        problems.append("expected Generate Industry (default 'general') to have actually run, producing at least one BusinessCapability part")
+    if not result["messageLogHasDone"]:
+        problems.append("expected 'Done' written to the persistent Message Log")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "BatchScript_QuickStart (run via main(), the real Script Console UI) generates the default industry, builds a Business Functions org view from the Enterprise Functions template, adjusts the mof section's row count, zooms to 60%, and logs 'Done'"
 
 
 def check_spacing_scale_uniform(page):
@@ -1755,6 +1927,55 @@ def check_local_secrets_settings_split(page):
         return False, f"maxScriptEntities did not auto-apply from its localStorage cache after reload (expected 777): {after}"
 
     return True, "Local Secrets reset on reload (memory-only); Local Settings' maxScriptEntities auto-loads from localStorage after a reload with no file re-selection"
+
+
+def check_batch_script_code_persists_with_local_settings(page):
+    """Regression guard: the Script Console's text (store.batchScriptCode) is bundled
+    into File > Save/Load Local Settings and its localStorage cache, same as
+    maxScriptEntities/nodeSizeMultiplier — reported directly: "These can be viewed in
+    'Code Summary' and saved along with user local settings." Covers the same
+    auto-apply-on-reload behavior check_local_secrets_settings_split already proves for
+    maxScriptEntities: loading a Local Settings file with a custom batchScriptCode
+    caches it to localStorage immediately, and a full page reload picks it up with no
+    file re-selection needed."""
+    custom_code = "function main() { return 'custom-batch-script-marker'; }"
+
+    def load_file(input_id, obj):
+        js(page, f"""
+        async () => {{
+          const text = {json.dumps(json.dumps(obj))};
+          const blob = new Blob([text], {{ type: 'application/json' }});
+          const file = new File([blob], 'test.json', {{ type: 'application/json' }});
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          const input = document.getElementById('{input_id}');
+          input.files = dt.files;
+          input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+          await new Promise(r => setTimeout(r, 150));
+        }}
+        """)
+
+    load_file('load-local-settings-input', {'batchScriptCode': custom_code})
+
+    before = js(page, """
+    async () => ({
+      code: window.dycadApp.store.batchScriptCode,
+      cached: localStorage.getItem('dycad-local-settings-cache'),
+    })
+    """)
+    if before["code"] != custom_code:
+        return False, f"batchScriptCode didn't load correctly: {before}"
+    if not before["cached"] or json.loads(before["cached"]).get("batchScriptCode") != custom_code:
+        return False, f"batchScriptCode wasn't cached to localStorage on load: {before}"
+
+    page.reload()
+    page.wait_for_timeout(1200)
+
+    after = js(page, "async () => ({ code: window.dycadApp.store.batchScriptCode })")
+    if after["code"] != custom_code:
+        return False, f"batchScriptCode did not auto-apply from its localStorage cache after reload: {after}"
+
+    return True, "batchScriptCode loads from a Local Settings file, caches to localStorage, and auto-applies on the next page load with no file re-selection"
 
 
 def check_instructions_closed_persists_across_reload(page):
@@ -4116,6 +4337,9 @@ CHECKS = [
     check_property_panel_field_split,
     check_multiselect_shows_entity_level_fields,
     check_code_summary,
+    check_script_console_and_code_summary_moved_to_advanced,
+    check_script_console_runs_main_function,
+    check_batch_script_quickstart,
     check_spacing_scale_uniform,
     check_routing_avoids_obstacle,
     check_archimate_import_fixture,
@@ -4147,6 +4371,7 @@ CHECKS = [
     check_streams_field_editable,
     check_pinned_field_dblclick_not_stolen_by_pin_icon,
     check_local_secrets_settings_split,
+    check_batch_script_code_persists_with_local_settings,
     check_instructions_closed_persists_across_reload,
     check_load_sfcce,
     check_stream_template_shared_default,

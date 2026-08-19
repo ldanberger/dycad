@@ -302,7 +302,7 @@ Output ONLY the JSON array, valid and complete -- no commentary.</pre>
     just this view's placement(s). If that leaves a part or connector with no other placement anywhere (and, for a
     part, nothing still connected to it), you're separately asked whether to delete it from the model entirely, not
     just this view. Declining leaves it exactly as before.</td></tr>
-    <tr><td><code>Ctrl/Cmd + Enter</code></td><td>Run the current entry in the Script Console (Simulation menu).</td></tr>
+    <tr><td><code>Ctrl/Cmd + Enter</code></td><td>Run the Script Console's main() (Advanced menu).</td></tr>
   </tbody>
 </table>
 <p>All of the above are ignored while typing in a text field (so, for example, deleting text in a Label field
@@ -398,8 +398,8 @@ Enabled" in Root Properties, then write the script body in the Script field.</p>
     <tr><td><code>ctx.secrets</code></td><td>Read-only access to your Local Secrets (File &gt; Load Local
     Secrets — e.g. an API key) that should never end up saved into a shared model file. Deliberately
     memory-only — never cached to localStorage either, so it must be re-loaded each browser session, unlike
-    File &gt; Load/Save Local Settings (pinned fields, Max Script Entities, node size) which IS cached and
-    auto-applies on startup.</td></tr>
+    File &gt; Load/Save Local Settings (pinned fields, Max Script Entities, node size, and the Script Console's
+    own text) which IS cached and auto-applies on startup.</td></tr>
     <tr><td><code>ctx.setState(patch)</code></td><td>For asynchronous work (e.g. a fetch whose result arrives
     later) — merges into this part's state at the start of the <em>next</em> tick rather than immediately.</td></tr>
     <tr><td><code>ctx.loadedFileName</code></td><td>The filename of the last file that fully replaced the model
@@ -452,21 +452,31 @@ effect across page refreshes without re-loading the file. The same file/mechanis
 multiplier — see <a href="#views">Views &amp; Layout</a> above.</p>
 
 <h3>Script Console</h3>
-<p>Simulation &gt; Script Console opens a REPL-style debugging tool, separate from any one part's script — for
-poking at live simulation/document state interactively (e.g. checking what <code>findParts(...)</code> would
-return) rather than round-tripping through a node's script field. It has full <code>app</code>/<code>store</code>
-access (more powerful than a part's sandboxed <code>ctx</code>, since it's an explicit debugging tool, not
-something a saved document runs unattended) via the bindings <code>app</code>, <code>store</code>,
-<code>model</code> (the currently-selected simulation model), <code>findParts</code>, and <code>log(...)</code>.
-Enter an expression directly, or full statements ending in your own <code>return</code>; Ctrl+Enter runs it.</p>
+<p>Advanced &gt; Script Console opens a persistent batch-script editor, separate from any one part's script — for
+one-shot bulk operations (generate an industry, build a whole view, ...) you trigger on demand, rather than
+per-tick simulation behavior. It has full <code>app</code>/<code>store</code> access (more powerful than a part's
+sandboxed <code>ctx</code>, since it's an explicit tool a person runs, not something a saved document executes
+unattended) via the bindings <code>app</code>, <code>store</code>, <code>model</code> (the currently-selected
+simulation model), <code>findParts</code>, <code>log(...)</code> (prints to the console's own output area),
+<code>messageLog(...)</code> (writes to the persistent Message Log instead), and the raw commands
+<code>generateIndustry(app, industryKey, onProgress, placeInView)</code> and
+<code>populateFromTemplate(app, tab, templateName)</code>.</p>
+<p>The editor's text is a real script FILE, not a one-off REPL entry: it's saved as you go (both to this browser's
+localStorage and, if you edit it, alongside File &gt; Save Local Settings — see below), and Run doesn't clear it
+afterward. Run (or Ctrl+Enter) defines everything currently in the box — so any <code>function foo() {...}</code>
+you write becomes callable — then calls exactly one predetermined entry point, a top-level <code>main()</code>,
+which is free to call whatever other functions you've defined alongside it (they all share the same bindings
+automatically, without needing them passed in). The default script's <code>main()</code> calls one starter batch
+script, <code>BatchScript_QuickStart()</code> — the convention for adding your own is
+<code>BatchScript_&lt;Name&gt;</code>, with <code>main()</code> picking which one(s) to run.</p>
 
 <h3>Code Summary</h3>
-<p>Simulation &gt; Code Summary opens a read-only listing of every part's own script in the current document, for
-security review before running an unfamiliar simulation (a script runs with full access to the document — it can
-create parts/connectors and call <code>findParts</code> — and to any configured API secrets). Every part with a
-script is listed regardless of whether its "Part Script Enabled" checkbox is currently on, since a disabled
-script could always be re-enabled later; each entry is clearly marked ENABLED or disabled and identifies its
-source part by label, type, and id, grouped by model.</p>
+<p>Advanced &gt; Code Summary opens a read-only listing of the Script Console's own text plus every part's own
+script in the current document, for security review before running an unfamiliar simulation or batch script (both
+run with full access to the document — creating parts/connectors, calling <code>findParts</code> — and to any
+configured API secrets). Every part with a script is listed regardless of whether its "Part Script Enabled"
+checkbox is currently on, since a disabled script could always be re-enabled later; each entry is clearly marked
+ENABLED or disabled and identifies its source part by label, type, and id, grouped by model.</p>
 
 <h3>What a script must return</h3>
 <p>A script must return an object <code>{ value, state, response, badge }</code> — <code>response</code> and
