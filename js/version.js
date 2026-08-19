@@ -1903,4 +1903,22 @@
 // — assertions are tolerance-based, not exact-equality, since levelDownSingle's own
 // trailing redrawAndResolveLayout call can resize/reflow nodes after this placement
 // runs), confirmed to catch the regression via a temporary revert. Full suite 68/68.
-export const APP_VERSION = '0.824';
+// 0.825: data correction, not a code change — audited public/custom.json's elements
+// list against the TOGAF 9.2 Content Metamodel (core entities plus the Governance,
+// Data, Infrastructure Consolidation, Motivation, and Migration Planning extensions)
+// and added the 't' (TOGAF) source code to 18 elements that correspond to a standard
+// TOGAF entity but were only tagged 'a' (ArchiMate): BusinessActor (Actor),
+// DataDataEntity (Data Entity), BusinessRole (Role), ApplicationFunction and
+// ApplicationProcess (Function/Process — inconsistent with BusinessFunction/
+// BusinessProcess/TechnologyFunction/TechnologyProcess already being tagged),
+// Capability and BusinessCapability, Contract, Product, Location, Driver, Goal,
+// Constraint, Principle, Requirement, Gap, WorkPackage, and Stakeholder. This only
+// affects which elements the Toolbox's TOGAF library filter surfaces (see
+// renderToolbox/js/render.js's codeMap) — verified live: filtering to TOGAF-only now
+// shows exactly the 32 expected elements (was 14). No application logic changed, so no
+// new permanent regression check — full suite still 68/68 (unaffected). Also
+// identified, but deliberately left untouched pending further review: Business Event
+// is missing from the elements list entirely (independent of TOGAF tagging — ArchiMate
+// has it, this app doesn't), and TOGAF's Measure/Service Quality/Assumption entities
+// have no corresponding element at all.
+export const APP_VERSION = '0.825';
