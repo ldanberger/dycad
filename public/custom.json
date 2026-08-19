@@ -1592,6 +1592,17 @@
       "path": "M 20,10 m -7,0 a 7,7 0 1,0 14,0 a 7,7 0 1,0 -14,0 M 20,5 V 15 M 17,8 H 23 M 17,12 H 23"
     },
     {
+      "type": "Assumption",
+      "title": "Assumption",
+      "group": "Strategymotivation",
+      "tkDisplayOrder": 13,
+      "cornerRadius": 0,
+      "sources": "t",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 20,10 m -7,0 a 7,7 0 1,0 14,0 a 7,7 0 1,0 -14,0 M 17,8 A 3 3 0 1 1 20 11 V 13 M 20,16 m -1,0 a 1,1 0 1,0 2,0 a 1,1 0 1,0 -2,0"
+    },
+    {
       "type": "BusinessCollaboration",
       "title": "Business Collaboration",
       "group": "Business",
@@ -1920,6 +1931,17 @@
       "prefix": "",
       "suffix": "",
       "path": "M 20,18 C 20,18 12,11 12,7 A 8 8 0 1 1 28 7 C 28,11 20,18 20,18 Z M 20,7 m -2.5,0 a2.5,2.5 0 1,0 5,0 a2.5,2.5 0 1,0 -5,0"
+    },
+    {
+      "type": "Measure",
+      "title": "Measure",
+      "group": "General",
+      "tkDisplayOrder": 6,
+      "cornerRadius": 0,
+      "sources": "t",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,18 H 29 M 14,18 V 12 M 20,18 V 3 M 26,18 V 9"
     }
   ],
   "streamTemplates": [
@@ -2061,8 +2083,8 @@
     }
   ],
   "cubeOrder": [
-    "GeneralActor", "GeneralCapability", "Text", "MetadataRegistry", "GeneralEntity", "Tester", "Multi", "Grouping", "Location",
-    "Capability", "CourseOfAction", "Resource", "Assessment", "Constraint", "Driver", "Goal", "Meaning", "Outcome", "Principle", "Requirement", "Stakeholder", "Value",
+    "GeneralActor", "GeneralCapability", "Text", "MetadataRegistry", "GeneralEntity", "Tester", "Multi", "Grouping", "Location", "Measure",
+    "Capability", "CourseOfAction", "Resource", "Assessment", "Constraint", "Driver", "Goal", "Meaning", "Outcome", "Principle", "Requirement", "Stakeholder", "Value", "Assumption",
     "BusinessActor", "BusinessCapability", "BusinessFunction", "BusinessProcess", "BusinessInterface", "BusinessService", "BusinessCollaboration", "BusinessObject", "BusinessRole", "Contract", "Product", "Representation", "BusinessEvent",
     "ApplicationApplication", "DataObject", "ApplicationComponent", "ApplicationLogicalComponent", "ApplicationPhysicalComponent", "ApplicationCapability", "ApplicationFunction", "ApplicationProcess", "ApplicationService", "ApplicationCollaboration", "ApplicationEvent", "ApplicationInteraction", "ApplicationInterface",
     "TechnologyCapability", "TechnologyFunction", "TechnologyLogicalComponent", "TechnologyPhysicalComponent", "TechnologyProcess", "TechnologyService", "CommunicationNetwork", "Device", "DistributionNetwork", "Equipment", "Facility", "Material", "Node", "Path", "SystemSoftware", "TechnologyEvent", "TechnologyInteraction", "TechnologyInterface",

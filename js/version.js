@@ -1939,4 +1939,22 @@
 // correspondence in both directions) to catch this class of omission for any FUTURE
 // new element type, confirmed to catch the regression via a temporary revert. Full
 // suite 69/69.
-export const APP_VERSION = '0.826';
+// 0.827: added the last two elements flagged missing by 0.825's TOGAF audit — Measure
+// (Governance extension) and Assumption (Motivation extension), neither of which has
+// an ArchiMate counterpart to borrow an icon/placement from, unlike BusinessEvent in
+// 0.826. sources: 't' only (no 'a' — these aren't ArchiMate elements). Measure placed
+// in the General group (tkDisplayOrder 6, after Location) as a generic governance
+// artifact not tied to one architecture layer; Assumption in Strategymotivation
+// (tkDisplayOrder 13, after Value) alongside the app's other TOGAF/motivation-adjacent
+// elements (Driver, Goal, Constraint, Requirement, Stakeholder, ...). New hand-drawn
+// icons: Measure a simple ascending bar chart, Assumption a question mark in a circle
+// (both compared against alternate candidates rendered side-by-side before picking).
+// Both added to cubeOrder in the same relative positions, verified via
+// check_cubeorder_covers_all_elements (added in 0.826 specifically to catch this).
+// No relationshipPairs entries added, matching the other ungoverned/generic element
+// types' existing precedent. Full suite 69/69 (unaffected — pure data addition).
+// 0.828: added a contact email to the small-screen overlay's ("DyCAD needs a larger
+// screen") body text, right before the "Continue anyway" link. Cosmetic text-only
+// change, verified in a real browser at a sub-800px viewport width; full suite
+// unaffected (69/69, no new check — nothing here is application logic to regress).
+export const APP_VERSION = '0.828';

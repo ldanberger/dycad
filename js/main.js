@@ -2658,6 +2658,7 @@ function showSmallScreenScreen(onContinueAnyway) {
       <p style="margin:0; color:var(--text-muted); font-size:13px; line-height:1.5;">
         This is a canvas-based diagramming tool with several side panels — it isn't usable comfortably at this
         width. Try a laptop or desktop browser, or widen this window. In the meantime, here are the Instructions.
+        Larry.danberger@larryhere.com
         <a href="#" id="small-screen-continue" style="margin-left:6px; white-space:nowrap;">Continue anyway →</a>
       </p>
     </div>
