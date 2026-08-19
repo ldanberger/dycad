@@ -1658,6 +1658,17 @@
       "path": "M 12,2 H 28 V 14 C 26,17 24,13 22,16 C 20,19 18,15 16,17 C 14,19 13,16 12,17 Z M 15,6 H 25 M 15,9 H 25"
     },
     {
+      "type": "BusinessEvent",
+      "title": "Business Event",
+      "group": "Business",
+      "tkDisplayOrder": 12,
+      "cornerRadius": 0,
+      "sources": "a",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 15,3 L 22,3 L 17,10 L 24,10 L 14,19 L 17,11 L 11,11 Z"
+    },
+    {
       "type": "ApplicationCollaboration",
       "title": "Application Collaboration",
       "group": "Application",
@@ -2052,7 +2063,7 @@
   "cubeOrder": [
     "GeneralActor", "GeneralCapability", "Text", "MetadataRegistry", "GeneralEntity", "Tester", "Multi", "Grouping", "Location",
     "Capability", "CourseOfAction", "Resource", "Assessment", "Constraint", "Driver", "Goal", "Meaning", "Outcome", "Principle", "Requirement", "Stakeholder", "Value",
-    "BusinessActor", "BusinessCapability", "BusinessFunction", "BusinessProcess", "BusinessInterface", "BusinessService", "BusinessCollaboration", "BusinessObject", "BusinessRole", "Contract", "Product", "Representation",
+    "BusinessActor", "BusinessCapability", "BusinessFunction", "BusinessProcess", "BusinessInterface", "BusinessService", "BusinessCollaboration", "BusinessObject", "BusinessRole", "Contract", "Product", "Representation", "BusinessEvent",
     "ApplicationApplication", "DataObject", "ApplicationComponent", "ApplicationLogicalComponent", "ApplicationPhysicalComponent", "ApplicationCapability", "ApplicationFunction", "ApplicationProcess", "ApplicationService", "ApplicationCollaboration", "ApplicationEvent", "ApplicationInteraction", "ApplicationInterface",
     "TechnologyCapability", "TechnologyFunction", "TechnologyLogicalComponent", "TechnologyPhysicalComponent", "TechnologyProcess", "TechnologyService", "CommunicationNetwork", "Device", "DistributionNetwork", "Equipment", "Facility", "Material", "Node", "Path", "SystemSoftware", "TechnologyEvent", "TechnologyInteraction", "TechnologyInterface",
     "DataDataEntity", "DataLogicalComponent", "DataPhysicalComponent",

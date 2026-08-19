@@ -2405,6 +2405,43 @@ def check_view3d_cube_order_fallback(page):
     return True, "with a template (Test) that leaves both General and Application unordered, the fallback used custom.json's cubeOrder sequence (General before Application) rather than elementGroups' own declaration order (which disagrees)"
 
 
+def check_cubeorder_covers_all_elements(page):
+    """Regression guard for a real near-miss: cubeOrder (see check_view3d_cube_order_fallback
+    above) is documented as "a hand-authored master list covering every element type" —
+    but it's a second, hand-maintained list that has to be kept in sync with
+    settings.elements by hand every time a new element type is added, with nothing
+    enforcing that today. Caught while adding BusinessEvent: the new element worked fine
+    in the Toolbox and on canvas immediately, but would have silently fallen through to
+    resolveLayerOrder's defensive tkDisplayOrder/alphabetical fallback in the 3D View
+    (rather than its deliberate, intended position) if cubeOrder hadn't ALSO been
+    updated — an easy thing to forget since nothing else surfaces the omission. Checks
+    both directions: every element type appears in cubeOrder exactly once, and every
+    cubeOrder entry has a matching element."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const elTypes = (store.settings.elements || []).map(e => e.type);
+      const cube = store.settings.cubeOrder || [];
+      const elSet = new Set(elTypes);
+      const cubeSet = new Set(cube);
+      const missingFromCube = elTypes.filter(t => !cubeSet.has(t));
+      const orphanedInCube = cube.filter(t => !elSet.has(t));
+      const dupesInCube = cube.filter((t, i) => cube.indexOf(t) !== i);
+      return { elementCount: elTypes.length, cubeCount: cube.length, missingFromCube, orphanedInCube, dupesInCube };
+    }
+    """)
+    problems = []
+    if result["missingFromCube"]:
+        problems.append(f"element type(s) missing from cubeOrder: {result['missingFromCube']}")
+    if result["orphanedInCube"]:
+        problems.append(f"cubeOrder entries with no matching element: {result['orphanedInCube']}")
+    if result["dupesInCube"]:
+        problems.append(f"duplicate entries in cubeOrder: {result['dupesInCube']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, f"cubeOrder stays in exact 1:1 correspondence with settings.elements ({result['elementCount']} types, no gaps/orphans/duplicates)"
+
+
 def check_view3d_focus_and_zoom_jump(page):
     """Regression guard for 3D View Stage 4 (zoom-to-2D-detail): focusing a part (driven
     here via view3d.js's debugFocusPart, since real mouse/wheel events are unreliable
@@ -3820,6 +3857,7 @@ CHECKS = [
     check_view3d_layers_and_filters,
     check_view3d_connectors_and_clustering,
     check_view3d_cube_order_fallback,
+    check_cubeorder_covers_all_elements,
     check_view3d_focus_and_zoom_jump,
     check_sfce_array_field_survives_deeper_nesting,
     check_view3d_sim_overlay,

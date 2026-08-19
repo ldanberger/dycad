@@ -1921,4 +1921,22 @@
 // is missing from the elements list entirely (independent of TOGAF tagging — ArchiMate
 // has it, this app doesn't), and TOGAF's Measure/Service Quality/Assumption entities
 // have no corresponding element at all.
-export const APP_VERSION = '0.825';
+// 0.826: added the missing BusinessEvent element (Business group, tkDisplayOrder 12 —
+// appended after Representation rather than reordering the group's existing 12
+// entries; same lightning-bolt icon path already shared by ApplicationEvent/
+// TechnologyEvent/ImplementationEvent; sources: 'a' only, matching those same
+// siblings — left ungraded for TOGAF pending the same confirmation caveat as
+// Deliverable/Plateau/ImplementationEvent in 0.825). No relationshipPairs entry added
+// either, again matching the other Event types' existing (unrestricted) precedent.
+// While verifying this, found a real near-miss: custom.json's cubeOrder (3D View's
+// fallback ordering list, "a hand-authored master list covering every element type"
+// per its own doc comment) has no enforcement keeping it in sync with
+// settings.elements — BusinessEvent worked immediately in the Toolbox and on canvas
+// without it, and would have silently gotten 3D View's defensive fallback ordering
+// instead of its intended position if I hadn't caught it manually. Added BusinessEvent
+// to cubeOrder too (same position, after Representation), and a new permanent
+// regression check (check_cubeorder_covers_all_elements, verifying the full 1:1
+// correspondence in both directions) to catch this class of omission for any FUTURE
+// new element type, confirmed to catch the regression via a temporary revert. Full
+// suite 69/69.
+export const APP_VERSION = '0.826';
