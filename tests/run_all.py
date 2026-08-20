@@ -410,6 +410,101 @@ def check_script_console_and_code_summary_moved_to_advanced(page):
     return True, "Script Console and Code Summary now live in the Advanced menu, after a separator, and are gone from the Simulation menu"
 
 
+def check_reset_pinned_3d_positions_moved_to_explore(page):
+    """Regression guard: 'Reset Pinned 3D Positions' moved from the Advanced menu to
+    the Explore menu, after a separator — reported directly: "Move 'Reset Pinned 3D
+    Positions' to the Explore menu after a separator." Also checks it's genuinely GONE
+    from the Advanced menu, not just duplicated."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp;
+      document.getElementById('explore-menu-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      const exploreItems = [...document.querySelectorAll('#explore-menu .dd-item')];
+      const resetIdx = exploreItems.findIndex(e => e.dataset.action === 'resetPinned3DPositions');
+      const resetEl = exploreItems[resetIdx];
+      const precedingEl = resetEl ? resetEl.previousElementSibling : null;
+      const hasSeparatorBeforeReset = !!precedingEl && precedingEl.classList.contains('dd-separator');
+      document.getElementById('explore-menu-btn').click();
+
+      document.getElementById('advanced-menu-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      const advActions = [...document.querySelectorAll('#advanced-menu .dd-item')].map(e => e.dataset.action);
+      document.getElementById('advanced-menu-btn').click();
+
+      return {
+        resetInExplore: resetIdx !== -1,
+        hasSeparatorBeforeReset,
+        advActions,
+      };
+    }
+    """)
+    problems = []
+    if not result["resetInExplore"]:
+        problems.append("expected 'Reset Pinned 3D Positions' in the Explore menu")
+    if not result["hasSeparatorBeforeReset"]:
+        problems.append("expected a separator immediately before 'Reset Pinned 3D Positions' in the Explore menu")
+    if 'resetPinned3DPositions' in result["advActions"]:
+        problems.append("expected 'Reset Pinned 3D Positions' to be GONE from the Advanced menu, not just duplicated")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Reset Pinned 3D Positions now lives in the Explore menu, after a separator, and is gone from the Advanced menu"
+
+
+def check_toolbar_filter_groups_hidden_when_inactive(page):
+    """Regression guard: the toolbar's tab-scoped filter controls (Stream, Types,
+    Section, Connector Type, Layer Order, Highlight, Levels) are now HIDDEN entirely
+    (not just disabled) on a tab type they don't apply to, instead of sitting there
+    disabled and confusing — reported directly: "Can the filters... be hidden unless
+    active for the current tab? For example Highlight has no purpose and is confusing
+    on other types of tabs." Checks all three tab types these controls actually
+    differ across: a canvas tab (Stream/Types/Section/Levels visible; Connector
+    Type/Layer Order/Highlight hidden — those three are 3D-only), a 3D tab (the
+    reverse: Connector Type/Layer Order/Highlight visible, Levels hidden — canvas-only
+    — Stream/Types/Section stay visible on both), and a table tab (catalog — ALL
+    SEVEN hidden, since none of them apply there at all)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const groupIds = ['stream-filter-group', 'element-type-filter-group', 'section-filter-group', 'connector-type-filter-group', 'view3d-layer-order-group', 'highlight-type-filter-group', 'connector-levels-group'];
+      const hiddenMap = () => Object.fromEntries(groupIds.map(id => [id, document.getElementById(id).classList.contains('hidden')]));
+
+      const view = store.doc.views[0];
+      const canvasTab = app.createCanvasTab(view);
+      app.switchToTab(canvasTab.id);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      const onCanvas = hiddenMap();
+
+      app.openOrSwitch3DView();
+      await new Promise(r => setTimeout(r, 200));
+      const on3D = hiddenMap();
+
+      app.openOrSwitchCatalog('parts', 'Parts');
+      await new Promise(r => setTimeout(r, 60));
+      const onTable = hiddenMap();
+
+      return { onCanvas, on3D, onTable };
+    }
+    """)
+    r = result
+    problems = []
+    canvasExpectedHidden = {'stream-filter-group': False, 'element-type-filter-group': False, 'section-filter-group': False, 'connector-type-filter-group': True, 'view3d-layer-order-group': True, 'highlight-type-filter-group': True, 'connector-levels-group': False}
+    for gid, expectedHidden in canvasExpectedHidden.items():
+        if r["onCanvas"][gid] != expectedHidden:
+            problems.append(f"canvas tab: expected #{gid} hidden={expectedHidden}, got {r['onCanvas'][gid]}")
+    view3dExpectedHidden = {'stream-filter-group': False, 'element-type-filter-group': False, 'section-filter-group': False, 'connector-type-filter-group': False, 'view3d-layer-order-group': False, 'highlight-type-filter-group': False, 'connector-levels-group': True}
+    for gid, expectedHidden in view3dExpectedHidden.items():
+        if r["on3D"][gid] != expectedHidden:
+            problems.append(f"3D tab: expected #{gid} hidden={expectedHidden}, got {r['on3D'][gid]}")
+    for gid, hidden in r["onTable"].items():
+        if not hidden:
+            problems.append(f"table tab: expected #{gid} hidden=True (none of these apply to a catalog table), got False")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {r})"
+    return True, "toolbar filter groups (Stream/Types/Section/Connector Type/Layer Order/Highlight/Levels) show/hide correctly per tab type -- canvas gets Stream/Types/Section/Levels, 3D gets everything except Levels, and a table tab hides all seven"
+
+
 def check_script_console_runs_main_function(page):
     """Regression guard for the Script Console's new execution model: Run no longer
     executes the editor's text directly (the old REPL-style "evaluate this one entry"
@@ -489,9 +584,9 @@ def check_batch_script_quickstart(page):
     running without error (a later-added step: 'org' is a section-based view type, so
     remap's own applyRemapLayout routes it through applyRemapLayoutSectioned rather
     than pattern-based freeform placement — 'pattern' is accepted but not itself
-    meaningful there; this just proves the call is wired in and doesn't throw); (7)
-    "Done" written to the persistent Message Log (not just the Script Console's own
-    output area)."""
+    meaningful there; this just proves the call is wired in and doesn't throw); (7) the
+    3D View opened (and became the active tab) afterward; (8) "Done" written to the
+    persistent Message Log (not just the Script Console's own output area)."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -511,6 +606,7 @@ def check_batch_script_quickstart(page):
       const mof = view ? (view.sections || []).find(s => s.sectionId === 'mof') : null;
       const tab = store.tabs.find(t => t.viewId === view?.id);
       const genActor = store.doc.parts.find(p => p.type === 'BusinessCapability');
+      const view3dTab = store.tabs.find(t => t.type === '3d');
 
       return {
         viewCreated: !!view,
@@ -521,6 +617,8 @@ def check_batch_script_quickstart(page):
         industryGenerated: !!genActor,
         messageLogHasDone: store.messageLog.some(e => JSON.stringify(e).includes('Done')),
         consoleOutput,
+        view3dOpened: !!view3dTab,
+        view3dIsActive: view3dTab ? store.activeTabId === view3dTab.id : false,
       };
     }
     """)
@@ -533,6 +631,10 @@ def check_batch_script_quickstart(page):
         problems.append(f"expected the 'mof' section's rowCount changed from its default 2 down to 1, got {result['mofRowCount']}")
     if result["zoom"] != 0.6:
         problems.append(f"expected the view's tab zoomed to 60% (0.6), got {result['zoom']}")
+    if not result["view3dOpened"]:
+        problems.append("expected the script to open the 3D View (app.openOrSwitch3DView()) after remap")
+    if not result["view3dIsActive"]:
+        problems.append("expected the 3D View to become the active tab after the script finishes")
     if "error" in result["consoleOutput"].lower():
         problems.append(f"expected the script to run end-to-end (including its remap(app, tab, {{pattern:'default'}}) step) without reporting an error, got console output: {result['consoleOutput']}")
     if not result["industryGenerated"]:
@@ -541,7 +643,7 @@ def check_batch_script_quickstart(page):
         problems.append("expected 'Done' written to the persistent Message Log")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "BatchScript_QuickStart (run via main(), the real Script Console UI) generates the default industry, builds a Business Functions org view from the Enterprise Functions template, adjusts the mof section's row count, zooms to 60%, and logs 'Done'"
+    return True, "BatchScript_QuickStart (run via main(), the real Script Console UI) generates the default industry, builds a Business Functions org view from the Enterprise Functions template, adjusts the mof section's row count, zooms to 60%, opens the 3D View, and logs 'Done'"
 
 
 def check_script_console_remap_and_smart_check_bindings(page):
@@ -3770,6 +3872,102 @@ def check_view3d_reset_pinned_positions(page):
     return True, "Advanced > Reset Pinned 3D Positions is a no-op with nothing pinned, confirms with the exact count otherwise, Cancel leaves pins untouched, and OK clears every pin3D back to null with parts genuinely returning to auto-layout"
 
 
+def check_view3d_highlight_type_picker(page):
+    """Regression guard for the 3D View's Highlight picker — reported directly: "add a
+    'highlight' option, perhaps a dropdown list with checkbox... for element type in
+    use, allowing user to enable for example highlighting the businessfunction parts."
+    A toolbar checkbox-dropdown (#highlight-type-filter-btn/-menu, tab.highlightedTypes)
+    like Type/Connector Type, listing every element type actually present in the
+    document. Purely a visual call-out (a wireframe InstancedMesh, one instance per
+    matching part) layered on top of the normal scene, NOT a filter — checking a type
+    must not hide or otherwise change any OTHER type's own rendering. Verifies: the
+    button is disabled on a canvas tab; checking ONE type highlights exactly its own
+    parts (right count AND right partIds, not just a count that happens to match);
+    checking a SECOND type on top adds to the highlight rather than replacing it;
+    unchecking both clears the highlight mesh entirely; and the button's own label
+    text reflects None / a single type's title / "N types" as the selection changes."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      const a1 = store.createPart({ type: 'GeneralActor', label: 'A1', model: store.defaultModel, streams: [] });
+      const a2 = store.createPart({ type: 'GeneralActor', label: 'A2', model: store.defaultModel, streams: [] });
+      const a3 = store.createPart({ type: 'GeneralActor', label: 'A3', model: store.defaultModel, streams: [] });
+      const b1 = store.createPart({ type: 'BusinessCapability', label: 'B1', model: store.defaultModel, streams: [] });
+      const b2 = store.createPart({ type: 'BusinessCapability', label: 'B2', model: store.defaultModel, streams: [] });
+
+      const canvasTab = store.tabs.find(t => t.type === 'canvas') || app.createCanvasTab(store.doc.views[0]);
+      app.switchToTab(canvasTab.id);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      const disabledOnCanvas = document.getElementById('highlight-type-filter-btn').disabled;
+
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 250));
+      const disabledOn3D = document.getElementById('highlight-type-filter-btn').disabled;
+      const labelNone = document.getElementById('highlight-type-filter-btn').textContent;
+      const initialHighlight = view3d.getDebugSceneInfo(tab.id).highlight;
+
+      const checkType = (value, checked) => {
+        document.getElementById('highlight-type-filter-btn').click();
+        const cb = [...document.querySelectorAll('#highlight-type-filter-menu input[type=\"checkbox\"]')].find(c => c.value === value);
+        cb.checked = checked;
+        cb.dispatchEvent(new Event('change'));
+      };
+
+      checkType('GeneralActor', true);
+      await new Promise(r => setTimeout(r, 150));
+      const afterA = view3d.getDebugSceneInfo(tab.id).highlight;
+      const labelA = document.getElementById('highlight-type-filter-btn').textContent;
+      const generalActorMeshStillFull = view3d.getDebugSceneInfo(tab.id).types.GeneralActor.count === 3
+        && view3d.getDebugSceneInfo(tab.id).types.BusinessCapability.count === 2;
+
+      checkType('BusinessCapability', true);
+      await new Promise(r => setTimeout(r, 150));
+      const afterBoth = view3d.getDebugSceneInfo(tab.id).highlight;
+      const labelBoth = document.getElementById('highlight-type-filter-btn').textContent;
+
+      checkType('GeneralActor', false);
+      checkType('BusinessCapability', false);
+      await new Promise(r => setTimeout(r, 150));
+      const afterNone = view3d.getDebugSceneInfo(tab.id).highlight;
+
+      return {
+        disabledOnCanvas, disabledOn3D, labelNone, initialHighlight,
+        afterA, labelA, generalActorMeshStillFull,
+        afterBoth, labelBoth, afterNone,
+        aIds: [a1.id, a2.id, a3.id], bIds: [b1.id, b2.id],
+      };
+    }
+    """)
+    r = result
+    problems = []
+    if not r["disabledOnCanvas"]:
+        problems.append("expected the Highlight button to be disabled on a canvas tab (3D-only concept)")
+    if r["disabledOn3D"]:
+        problems.append("expected the Highlight button to be enabled on the 3D tab")
+    if r["labelNone"] != "None":
+        problems.append(f"expected the Highlight button to read 'None' with nothing checked, got {r['labelNone']!r}")
+    if r["initialHighlight"]["count"] != 0:
+        problems.append(f"expected no highlight mesh at all with nothing checked, got {r['initialHighlight']}")
+    if sorted(r["afterA"]["partIds"]) != sorted(r["aIds"]):
+        problems.append(f"expected checking GeneralActor to highlight exactly its 3 own parts, got {r['afterA']}")
+    if not r["generalActorMeshStillFull"]:
+        problems.append("expected highlighting to be purely additive -- both types' own InstancedMeshes must still have their full part counts, not be filtered down")
+    if r["labelA"] != "General Actor":
+        problems.append(f"expected the button label to read the single checked type's own display title ('General Actor'), got {r['labelA']!r}")
+    if sorted(r["afterBoth"]["partIds"]) != sorted(r["aIds"] + r["bIds"]):
+        problems.append(f"expected checking a SECOND type to ADD to the highlight (all 5 parts), not replace it, got {r['afterBoth']}")
+    if r["labelBoth"] != "2 types":
+        problems.append(f"expected the button label to read '2 types' with two checked, got {r['labelBoth']!r}")
+    if r["afterNone"]["count"] != 0:
+        problems.append(f"expected unchecking both types to clear the highlight mesh entirely, got {r['afterNone']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {r})"
+    return True, "the 3D View's Highlight picker is disabled outside 3D, lists element types in use, and checking type(s) draws a wireframe box around exactly their own parts -- additively, without disturbing any other type's own rendering -- with a label reflecting the current selection"
+
+
 def check_view3d_disposed_on_full_document_load(page):
     """Regression guard for a real bug: File > Load / Load Example / Recently Opened all
     replace store.doc by wiping store.tabs directly (this.store.tabs = []) rather than
@@ -4921,6 +5119,8 @@ CHECKS = [
     check_multiselect_shows_entity_level_fields,
     check_code_summary,
     check_script_console_and_code_summary_moved_to_advanced,
+    check_reset_pinned_3d_positions_moved_to_explore,
+    check_toolbar_filter_groups_hidden_when_inactive,
     check_script_console_runs_main_function,
     check_batch_script_quickstart,
     check_script_console_remap_and_smart_check_bindings,
@@ -4981,6 +5181,7 @@ CHECKS = [
     check_view3d_connector_direction_markers,
     check_view3d_right_click_drag_pins_node,
     check_view3d_reset_pinned_positions,
+    check_view3d_highlight_type_picker,
     check_view3d_disposed_on_full_document_load,
     check_view3d_section_boundaries,
     check_generate_industry_propagates_section_to_whole_chain,

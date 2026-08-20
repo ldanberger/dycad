@@ -309,6 +309,10 @@ Output ONLY the JSON array, valid and complete -- no commentary.</pre>
 doesn't also delete the selected node) and require the current tab to be a canvas view where relevant.</p>
 
 <h2 id="filtering">4. Filtering, Streams &amp; Catalogs</h2>
+<p>Every control below only appears in the toolbar while the current tab is one it actually applies to —
+e.g. Connector Type/Layer Order/Highlight only show up on a 3D View tab, Levels only on a canvas tab, and
+none of them show up at all on a catalog table or other non-diagram tab — rather than sitting there
+disabled and confusing.</p>
 <ul>
   <li><strong>Stream filter</strong> — show only nodes/connectors tagged with a chosen stream; select-all/
   exclude-all and scrollable for models with many streams.</li>
@@ -323,6 +327,10 @@ doesn't also delete the selected node) and require the current tab to be a canva
   <li><strong>Connector Type filter</strong> (3D View only) — which connectorType(s) draw at all: 'c'
   Connectors and/or 's' Streams. Same select-all/exclude-all pattern as Stream/Type/Section. Disabled on a
   canvas tab, where this is instead a per-view setting (Show Connector Type / Show Stream Type).</li>
+  <li><strong>Highlight</strong> (3D View only) — NOT a filter: draws a wireframe box around every part of
+  whichever checked element type(s), while everything else keeps rendering normally. Useful for making one
+  or two types of interest visually pop out of a large scene (e.g. every Business Function) without hiding
+  anything else.</li>
   <li><strong>Toolkit filters</strong> (left sidebar) — Source chips (TOGAF/ArchiMate/Other) and Group chips
   (Application/Business/Data/etc., shown in light blue) narrow which element types appear in the drag-and-drop
   toolkit itself.</li>
@@ -360,7 +368,11 @@ element type in a fixed reference order (so nothing is hidden by default); picki
 (e.g. "Enterprise") narrows the WHOLE scene down to just the types that template actually cares about — its
 main value[] chain plus any type its passive relationships (e.g. Enterprise's Business Function, tied to
 Business Process) mention — anything neither list touches doesn't render at all, not just falls to the back
-of the order. Click a
+of the order. The <strong>Highlight</strong> picker (top toolbar, 3D-only) draws a bright cyan wireframe box
+around every part of whichever element type(s) you check — e.g. check "Business Function" to make every
+Business Function part visually pop out from the rest. Purely a visual call-out, not a filter: unlike Type,
+an unchecked type's parts stay exactly as visible as before, and checking more types adds to the highlight
+rather than replacing it. Click a
 part to focus it (a yellow outline highlights
 it) and show its properties in the panel on the right, with the same controls as selecting it in a 2D
 view. Zoom in further while it's focused and you'll jump straight to a 2D view that already has it placed,
@@ -377,7 +389,7 @@ combining them; pick "All of the above" to filter to every stream the part carri
 <strong>Right-click and drag</strong> a part instead to move it anywhere in 3D space — dropping it "pins"
 it there (saved with the document), and it's excluded from the auto-layout grid entirely from then on, so
 it won't shift when other parts are added/removed. A dragged part doesn't also open the quick menu. Pin as
-many parts as you like, then <strong>Advanced &gt; Reset Pinned 3D Positions</strong> to unpin all of them
+many parts as you like, then <strong>Explore &gt; Reset Pinned 3D Positions</strong> to unpin all of them
 at once and let auto-layout take back over (there's no per-part unpin — it's an all-or-nothing reset).
 Panning uses middle-click-drag here (right-click is reserved for the menu/drag instead).</p>
 

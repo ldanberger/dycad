@@ -521,8 +521,9 @@ so a future session doesn't have to re-derive it from scratch):
     across streams from two different sections keeps whichever section it was first
     created with, rather than flipping to whichever stream runs last).
 
-- **Stage 6 series (done)** — four further real-usage fixes; see `view3d.js`'s own
-  inline Stage 5.2/6/6.1/6.2/6.3 header comments for full rationale/tradeoffs on each.
+- **Stage 6 series (done)** — five further real-usage fixes; see `view3d.js`'s own
+  inline Stage 5.2/6/6.1/6.2/6.3/6.4 header comments for full rationale/tradeoffs on
+  each.
   - **Cross-layer stream crisscrossing.** Stage 5.2 fixed a multi-stream part clustering
     under an arbitrary alphabetically-first stream regardless of the active filter, and
     forced a row break on a stream change within one type's own grid. Stage 6.1 went
@@ -594,6 +595,20 @@ so a future session doesn't have to re-derive it from scratch):
     behavior — so the permanent regression check dispatches raw `PointerEvent`s plus a
     manually-fired `contextmenu` event, in the actual order a real browser uses, rather
     than relying on `page.mouse`.
+  - **Highlight picker (Stage 6.4).** Reported directly: "add a 'highlight' option,
+    perhaps a dropdown list with checkbox... for element type in use, allowing user to
+    enable for example highlighting the businessfunction parts." New toolbar
+    checkbox-dropdown (3D-only, `tab.highlightedTypes` — a plain array, default `[]`,
+    deliberately NOT the null-vs-`[]` "unfiltered" convention the real filters use,
+    since "highlight everything" isn't a meaningful default). Draws a bright cyan
+    (`HIGHLIGHT_COLOR`, distinct from `FOCUS_HIGHLIGHT_COLOR`'s yellow — a focused part
+    and a highlighted type are different, simultaneously-visible concepts) wireframe box
+    — `InstancedMesh` + `MeshBasicMaterial({wireframe:true})`, one instance per matching
+    part — around every part of the checked type(s). Purely an ADDITIVE visual overlay,
+    not a filter: an unchecked type's own `InstancedMesh` part count/rendering is
+    completely untouched. Excluded from `pickPartAtClientXY`'s raycast target list (it
+    only ever intersects `inst.typeMeshes.values()`), so the highlight overlay never
+    interferes with click/drag/context-menu hit-testing.
 
 ## 10. Testing strategy
 

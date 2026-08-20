@@ -144,6 +144,20 @@
 // "Reset Pinned 3D Positions" (App.promptResetPinned3DPositions, main.js) clears every
 // part's pin3D back to null in one bulk, confirmed action — deliberately no per-part
 // unpin, matching what was actually asked for.
+// Stage 6.4 (done): Highlight — a new toolbar picker (3D-only, checkbox-dropdown like
+// Type/Connector Type) draws a bright cyan wireframe box (InstancedMesh,
+// MeshBasicMaterial({wireframe:true}) — per-instance InstancedMesh COLOR doesn't render
+// reliably here per ensureFocusMarker's own comment, but wireframe as a material MODE
+// works fine instanced) around every part of the checked element type(s). Reported
+// directly: "add a 'highlight' option, perhaps a dropdown list with checkbox... for
+// element type in use, allowing user to enable for example highlighting the
+// businessfunction parts." Purely a visual call-out layered on top of the normal scene,
+// NOT a filter — unlike Type, an unchecked type's parts stay exactly as visible/
+// interactive as before. tab.highlightedTypes is a plain array (default [] — no
+// null-vs-[] "unfiltered" convention here, since "highlight everything" isn't a
+// meaningful default). A distinct color from FOCUS_HIGHLIGHT_COLOR (yellow) on purpose:
+// a click-focused part and a highlighted type are different, simultaneously-visible
+// concepts.
 //
 // Deliberately the ONLY module that imports the vendored Three.js/OrbitControls — every
 // other module stays free of a 3D dependency, and canvas.js only ever reaches this file
@@ -167,6 +181,12 @@ const GROUP_LAYER_GAP = 1.2;    // EXTRA Z gap inserted at each element-group bo
 const ZOOM_JUMP_DISTANCE = NODE_SIZE * 4; // camera-to-target distance that counts as "zoomed in on it"
 const CLICK_DRAG_TOLERANCE = 5; // px of pointer movement still treated as a click, not a drag
 const FOCUS_HIGHLIGHT_COLOR = 0xffcc00;
+// A distinct color from FOCUS_HIGHLIGHT_COLOR (yellow) on purpose — a focused part
+// (single, transient, click-driven) and a highlighted type (a persistent, potentially
+// many-part, toolbar-driven selection) are different concepts and can both be visible
+// on the same part at once; a bright cyan reads clearly against every element-group fill.
+const HIGHLIGHT_COLOR = 0x00e5ff;
+const HIGHLIGHT_BOX_SCALE = 1.25; // fraction larger than NODE_SIZE, so the wireframe visibly surrounds the solid cube
 const SIM_BADGE_RADIUS = NODE_SIZE * 0.22;
 const SIM_BADGE_HEIGHT = NODE_SIZE * 0.7; // floats above the node's own top face
 // Mirrors css/styles.css' .fnode-sim-badge colors exactly (normal/error/changed) — the 2D
@@ -839,7 +859,7 @@ function createInstance(app, tab, container) {
     typeMeshes: new Map(), connectorLineGroups: new Map(), connectorMarkerMeshes: new Map(), hasFramedOnce: false, lastSignature: null,
     focusMarker: null, focusedPartId: null, jumpedForPartId: null, focusedPartPosition: null,
     simMeshes: new Map(), lastSimSignature: null, partPositions: null,
-    sectionBoundaries: [],
+    sectionBoundaries: [], highlightMesh: null,
   };
 
   // inst.animId is written directly here (not a separate outer variable captured once
@@ -997,6 +1017,7 @@ function computeSignature(app, tab) {
     tab.activeElementTypes,
     tab.activeSections,
     tab.activeConnectorTypes,
+    tab.highlightedTypes,
     preferredView3DLayerOrderTemplate(),
     document.body.dataset.theme,
   ]);
@@ -1026,6 +1047,12 @@ function syncSceneData(app, tab, inst) {
     mesh.material.dispose();
   }
   inst.connectorMarkerMeshes.clear();
+  if (inst.highlightMesh) {
+    inst.scene.remove(inst.highlightMesh);
+    inst.highlightMesh.geometry.dispose();
+    inst.highlightMesh.material.dispose();
+    inst.highlightMesh = null;
+  }
   clearSectionBoundaries(inst);
   inst.scene.background = new THREE.Color(themeBackgroundColor());
 
@@ -1076,6 +1103,11 @@ function syncSceneData(app, tab, inst) {
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   const matrix = new THREE.Matrix4();
   const partPositions = new Map(); // partId -> {x, y, z}, for the connector-line pass below
+  // Highlight (toolbar picker, main.js): a wireframe box around every part of the
+  // checked element type(s) — purely a visual call-out layered on top of the normal
+  // scene, not a filter (an unchecked type's parts still render exactly as before).
+  const highlightTypeSet = new Set((tab.highlightedTypes || []).map((t) => String(t).toLowerCase()));
+  const highlightPositions = [];
 
   for (const entry of typeEntries) {
     if (prevGroupIdx !== null && entry.groupIdx !== prevGroupIdx) z += GROUP_LAYER_GAP;
@@ -1113,12 +1145,14 @@ function syncSceneData(app, tab, inst) {
       ...pinnedParts.map((part) => ({ part, x: part.pin3D.x, y: part.pin3D.y, z: part.pin3D.z })),
     ];
     const sectionBounds = new Map(); // section name -> {minX, maxX, minY, maxY}, this type's own grid only
+    const isHighlightedType = highlightTypeSet.has(entry.type.toLowerCase());
     placements.forEach(({ part, x, y, z: partZ }, i) => {
       matrix.setPosition(x, y, partZ);
       mesh.setMatrixAt(i, matrix);
       partPositions.set(part.id, { x, y, z: partZ, model: part.model });
       minX = Math.min(minX, x); maxX = Math.max(maxX, x);
       minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      if (isHighlightedType) highlightPositions.push({ partId: part.id, x, y, z: partZ });
 
       const sectionName = part.section || '';
       if (sectionName) {
@@ -1134,6 +1168,21 @@ function syncSceneData(app, tab, inst) {
     inst.typeMeshes.set(entry.type, mesh);
     for (const [sectionName, b] of sectionBounds) addSectionBoundary(inst, sectionName, b, z);
     z += TYPE_LAYER_GAP;
+  }
+
+  if (highlightPositions.length > 0) {
+    const size = NODE_SIZE * HIGHLIGHT_BOX_SCALE;
+    const highlightGeometry = new THREE.BoxGeometry(size, size, size);
+    const highlightMaterial = new THREE.MeshBasicMaterial({ color: HIGHLIGHT_COLOR, wireframe: true });
+    const highlightMesh = new THREE.InstancedMesh(highlightGeometry, highlightMaterial, highlightPositions.length);
+    highlightMesh.userData.partIds = highlightPositions.map((p) => p.partId);
+    highlightPositions.forEach((p, i) => {
+      matrix.setPosition(p.x, p.y, p.z);
+      highlightMesh.setMatrixAt(i, matrix);
+    });
+    highlightMesh.instanceMatrix.needsUpdate = true;
+    inst.scene.add(highlightMesh);
+    inst.highlightMesh = highlightMesh;
   }
 
   // A resync rebuilds every mesh from scratch, so a part focused before this rebuild
@@ -1363,6 +1412,9 @@ function getDebugSceneInfo(tabId) {
   for (const [key, mesh] of inst.connectorMarkerMeshes) {
     connectorMarkers[key] = { count: mesh.count, family: mesh.userData.family, color: `#${mesh.material.color.getHexString()}`, wireframe: mesh.material.wireframe };
   }
+  const highlight = inst.highlightMesh
+    ? { count: inst.highlightMesh.count, partIds: [...inst.highlightMesh.userData.partIds], color: `#${inst.highlightMesh.material.color.getHexString()}` }
+    : { count: 0, partIds: [], color: null };
   return {
     types,
     meshCount: inst.typeMeshes.size,
@@ -1370,6 +1422,7 @@ function getDebugSceneInfo(tabId) {
     connectorCount,
     connectorGroups,
     connectorMarkers,
+    highlight,
     focusedPartId: inst.focusedPartId,
     jumpedForPartId: inst.jumpedForPartId,
     focusMarkerVisible: inst.focusMarker ? inst.focusMarker.visible : false,

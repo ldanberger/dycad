@@ -121,6 +121,7 @@ function renderToolbar(app) {
     streamBtn.textContent = `${rawActiveStreams.length} streams`;
   }
   streamBtn.disabled = !filtersApply;
+  document.getElementById('stream-filter-group').classList.toggle('hidden', !filtersApply);
 
   const typeBtn = document.getElementById('element-type-filter-btn');
   const rawActiveTypes = filtersApply ? tab.activeElementTypes : null;
@@ -135,6 +136,7 @@ function renderToolbar(app) {
     typeBtn.textContent = `${rawActiveTypes.length} types`;
   }
   typeBtn.disabled = !filtersApply;
+  document.getElementById('element-type-filter-group').classList.toggle('hidden', !filtersApply);
 
   const sectionBtn = document.getElementById('section-filter-btn');
   const rawActiveSections = filtersApply ? tab.activeSections : null;
@@ -148,6 +150,7 @@ function renderToolbar(app) {
     sectionBtn.textContent = `${rawActiveSections.length} sections`;
   }
   sectionBtn.disabled = !filtersApply;
+  document.getElementById('section-filter-group').classList.toggle('hidden', !filtersApply);
 
   // Connector Type is 3D-only (the 2D canvas already has this per-VIEW, via
   // view.chkShowConnectorType/chkShowStreamType — this is the 3D-only, tab-scoped
@@ -165,6 +168,7 @@ function renderToolbar(app) {
     connTypeBtn.textContent = 'All (c + s)';
   }
   connTypeBtn.disabled = !is3D;
+  document.getElementById('connector-type-filter-group').classList.toggle('hidden', !is3D);
 
   // Layer Order (3D-only): which streamTemplate's value[] decides element-group/type
   // ordering in the 3D scene (view3d.js's resolveLayerOrder) — independent of
@@ -189,13 +193,31 @@ function renderToolbar(app) {
   }
   if (layerOrderSelect.value !== layerOrderValue) layerOrderSelect.value = layerOrderValue;
   layerOrderSelect.disabled = !is3D;
+  document.getElementById('view3d-layer-order-group').classList.toggle('hidden', !is3D);
+
+  // Highlight (3D-only): plain array, no null-vs-[] convention (see state.js's
+  // createTab comment) — [] always means "nothing highlighted", not "unfiltered".
+  const highlightBtn = document.getElementById('highlight-type-filter-btn');
+  const rawHighlighted = is3D ? (tab.highlightedTypes || []) : [];
+  if (rawHighlighted.length === 0) {
+    highlightBtn.textContent = 'None';
+  } else if (rawHighlighted.length === 1) {
+    const elDef = (store.settings.elements || []).find((e) => e.type === rawHighlighted[0]);
+    highlightBtn.textContent = elDef ? elDef.title : rawHighlighted[0];
+  } else {
+    highlightBtn.textContent = `${rawHighlighted.length} types`;
+  }
+  highlightBtn.disabled = !is3D;
+  document.getElementById('highlight-type-filter-group').classList.toggle('hidden', !is3D);
 
   const levelsInput = document.getElementById('connector-levels-input');
   if (document.activeElement !== levelsInput) { // don't clobber the value while the user is actively typing in it
     const rawLevels = tab && tab.type === 'canvas' ? tab.connectorLevels : 0;
     levelsInput.value = rawLevels == null ? '' : String(rawLevels);
   }
-  levelsInput.disabled = !(tab && tab.type === 'canvas');
+  const levelsApply = !!(tab && tab.type === 'canvas');
+  levelsInput.disabled = !levelsApply;
+  document.getElementById('connector-levels-group').classList.toggle('hidden', !levelsApply);
 
   document.getElementById('undo-btn').disabled = !tab || tab.history.past.length === 0;
   document.getElementById('redo-btn').disabled = !tab || tab.history.future.length === 0;

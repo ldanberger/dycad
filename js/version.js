@@ -2258,4 +2258,54 @@
 // and mentioned-in-neither cases; confirmed it catches the regression via a temporary
 // revert. tests/README.md, public/instructions.html, and DESIGN_DOCUMENT.md updated.
 // Full suite 84/84.
-export const APP_VERSION = '0.842';
+// 0.843: two requests.
+// (1) New 3D View "Highlight" toolbar picker (3D-only checkbox-dropdown, like Type/
+// Connector Type) — reported directly: "add a 'highlight' option, perhaps a dropdown
+// list with checkbox but other approach can be considered, for element type in use,
+// allowing user to enable for example highlighting the businessfunction parts."
+// tab.highlightedTypes (plain array, default [] -- no null-vs-[] "unfiltered"
+// convention, since "highlight everything" isn't a meaningful default) drives a bright
+// cyan wireframe box (InstancedMesh + MeshBasicMaterial({wireframe:true}), one
+// instance per matching part) around every part of the checked type(s) -- purely an
+// ADDITIVE visual overlay, never a filter (an unchecked type's own rendering/part
+// count is completely untouched, and the overlay is excluded from raycast hit-testing,
+// so it never interferes with click/drag/context-menu). Distinct color from
+// FOCUS_HIGHLIGHT_COLOR (yellow) on purpose -- a focused part and a highlighted type
+// are different, simultaneously-visible concepts.
+// (2) BatchScript_QuickStart (DEFAULT_BATCH_SCRIPT_CODE, state.js) now opens (and
+// switches to) the 3D View as its final step, right after remap() and before logging
+// "Done".
+// New check_view3d_highlight_type_picker (disabled outside 3D, checking a type
+// highlights EXACTLY its own parts by id, checking a second type ADDS rather than
+// replaces, highlighting never disturbs another type's own InstancedMesh count, label
+// text reflects the selection); check_batch_script_quickstart extended to verify the
+// 3D View opens and becomes the active tab. Both confirmed to catch their own
+// regression via a temporary revert. tests/README.md, public/instructions.html, and
+// DESIGN_DOCUMENT.md updated. Full suite 85/85.
+// 0.844: two requests.
+// (1) 'Reset Pinned 3D Positions' moved from the Advanced menu to the Explore menu,
+// after a separator (matching the pattern the earlier Script Console/Code Summary
+// move to Advanced already used).
+// (2) Toolbar filter groups (Stream, Types, Section, Connector Type, Layer Order,
+// Highlight, Levels) are now HIDDEN entirely -- not just disabled -- on a tab type
+// they don't apply to, instead of sitting there disabled and confusing. Reported
+// directly: "Can the filters... be hidden unless active for the current tab? For
+// example Highlight has no purpose and is confusing on other types of tabs." Each
+// .toolbar-group wrapper in index.html got a stable id; render.js's renderToolbar
+// toggles a 'hidden' class on each using the SAME applicability booleans that already
+// drove .disabled (filtersApply for Stream/Types/Section, is3D for Connector
+// Type/Layer Order/Highlight, canvas-only for Levels) -- so a canvas tab shows Stream/
+// Types/Section/Levels, a 3D tab shows everything except Levels, and a table/catalog
+// tab (or any other non-diagram tab) hides all seven. Deliberately did NOT extend this
+// to Current View/Default Model -- those are navigation/global-preference controls,
+// not tab-scoped filters (View literally switches to a different tab; Model is a
+// persistent app-wide preference used well beyond just the active tab's own
+// rendering), so hiding them would risk removing the only way to switch views/models
+// while parked on some other tab; left visible everywhere as before.
+// Two new permanent checks: check_reset_pinned_3d_positions_moved_to_explore (menu
+// placement + separator + gone from Advanced) and
+// check_toolbar_filter_groups_hidden_when_inactive (all seven groups' hidden state
+// checked across canvas/3D/table tabs). Both confirmed to catch their own regression
+// via a temporary revert. tests/README.md and public/instructions.html updated.
+// Full suite 87/87.
+export const APP_VERSION = '0.844';

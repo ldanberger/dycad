@@ -3301,8 +3301,6 @@ function wireGlobalEvents(app) {
     { separator: true },
     { label: 'Script Console...', action: 'scriptConsole' },
     { label: 'Code Summary', action: 'codeSummary' },
-    { separator: true },
-    { label: 'Reset Pinned 3D Positions', action: 'resetPinned3DPositions' },
   ];
   const advancedMenu = document.getElementById('advanced-menu');
   advancedMenu.innerHTML = ADVANCED_LINKS.map((l) => l.separator ? '<div class="dd-separator"></div>' : `<div class="dd-item" data-url="${l.url || ''}" data-action="${l.action || ''}">${l.label}</div>`).join('');
@@ -3320,8 +3318,6 @@ function wireGlobalEvents(app) {
         app.promptScriptConsole();
       } else if (item.dataset.action === 'codeSummary') {
         app.promptCodeSummary();
-      } else if (item.dataset.action === 'resetPinned3DPositions') {
-        app.promptResetPinned3DPositions();
       } else if (item.dataset.url) {
         window.open(item.dataset.url, '_blank', 'noopener');
       }
@@ -3376,12 +3372,15 @@ function wireGlobalEvents(app) {
   // View; distinct from Catalogs' per-entity tables and Advanced's one-shot commands) =====
   const EXPLORE_LINKS = [
     { label: '3D View', action: 'view3d' },
+    { separator: true },
+    { label: 'Reset Pinned 3D Positions', action: 'resetPinned3DPositions' },
   ];
   const exploreMenu = document.getElementById('explore-menu');
-  exploreMenu.innerHTML = EXPLORE_LINKS.map((l) => `<div class="dd-item" data-action="${l.action}">${l.label}</div>`).join('');
+  exploreMenu.innerHTML = EXPLORE_LINKS.map((l) => l.separator ? '<div class="dd-separator"></div>' : `<div class="dd-item" data-action="${l.action}">${l.label}</div>`).join('');
   exploreMenu.querySelectorAll('.dd-item').forEach((item) => {
     item.addEventListener('click', () => {
       if (item.dataset.action === 'view3d') app.openOrSwitch3DView();
+      else if (item.dataset.action === 'resetPinned3DPositions') app.promptResetPinned3DPositions();
       exploreMenu.classList.add('hidden');
     });
   });
@@ -3720,6 +3719,46 @@ function wireGlobalEvents(app) {
   document.getElementById('view3d-layer-order-select').addEventListener('change', (e) => {
     setCachedView3DLayerOrderTemplate(e.target.value);
     app.render();
+  });
+
+  // Highlight (3D-only) — draws a wireframe box around every part of the checked
+  // element type(s), a visual call-out layered on top of the scene rather than a
+  // filter (highlighted and non-highlighted parts stay equally visible). Same
+  // checkbox-dropdown pattern as the Type filter above, scanning the WHOLE document's
+  // parts (not one view's) for its available-types list — same reasoning as the 3D
+  // branch of the Type/Stream filters. No Select-All/Exclude-All row: "highlight
+  // everything" isn't a meaningful default worth offering here, unlike a real filter.
+  document.getElementById('highlight-type-filter-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const menu = document.getElementById('highlight-type-filter-menu');
+    const tab = store.activeTab();
+    if (!tab || tab.type !== '3d') return;
+
+    const availableTypes = new Set();
+    for (const p of store.doc.parts) availableTypes.add(p.type);
+    const items = [...availableTypes].map((type) => {
+      const elDef = (store.settings.elements || []).find((el) => el.type === type);
+      return { type, title: elDef ? elDef.title : type };
+    }).sort((a, b) => a.title.localeCompare(b.title));
+
+    const checked = new Set(tab.highlightedTypes || []);
+    if (items.length === 0) {
+      menu.innerHTML = '<div class="dd-empty">No elements in the model</div>';
+    } else {
+      menu.innerHTML = `<div class="dd-item-list">${items.map((i) => `<div class="dd-item"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" value="${escapeHtml(i.type)}" ${checked.has(i.type) ? 'checked' : ''} />${escapeHtml(i.title)}</label></div>`).join('')}</div>`;
+    }
+
+    menu.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        tab.highlightedTypes = [...menu.querySelectorAll('input[type="checkbox"]')].filter((c) => c.checked).map((c) => c.value);
+        app.render();
+      });
+    });
+    menu.classList.toggle('hidden');
+  });
+  document.addEventListener('click', (e) => {
+    const menu = document.getElementById('highlight-type-filter-menu');
+    if (!menu.contains(e.target) && e.target.id !== 'highlight-type-filter-btn') menu.classList.add('hidden');
   });
 
   // Connector levels — blank input means null ("All"/unlimited); any non-negative

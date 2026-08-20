@@ -39,6 +39,10 @@ async function BatchScript_QuickStart() {
   remap(app, tab, { pattern: 'default' });
 
   app.recordAndRender();
+
+  // Show it in 3D too.
+  app.openOrSwitch3DView();
+
   messageLog('Done');
 }
 `;
@@ -506,6 +510,14 @@ class Store {
       // view.chkShowConnectorType/chkShowStreamType the way the 2D canvas's own
       // equivalent does; this is the 3D-only, tab-scoped counterpart instead.
       activeConnectorTypes: null,
+      // 3D-tab-only: which element type(s) get a highlight overlay (a bright wireframe
+      // box around every matching instance) — a plain array, default [] (nothing
+      // highlighted), NOT the null-vs-[] convention the filters above use, since there's
+      // no "highlight everything" default worth having. Purely a visual call-out, not a
+      // filter — highlighted AND non-highlighted parts stay equally visible/interactive.
+      // Set via the toolbar's Highlight picker (main.js), same dropdown-menu pattern as
+      // Type/Connector Type.
+      highlightedTypes: [],
     };
     this.tabs.push(tab);
     return tab;
