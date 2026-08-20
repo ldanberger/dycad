@@ -149,6 +149,47 @@ function renderToolbar(app) {
   }
   sectionBtn.disabled = !filtersApply;
 
+  // Connector Type is 3D-only (the 2D canvas already has this per-VIEW, via
+  // view.chkShowConnectorType/chkShowStreamType — this is the 3D-only, tab-scoped
+  // counterpart, since a 3D tab isn't backed by any one view).
+  const is3D = !!(tab && tab.type === '3d');
+  const connTypeBtn = document.getElementById('connector-type-filter-btn');
+  const rawActiveConnTypes = is3D ? tab.activeConnectorTypes : null;
+  if (rawActiveConnTypes == null) {
+    connTypeBtn.textContent = 'All (c + s)';
+  } else if (rawActiveConnTypes.length === 0) {
+    connTypeBtn.textContent = 'None';
+  } else if (rawActiveConnTypes.length === 1) {
+    connTypeBtn.textContent = rawActiveConnTypes[0] === 'c' ? 'Connectors (c)' : 'Streams (s)';
+  } else {
+    connTypeBtn.textContent = 'All (c + s)';
+  }
+  connTypeBtn.disabled = !is3D;
+
+  // Layer Order (3D-only): which streamTemplate's value[] decides element-group/type
+  // ordering in the 3D scene (view3d.js's resolveLayerOrder) — independent of
+  // Remap/Generate Stream's own shared "last used" template preference, since ordering
+  // the 3D scene is an unrelated concern from which template to generate FROM. Reads
+  // its own cache entry directly (same key/shape as main.js's getCachedView3DLayerOrderTemplate
+  // — duplicated in miniature rather than importing main.js here, which sits at the TOP
+  // of this app's dependency graph; see view3d.js's preferredStreamTemplateName for the
+  // same precedent).
+  const layerOrderSelect = document.getElementById('view3d-layer-order-select');
+  const templateNames = (store.settings.streamTemplates || []).map((t) => t.name);
+  const cachedLayerOrder = (() => {
+    try {
+      const cached = JSON.parse(localStorage.getItem('dycad-local-settings-cache') || '{}');
+      return typeof cached.view3DLayerOrderTemplate === 'string' && cached.view3DLayerOrderTemplate ? cached.view3DLayerOrderTemplate : null;
+    } catch { return null; }
+  })();
+  const layerOrderValue = (cachedLayerOrder && templateNames.includes(cachedLayerOrder)) ? cachedLayerOrder : (templateNames.includes('All') ? 'All' : templateNames[0]);
+  if (layerOrderSelect.dataset.optionsSig !== templateNames.join(',')) {
+    layerOrderSelect.innerHTML = templateNames.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+    layerOrderSelect.dataset.optionsSig = templateNames.join(',');
+  }
+  if (layerOrderSelect.value !== layerOrderValue) layerOrderSelect.value = layerOrderValue;
+  layerOrderSelect.disabled = !is3D;
+
   const levelsInput = document.getElementById('connector-levels-input');
   if (document.activeElement !== levelsInput) { // don't clobber the value while the user is actively typing in it
     const rawLevels = tab && tab.type === 'canvas' ? tab.connectorLevels : 0;

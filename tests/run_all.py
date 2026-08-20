@@ -485,8 +485,13 @@ def check_batch_script_quickstart(page):
     Functions" of type "org" (Business Function Organization); (3) Populate From
     Template using "Enterprise Functions" inside that view; (4) the "mof" (Mainstream
     Operational Functions) section's rowCount changed from its default of 2 down to 1;
-    (5) the view's own tab zoomed to 60%; (6) "Done" written to the persistent Message
-    Log (not just the Script Console's own output area)."""
+    (5) the view's own tab zoomed to 60%; (6) remap(app, tab, {pattern:'default'})
+    running without error (a later-added step: 'org' is a section-based view type, so
+    remap's own applyRemapLayout routes it through applyRemapLayoutSectioned rather
+    than pattern-based freeform placement — 'pattern' is accepted but not itself
+    meaningful there; this just proves the call is wired in and doesn't throw); (7)
+    "Done" written to the persistent Message Log (not just the Script Console's own
+    output area)."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -498,6 +503,7 @@ def check_batch_script_quickstart(page):
 
       box.querySelector('.run').click();
       await new Promise(r => setTimeout(r, 2000));
+      const consoleOutput = box.querySelector('#console-output').textContent;
       box.querySelector('.cancel').click();
       await new Promise(r => setTimeout(r, 60));
 
@@ -514,6 +520,7 @@ def check_batch_script_quickstart(page):
         zoom: tab ? tab.viewport.zoom : null,
         industryGenerated: !!genActor,
         messageLogHasDone: store.messageLog.some(e => JSON.stringify(e).includes('Done')),
+        consoleOutput,
       };
     }
     """)
@@ -526,6 +533,8 @@ def check_batch_script_quickstart(page):
         problems.append(f"expected the 'mof' section's rowCount changed from its default 2 down to 1, got {result['mofRowCount']}")
     if result["zoom"] != 0.6:
         problems.append(f"expected the view's tab zoomed to 60% (0.6), got {result['zoom']}")
+    if "error" in result["consoleOutput"].lower():
+        problems.append(f"expected the script to run end-to-end (including its remap(app, tab, {{pattern:'default'}}) step) without reporting an error, got console output: {result['consoleOutput']}")
     if not result["industryGenerated"]:
         problems.append("expected Generate Industry (default 'general') to have actually run, producing at least one BusinessCapability part")
     if not result["messageLogHasDone"]:
@@ -533,6 +542,200 @@ def check_batch_script_quickstart(page):
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
     return True, "BatchScript_QuickStart (run via main(), the real Script Console UI) generates the default industry, builds a Business Functions org view from the Enterprise Functions template, adjusts the mof section's row count, zooms to 60%, and logs 'Done'"
+
+
+def check_script_console_remap_and_smart_check_bindings(page):
+    """Regression guard: remap, smartCheckView, and smartCheckNode became callable from a
+    Script Console main() (js/main.js's promptScriptConsole bindingNames/bindingValues),
+    with their full options objects actually wired through end to end -- not just present
+    as bindings. Reported directly: "add remap and the smartCheck functions too; add
+    options as parameters for full functionality if you can." Builds a small real view/
+    part/connector graph directly via store, then drives remap (pattern:'none', a real
+    sortKeys array) and smartCheckView/smartCheckNode (with a downstream/upstream option
+    pair that must actually filter, not just be accepted) purely through the real Script
+    Console UI -- proving both that the bindings exist and that options passed through
+    them have a genuine effect."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+
+      const view = store.addView('RemapConsoleTest_' + Date.now());
+      const partA = store.createPart({ type: 'Unknown', label: 'A', model: store.defaultModel, streams: [] });
+      const partB = store.createPart({ type: 'Unknown', label: 'B', model: store.defaultModel, streams: [] });
+      const partD = store.createPart({ type: 'Unknown', label: 'Downstream', model: store.defaultModel, streams: [] });
+      const partE = store.createPart({ type: 'Unknown', label: 'Upstream', model: store.defaultModel, streams: [] });
+      const vmA = store.createViewMember({ view: view.id, objectType: 'part', objectId: partA.id, x: 900, y: 900 });
+      const vmB = store.createViewMember({ view: view.id, objectType: 'part', objectId: partB.id, x: 10, y: 10 });
+      // A->B: both ends placed but the connector itself isn't -- for smartCheckView.
+      const connAB = store.createConnector({ from: partA.id, to: partB.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      // A->D: downstream of seed A, D not placed at all -- for smartCheckNode's downstream option.
+      store.createConnector({ from: partA.id, to: partD.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      // E->A: upstream of seed A, E not placed at all -- must NOT be pulled in with upstream:false.
+      store.createConnector({ from: partE.id, to: partA.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+
+      app.promptScriptConsole();
+      await new Promise(r => setTimeout(r, 60));
+      const box = document.querySelector('.modal-box.modal-box-textedit');
+      const textarea = box.querySelector('#console-input');
+      textarea.value = `
+        function main() {
+          const view = store.findView('${view.id}');
+          const tab = app.createCanvasTab(view);
+          app.switchToTab(tab.id);
+          remap(app, tab, { pattern: 'none', sortKeys: ['type'] });
+          smartCheckView(app, tab, { missingConnectors: true });
+          smartCheckNode(app, tab, '${partA.id}', { missingConnectorsAndNodes: true, downstream: true, upstream: false });
+        }
+      `;
+      box.querySelector('.run').click();
+      await new Promise(r => setTimeout(r, 300));
+      const output = box.querySelector('#console-output').textContent;
+      box.querySelector('.cancel').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      const vms = store.viewMembersForView(view.id);
+      const partVmObjectIds = new Set(vms.filter(v => v.objectType === 'part').map(v => v.objectId));
+      const freshA = store.findViewMember(vmA.id);
+      const freshB = store.findViewMember(vmB.id);
+
+      return {
+        ranWithoutError: !/error/i.test(output),
+        remapMovedNodes: (freshA.x !== 900 || freshA.y !== 900) && (freshB.x !== 10 || freshB.y !== 10),
+        smartCheckViewAddedConnector: vms.some(v => v.objectType === 'connector' && v.objectId === connAB.id),
+        downstreamNodeAdded: partVmObjectIds.has(partD.id),
+        upstreamNodeNotAdded: !partVmObjectIds.has(partE.id),
+      };
+    }
+    """)
+    problems = []
+    if not result["ranWithoutError"]:
+        problems.append("expected remap/smartCheckView/smartCheckNode to run via the Script Console without error")
+    if not result["remapMovedNodes"]:
+        problems.append("expected remap(app, tab, {pattern:'none', sortKeys:['type']}) to actually reposition the view's nodes")
+    if not result["smartCheckViewAddedConnector"]:
+        problems.append("expected smartCheckView(app, tab, {missingConnectors:true}) to add the missing A->B connector to the view")
+    if not result["downstreamNodeAdded"]:
+        problems.append("expected smartCheckNode(..., {missingConnectorsAndNodes:true, downstream:true, upstream:false}) to pull in the downstream-only node")
+    if not result["upstreamNodeNotAdded"]:
+        problems.append("expected smartCheckNode with upstream:false to NOT pull in the upstream-only node -- the direction option isn't actually filtering")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "remap, smartCheckView, and smartCheckNode are callable from the Script Console's main(), and their options (pattern/sortKeys, missingConnectors, and direction filters) genuinely take effect"
+
+
+def check_catalog_multi_column_sort(page):
+    """Regression guard for the catalog table's multi-column sort (canvas.js
+    renderTablePage, tab.sortColumns): a plain click sorts by exactly one column
+    (unchanged, pre-multi-sort behavior); shift+click ADDS another column as a
+    secondary tiebreaker without disturbing the first; a second shift+click on an
+    already-active secondary column flips only its own direction; a later plain click
+    discards every other criterion back down to one column. Reported directly: "can
+    multi column sorting be supported? For example sorting parts by type and label."
+    Uses the real Parts catalog tab and dispatches real click/shift+click DOM events on
+    the header cells, then reads the actual rendered row order back out of the table."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+
+      // Three parts chosen so type-only order differs from type-then-label order, and
+      // so the two same-type parts are only disambiguated once label sort is added.
+      const p1 = store.createPart({ type: 'Zeta', label: 'Beta', model: store.defaultModel, streams: [] });
+      const p2 = store.createPart({ type: 'Zeta', label: 'Alpha', model: store.defaultModel, streams: [] });
+      const p3 = store.createPart({ type: 'Alpha', label: 'Charlie', model: store.defaultModel, streams: [] });
+      const ids = new Set([p1.id, p2.id, p3.id]);
+
+      app.openOrSwitchCatalog('parts', 'Parts');
+      await new Promise(r => setTimeout(r, 60));
+
+      const readOrder = () => [...document.querySelectorAll('tr.catalog-row')]
+        .map(tr => tr.dataset.id)
+        .filter(id => ids.has(id));
+      const clickHeader = (col, shift) => {
+        const th = document.querySelector(`th.sortable-col[data-col="${col}"]`);
+        th.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: !!shift }));
+      };
+
+      // Plain click 'type': ties (the two Zetas) keep their original relative order.
+      clickHeader('type', false);
+      await new Promise(r => setTimeout(r, 60));
+      const afterTypeOnly = readOrder();
+
+      // Shift+click 'label': 'type' stays primary, 'label' becomes the tiebreaker.
+      clickHeader('label', true);
+      await new Promise(r => setTimeout(r, 60));
+      const afterTypeThenLabel = readOrder();
+
+      // Shift+click 'label' again: flips ONLY label's direction, 'type' unaffected.
+      clickHeader('label', true);
+      await new Promise(r => setTimeout(r, 60));
+      const afterLabelDescToggle = readOrder();
+
+      // Plain click 'label': discards the 'type' criterion, sorts by label alone.
+      clickHeader('label', false);
+      await new Promise(r => setTimeout(r, 60));
+      const afterLabelOnly = readOrder();
+
+      return { afterTypeOnly, afterTypeThenLabel, afterLabelDescToggle, afterLabelOnly, p1: p1.id, p2: p2.id, p3: p3.id };
+    }
+    """)
+    problems = []
+    if result["afterTypeOnly"] != [result["p3"], result["p1"], result["p2"]]:
+        problems.append(f"plain click on 'type' should sort Alpha-type first then the two Zeta-type parts in their original (stable) order, got {result['afterTypeOnly']}")
+    if result["afterTypeThenLabel"] != [result["p3"], result["p2"], result["p1"]]:
+        problems.append(f"shift+click on 'label' should keep 'type' as primary and add 'label' as tiebreaker, got {result['afterTypeThenLabel']}")
+    if result["afterLabelDescToggle"] != [result["p3"], result["p1"], result["p2"]]:
+        problems.append(f"a second shift+click on 'label' should flip only label's direction, leaving 'type' as primary, got {result['afterLabelDescToggle']}")
+    if result["afterLabelOnly"] != [result["p2"], result["p1"], result["p3"]]:
+        problems.append(f"a plain click on 'label' should discard the 'type' criterion and sort by label alone, got {result['afterLabelOnly']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "catalog table headers support multi-column sort: shift+click adds a column as a secondary tiebreaker, a second shift+click flips just that column's direction, and a plain click resets back to a single-column sort"
+
+
+def check_sfce_table_multi_column_sort(page):
+    """Regression guard: the SFCCE preview table (Catalogs > SFCE) reaches
+    renderTablePage's tab.tableRows/tab.tableCols branch directly, not the catalogType
+    branch check_catalog_multi_column_sort exercises -- confirms the same
+    tab.sortColumns multi-column sort applies there too, not just to catalogType
+    tables. Reported directly: "implement it for all catalogs and SFCCE.\""""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp;
+      const tab = app.openOrSwitchSfceCatalog('general');
+      // Overwrite with a small synthetic dataset for a deterministic assertion --
+      // still exercises the real tab.tableRows/tab.tableCols path (tab.catalogType is
+      // unset on an SFCE tab).
+      tab.tableRows = [
+        { section: 'B', functionName: 'Beta' },
+        { section: 'B', functionName: 'Alpha' },
+        { section: 'A', functionName: 'Charlie' },
+      ];
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+
+      const clickHeader = (col, shift) => {
+        const th = document.querySelector(`th.sortable-col[data-col="${col}"]`);
+        th.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: !!shift }));
+      };
+      clickHeader('section', false);
+      await new Promise(r => setTimeout(r, 60));
+      clickHeader('functionName', true);
+      await new Promise(r => setTimeout(r, 60));
+
+      return {
+        order: tab.tableRows.map(r => `${r.section}/${r.functionName}`),
+        sortColumns: tab.sortColumns.map(s => `${s.col}:${s.dir}`),
+      };
+    }
+    """)
+    problems = []
+    if result["order"] != ["A/Charlie", "B/Alpha", "B/Beta"]:
+        problems.append(f"expected the SFCE table's rows sorted by 'section' then 'functionName' (A/Charlie, B/Alpha, B/Beta), got {result['order']}")
+    if result["sortColumns"] != ["section:asc", "functionName:asc"]:
+        problems.append(f"expected tab.sortColumns to record ['section:asc','functionName:asc'], got {result['sortColumns']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "the SFCCE preview table's tab.tableRows/tab.tableCols code path also honors multi-column sort (shift+click adds a tiebreaker), not just catalogType tables"
 
 
 def check_spacing_scale_uniform(page):
@@ -2594,6 +2797,79 @@ def check_view3d_layers_and_filters(page):
     return True, "parts grouped into one InstancedMesh per type, layered in the correct General/Business/Application/Data Z order, Stream and Type filters both reach the 3D scene, and an unchanged re-render reuses the same mesh instead of rebuilding it"
 
 
+def check_view3d_stream_lane_alignment(page):
+    """Regression guard for view3d.js's computeStreamLanes/layoutTypeIntoLanes (Stage
+    6.1) — a follow-up fix reported directly after Stage 5.2's per-type stream
+    clustering still left "significant criss cross between columns, stream names seem
+    to jump around": each type's own Z-layer used to compute its row/col grid entirely
+    independently, so a stream's row position in one type's layer had NO relationship
+    to that same stream's row position in the next layer, and cross-layer connectors
+    (the main dependency chain) crisscrossed heavily even though each layer's OWN
+    clustering was internally clean. Fix: one shared column width and one shared
+    row-band per (section, stream) LANE, computed across every currently-visible part
+    regardless of type, so a lane sits at the identical row (and therefore world Y) in
+    every type's layer. This fixture puts 2 parts in an 'Alpha'-stream lane and 2 in a
+    'Beta'-stream lane, in EACH of two different types (GeneralActor,
+    BusinessCapability), plus a THIRD type (ApplicationCapability) holding a single
+    multi-stream part 'q' (streams: ['Aardvark', 'Beta']) under an active filter of
+    ['Alpha', 'Beta'] — 'Aardvark' isn't in the filter, so a filter-aware pick must
+    still land 'q' on 'Beta' (Stage 5.2's own fix, still exercised here), landing it at
+    the SAME world Y as every other Beta-lane part in every type. Every cell here has
+    <= cols parts (no within-lane wrapping), so every assertion is an exact,
+    deterministic world-Y equality/inequality — not a screenshot guess."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      const mk = (type, label, streams) => store.createPart({ type, label, model: store.defaultModel, streams });
+
+      const xa1 = mk('GeneralActor', 'XA1', ['Alpha']);
+      const xa2 = mk('GeneralActor', 'XA2', ['Alpha']);
+      const xb1 = mk('GeneralActor', 'XB1', ['Beta']);
+      const xb2 = mk('GeneralActor', 'XB2', ['Beta']);
+      const ya1 = mk('BusinessCapability', 'YA1', ['Alpha']);
+      const ya2 = mk('BusinessCapability', 'YA2', ['Alpha']);
+      const yb1 = mk('BusinessCapability', 'YB1', ['Beta']);
+      const yb2 = mk('BusinessCapability', 'YB2', ['Beta']);
+      // Alone in its own (type, lane) cell -- no tie-breaking ambiguity with xb1/xb2/
+      // yb1/yb2 about which sub-row it lands on, only which LANE (lane = row-band).
+      const q = mk('ApplicationCapability', 'Q', ['Aardvark', 'Beta']);
+
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      tab.activeStreams = ['Alpha', 'Beta'];
+      app.render();
+      await new Promise(r => setTimeout(r, 300));
+
+      const info = view3d.getDebugSceneInfo(tab.id);
+      const posX = info.types['GeneralActor']?.positions || {};
+      const posY = info.types['BusinessCapability']?.positions || {};
+      const posQ = info.types['ApplicationCapability']?.positions || {};
+
+      return {
+        xa1Y: posX[xa1.id]?.y, xa2Y: posX[xa2.id]?.y, xb1Y: posX[xb1.id]?.y, xb2Y: posX[xb2.id]?.y,
+        ya1Y: posY[ya1.id]?.y, ya2Y: posY[ya2.id]?.y, yb1Y: posY[yb1.id]?.y, yb2Y: posY[yb2.id]?.y,
+        qY: posQ[q.id]?.y,
+      };
+    }
+    """)
+    def close(a, b):
+        return a is not None and b is not None and abs(a - b) < 1e-6
+    r = result
+    problems = []
+    if not close(r["xa1Y"], r["xa2Y"]) or not close(r["xa1Y"], r["ya1Y"]) or not close(r["ya1Y"], r["ya2Y"]):
+        problems.append(f"expected all 4 Alpha-stream parts (across BOTH GeneralActor and BusinessCapability) to share the SAME world Y -- the whole point of global stream lanes -- got xa1Y={r['xa1Y']} xa2Y={r['xa2Y']} ya1Y={r['ya1Y']} ya2Y={r['ya2Y']}")
+    if not close(r["xb1Y"], r["xb2Y"]) or not close(r["xb1Y"], r["yb1Y"]) or not close(r["yb1Y"], r["yb2Y"]):
+        problems.append(f"expected all 4 Beta-stream parts (across BOTH types) to share the SAME world Y, got xb1Y={r['xb1Y']} xb2Y={r['xb2Y']} yb1Y={r['yb1Y']} yb2Y={r['yb2Y']}")
+    if close(r["xa1Y"], r["xb1Y"]):
+        problems.append(f"expected the Alpha lane and the Beta lane to occupy DIFFERENT rows (distinct world Y), got both at {r['xa1Y']}")
+    if not close(r["qY"], r["xb1Y"]):
+        problems.append(f"expected 'q' (streams: Aardvark + Beta, filtered to [Alpha,Beta]) to resolve to the filter-relevant 'Beta' lane and land at the SAME world Y as every other Beta-lane part in every type, got qY={r['qY']} vs the Beta lane's {r['xb1Y']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {r})"
+    return True, "computeStreamLanes/layoutTypeIntoLanes give every (section, stream) lane one shared, globally-consistent row-band -- a stream's row (and world Y) is now identical across every type's own Z-layer, not just internally clean within one layer, and a multi-stream part still resolves to whichever of its streams the active filter is actually about"
+
+
 def check_view3d_connectors_and_clustering(page):
     """Regression guard for 3D View Stage 2: connector lines and section clustering.
     Builds A0/A1/A2 (GeneralActor, section "SectionA"), B0 (GeneralActor, section
@@ -2655,77 +2931,118 @@ def check_view3d_connectors_and_clustering(page):
     return True, "connector lines drawn between resolved positions (and correctly disappearing once a filtered-out endpoint hides), and section clustering forces a new row at each section boundary instead of packing across it"
 
 
-def check_view3d_cube_order_fallback(page):
-    """Regression guard for 3D View Stage 3: custom.json's cubeOrder now decides fallback
-    layer order (both group and type) for any element type the active stream template's
-    value[] doesn't mention — instead of falling back to elementGroups' own declaration
-    order, which isn't itself a meaningful/deliberate sequence (just JSON authoring
-    order). Uses the built-in 'Test' template (value: BusinessService, BusinessCapability,
-    BusinessProcess, thingamajack, DataDataEntity — covering the Business/Unknown/Data
-    groups, nothing else) so General and Application are BOTH left for the fallback to
-    order — the one case where the old elementGroups-order fallback and the new cubeOrder
-    fallback actually disagree (old: Application before General; new, matching
-    cubeOrder's own General-before-Application sequence: General before Application),
-    rather than a case where they'd coincidentally agree either way."""
+def check_view3d_layer_order_template_selector(page):
+    """Regression guard for Stage 6.2: custom.json's cubeOrder (a separate top-level
+    field that used to ALWAYS blend into layer ordering underneath whichever
+    streamTemplate happened to be preferred elsewhere) is now just another
+    streamTemplates entry named "All" (its value[] is the old cubeOrder list, verbatim),
+    picked via a new toolbar-only "Layer Order" <select> (view3DLayerOrderTemplate in
+    Local Settings) — independent of Remap/Generate Stream's own shared template
+    preference. Reported directly: "make cubeorder into a new streamTemplate named
+    something like all, and cubeOrder list goes into value. Then provide user ability to
+    switch streamTemplate for 3d view display", then corrected TWICE: (1) "anything that
+    template's value[] doesn't mention should not be shown" (an initial version only
+    REORDERED unmentioned types via the tkDisplayOrder/alphabetical fallback; picking a
+    template now HIDES them entirely instead); (2) "the layer order appears to be
+    missing the passive elements and their connectors, when a 'Layer Order' is selected
+    that includes passives" (fix (1) wrongly hid a type ONLY mentioned in the template's
+    passive[] from/to pairs, not its value[] chain — passive[] types must count as
+    visible too, just without a defined chain position of their own). Verifies the
+    toolbar <select> lists "All" among the real templates and defaults to it; that ALL
+    THREE element types render under "All" (which covers everything); and that switching
+    to the built-in 'Test' template (value: BusinessService, BusinessCapability,
+    BusinessProcess, thingamajack, DataDataEntity; passive: BusinessFunction->
+    BusinessProcess, BusinessCapability->metaDataRegistry, GeneralActor->thingamajig)
+    keeps BOTH BusinessCapability (value[]) AND BusinessFunction (passive[]-only)
+    visible, while ApplicationComponent (mentioned in NEITHER Test's value[] nor its
+    passive[]) disappears from the scene entirely."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
       const view3d = await import('./js/view3d.js');
-      localStorage.setItem('dycad-local-settings-cache', JSON.stringify({ streamTemplate: 'Test' }));
 
-      store.createPart({ type: 'GeneralActor', label: 'GA', model: store.defaultModel, streams: [] });
       store.createPart({ type: 'ApplicationComponent', label: 'AC', model: store.defaultModel, streams: [] });
+      store.createPart({ type: 'BusinessCapability', label: 'BC', model: store.defaultModel, streams: [] });
+      store.createPart({ type: 'BusinessFunction', label: 'BF', model: store.defaultModel, streams: [] });
 
       app.openOrSwitch3DView();
       const tab = store.tabs.find(t => t.type === '3d');
       await new Promise(r => setTimeout(r, 200));
-      return view3d.getDebugSceneInfo(tab.id);
+
+      const select = document.getElementById('view3d-layer-order-select');
+      const options = [...select.options].map(o => o.value);
+      const defaultValue = select.value;
+      const infoAll = view3d.getDebugSceneInfo(tab.id);
+
+      select.value = 'Test';
+      select.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 200));
+      const infoTest = view3d.getDebugSceneInfo(tab.id);
+
+      return {
+        options, defaultValue,
+        acShownAll: !!infoAll.types.ApplicationComponent, bcShownAll: !!infoAll.types.BusinessCapability, bfShownAll: !!infoAll.types.BusinessFunction,
+        acShownTest: !!infoTest.types.ApplicationComponent, bcShownTest: !!infoTest.types.BusinessCapability, bfShownTest: !!infoTest.types.BusinessFunction,
+      };
     }
     """)
-    ga = result["types"].get("GeneralActor")
-    ac = result["types"].get("ApplicationComponent")
-    if not ga or not ac:
-        return False, f"expected both GeneralActor and ApplicationComponent to have their own layer, got {result}"
-    if not (ga["z"] < ac["z"]):
-        return False, f"expected General's layer (z={ga['z']}) before Application's (z={ac['z']}) — cubeOrder's own group sequence puts General first; the old elementGroups-declaration-order fallback would have put Application first instead, got: {result}"
-    return True, "with a template (Test) that leaves both General and Application unordered, the fallback used custom.json's cubeOrder sequence (General before Application) rather than elementGroups' own declaration order (which disagrees)"
+    r = result
+    problems = []
+    if 'All' not in r["options"]:
+        problems.append(f"expected the Layer Order <select> to list 'All' among the streamTemplates, got {r['options']}")
+    if r["defaultValue"] != 'All':
+        problems.append(f"expected the Layer Order <select> to default to 'All', got {r['defaultValue']}")
+    if not r["acShownAll"] or not r["bcShownAll"] or not r["bfShownAll"]:
+        problems.append(f"expected ALL THREE types visible with 'All' selected (covers everything), got {r}")
+    if not r["bcShownTest"]:
+        problems.append("expected BusinessCapability to stay visible with 'Test' selected -- Test's value[] DOES mention it")
+    if not r["bfShownTest"]:
+        problems.append("expected BusinessFunction to stay visible with 'Test' selected -- Test's passive[] mentions it (from: BusinessFunction), even though value[] doesn't -- passive-only types must not be hidden")
+    if r["acShownTest"]:
+        problems.append("expected ApplicationComponent to disappear entirely with 'Test' selected -- Test mentions it in NEITHER value[] nor passive[]")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {r})"
+    return True, "the 3D View's Layer Order template picker lists 'All' (the former cubeOrder) alongside real streamTemplates, defaults to it, HIDES a type mentioned in neither value[] nor passive[], and keeps a passive[]-only type visible (not just a value[]-mentioned one)"
 
 
-def check_cubeorder_covers_all_elements(page):
-    """Regression guard for a real near-miss: cubeOrder (see check_view3d_cube_order_fallback
-    above) is documented as "a hand-authored master list covering every element type" —
-    but it's a second, hand-maintained list that has to be kept in sync with
-    settings.elements by hand every time a new element type is added, with nothing
-    enforcing that today. Caught while adding BusinessEvent: the new element worked fine
-    in the Toolbox and on canvas immediately, but would have silently fallen through to
-    resolveLayerOrder's defensive tkDisplayOrder/alphabetical fallback in the 3D View
-    (rather than its deliberate, intended position) if cubeOrder hadn't ALSO been
-    updated — an easy thing to forget since nothing else surfaces the omission. Checks
-    both directions: every element type appears in cubeOrder exactly once, and every
-    cubeOrder entry has a matching element."""
+def check_view3d_all_template_covers_all_elements(page):
+    """Regression guard for a real near-miss: the "All" streamTemplate (formerly
+    custom.json's separate cubeOrder field — see check_view3d_layer_order_template_selector
+    above) is meant to cover every element type — but it's a second, hand-maintained list
+    that has to be kept in sync with settings.elements by hand every time a new element
+    type is added, with nothing enforcing that today. Caught while adding BusinessEvent:
+    the new element worked fine in the Toolbox and on canvas immediately, but would have
+    silently fallen through to resolveLayerOrder's defensive tkDisplayOrder/alphabetical
+    fallback in the 3D View (rather than its deliberate, intended position) if cubeOrder
+    hadn't ALSO been updated at the time — an easy thing to forget since nothing else
+    surfaces the omission. Checks both directions: every element type appears in "All"'s
+    value[] exactly once, and every value[] entry has a matching element."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
       const elTypes = (store.settings.elements || []).map(e => e.type);
-      const cube = store.settings.cubeOrder || [];
+      const allTemplate = (store.settings.streamTemplates || []).find(t => t.name === 'All');
+      const all = allTemplate ? allTemplate.value : [];
       const elSet = new Set(elTypes);
-      const cubeSet = new Set(cube);
-      const missingFromCube = elTypes.filter(t => !cubeSet.has(t));
-      const orphanedInCube = cube.filter(t => !elSet.has(t));
-      const dupesInCube = cube.filter((t, i) => cube.indexOf(t) !== i);
-      return { elementCount: elTypes.length, cubeCount: cube.length, missingFromCube, orphanedInCube, dupesInCube };
+      const allSet = new Set(all);
+      const missingFromAll = elTypes.filter(t => !allSet.has(t));
+      const orphanedInAll = all.filter(t => !elSet.has(t));
+      const dupesInAll = all.filter((t, i) => all.indexOf(t) !== i);
+      return { found: !!allTemplate, elementCount: elTypes.length, allCount: all.length, missingFromAll, orphanedInAll, dupesInAll };
     }
     """)
     problems = []
-    if result["missingFromCube"]:
-        problems.append(f"element type(s) missing from cubeOrder: {result['missingFromCube']}")
-    if result["orphanedInCube"]:
-        problems.append(f"cubeOrder entries with no matching element: {result['orphanedInCube']}")
-    if result["dupesInCube"]:
-        problems.append(f"duplicate entries in cubeOrder: {result['dupesInCube']}")
+    if not result["found"]:
+        problems.append("expected a streamTemplates entry named 'All'")
+    if result["missingFromAll"]:
+        problems.append(f"element type(s) missing from 'All''s value[]: {result['missingFromAll']}")
+    if result["orphanedInAll"]:
+        problems.append(f"'All' value[] entries with no matching element: {result['orphanedInAll']}")
+    if result["dupesInAll"]:
+        problems.append(f"duplicate entries in 'All''s value[]: {result['dupesInAll']}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, f"cubeOrder stays in exact 1:1 correspondence with settings.elements ({result['elementCount']} types, no gaps/orphans/duplicates)"
+    return True, f"the 'All' streamTemplate's value[] stays in exact 1:1 correspondence with settings.elements ({result['elementCount']} types, no gaps/orphans/duplicates)"
 
 
 def check_view3d_focus_and_zoom_jump(page):
@@ -3087,104 +3404,370 @@ def check_view3d_real_click_shows_panel_and_no_recenter(page):
 
 
 def check_view3d_node_context_menu(page):
-    """Regression guard for the 3D node right-click context menu (Filter to Streams +
-    Connector Type quick filter — 3D draws connectorType 'c' Connectors and 's' Streams
-    together with no distinction by default, unlike the 2D canvas's per-view checkboxes).
+    """Regression guard for the 3D node right-click context menu's Filter to Stream
+    quick filter. (Its former Connector Type submenu moved to the toolbar's own
+    Connector Type filter — see check_view3d_connector_type_toolbar_filter — matching
+    Stream/Type/Section's existing dropdown pattern rather than being buried here.)
+    Filter to Stream used to be a single combined "Filter to Streams: S1, S2" item that
+    always selected every stream a multi-stream part carried at once — reported directly:
+    "if the stream has multiple I can't select one or the other." Now each stream the
+    part carries gets its own clickable item (plus an "All of the above" item when there
+    is more than one), so this specifically verifies picking ONE stream out of several
+    actually narrows to just that one (not the old lump-everything-together behavior),
+    and that picking a different single stream afterward SWITCHES rather than stacking.
     Uses genuine page.mouse.click(..., button='right') events, positioned via
-    debugGetScreenPosition, against a fixture with a distinguishable 'c' and 's'
-    connector from the same source part, so switching the Connector Type filter produces
-    a directly observable, different connectorCount — not just a changed field value."""
+    debugGetScreenPosition."""
     setup = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
       const view3d = await import('./js/view3d.js');
       const a = store.createPart({ type: 'GeneralActor', label: 'CtxSource', model: store.defaultModel, streams: ['S1', 'S2'] });
-      // b/c also carry S1 so the earlier "Filter to Streams: S1, S2" step (tested first,
-      // in the same flow) doesn't hide them and, with them, their connectors — that would
-      // confound the later connector-type-filter assertions with an unrelated cause.
       const b = store.createPart({ type: 'BusinessCapability', label: 'CtxRel', model: store.defaultModel, streams: ['S1'] });
-      const c = store.createPart({ type: 'ApplicationComponent', label: 'CtxStream', model: store.defaultModel, streams: ['S1'] });
       store.createConnector({ from: a.id, to: b.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
-      store.createConnector({ from: a.id, to: c.id, model: store.defaultModel, connectorType: 's', relationship: 'Association', streams: ['S1'] });
       app.openOrSwitch3DView();
       const tab = store.tabs.find(t => t.type === '3d');
       await new Promise(r => setTimeout(r, 250));
       const pos = view3d.debugGetScreenPosition(tab.id, a.id);
-      const initialConnectorCount = view3d.getDebugSceneInfo(tab.id).connectorCount;
-      return { pos, initialConnectorCount };
+      return { pos };
     }
     """)
     if not setup["pos"]:
         return False, f"debugGetScreenPosition couldn't find the source part on screen: {setup}"
-    if setup["initialConnectorCount"] != 2:
-        return False, f"expected 2 connectors initially (1 'c' + 1 's'), got {setup['initialConnectorCount']}"
 
     x, y = setup["pos"]["x"], setup["pos"]["y"]
     page.mouse.click(x, y, button="right")
     page.wait_for_timeout(200)
     menu1 = js(page, "async () => [...document.querySelectorAll('.view3d-context-menu .v3d-ctx-item')].map(e => e.textContent.trim())")
 
-    js(page, "async () => { [...document.querySelectorAll('.view3d-context-menu .v3d-ctx-item')].find(el => el.textContent.includes('Filter to Streams'))?.click(); }")
+    # Pick S1 alone.
+    js(page, "async () => { [...document.querySelectorAll('.view3d-context-menu .v3d-ctx-item')].find(el => el.textContent.trim() === 'S1')?.click(); }")
+    page.wait_for_timeout(150)
+    afterS1Only = js(page, "async () => window.dycadApp.store.tabs.find(t => t.type === '3d').activeStreams")
+
+    # Pick S2 alone -- must SWITCH to just S2, not add to S1.
+    page.mouse.click(x, y, button="right")
+    page.wait_for_timeout(200)
+    js(page, "async () => { [...document.querySelectorAll('.view3d-context-menu .v3d-ctx-item')].find(el => el.textContent.trim() === 'S2')?.click(); }")
+    page.wait_for_timeout(150)
+    afterS2Only = js(page, "async () => window.dycadApp.store.tabs.find(t => t.type === '3d').activeStreams")
+
+    # Pick "All of the above" -- restores both streams.
+    page.mouse.click(x, y, button="right")
+    page.wait_for_timeout(200)
+    js(page, "async () => { [...document.querySelectorAll('.view3d-context-menu .v3d-ctx-item')].find(el => el.textContent.includes('All of the above'))?.click(); }")
     page.wait_for_timeout(150)
     afterStreamFilter = js(page, "async () => window.dycadApp.store.tabs.find(t => t.type === '3d').activeStreams")
 
-    page.mouse.click(x, y, button="right")
-    page.wait_for_timeout(200)
-    afterConnectorsOnly = js(page, """
-    async () => {
-      const app = window.dycadApp, store = app.store;
-      const view3d = await import('./js/view3d.js');
-      [...document.querySelectorAll('.view3d-context-menu .v3d-ctx-item')].find(el => el.textContent.trim().endsWith('Connectors'))?.click();
-      await new Promise(r => setTimeout(r, 150));
-      const tab = store.tabs.find(t => t.type === '3d');
-      return { connectorTypeFilter: tab.connectorTypeFilter, connectorCount: view3d.getDebugSceneInfo(tab.id).connectorCount };
-    }
-    """)
-
-    page.mouse.click(x, y, button="right")
-    page.wait_for_timeout(200)
-    afterStreamsOnly = js(page, """
-    async () => {
-      const app = window.dycadApp, store = app.store;
-      const view3d = await import('./js/view3d.js');
-      [...document.querySelectorAll('.view3d-context-menu .v3d-ctx-item')].find(el => { const t = el.textContent.trim(); return t.endsWith('Streams') && !t.includes('Filter'); })?.click();
-      await new Promise(r => setTimeout(r, 150));
-      const tab = store.tabs.find(t => t.type === '3d');
-      return { connectorTypeFilter: tab.connectorTypeFilter, connectorCount: view3d.getDebugSceneInfo(tab.id).connectorCount };
-    }
-    """)
-
-    page.mouse.click(x, y, button="right")
-    page.wait_for_timeout(200)
-    afterAll = js(page, """
-    async () => {
-      const app = window.dycadApp, store = app.store;
-      const view3d = await import('./js/view3d.js');
-      [...document.querySelectorAll('.view3d-context-menu .v3d-ctx-item')].find(el => el.textContent.trim().endsWith('All'))?.click();
-      await new Promise(r => setTimeout(r, 150));
-      const tab = store.tabs.find(t => t.type === '3d');
-      return { connectorTypeFilter: tab.connectorTypeFilter, connectorCount: view3d.getDebugSceneInfo(tab.id).connectorCount };
-    }
-    """)
-
     problems = []
-    if not any("Filter to Streams" in t for t in menu1):
-        problems.append(f"expected the right-click menu to offer a 'Filter to Streams' item, got {menu1}")
-    if not any(t.endswith("Connectors") for t in menu1):
-        problems.append(f"expected a 'Connectors' connector-type option, got {menu1}")
-    if not any(t.endswith("Streams") and "Filter" not in t for t in menu1):
-        problems.append(f"expected a 'Streams' connector-type option, got {menu1}")
+    if not any(t == "S1" for t in menu1):
+        problems.append(f"expected the right-click menu to offer a standalone 'S1' stream item, got {menu1}")
+    if not any(t == "S2" for t in menu1):
+        problems.append(f"expected the right-click menu to offer a standalone 'S2' stream item, got {menu1}")
+    if not any("All of the above" in t for t in menu1):
+        problems.append(f"expected an 'All of the above' item for a multi-stream part, got {menu1}")
+    if any("Connector Type" in t for t in menu1):
+        problems.append(f"expected the Connector Type submenu to be gone from here (moved to the toolbar filter), got {menu1}")
+    if afterS1Only != ["S1"]:
+        problems.append(f"expected clicking the standalone 'S1' item to set tab.activeStreams to exactly ['S1'] -- not both of the part's streams -- got {afterS1Only}")
+    if afterS2Only != ["S2"]:
+        problems.append(f"expected clicking the standalone 'S2' item to SWITCH tab.activeStreams to exactly ['S2'], not stack onto S1, got {afterS2Only}")
     if afterStreamFilter != ["S1", "S2"]:
-        problems.append(f"expected clicking 'Filter to Streams' to set tab.activeStreams to the part's own streams ['S1','S2'], got {afterStreamFilter}")
-    if afterConnectorsOnly["connectorTypeFilter"] != "c" or afterConnectorsOnly["connectorCount"] != 1:
-        problems.append(f"expected picking 'Connectors' to filter to connectorType 'c' only (1 connector), got {afterConnectorsOnly}")
-    if afterStreamsOnly["connectorTypeFilter"] != "s" or afterStreamsOnly["connectorCount"] != 1:
-        problems.append(f"expected picking 'Streams' to filter to connectorType 's' only (1 connector), got {afterStreamsOnly}")
-    if afterAll["connectorTypeFilter"] is not None or afterAll["connectorCount"] != 2:
-        problems.append(f"expected picking 'All' to clear the connector-type filter (both connectors visible again), got {afterAll}")
+        problems.append(f"expected clicking 'All of the above' to set tab.activeStreams to the part's own streams ['S1','S2'], got {afterStreamFilter}")
     if problems:
         return False, "; ".join(problems) + f" (menu1: {menu1})"
-    return True, "the 3D node right-click context menu offers a working Filter-to-Streams quick filter and a working Connector Type filter (All/Connectors/Streams), driven via genuine right-click mouse events"
+    return True, "the 3D node right-click context menu offers a per-stream Filter to Stream item (picking one stream out of several genuinely narrows to just that one, and switches rather than stacking), with Connector Type no longer duplicated here"
+
+
+def check_view3d_connector_type_toolbar_filter(page):
+    """Regression guard: the 3D View's Connector Type filter (which connectorType(s) --
+    'c' Connectors, 's' Streams -- draw at all) moved from a right-click-only quick
+    filter to its own toolbar dropdown, matching Stream/Type/Section's existing
+    Select-All/Exclude-All + checkbox-list pattern. Reported directly: "let's make that
+    user selectable for the view same as the view filters already existing." Uses real
+    button clicks and checkbox change events against the toolbar's #connector-type-
+    filter-btn, verifying both tab.activeConnectorTypes and the actual visible
+    connectorCount (view3d.js's getDebugSceneInfo) change accordingly -- and that the
+    filter button is disabled outside a 3D tab, since it has no meaning for canvas tabs
+    (the 2D canvas already has its own per-VIEW chkShowConnectorType/chkShowStreamType
+    checkboxes for this)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      const a = store.createPart({ type: 'GeneralActor', label: 'CTA', model: store.defaultModel, streams: [] });
+      const b = store.createPart({ type: 'BusinessCapability', label: 'CTB', model: store.defaultModel, streams: [] });
+      store.createConnector({ from: a.id, to: b.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      store.createConnector({ from: a.id, to: b.id, model: store.defaultModel, connectorType: 's', relationship: 'Stream', streams: ['S1'] });
+
+      const canvasTab = store.tabs.find(t => t.type === 'canvas') || app.createCanvasTab(store.doc.views[0]);
+      app.switchToTab(canvasTab.id);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      const disabledOnCanvas = document.getElementById('connector-type-filter-btn').disabled;
+
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 250));
+      const disabledOn3D = document.getElementById('connector-type-filter-btn').disabled;
+      const initialCount = view3d.getDebugSceneInfo(tab.id).connectorCount;
+
+      document.getElementById('connector-type-filter-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      const selectAllCb = document.getElementById('connector-type-select-all');
+      const initiallyChecked = selectAllCb ? selectAllCb.checked : null;
+      const itemCheckboxes = () => [...document.querySelectorAll('#connector-type-filter-menu .dd-item-list input[type=\\"checkbox\\"]')];
+      const connectorsOnlyCb = itemCheckboxes().find(cb => cb.value === 'c');
+      connectorsOnlyCb.checked = false;
+      connectorsOnlyCb.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 100));
+      const afterConnectorsOnly = { activeConnectorTypes: tab.activeConnectorTypes, connectorCount: view3d.getDebugSceneInfo(tab.id).connectorCount };
+
+      document.getElementById('connector-type-filter-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      document.getElementById('connector-type-select-all').checked = false;
+      document.getElementById('connector-type-select-all').dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 100));
+      const afterExcludeAll = { activeConnectorTypes: tab.activeConnectorTypes, connectorCount: view3d.getDebugSceneInfo(tab.id).connectorCount };
+
+      document.getElementById('connector-type-filter-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      document.getElementById('connector-type-select-all').checked = true;
+      document.getElementById('connector-type-select-all').dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 100));
+      const afterSelectAll = { activeConnectorTypes: tab.activeConnectorTypes, connectorCount: view3d.getDebugSceneInfo(tab.id).connectorCount };
+
+      return { disabledOnCanvas, disabledOn3D, initialCount, initiallyChecked, afterConnectorsOnly, afterExcludeAll, afterSelectAll };
+    }
+    """)
+    problems = []
+    if not result["disabledOnCanvas"]:
+        problems.append("expected the Connector Type filter button to be disabled on a canvas tab (3D-only concept)")
+    if result["disabledOn3D"]:
+        problems.append("expected the Connector Type filter button to be enabled on the 3D tab")
+    if result["initialCount"] != 2:
+        problems.append(f"expected both connectors visible with no filter set, got {result['initialCount']}")
+    if not result["initiallyChecked"]:
+        problems.append("expected the Select All checkbox to start checked (unfiltered)")
+    ac = result["afterConnectorsOnly"]
+    if ac["activeConnectorTypes"] != ["s"] or ac["connectorCount"] != 1:
+        problems.append(f"expected unchecking 'Connectors (c)' to leave only the 's' connector visible, got {ac}")
+    ax = result["afterExcludeAll"]
+    if ax["activeConnectorTypes"] != [] or ax["connectorCount"] != 0:
+        problems.append(f"expected Exclude All to set tab.activeConnectorTypes to [] and hide every connector line, got {ax}")
+    asel = result["afterSelectAll"]
+    if asel["activeConnectorTypes"] is not None or asel["connectorCount"] != 2:
+        problems.append(f"expected Select All to reset tab.activeConnectorTypes to null (unfiltered) and restore both connectors, got {asel}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "the 3D View's Connector Type filter is a real toolbar dropdown (Select All/Exclude All + per-type checkboxes), disabled outside a 3D tab, and genuinely narrows which connectorType(s) draw"
+
+
+def check_view3d_connector_direction_markers(page):
+    """Regression guard for 3D connector direction indicators (view3d.js's per-
+    relationship line/marker grouping) — reported directly: "implement direction
+    indicators for the 3D lines ideally matching line end settings, and line
+    characteristics as well." Verifies, via getDebugSceneInfo's connectorGroups/
+    connectorMarkers, that THREE DISTINCT relationships (custom.json's
+    relationshipStyles) each render distinctly: Composition (dash:[2,5], a black
+    diamond marker at the FROM end, none at TO) — the two-endpoints case;
+    Association (dash:[], an open/wireframe cone at the TO end, none at FROM) — solid
+    line + open marker; Realization (dash:[3,2], a white-filled cone at the TO end) —
+    dashed line + filled marker. Confirms line color matches each relationship's own
+    stroke, dashed vs. solid matches its own dash array, and marker family/color/
+    wireframe matches its own lineEnds entries — not just that SOMETHING renders."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      const a = store.createPart({ type: 'GeneralActor', label: 'MkA', model: store.defaultModel, streams: [] });
+      const b = store.createPart({ type: 'BusinessCapability', label: 'MkB', model: store.defaultModel, streams: [] });
+      const c = store.createPart({ type: 'BusinessProcess', label: 'MkC', model: store.defaultModel, streams: [] });
+      const d = store.createPart({ type: 'BusinessFunction', label: 'MkD', model: store.defaultModel, streams: [] });
+      store.createConnector({ from: a.id, to: b.id, model: store.defaultModel, connectorType: 'c', relationship: 'Composition', streams: [] });
+      store.createConnector({ from: b.id, to: c.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      store.createConnector({ from: c.id, to: d.id, model: store.defaultModel, connectorType: 'c', relationship: 'Realization', streams: [] });
+
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 300));
+      const info = view3d.getDebugSceneInfo(tab.id);
+      return { groups: info.connectorGroups, markers: info.connectorMarkers };
+    }
+    """)
+    groups, markers = result["groups"], result["markers"]
+    problems = []
+
+    comp = groups.get("Composition")
+    if not comp or comp["count"] != 1 or not comp["dashed"] or comp["color"].lower() != "#000000":
+        problems.append(f"expected Composition's line: 1 connector, dashed (dash:[2,5]), black stroke, got {comp}")
+    compFrom = markers.get("Composition|from")
+    if not compFrom or compFrom["family"] != "diamond" or compFrom["color"].lower() != "#000000" or compFrom["wireframe"]:
+        problems.append(f"expected Composition's FROM-end marker: a solid black diamond (diamondSmallBlack), got {compFrom}")
+    if "Composition|to" in markers:
+        problems.append(f"expected Composition to have NO marker at its TO end (toLineEndSettingType is 'none'), got {markers.get('Composition|to')}")
+
+    assoc = groups.get("Association")
+    if not assoc or assoc["count"] != 1 or assoc["dashed"]:
+        problems.append(f"expected Association's line: 1 connector, solid (dash:[]), got {assoc}")
+    assocTo = markers.get("Association|to")
+    if not assocTo or assocTo["family"] != "cone" or not assocTo["wireframe"]:
+        problems.append(f"expected Association's TO-end marker: an open/wireframe cone (openHalfArrowSmall has no fill), got {assocTo}")
+
+    real = groups.get("Realization")
+    if not real or real["count"] != 1 or not real["dashed"]:
+        problems.append(f"expected Realization's line: 1 connector, dashed (dash:[3,2]), got {real}")
+    realTo = markers.get("Realization|to")
+    if not realTo or realTo["family"] != "cone" or realTo["wireframe"] or realTo["color"].lower() != "#ffffff":
+        problems.append(f"expected Realization's TO-end marker: a SOLID white cone (arrowLargeWhite), got {realTo}")
+
+    if problems:
+        return False, "; ".join(problems) + f" (full groups: {groups}, markers: {markers})"
+    return True, "3D connector lines/markers are grouped and styled per relationship (stroke color, dash pattern, and a from/to marker shape+fill matching custom.json's relationshipStyles/lineEnds), not one flat undirected line for everything"
+
+
+def check_view3d_right_click_drag_pins_node(page):
+    """Regression guard for right-click-drag repositioning in the 3D View — reported
+    directly: "in 3d view can it be supported to right click an object and move it
+    around?" Real user right-click-drag fires 'contextmenu' AFTER pointerup (standard
+    browser behavior); Playwright/CDP's own mouse.down(button='right') fires it
+    prematurely ON mousedown instead (a documented automation quirk, not a real-browser
+    behavior), so this dispatches raw PointerEvents + a synthetic 'contextmenu' event
+    directly, in the REAL order, rather than driving it through page.mouse -- verified
+    against the app's own actual event listeners either way, not a mock.
+    Fixture: two same-type, same-(default)-lane parts (A dragged, B left alone). Checks,
+    in order: (1) a genuine drag (past CLICK_DRAG_TOLERANCE) sets A's part.pin3D to
+    (approximately) the drop position AND suppresses the context menu that would
+    otherwise open on a right-click release; (2) A's actual rendered position after the
+    resync matches its stored pin3D; (3) B (now the ONLY unpinned part in that lane)
+    recentres to a single-item grid (x=0) -- proving the pinned part was excluded from
+    lane occupancy, not just visually moved while still holding a grid cell; (4) a plain
+    right-click (no movement) on B, a part that was never touched, still opens the
+    context menu normally -- proving the drag-vs-click distinction doesn't over-suppress
+    unrelated right-clicks."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      const a = store.createPart({ type: 'GeneralActor', label: 'DragA', model: store.defaultModel, streams: [] });
+      const b = store.createPart({ type: 'GeneralActor', label: 'KeepB', model: store.defaultModel, streams: [] });
+
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 250));
+
+      const screenPos = view3d.debugGetScreenPosition(tab.id, a.id);
+      const canvasEl = document.querySelector('canvas');
+      const fire = (type, x, y, button) => canvasEl.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, button, bubbles: true, cancelable: true, pointerId: 1 }));
+
+      fire('pointerdown', screenPos.x, screenPos.y, 2);
+      fire('pointermove', screenPos.x + 40, screenPos.y + 20, 2);
+      fire('pointermove', screenPos.x + 70, screenPos.y + 35, 2);
+      fire('pointerup', screenPos.x + 70, screenPos.y + 35, 2);
+      canvasEl.dispatchEvent(new MouseEvent('contextmenu', { clientX: screenPos.x + 70, clientY: screenPos.y + 35, bubbles: true, cancelable: true }));
+      await new Promise(r => setTimeout(r, 150));
+
+      const menuOpenAfterDrag = !!document.querySelector('.view3d-context-menu');
+      const partA = store.findPart(a.id);
+      const infoAfterDrag = view3d.getDebugSceneInfo(tab.id);
+      const renderedA = infoAfterDrag.types.GeneralActor.positions[a.id];
+      const renderedB = infoAfterDrag.types.GeneralActor.positions[b.id];
+
+      // Plain right-click (no movement) on B, untouched by the drag -- must still work.
+      const screenPosB = view3d.debugGetScreenPosition(tab.id, b.id);
+      fire('pointerdown', screenPosB.x, screenPosB.y, 2);
+      fire('pointerup', screenPosB.x, screenPosB.y, 2);
+      canvasEl.dispatchEvent(new MouseEvent('contextmenu', { clientX: screenPosB.x, clientY: screenPosB.y, bubbles: true, cancelable: true }));
+      await new Promise(r => setTimeout(r, 150));
+      const menuTextAfterPlainClick = document.querySelector('.view3d-context-menu')?.textContent || '';
+
+      return {
+        pin3D: partA.pin3D, menuOpenAfterDrag, renderedA, renderedB,
+        plainClickOpenedMenu: menuTextAfterPlainClick.includes('KeepB'),
+      };
+    }
+    """)
+    r = result
+    problems = []
+    if not r["pin3D"]:
+        problems.append(f"expected the dragged part's pin3D to be set after a genuine right-click-drag, got {r['pin3D']}")
+    if r["menuOpenAfterDrag"]:
+        problems.append("expected the context menu to stay closed after a genuine drag (contextmenu fires on release, same as a plain right-click would, but a real drag must suppress it)")
+    if not r["renderedA"] or abs(r["renderedA"]["x"] - r["pin3D"]["x"]) > 1e-3 or abs(r["renderedA"]["y"] - r["pin3D"]["y"]) > 1e-3:
+        problems.append(f"expected A's actual rendered position to match its stored pin3D after the resync, got rendered={r['renderedA']} pin3D={r['pin3D']}")
+    if not r["renderedB"] or abs(r["renderedB"]["x"]) > 1e-3:
+        problems.append(f"expected B (now the only unpinned GeneralActor) to recentre to a single-item grid (x=0), proving the pinned part no longer occupies a grid cell, got {r['renderedB']}")
+    if not r["plainClickOpenedMenu"]:
+        problems.append("expected a plain right-click (no movement) on an untouched part to still open its context menu -- the drag-vs-click distinction must not over-suppress unrelated right-clicks")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {r})"
+    return True, "right-click-dragging a 3D node sets part.pin3D to the drop position, suppresses the context menu for that genuine drag, renders at exactly the pinned position, excludes it from its type's auto-layout grid (a sibling recentres), and doesn't interfere with a plain right-click elsewhere"
+
+
+def check_view3d_reset_pinned_positions(page):
+    """Regression guard for Advanced > Reset Pinned 3D Positions — reported directly:
+    "Create new option somewhere to reset - which clears all 'pinned' new locations."
+    Verifies: (1) with nothing pinned, it's a no-op (toast only, no confirm dialog);
+    (2) with 2 parts pinned, it shows a confirm dialog naming the exact count; (3)
+    Cancel leaves both pin3D values untouched; (4) OK clears BOTH pin3D fields back to
+    null in one go and the parts genuinely return to auto-layout positions (re-checked
+    via getDebugSceneInfo, not just that pin3D is null)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+
+      // (1) No-op case: no pinned parts at all yet.
+      app.promptResetPinned3DPositions();
+      await new Promise(r => setTimeout(r, 100));
+      const noopHadDialog = !!document.querySelector('.modal-box');
+
+      const a = store.createPart({ type: 'GeneralActor', label: 'PinA', model: store.defaultModel, streams: [] });
+      const b = store.createPart({ type: 'BusinessCapability', label: 'PinB', model: store.defaultModel, streams: [] });
+      a.pin3D = { x: 5, y: 5, z: 5 };
+      b.pin3D = { x: -5, y: -5, z: -5 };
+
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 250));
+
+      // (2)+(3) Cancel leaves pins intact.
+      app.promptResetPinned3DPositions();
+      await new Promise(r => setTimeout(r, 100));
+      const confirmText = document.querySelector('.modal-box')?.textContent || '';
+      document.querySelector('.modal-box .cancel')?.click();
+      await new Promise(r => setTimeout(r, 100));
+      const afterCancel = { aPinned: !!store.findPart(a.id).pin3D, bPinned: !!store.findPart(b.id).pin3D };
+
+      // (4) OK clears both.
+      app.promptResetPinned3DPositions();
+      await new Promise(r => setTimeout(r, 100));
+      document.querySelector('.modal-box .primary')?.click();
+      await new Promise(r => setTimeout(r, 150));
+      const afterOk = { aPinned: !!store.findPart(a.id).pin3D, bPinned: !!store.findPart(b.id).pin3D };
+      const info = view3d.getDebugSceneInfo(tab.id);
+      const posA = info.types.GeneralActor?.positions?.[a.id];
+      const posB = info.types.BusinessCapability?.positions?.[b.id];
+
+      return { noopHadDialog, confirmText, afterCancel, afterOk, posA, posB };
+    }
+    """)
+    r = result
+    problems = []
+    if r["noopHadDialog"]:
+        problems.append("expected NO confirm dialog when nothing is pinned (should just toast)")
+    if "2" not in r["confirmText"]:
+        problems.append(f"expected the confirm dialog to mention the exact pinned count (2), got: {r['confirmText']!r}")
+    if not r["afterCancel"]["aPinned"] or not r["afterCancel"]["bPinned"]:
+        problems.append(f"expected Cancel to leave both pins untouched, got {r['afterCancel']}")
+    if r["afterOk"]["aPinned"] or r["afterOk"]["bPinned"]:
+        problems.append(f"expected OK to clear BOTH pins back to null, got {r['afterOk']}")
+    if not r["posA"] or (abs(r["posA"]["x"] - 5) < 1e-3 and abs(r["posA"]["y"] - 5) < 1e-3):
+        problems.append(f"expected A to genuinely return to an auto-layout position (not still at its old pinned (5,5,5)), got {r['posA']}")
+    if not r["posB"] or (abs(r["posB"]["x"] + 5) < 1e-3 and abs(r["posB"]["y"] + 5) < 1e-3):
+        problems.append(f"expected B to genuinely return to an auto-layout position (not still at its old pinned (-5,-5,-5)), got {r['posB']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {r})"
+    return True, "Advanced > Reset Pinned 3D Positions is a no-op with nothing pinned, confirms with the exact count otherwise, Cancel leaves pins untouched, and OK clears every pin3D back to null with parts genuinely returning to auto-layout"
 
 
 def check_view3d_disposed_on_full_document_load(page):
@@ -4340,6 +4923,9 @@ CHECKS = [
     check_script_console_and_code_summary_moved_to_advanced,
     check_script_console_runs_main_function,
     check_batch_script_quickstart,
+    check_script_console_remap_and_smart_check_bindings,
+    check_catalog_multi_column_sort,
+    check_sfce_table_multi_column_sort,
     check_spacing_scale_uniform,
     check_routing_avoids_obstacle,
     check_archimate_import_fixture,
@@ -4381,15 +4967,20 @@ CHECKS = [
     check_smart_check_node,
     check_view3d_boots,
     check_view3d_layers_and_filters,
+    check_view3d_stream_lane_alignment,
     check_view3d_connectors_and_clustering,
-    check_view3d_cube_order_fallback,
-    check_cubeorder_covers_all_elements,
+    check_view3d_layer_order_template_selector,
+    check_view3d_all_template_covers_all_elements,
     check_view3d_focus_and_zoom_jump,
     check_sfce_array_field_survives_deeper_nesting,
     check_view3d_sim_overlay,
     check_view3d_dispose_cancels_current_animation_frame,
     check_view3d_real_click_shows_panel_and_no_recenter,
     check_view3d_node_context_menu,
+    check_view3d_connector_type_toolbar_filter,
+    check_view3d_connector_direction_markers,
+    check_view3d_right_click_drag_pins_node,
+    check_view3d_reset_pinned_positions,
     check_view3d_disposed_on_full_document_load,
     check_view3d_section_boundaries,
     check_generate_industry_propagates_section_to_whole_chain,

@@ -2041,4 +2041,221 @@
 // check_batch_script_code_persists_with_local_settings, plus check_code_summary
 // updated for the new menu location and the batch-script section), each confirmed to
 // catch its own regression via a temporary revert. Full suite 76/76.
-export const APP_VERSION = '0.831';
+// 0.832: Script Console (Advanced menu) gained three more bindings: remap(app, tab,
+// options), smartCheckView(app, tab, options), smartCheckNode(app, tab, partId,
+// options) — the same raw commands.js functions the Remap/Smart Check View/Smart
+// Check Node dialogs already call, options object and all (sortKeys/templateName/
+// pattern/limitColumnsToView/visiblePartVmIds/forcePreferRight/forceGroupRows for
+// remap; missingConnectors/missingConnectorsAndNodes/levels/syncWithInventory for
+// smartCheckView; same plus upstream/downstream/byStream/streams for smartCheckNode).
+// Reported directly: "add remap and the smartCheck functions too; add options as
+// parameters for full functionality if you can." A script builds its own tab when it
+// needs one (app.createCanvasTab(view) / app.switchToTab(tab.id)), same as
+// BatchScript_QuickStart already does. Help text in the console itself and
+// public/instructions.html updated to list every option per function. New permanent
+// check check_script_console_remap_and_smart_check_bindings builds a real view/part/
+// connector graph, then drives all three functions purely through the real Script
+// Console UI — proving both that the bindings exist and that a downstream/upstream
+// option pair genuinely filters (not just accepted and ignored); confirmed it catches
+// the regression via a temporary revert of the binding list. Full suite 77/77.
+// 0.833: multi-column sort for every catalog table AND the SFCCE preview table
+// (canvas.js's shared renderTablePage — Parts/Connectors/Views/ViewMembers, the
+// simulation log, and any tab.tableRows/tableCols table alike). tab.sortColumn/
+// sortDir (a single column) replaced by tab.sortColumns, an ordered [{col, dir}, ...]
+// array — the row comparator walks it in order, falling through to the next criterion
+// only on a tie. Plain click on a header is unchanged (sorts by just that column,
+// toggling direction on repeat clicks of the same sole column); shift+click adds
+// another column as a secondary tiebreaker (or, if it's already active, flips just
+// that column's own direction) without disturbing the others. Each active column's
+// header shows a rank glyph (①②③...) ahead of its ▴/▾ arrow once more than one column
+// is active. Reported directly: "can multi column sorting be supported? For example
+// sorting parts by type and label" -> "yes, implement it for all catalogs and SFCCE."
+// Two new permanent checks: check_catalog_multi_column_sort (Parts catalog — the
+// tab.catalogType/catalogRows() branch) and check_sfce_table_multi_column_sort (SFCE
+// preview — the separate tab.tableRows/tab.tableCols branch), each dispatching real
+// click/shift+click DOM events and reading the actual rendered row order back out;
+// both confirmed to catch the regression via a temporary revert (shift-click support
+// removed). tests/README.md and public/instructions.html updated. Full suite 79/79.
+// 0.834: fixed the 3D View's node right-click "Filter to Streams" quick filter
+// (view3d.js's showNodeContextMenu) — a multi-stream part offered only one combined
+// "Filter to Streams: A, B" item, which always set tab.activeStreams to every stream
+// at once with no way to pick just one. Reported directly: "if the stream has
+// multiple I can't select one or the other. For example 'Supplier Profile, Purchase
+// Contract' shows up instead of one or the other. this is after executing
+// BatchScript_QuickStart" (the Enterprise Functions template's own data has several
+// multi-stream parts, so this was reachable from the shipped default script).
+// Replaced with one clickable item per stream the part actually carries (checkmarked
+// when it's the sole active filter), plus an "All of the above" item — only shown
+// when there's more than one stream — for the old lump-them-together behavior.
+// check_view3d_node_context_menu extended to prove picking one stream narrows to
+// exactly that stream and SWITCHES (not stacks) when a different single stream is
+// picked next; confirmed it catches the regression via a temporary revert.
+// tests/README.md and public/instructions.html updated. Full suite 79/79.
+// 0.835: BatchScript_QuickStart (DEFAULT_BATCH_SCRIPT_CODE, state.js) gained a final
+// remap(app, tab, { pattern: 'default' }) step, right after the zoom-to-60% line and
+// before the closing recordAndRender()/messageLog('Done') — requested directly.
+// check_batch_script_quickstart extended to capture the Script Console's own output
+// and fail if it contains "error" (proving the new remap call is wired in and
+// doesn't throw — 'org' is a section-based view type, so remap routes through
+// applyRemapLayoutSectioned rather than pattern-based freeform placement there,
+// making 'pattern' accepted but not itself meaningful for this particular view type;
+// the check documents that rather than asserting exact resulting positions).
+// Confirmed it catches the regression via a temporary revert (typo'd the call so it
+// throws ReferenceError). tests/README.md updated. Full suite 79/79.
+// 0.836: fixed 3D View multi-stream clustering (view3d.js) — reported directly:
+// "when a node is in multiple streams, the nodes crisscross columns and back later.
+// Filtering to streams Purchase Order and Inventory Item is an example." Two root
+// causes. (1) representativeStream() picked a part's alphabetically-first stream
+// across ALL its streams, ignoring which stream(s) the active Stream filter was
+// actually about — now prefers a stream from tab.activeStreams when one's set,
+// falling back to alphabetically-first overall otherwise. (2)
+// layoutGridWithSectionBreaks only forced a new grid row at a SECTION boundary, never
+// a representative-stream boundary, so one cluster's tail could share a row with the
+// next cluster's head — now forces a break on either. New permanent check
+// check_view3d_multi_stream_clustering, with two isolated fixtures (one exercising
+// each fix independently via exact world-Y position equality/inequality on real
+// Three.js instance data), confirmed to catch each regression separately via a
+// temporary revert. tests/README.md updated. Full suite 80/80.
+// 0.837: 3D View connector direction indicators + toolbar-selectable Connector Type
+// filter. Reported directly, after a "why does X show a connector from Y" question the
+// 3D view genuinely couldn't answer: "implement direction indicators for the 3D lines
+// ideally matching line end settings, and line characteristics as well, but they
+// should be based on connections of type 'c' or 's', lets make that user selectable
+// for the view same as the view filters already existing."
+// (1) view3d.js's connector lines were one flat, undirected, uncolored LineSegments for
+// every connector. Now grouped by relationship (custom.json's relationshipStyles, the
+// SAME lookup the 2D canvas's own edge rendering already uses) into per-relationship
+// colored/dashed LineSegments, plus a small cone/diamond/sphere InstancedMesh marker
+// (resolveMarkerFamily/resolveMarkerAppearance) at whichever end(s) that relationship's
+// lineEnds entry marks — a best-effort SVG-path-to-3D-primitive approximation (see
+// those functions' own comments), not a pixel match: filled vs. open line-ends become a
+// solid vs. wireframe marker; DASH_SCALE converts SVG-pixel dash units into roughly-
+// proportioned Three.js world units. Still bounded to a handful of draw calls (one line
+// mesh + up to two marker meshes per DISTINCT relationship actually present).
+// (2) tab.connectorTypeFilter (null/'c'/'s', previously only reachable via the 3D node
+// right-click menu) renamed to tab.activeConnectorTypes and promoted to its own toolbar
+// dropdown filter (index.html/render.js/main.js), matching Stream/Type/Section's
+// existing Select-All/Exclude-All + checkbox pattern instead of being buried in a
+// context menu — 3D-only, disabled on canvas tabs (which have their own per-view
+// chkShowConnectorType/chkShowStreamType instead). The context menu's Connector Type
+// submenu is gone; Filter to Stream stays there unchanged.
+// check_view3d_node_context_menu updated (Connector Type assertions removed, one added
+// confirming it's gone from there); two new checks:
+// check_view3d_connector_type_toolbar_filter (real toolbar clicks, disabled-outside-3D,
+// genuine connectorCount changes) and check_view3d_connector_direction_markers (three
+// distinct relationships' line color/dash and marker family/color/wireframe verified
+// against getDebugSceneInfo's new connectorGroups/connectorMarkers fields) — both
+// confirmed to catch their own regression via a temporary revert. tests/README.md and
+// public/instructions.html updated. Full suite 82/82.
+// 0.838: fixed persistent 3D View crisscrossing between type layers, reported directly
+// after 0.836's per-type stream clustering fix: "there is still significant criss
+// cross between columns, stream names seem to jump around. Is there another option to
+// sort these?" -> "yes, implement that." Root cause: each type's own Z-layer computed
+// its row/col grid entirely independently (its own row/col count from its own part
+// count alone), so a stream's row position in one type's layer had NO relationship to
+// that same stream's row position in the next layer — 0.836 only ever fixed
+// crisscrossing WITHIN one type's own grid, not BETWEEN layers, where most of the main
+// dependency chain's connectors actually run.
+// layoutGridWithSectionBreaks (per-type, sequential-discovery row breaks) replaced by
+// computeStreamLanes + layoutTypeIntoLanes: ONE shared column width and ONE shared
+// row-band per (section, stream) lane, computed across every currently-visible part
+// regardless of type — so a lane sits at the identical row, and therefore the same
+// world Y, in every type's own layer. Traded off and accepted up front: a type with
+// few parts in a lane still reserves that lane's full (globally tallest) height, so
+// layers with uneven per-lane counts look sparser than the old tightly-packed-but-
+// misaligned grid. check_view3d_multi_stream_clustering rewritten as
+// check_view3d_stream_lane_alignment (the old fixture's exact-position math no longer
+// applies to the new algorithm) — verifies 4 Alpha-stream and 4 Beta-stream parts,
+// spread across two different element types, land at exactly the same world Y within
+// their own stream and a different Y between streams, and that a multi-stream part
+// still resolves to whichever of its streams the active filter is actually about (the
+// 0.836 fix, still exercised); confirmed it catches the regression via a temporary
+// revert. tests/README.md and public/instructions.html updated. Full suite 82/82.
+// 0.839: custom.json's cubeOrder retired into a real streamTemplates entry, plus a new
+// toolbar-only way to pick which template drives 3D layer ordering. Reported directly:
+// "can we change to make cubeorder into a new streamTemplate named something like all,
+// and cubeOrder list goes into value. Then provide user ability to switch
+// streamTemplate for 3d view display -- they can select cubeOrder (which is what
+// they're getting now) or a streamTemplate." custom.json's separate top-level
+// cubeOrder field (77 types) is now a streamTemplates entry named "All", its value[]
+// exactly the old cubeOrder list. New toolbar <select> "Layer Order" (index.html/
+// render.js/main.js, 3D-only, disabled elsewhere) lists every streamTemplate; picking
+// one persists to Local Settings (view3DLayerOrderTemplate, its OWN preference --
+// deliberately separate from Remap/Generate Stream's shared "last used" template pick).
+// view3d.js's resolveLayerOrder no longer blends two sources (template value[] + an
+// automatic cubeOrder fallback underneath it) -- it now uses exactly the ONE selected
+// template's value[], falling back to tkDisplayOrder/alphabetical for anything that
+// template doesn't mention. Defaults to "All", so out-of-the-box 3D layer order is
+// unchanged; picking a short template like "Enterprise" now genuinely changes the
+// fallback order for everything it doesn't cover, instead of silently still following
+// cubeOrder underneath it.
+// check_view3d_cube_order_fallback rewritten as check_view3d_layer_order_template_selector
+// (verifies the <select>'s options/default, and that "All" vs. "Test" genuinely
+// disagree on unmentioned types' fallback order -- proving the auto-blend is gone);
+// check_cubeorder_covers_all_elements rewritten as
+// check_view3d_all_template_covers_all_elements (same 1:1-correspondence check, now
+// against "All"'s value[]). Both confirmed to still catch their regression via a
+// temporary revert. tests/README.md, public/instructions.html, and
+// DESIGN_DOCUMENT.md updated. Full suite 82/82.
+// 0.840: corrected 0.839's Layer Order template picker — "anything that template's
+// value[] doesn't mention should not be shown" (0.839 only REORDERED an unmentioned
+// type via the tkDisplayOrder/alphabetical fallback; it should HIDE it instead).
+// syncSceneData's own parts filter now also checks resolveLayerOrder's
+// templateTypeOrder — a type the selected template's value[] doesn't mention no longer
+// renders in the 3D scene at all. "All"'s value[] covers all 77 known types, so this is
+// a no-op there (default behavior unchanged); picking a real template like "Enterprise"
+// now narrows the WHOLE scene down to just the types it actually lists. Rewrote
+// check_view3d_layer_order_template_selector accordingly (BusinessCapability, which
+// the 'Test' template mentions, stays visible; GeneralActor, which it doesn't, must
+// disappear entirely rather than just reorder) — confirmed it catches the regression
+// via a temporary revert. tests/README.md, public/instructions.html, and
+// DESIGN_DOCUMENT.md updated. Full suite 82/82.
+// 0.841: right-click-drag to reposition a node in the 3D View, persisted as
+// Part.pin3D. Reported directly: "in 3d view can it be supported to right click an
+// object and move it around?" -> confirmed persistence model: "let's try option 2
+// persist, with new locations treated as pinned. Create new option somewhere to
+// reset - which clears all 'pinned' new locations." New Part.pin3D field (null, or a
+// real {x,y,z}, persisted with the document; state.js createPart/migrateDoc). Right-
+// click-dragging a node past CLICK_DRAG_TOLERANCE (the same drag-vs-click distinction
+// the left-click focus handler already uses) sets it, dragging along a plane facing
+// the camera through the part's current position. A pinned part skips
+// computeStreamLanes/layoutTypeIntoLanes' auto-layout grid entirely -- excluded from
+// lane occupancy too, so it doesn't inflate a lane's reserved height without
+// occupying a cell -- and renders at exactly its stored position. New Advanced menu
+// item "Reset Pinned 3D Positions" (App.promptResetPinned3DPositions) clears every
+// part's pin3D back to null in one confirmed, bulk action -- deliberately no per-part
+// unpin, matching what was actually asked for. computeSignature extended to include
+// each part's pin3D so a drag actually triggers a resync.
+// Two new permanent checks: check_view3d_right_click_drag_pins_node (drag sets
+// pin3D, suppresses the context menu for that drag, renders at exactly the pinned
+// spot, excludes the part from lane occupancy -- a sibling recentres -- and doesn't
+// interfere with a plain right-click elsewhere) and check_view3d_reset_pinned_positions
+// (no-op with nothing pinned, confirm dialog names the exact count, Cancel leaves
+// pins untouched, OK clears every pin3D with a genuine return to auto-layout).
+// Testing note: Playwright's own page.mouse.down(button:'right') fires a synthetic
+// contextmenu event prematurely, ON mousedown rather than after release -- a
+// documented Chromium/CDP automation quirk, not real-browser behavior -- so both new
+// checks dispatch raw PointerEvents plus a manually-fired contextmenu event, in the
+// actual order a real browser uses, rather than relying on page.mouse. Confirmed both
+// checks catch their own regression via a temporary revert. tests/README.md,
+// public/instructions.html, and DESIGN_DOCUMENT.md updated. Full suite 84/84.
+// 0.842: fixed 0.840's Layer Order "hide unmentioned types" fix wrongly hiding
+// PASSIVE elements too. Reported directly: "in 3d view the layer order appears to be
+// missing the passive elements and their connectors, when a 'Layer Order' is selected
+// that includes passives." Root cause: syncSceneData's parts filter checked
+// templateTypeOrder, built from the selected template's value[] ONLY -- a type
+// mentioned solely via the template's passive[] from/to pairs (e.g. Enterprise's
+// BusinessFunction, tied to BusinessProcess but never part of value[]'s main chain)
+// was therefore treated as "unmentioned" and hidden, along with it every connector
+// touching it (a connector only draws once BOTH endpoints are visible). Fixed by
+// having resolveLayerOrder return a separate visibleTypes set: value[] types UNION
+// every passive[] entry's from/to types. templateTypeOrder (drives Z-ordering) still
+// comes from value[] alone -- a passive-only type has no natural chain position, so it
+// falls to the tkDisplayOrder/alphabetical fallback tier, exactly like any other
+// value[]-unmentioned type already did; only VISIBILITY was ever wrong.
+// check_view3d_layer_order_template_selector extended with a BusinessFunction fixture
+// (passive[]-only under the 'Test' template) alongside the existing value[]-mentioned
+// and mentioned-in-neither cases; confirmed it catches the regression via a temporary
+// revert. tests/README.md, public/instructions.html, and DESIGN_DOCUMENT.md updated.
+// Full suite 84/84.
+export const APP_VERSION = '0.842';

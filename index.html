@@ -86,6 +86,15 @@
         <button id="section-filter-btn" class="tb-select" style="text-align:left;">All sections</button>
         <div id="section-filter-menu" class="dropdown-menu hidden"></div>
       </div>
+      <div class="toolbar-group" style="position:relative;">
+        <label class="tb-label" for="connector-type-filter-btn">Connector Type</label>
+        <button id="connector-type-filter-btn" class="tb-select" style="text-align:left;" title="3D View only: which connectorType(s) draw at all -- 'c' (Connectors) and/or 's' (Streams).">All (c + s)</button>
+        <div id="connector-type-filter-menu" class="dropdown-menu hidden"></div>
+      </div>
+      <div class="toolbar-group">
+        <label class="tb-label" for="view3d-layer-order-select">Layer Order</label>
+        <select id="view3d-layer-order-select" class="tb-select" title="3D View only: which streamTemplate's value[] decides element-group/type layer order. 'All' (every type, in a fixed reference order) is the default."></select>
+      </div>
       <div class="toolbar-group">
         <label class="tb-label" for="connector-levels-input">Levels</label>
         <input type="number" id="connector-levels-input" class="tb-select" style="width:60px;" min="0" step="1" placeholder="All" title="Connector levels: how many hops of connected nodes/connectors to also show beyond the matching ones (blank = unlimited). Only applies while Stream, Types, or Section is filtering." />

@@ -181,6 +181,20 @@ function getCachedStreamTemplate() {
 }
 function setCachedStreamTemplate(name) { setLocalSettingsCache({ streamTemplate: name }); }
 
+/** The 3D View's OWN layer-order preference — which streamTemplate's value[] decides
+ * element-group/type ordering there (view3d.js's resolveLayerOrder) — deliberately
+ * SEPARATE from getCachedStreamTemplate above, since Remap/Generate Stream/Smart Check
+ * View's shared "last used" preference is about which template to GENERATE a stream
+ * from, an unrelated concern from "how should the 3D scene visually order its layers."
+ * Defaults to null, which view3d.js resolves to "All" (the former cubeOrder, now just
+ * another streamTemplate entry covering all 77 known types) — today's out-of-the-box
+ * 3D layer order, unchanged unless a person explicitly picks a different template. */
+function getCachedView3DLayerOrderTemplate() {
+  const v = getLocalSettingsCache().view3DLayerOrderTemplate;
+  return typeof v === 'string' && v ? v : null;
+}
+function setCachedView3DLayerOrderTemplate(name) { setLocalSettingsCache({ view3DLayerOrderTemplate: name }); }
+
 /** Remap dialog's own options (pattern, limit-to-view, filtered-only, the two force-
  * directed sub-options, and sort priority order) — remembered as user-level defaults
  * across ALL views, applied whenever Remap reopens so even a brand-new view starts from
@@ -462,9 +476,17 @@ class App {
         <code>findParts({type, model})</code>, <code>log(...)</code> (prints below),
         <code>messageLog(...)</code> (writes to the persistent Message Log),
         <code>generateIndustry(app, industryKey, onProgress, placeInView)</code>,
-        <code>populateFromTemplate(app, tab, templateName)</code>. Run (or Ctrl+Enter) defines
-        everything below, then calls your top-level <code>main()</code> — it can call any other
-        functions you've defined alongside it. Edits are saved automatically (Local Settings).
+        <code>populateFromTemplate(app, tab, templateName)</code>,
+        <code>remap(app, tab, options)</code> (options: <code>sortKeys, templateName, pattern
+        ('default'|'none'|'force'), limitColumnsToView, visiblePartVmIds, forcePreferRight,
+        forceGroupRows</code> — all optional, same defaults as the Remap dialog),
+        <code>smartCheckView(app, tab, options)</code> (options: <code>missingConnectors,
+        missingConnectorsAndNodes, levels, syncWithInventory</code>),
+        <code>smartCheckNode(app, tab, partId, options)</code> (options: same as
+        smartCheckView plus <code>upstream, downstream, byStream, streams</code>). Run (or
+        Ctrl+Enter) defines everything below, then calls your top-level <code>main()</code> —
+        it can call any other functions you've defined alongside it. Edits are saved
+        automatically (Local Settings).
       </div>
       <div id="console-output" style="height:220px;overflow-y:auto;background:var(--bg);border:1px solid var(--border-strong);border-radius:5px;padding:8px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;margin-bottom:8px;"></div>
       <textarea id="console-input" spellcheck="false" style="width:100%;height:260px;font-family:var(--mono);font-size:12px;box-sizing:border-box;border:1px solid var(--border-strong);border-radius:5px;padding:8px;background:var(--bg);color:var(--text);resize:vertical;"></textarea>
@@ -505,13 +527,13 @@ class App {
       persist();
       if (!code.trim()) return;
 
-      const bindingNames = ['app', 'store', 'model', 'findParts', 'log', 'messageLog', 'generateIndustry', 'populateFromTemplate'];
+      const bindingNames = ['app', 'store', 'model', 'findParts', 'log', 'messageLog', 'generateIndustry', 'populateFromTemplate', 'remap', 'smartCheckView', 'smartCheckNode'];
       const bindingValues = [
         this, this.store, this.store.simSelectedModel || null,
         findPartsForConsole,
         (...args) => appendOutput(args.map((a) => (typeof a === 'string' ? a : stringifyForConsole(a))).join(' ')),
         (msg) => pushMessageLog(this.store, typeof msg === 'string' ? msg : stringifyForConsole(msg)),
-        generateIndustry, populateFromTemplate,
+        generateIndustry, populateFromTemplate, remap, smartCheckView, smartCheckNode,
       ];
 
       let result, threw = false, errMessage = '';
@@ -588,6 +610,24 @@ class App {
       }
     }
     this.promptTextEdit({ title: 'Code Summary', value: lines.join('\n'), readonly: true, onSave: () => {} });
+  }
+
+  /** Clears every part's part.pin3D (right-click-drag positions set in the 3D View —
+   * see view3d.js's pointerdown/pointermove/pointerup handlers) back to null in one go,
+   * restoring auto-layout for all of them at once. Deliberately a single bulk reset, not
+   * a per-part "Unpin" — reported directly: "Create new option somewhere to reset -
+   * which clears all 'pinned' new locations." Confirmed first since it touches
+   * potentially many parts at once, even though it's undoable like any other store
+   * mutation (recordAndRender snapshots history). A no-op (with its own toast) if
+   * nothing is currently pinned, rather than a confirm dialog for nothing to confirm. */
+  async promptResetPinned3DPositions() {
+    const pinned = this.store.doc.parts.filter((p) => p.pin3D);
+    if (pinned.length === 0) { this.toast('No parts are currently pinned in the 3D View.'); return; }
+    const count = pinned.length;
+    if (!(await this.confirmModal(`Reset ${count} pinned 3D position${count === 1 ? '' : 's'} back to auto-layout?`))) return;
+    for (const p of pinned) { p.pin3D = null; this.store.touchPart(p); }
+    this.recordAndRender();
+    this.toast(`Reset ${count} pinned 3D position${count === 1 ? '' : 's'}.`);
   }
 
   // ===================== SELECTION =====================
@@ -3261,6 +3301,8 @@ function wireGlobalEvents(app) {
     { separator: true },
     { label: 'Script Console...', action: 'scriptConsole' },
     { label: 'Code Summary', action: 'codeSummary' },
+    { separator: true },
+    { label: 'Reset Pinned 3D Positions', action: 'resetPinned3DPositions' },
   ];
   const advancedMenu = document.getElementById('advanced-menu');
   advancedMenu.innerHTML = ADVANCED_LINKS.map((l) => l.separator ? '<div class="dd-separator"></div>' : `<div class="dd-item" data-url="${l.url || ''}" data-action="${l.action || ''}">${l.label}</div>`).join('');
@@ -3278,6 +3320,8 @@ function wireGlobalEvents(app) {
         app.promptScriptConsole();
       } else if (item.dataset.action === 'codeSummary') {
         app.promptCodeSummary();
+      } else if (item.dataset.action === 'resetPinned3DPositions') {
+        app.promptResetPinned3DPositions();
       } else if (item.dataset.url) {
         window.open(item.dataset.url, '_blank', 'noopener');
       }
@@ -3619,6 +3663,63 @@ function wireGlobalEvents(app) {
   document.addEventListener('click', (e) => {
     const menu = document.getElementById('section-filter-menu');
     if (!menu.contains(e.target) && e.target.id !== 'section-filter-btn') menu.classList.add('hidden');
+  });
+
+  // Connector Type filter — 3D-View-only (see renderToolbar's own comment), same
+  // Select-All/Exclude-All + checkbox-list pattern as Stream/Type/Section above, just
+  // over a fixed 2-item list ('c' Connectors, 's' Streams) instead of a scanned one.
+  // Replaces the old node-right-click-only quick filter (tab.connectorTypeFilter) —
+  // "let's make that user selectable for the view same as the view filters already
+  // existing."
+  const CONNECTOR_TYPE_ITEMS = [{ value: 'c', label: 'Connectors (c)' }, { value: 's', label: 'Streams (s)' }];
+  document.getElementById('connector-type-filter-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const menu = document.getElementById('connector-type-filter-menu');
+    const tab = store.activeTab();
+    if (!tab || tab.type !== '3d') return;
+
+    const isFilterActive = tab.activeConnectorTypes != null;
+    const checkedTypes = isFilterActive ? new Set(tab.activeConnectorTypes) : new Set(CONNECTOR_TYPE_ITEMS.map((i) => i.value));
+    const allChecked = CONNECTOR_TYPE_ITEMS.every((i) => checkedTypes.has(i.value));
+
+    menu.innerHTML = `
+      <div class="dd-item dd-select-all">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+          <input type="checkbox" id="connector-type-select-all" ${allChecked ? 'checked' : ''} />Select All / Exclude All
+        </label>
+      </div>
+      <div class="dd-item-list">
+        ${CONNECTOR_TYPE_ITEMS.map((i) => `<div class="dd-item"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" value="${escapeHtml(i.value)}" ${checkedTypes.has(i.value) ? 'checked' : ''} />${escapeHtml(i.label)}</label></div>`).join('')}
+      </div>`;
+
+    const itemCheckboxes = () => [...menu.querySelectorAll('.dd-item-list input[type="checkbox"]')];
+    const selectAllCb = document.getElementById('connector-type-select-all');
+    selectAllCb.addEventListener('change', () => {
+      tab.activeConnectorTypes = selectAllCb.checked ? null : []; // null = unfiltered; [] = explicit "exclude all"
+      itemCheckboxes().forEach((cb) => { cb.checked = selectAllCb.checked; });
+      app.render();
+    });
+    itemCheckboxes().forEach((cb) => {
+      cb.addEventListener('change', () => {
+        tab.activeConnectorTypes = itemCheckboxes().filter((c) => c.checked).map((c) => c.value);
+        selectAllCb.checked = itemCheckboxes().every((c) => c.checked);
+        app.render();
+      });
+    });
+    menu.classList.toggle('hidden');
+  });
+  document.addEventListener('click', (e) => {
+    const menu = document.getElementById('connector-type-filter-menu');
+    if (!menu.contains(e.target) && e.target.id !== 'connector-type-filter-btn') menu.classList.add('hidden');
+  });
+
+  // Layer Order (3D-only) — which streamTemplate's value[] decides element-group/type
+  // ordering in the 3D scene. A plain persisted preference (not a filter), so it's a
+  // <select> like Current View/Default Model rather than the checkbox-dropdown pattern
+  // Stream/Type/Section/Connector Type use.
+  document.getElementById('view3d-layer-order-select').addEventListener('change', (e) => {
+    setCachedView3DLayerOrderTemplate(e.target.value);
+    app.render();
   });
 
   // Connector levels — blank input means null ("All"/unlimited); any non-negative

@@ -1110,28 +1110,56 @@ function renderTablePage(app, tab, container) {
     if (filterText) rows = rows.filter((r) => cols.some((c) => fmtCell(r[c]).toLowerCase().includes(filterText)));
   }
 
-  if (tab.sortColumn && cols.includes(tab.sortColumn)) {
-    const dir = tab.sortDir === 'desc' ? -1 : 1;
+  // Multi-column sort: tab.sortColumns is an ordered array of {col, dir} — the row
+  // comparator walks it in order, falling through to the next criterion only on a tie,
+  // same convention as a spreadsheet's "sort by X, then by Y". Plain click on a header
+  // replaces the whole list with just that one column (the pre-multi-sort behavior,
+  // unchanged); shift+click appends (or, if already present, toggles) a column without
+  // disturbing the others — see the click handler below.
+  const activeSorts = (tab.sortColumns || []).filter((s) => cols.includes(s.col));
+  if (activeSorts.length) {
     rows.sort((a, b) => {
-      const va = fmtCell(a[tab.sortColumn]).toLowerCase(), vb = fmtCell(b[tab.sortColumn]).toLowerCase();
-      return va < vb ? -dir : va > vb ? dir : 0;
+      for (const { col, dir } of activeSorts) {
+        const d = dir === 'desc' ? -1 : 1;
+        const va = fmtCell(a[col]).toLowerCase(), vb = fmtCell(b[col]).toLowerCase();
+        if (va < vb) return -d;
+        if (va > vb) return d;
+      }
+      return 0;
     });
   }
 
-  const arrow = (c) => (tab.sortColumn === c ? (tab.sortDir === 'desc' ? ' ▾' : ' ▴') : '');
+  const RANK_GLYPHS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧'];
+  const arrow = (c) => {
+    const idx = activeSorts.findIndex((s) => s.col === c);
+    if (idx === -1) return '';
+    const rankPrefix = activeSorts.length > 1 ? (RANK_GLYPHS[idx] || `${idx + 1}`) : '';
+    return ` ${rankPrefix}${activeSorts[idx].dir === 'desc' ? '▾' : '▴'}`;
+  };
   const searchBarHtml = isFilterable
     ? `<div class="table-search-bar"><input type="text" class="table-filter-input" placeholder="Filter rows…" value="${escapeHtml(tab.catalogFilterText || '')}" /><span class="table-search-count">${rows.length} / ${totalCount}</span></div>`
     : '';
-  wrap.innerHTML = `${searchBarHtml}<table><thead><tr>${cols.map((c) => `<th class="sortable-col" data-col="${escapeHtml(c)}">${escapeHtml(c)}${arrow(c)}</th>`).join('')}</tr></thead>
+  wrap.innerHTML = `${searchBarHtml}<table><thead><tr>${cols.map((c) => `<th class="sortable-col" data-col="${escapeHtml(c)}" title="Click to sort by this column. Shift+click to add it as an additional sort tiebreaker.">${escapeHtml(c)}${arrow(c)}</th>`).join('')}</tr></thead>
     <tbody>${rows.map((r) => `<tr class="catalog-row${tab.selectedCatalogRow?.id === r.id ? ' selected' : ''}" data-id="${escapeHtml(r.id)}">${cols.map((c) => `<td>${escapeHtml(fmtCell(r[c]))}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${cols.length}" style="text-align:center;color:var(--text-muted);">No rows</td></tr>`}</tbody></table>`;
   container.appendChild(wrap);
   wrap.scrollTop = savedScrollTop;
 
   wrap.querySelectorAll('.sortable-col').forEach((th) => {
-    th.addEventListener('click', () => {
+    th.addEventListener('click', (e) => {
       const col = th.dataset.col;
-      if (tab.sortColumn === col) tab.sortDir = tab.sortDir === 'asc' ? 'desc' : 'asc';
-      else { tab.sortColumn = col; tab.sortDir = 'asc'; }
+      const sortColumns = tab.sortColumns || (tab.sortColumns = []);
+      if (e.shiftKey) {
+        // Add this column as an additional tiebreaker without disturbing the others'
+        // order or direction — same as re-clicking it flips just its own direction.
+        const idx = sortColumns.findIndex((s) => s.col === col);
+        if (idx === -1) sortColumns.push({ col, dir: 'asc' });
+        else sortColumns[idx].dir = sortColumns[idx].dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        // Plain click: sort by just this column, discarding any other tiebreakers —
+        // toggles direction only when it was already the sole active sort.
+        const wasSoleAsc = sortColumns.length === 1 && sortColumns[0].col === col && sortColumns[0].dir === 'asc';
+        tab.sortColumns = [{ col, dir: wasSoleAsc ? 'desc' : 'asc' }];
+      }
       app.render();
     });
   });

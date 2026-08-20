@@ -69,6 +69,81 @@
 // one per (type, section) pair, at that type's own Z, matching the row-break clustering
 // layoutGridWithSectionBreaks already does (never aggregated across types/Z-layers,
 // consistent with how that clustering has always worked).
+// Stage 5.2 (done): fixed a real visual bug reported from actually using multi-stream
+// filtering — a node carrying several streams always clustered under whichever was
+// alphabetically first across ALL its streams, ignoring which stream(s) the active
+// Stream filter was actually about, and the grid only forced a new row at section
+// boundaries (never at a representative-stream change), so one cluster's tail could
+// share a row with the next cluster's head. representativeStream now prefers a stream
+// from tab.activeStreams when one's set (falling back to alphabetically-first overall
+// otherwise), and layoutGridWithSectionBreaks forces a row break on a representative-
+// stream change too, not just a section change — each stream's cluster within a
+// section is now a clean rectangular block instead of an interleaved, crisscrossing one.
+// Stage 6 (done): connector lines carried no direction at all — plain undirected
+// segments in one flat, neutral color, no matter the relationship. Reported directly,
+// after a "why does X show a connector from Y" question surfaced that the 3D lines
+// genuinely couldn't answer it: "implement direction indicators for the 3D lines
+// ideally matching line end settings, and line characteristics as well." Connectors are
+// now grouped by relationship (custom.json's relationshipStyles, the SAME lookup the 2D
+// canvas's edge rendering already uses) into their own colored/dashed LineSegments, plus
+// a small cone/diamond/sphere InstancedMesh marker (resolveMarkerFamily's own comment
+// explains the SVG-path-to-3D-primitive approximation this relies on) at whichever end(s)
+// that relationship's lineEnds entry actually marks — an arrow cone pointing INTO the
+// 'to' end for most relationships, a diamond at the 'from' end for Composition/
+// Aggregation, etc. Also new: which connectorType(s) draw at all (tab.activeConnectorTypes,
+// null/'c'/'s'/both) moved from a right-click-only quick filter to its own toolbar
+// dropdown (main.js), matching Stream/Type/Section's existing pattern instead of being
+// buried in the node context menu — "let's make that user selectable for the view same
+// as the view filters already existing."
+// Stage 6.1 (done): Stage 5.2 fixed crisscrossing WITHIN one type's own grid, but each
+// type's grid was still laid out entirely independently (its own row/col count from its
+// own part count alone) — a stream's row position in one type's Z-layer had no
+// relationship to that same stream's row position in the next layer, so the main
+// dependency chain's connectors (which mostly run BETWEEN adjacent layers) still
+// crisscrossed heavily. Reported directly: "there is still significant criss cross
+// between columns, stream names seem to jump around. Is there another option to sort
+// these?" layoutGridWithSectionBreaks (Stage 5.1/5.2's per-type row-break approach) is
+// replaced by computeStreamLanes + layoutTypeIntoLanes: ONE shared column width and ONE
+// shared row-band per (section, stream) lane, computed across every currently-visible
+// part regardless of type, so a lane sits at the identical row range — and therefore
+// the same world Y — in EVERY type's own layer. Traded off up front and accepted: a
+// type with few parts in a lane still reserves that lane's full (globally tallest)
+// height, so layers with uneven per-lane counts look sparser than the old tightly-
+// packed-but-misaligned grid.
+// Stage 6.2 (done): custom.json's cubeOrder — previously a separate top-level field
+// ALWAYS blended into layer ordering underneath whichever streamTemplate was preferred
+// elsewhere (Remap/Generate Stream's shared "last used" pick) — is now just another
+// streamTemplates entry, named "All" (its own value[] is the old cubeOrder list
+// verbatim, all 77 known types in the same reference order). resolveLayerOrder no
+// longer blends two sources; it uses exactly ONE selected template's value[], chosen
+// via a new toolbar-only "Layer Order" <select> (main.js/render.js,
+// view3DLayerOrderTemplate in Local Settings — deliberately its OWN preference, not
+// shared with Remap/Generate Stream's template pick, since ordering the 3D scene is an
+// unrelated concern from which template to generate a stream from). Defaults to "All"
+// (today's out-of-the-box look, unchanged). Picking any other template (e.g.
+// "Enterprise") now HIDES every type that template's value[] doesn't mention, rather
+// than merely reordering it — corrected directly after an initial version only
+// reordered unmentioned types via the tkDisplayOrder/alphabetical fallback: "anything
+// that template's value[] doesn't mention should not be shown." templateTypeOrder
+// (from resolveLayerOrder) now does double duty as syncSceneData's own parts filter.
+// Reported directly: "can we change to make cubeorder into a new streamTemplate named
+// something like all, and cubeOrder list goes into value. Then provide user ability to
+// switch streamTemplate for 3d view display."
+// Stage 6.3 (done): right-click-drag to reposition a node, persisted as Part.pin3D
+// (null, or a real {x,y,z} world position) — reported directly: "in 3d view can it be
+// supported to right click an object and move it around?", then, for the persistence
+// model: "let's try option 2 persist, with new locations treated as pinned. Create new
+// option somewhere to reset - which clears all 'pinned' new locations." Dragging past
+// CLICK_DRAG_TOLERANCE (the SAME distinction the left-click focus handler already uses)
+// moves the node along a plane facing the camera through its current position
+// (Plane.setFromNormalAndCoplanarPoint + Raycaster against it); RIGHT was already
+// unbound in OrbitControls.mouseButtons (Stage 5.1), so this never fights the camera. A
+// pinned part skips computeStreamLanes/layoutTypeIntoLanes' auto-layout grid entirely
+// (excluded from lane occupancy too, so it doesn't inflate a lane's height without
+// occupying a cell) and renders at exactly its stored position. New Advanced menu item
+// "Reset Pinned 3D Positions" (App.promptResetPinned3DPositions, main.js) clears every
+// part's pin3D back to null in one bulk, confirmed action — deliberately no per-part
+// unpin, matching what was actually asked for.
 //
 // Deliberately the ONLY module that imports the vendored Three.js/OrbitControls — every
 // other module stays free of a 3D dependency, and canvas.js only ever reaches this file
@@ -103,6 +178,16 @@ const SECTION_BOUNDARY_PADDING = NODE_SIZE * 0.5 + 0.15; // gap between a sectio
 const SECTION_LABEL_GAP = 0.35; // how far above the boundary's top edge the label sprite floats
 const SECTION_LABEL_FONT_PX = 48; // canvas font size the label texture is rasterized at (before world-scale below)
 const SECTION_LABEL_WORLD_SCALE = 0.0035; // world units per texture pixel — tuned against NODE_SIZE so labels read clearly without dwarfing the cubes
+// Connector direction markers/dash (Stage 6, below): custom.json's lineEnds/
+// relationshipStyles are authored for 2D SVG (pixel-space paths, pixel dash units) — DASH_SCALE
+// converts a relationship's dash array into roughly-proportioned Three.js world units for a
+// typically-short connector segment; not a literal pixel match, just a legible approximation
+// at 3D scale (see resolveMarkerFamily's own comment for the same caveat on marker shape).
+const DASH_SCALE = 15;
+const MARKER_OFFSET = NODE_SIZE / 2 + 0.08; // sits just outside the target cube's face, not buried inside it
+const MARKER_CONE_RADIUS = 0.13, MARKER_CONE_HEIGHT = 0.34;
+const MARKER_DIAMOND_RADIUS = 0.15, MARKER_DIAMOND_STRETCH = 1.7;
+const MARKER_SPHERE_RADIUS = 0.13;
 
 // Scratch objects reused across picks (no per-call allocation) — Raycaster/Vector2 hold
 // no state between calls, safe to share at module scope.
@@ -127,6 +212,26 @@ function pickPartAtClientXY(inst, clientX, clientY) {
   if (hits.length === 0) return null;
   const hit = hits[0];
   return { partId: hit.object.userData.partIds[hit.instanceId], mesh: hit.object, instanceId: hit.instanceId };
+}
+
+/** Live-repositions a single InstancedMesh instance in place (finds whichever type mesh
+ * actually owns partId, same lookup pickPartAtClientXY's hit-testing already relies on),
+ * without touching the store or triggering a resync — used mid-drag, for immediate
+ * visual feedback while the store mutation (part.pin3D) and the real resync only happen
+ * once the drag actually finishes. Returns false if partId isn't currently rendered
+ * (shouldn't happen mid-drag, since the drag only starts from a genuine hit, but stays
+ * defensive). */
+const dragScratchMatrix = new THREE.Matrix4();
+function updateInstancePosition(inst, partId, x, y, z) {
+  for (const mesh of inst.typeMeshes.values()) {
+    const idx = mesh.userData.partIds.indexOf(partId);
+    if (idx === -1) continue;
+    dragScratchMatrix.setPosition(x, y, z);
+    mesh.setMatrixAt(idx, dragScratchMatrix);
+    mesh.instanceMatrix.needsUpdate = true;
+    return true;
+  }
+  return false;
 }
 
 /** The focused-instance highlight: a wireframe box slightly larger than a node, moved to
@@ -193,6 +298,39 @@ function themeConnectorColor() {
   return raw || '#888888';
 }
 
+/** Maps a custom.json lineEnds key (e.g. "arrowSmall", "diamondSmallBlack") to an
+ * approximate 3D marker shape family. SVG line-end paths don't translate literally
+ * into WebGL geometry, so this is a deliberate best-effort approximation, not a pixel
+ * match: anything with "arrow" in its name (filled or open, small or large, the
+ * distinctive triple-chevron "arrowStream") becomes a small cone, apex pointing along
+ * the connector; "diamond" becomes an elongated octahedron (Composition/Aggregation's
+ * own line ends); "circle" becomes a sphere. "none", an empty/missing path, or an
+ * unrecognized key gets no marker at all — same as 2D draws nothing there either. */
+function resolveMarkerFamily(lineEndKey) {
+  if (!lineEndKey) return null;
+  const key = lineEndKey.toLowerCase();
+  if (key === 'none') return null;
+  if (key.includes('diamond')) return 'diamond';
+  if (key.includes('circle')) return 'sphere';
+  if (key.includes('arrow')) return 'cone';
+  return null;
+}
+
+/** A lineEnds entry's own fill (e.g. diamondSmallWhite's white vs. diamondSmallBlack's
+ * black) decides the marker's color when it has a real fill; an empty/'transparent'
+ * fill (every "open"/outline arrow variant) instead renders as a wireframe cone in that
+ * shape's own stroke color — 3D's stand-in for "outline only, no fill" since a solid
+ * mesh can't literally be unfilled the way an SVG path can. Falls back to the
+ * connector's own relationship stroke color if the lineEnds entry itself doesn't set
+ * one (matches 2D's own fallback chain). */
+function resolveMarkerAppearance(store, lineEndKey, fallbackStroke) {
+  const le = store.settings.lineEnds?.[lineEndKey];
+  const fill = le?.fill;
+  const solid = !!fill && fill !== 'transparent';
+  const color = solid ? fill : (le?.stroke || fallbackStroke);
+  return { solid, color };
+}
+
 function themeSectionBoundaryColor() {
   // Matches the 2D canvas's own Section-view boundary styling (.section-box's dashed
   // border), which is a neutral, theme-aware color rather than a per-section hue — there
@@ -201,83 +339,172 @@ function themeSectionBoundaryColor() {
   return raw || '#888888';
 }
 
-/** A part's single representative stream for clustering purposes — the alphabetically
- * first of (possibly several) streams it carries, so ordering is deterministic. A part
- * with no streams sorts before any that has one (empty string < any non-empty string). */
-function representativeStream(part) {
+/** A part's single representative stream for clustering purposes. When a Stream filter
+ * is active (activeStreams non-empty), prefers the alphabetically-first stream among
+ * only the ones actually matching that filter — so a part carrying streams outside the
+ * current filter (invisible/irrelevant right now) can't hijack its cluster assignment
+ * away from the stream(s) actually being looked at. Falls back to the alphabetically-
+ * first of ALL the part's streams (no filter active, or none of its streams happen to
+ * match — shouldn't happen since passesStreamFilter already requires at least one
+ * match, but stays defensive). A part with no streams sorts before any that has one
+ * (empty string < any non-empty string). Reported directly: filtering to two streams
+ * ("Purchase Order" and "Inventory Item") on a node carrying both left it clustering
+ * under whichever was alphabetically first regardless of which the filter was actually
+ * about, producing a visually crisscrossed grid. */
+function representativeStream(part, activeStreams) {
   const streams = part.streams || [];
-  return streams.length ? [...streams].sort()[0] : '';
+  if (!streams.length) return '';
+  if (activeStreams && activeStreams.length) {
+    const matched = streams.filter((s) => activeStreams.includes(s));
+    if (matched.length) return [...matched].sort()[0];
+  }
+  return [...streams].sort()[0];
+}
+
+/** A part's lane key: (section, representative stream) — the SAME two-level clustering
+ * grouping ever since Stage 2, just now the unit a GLOBAL row-band gets reserved for
+ * (see computeStreamLanes below) rather than something each type's grid discovers and
+ * lays out independently. */
+function laneKeyOf(part, activeStreams) {
+  return `${part.section || ''}|${representativeStream(part, activeStreams)}`;
 }
 
 /**
- * Lays a type's parts out into a grid, clustering by section first (a new row starts at
- * every section boundary, so each section's parts occupy their own visually distinct
- * band within the layer) — parts must already be pre-sorted by (section, representative
- * stream, id) by the caller, so same-stream parts end up adjacent via sort order even
- * without their own forced row break. Returns each part's (col, row) plus the actual
- * total row count (not a simple ceil(count/cols), since section breaks can leave rows
- * partially filled) so the caller can center the grid correctly.
+ * Stage 6.1's fix for a real reported bug: each type's own Z-layer used to lay out its
+ * grid entirely independently (its own row/col count from its own part count alone),
+ * so even though one type's own stream clusters were internally clean rectangular
+ * blocks (Stage 5.2), a given stream's row position in one type's layer had NO
+ * relationship to that same stream's row position in the NEXT type's layer — the main
+ * dependency chain's connectors (which mostly run BETWEEN adjacent type layers) still
+ * crisscrossed heavily. Reported directly: "there is still significant criss cross
+ * between columns, stream names seem to jump around."
+ *
+ * This computes ONE shared column width (GLOBAL_COLS, sized off the single largest
+ * (type, lane) cell present anywhere) and ONE shared row-band per lane (tall enough for
+ * whichever type needs the most rows for that lane), used by EVERY type's grid — so the
+ * same (section, stream) lane sits at the identical row range, and therefore the same
+ * world Y, in every type's layer. The real cost (communicated up front before
+ * implementing): a type with few parts in a lane still reserves that lane's FULL
+ * (globally tallest) height, so layers with uneven per-lane counts look sparser/more
+ * ragged than the old, tightly-packed-but-misaligned per-type grid.
  */
-function layoutGridWithSectionBreaks(typeParts, cols) {
-  const placements = [];
-  let col = 0, row = 0, prevSection;
-  for (const p of typeParts) {
-    const section = p.section || '';
-    if (prevSection !== undefined && section !== prevSection && col !== 0) { row += 1; col = 0; }
-    prevSection = section;
-    placements.push({ part: p, col, row });
-    col += 1;
-    if (col >= cols) { col = 0; row += 1; }
+function computeStreamLanes(parts, activeStreams) {
+  const LANE_GAP_ROWS = 1;
+  const cellCounts = new Map(); // `${type}||${laneKey}` -> count
+  const laneSortKeys = new Map(); // laneKey -> { section, stream } (for sorting only)
+  let maxCellCount = 1;
+  for (const p of parts) {
+    const key = laneKeyOf(p, activeStreams);
+    laneSortKeys.set(key, { section: p.section || '', stream: representativeStream(p, activeStreams) });
+    const cellKey = `${p.type}||${key}`;
+    const count = (cellCounts.get(cellKey) || 0) + 1;
+    cellCounts.set(cellKey, count);
+    if (count > maxCellCount) maxCellCount = count;
   }
-  const rows = placements.length ? Math.max(...placements.map((pl) => pl.row)) + 1 : 0;
-  return { placements, rows };
+  const cols = Math.max(1, Math.ceil(Math.sqrt(maxCellCount)));
+
+  const sortedLaneKeys = [...laneSortKeys.keys()].sort((a, b) => {
+    const sa = laneSortKeys.get(a), sb = laneSortKeys.get(b);
+    return sa.section.localeCompare(sb.section) || sa.stream.localeCompare(sb.stream);
+  });
+
+  const laneHeight = new Map();
+  for (const key of sortedLaneKeys) laneHeight.set(key, 1);
+  for (const [cellKey, count] of cellCounts) {
+    const key = cellKey.slice(cellKey.indexOf('||') + 2);
+    const needed = Math.ceil(count / cols);
+    if (needed > laneHeight.get(key)) laneHeight.set(key, needed);
+  }
+
+  const laneRowOffset = new Map();
+  let cursor = 0;
+  for (const key of sortedLaneKeys) {
+    laneRowOffset.set(key, cursor);
+    cursor += laneHeight.get(key) + LANE_GAP_ROWS;
+  }
+  const totalRows = Math.max(1, cursor - LANE_GAP_ROWS); // trim the trailing gap
+
+  return { cols, laneRowOffset, totalRows };
 }
 
-/** The "last used" Stream Template preference (see main.js's getCachedStreamTemplate) —
- * read directly from its localStorage cache here rather than imported from main.js,
- * since main.js sits at the TOP of this app's dependency graph (nothing imports it; see
- * DESIGN_DOCUMENT.md §3) and importing it here would invert that. Same key, same shape,
- * deliberately duplicated in miniature rather than restructuring the module graph for a
- * four-line read. */
-function preferredStreamTemplateName() {
+/** Places one type's own (already section+stream-sorted) parts into (col, row)
+ * coordinates, using the GLOBAL lane row-offsets computeStreamLanes assigned — each
+ * lane's own parts start fresh at col 0 on its globally-reserved starting row, wrapping
+ * within that lane at `cols` exactly like the old per-type grid did, just anchored to a
+ * shared offset instead of wherever the previous lane happened to leave off. */
+function layoutTypeIntoLanes(typeParts, activeStreams, laneRowOffset, cols) {
+  const placements = [];
+  let currentLane, col = 0, subRow = 0;
+  for (const p of typeParts) {
+    const lane = laneKeyOf(p, activeStreams);
+    if (lane !== currentLane) { currentLane = lane; col = 0; subRow = 0; }
+    const row = laneRowOffset.get(lane) + subRow;
+    placements.push({ part: p, col, row });
+    col += 1;
+    if (col >= cols) { col = 0; subRow += 1; }
+  }
+  return placements;
+}
+
+/** The 3D View's OWN layer-order template preference (see main.js's
+ * getCachedView3DLayerOrderTemplate) — read directly from its localStorage cache here
+ * rather than imported from main.js, since main.js sits at the TOP of this app's
+ * dependency graph (nothing imports it; see DESIGN_DOCUMENT.md §3) and importing it
+ * here would invert that. Same key, same shape, deliberately duplicated in miniature
+ * rather than restructuring the module graph for a four-line read. Deliberately
+ * SEPARATE from Remap/Generate Stream's own "last used" template preference — which
+ * template to generate a stream FROM is an unrelated concern from how the 3D scene
+ * should visually order its layers. */
+function preferredView3DLayerOrderTemplate() {
   try {
     const cached = JSON.parse(localStorage.getItem('dycad-local-settings-cache') || '{}');
-    return typeof cached.streamTemplate === 'string' && cached.streamTemplate ? cached.streamTemplate : null;
+    return typeof cached.view3DLayerOrderTemplate === 'string' && cached.view3DLayerOrderTemplate ? cached.view3DLayerOrderTemplate : null;
   } catch { return null; }
 }
 
 /**
  * Decides layer order: which element GROUPS come first (broad Z-slabs) and which TYPES
- * come first within a group (finer sub-layers). Three sources, in priority order:
- *   1. The current stream template's value[] — same "last used" default Generate
- *      Stream/Remap/Smart Check View already share (e.g. Enterprise's chain visits
- *      General, then Business, then Application, then Data, in that order).
- *   2. custom.json's cubeOrder — a hand-authored master list covering every element
- *      type, giving a real, deliberate fallback order for anything the active template
- *      doesn't mention (which is most types — a typical template's value[] only spans a
- *      handful). Grouped internally by the same conceptual ArchiMate layering (General,
- *      Strategy/Motivation, Business, Application, Technology, Data,
- *      Implementation/Migration, Unknown) rather than custom.json's own elementGroups
- *      declaration order, which isn't itself meaningful (just JSON authoring order).
- *   3. A type present in NEITHER list (shouldn't happen once cubeOrder covers everything,
- *      but stays a defensive fallback) uses its toolbox tkDisplayOrder, then alphabetical.
- * Group order is each group's first-seen position while walking [...templateValue,
- * ...cubeOrder] in that combined sequence — so the template's own choices always win,
- * and cubeOrder fills in every group the template didn't touch. Type order within a
- * group follows the same combined-sequence position.
+ * come first within a group (finer sub-layers), driven entirely by ONE selected
+ * streamTemplate's value[] — the toolbar's own Layer Order picker (main.js), defaulting
+ * to "All" (formerly custom.json's separate cubeOrder field, now just another
+ * streamTemplate entry covering every one of the 77 known types in a fixed reference
+ * order — "let's make cubeOrder into a new streamTemplate... provide user ability to
+ * switch streamTemplate for 3D view display"). syncSceneData's own parts filter uses
+ * the returned visibleTypes set — a type NEITHER the selected template's value[] NOR
+ * its passive[] (from/to pairs — a template's auxiliary/side relationships, e.g.
+ * Enterprise's BusinessFunction->BusinessProcess, never part of the main value[] chain
+ * but still very much part of that template) mentions isn't shown at all ("...anything
+ * that template's value[] doesn't mention should not be shown" — corrected directly
+ * after an initial version merely reordered unmentioned types instead; corrected AGAIN
+ * after that fix wrongly hid passive-only types along with genuinely-unmentioned ones:
+ * "the layer order appears to be missing the passive elements and their connectors,
+ * when a 'Layer Order' is selected that includes passives"). templateTypeOrder (value[]
+ * only, NOT passive[]) still drives the actual Z-ordering — a passive-only type has no
+ * natural chain position, so it falls to the tkDisplayOrder/alphabetical fallback tier,
+ * same as any other unmentioned-in-value[] type already does; only VISIBILITY, not
+ * ordering, is extended to passive[]'s types. "All"'s value[] covers every known type,
+ * so this filter is a no-op there (today's default, unchanged); picking a short
+ * template like "Enterprise" narrows the scene down to just its value[] AND passive[]
+ * types combined.
+ * Group order is each group's first-seen position while walking the selected
+ * template's value[] in sequence, then whatever elementGroups declaration order didn't
+ * get touched (reachable for a passive-only type's group, e.g. Enterprise's
+ * BusinessFunction — its own group ("Business") happens to already be covered by
+ * value[]'s BusinessCapability/BusinessProcess here, but isn't guaranteed to be in
+ * general, so this fallback genuinely matters, not just defensively).
  */
 function resolveLayerOrder(store) {
   const templates = store.settings.streamTemplates || [];
-  const preferredName = preferredStreamTemplateName();
+  const preferredName = preferredView3DLayerOrderTemplate();
   const template = (preferredName && templates.find((t) => ciEq(t.name, preferredName)))
-    || templates.find((t) => ciEq(t.name, 'Enterprise'))
+    || templates.find((t) => ciEq(t.name, 'All'))
     || templates[0]
     || null;
   const templateValue = template?.value || [];
-  const cubeOrder = store.settings.cubeOrder || [];
+  const templatePassive = template?.passive || [];
 
   const groupOrder = [];
-  for (const type of [...templateValue, ...cubeOrder]) {
+  for (const type of templateValue) {
     const el = elementByType(store, type);
     if (el && !groupOrder.includes(el.group)) groupOrder.push(el.group);
   }
@@ -286,8 +513,12 @@ function resolveLayerOrder(store) {
   }
 
   const templateTypeOrder = new Map(templateValue.map((t, i) => [String(t).toLowerCase(), i]));
-  const cubeTypeOrder = new Map(cubeOrder.map((t, i) => [String(t).toLowerCase(), i]));
-  return { template, groupOrder, templateTypeOrder, cubeTypeOrder };
+  const visibleTypes = new Set(templateTypeOrder.keys());
+  for (const p of templatePassive) {
+    if (p.from) visibleTypes.add(String(p.from).toLowerCase());
+    if (p.to) visibleTypes.add(String(p.to).toLowerCase());
+  }
+  return { template, groupOrder, templateTypeOrder, visibleTypes };
 }
 
 /** Shows partId's own properties in the Properties panel while the 3D tab stays active —
@@ -334,14 +565,18 @@ function jumpToMatching2DView(app, tabId, partId) {
  * through the canvas's command registry (runCommand), since none of its commands apply
  * to a raw part/3D context. Two things, both answering "quick filter, scoped to what I
  * just right-clicked":
- *   - Filter to Streams: sets tab.activeStreams to exactly this part's own streams — the
- *     same field the toolbar's Stream filter reads, so opening that dropdown afterward
- *     shows exactly this selection already checked.
- *   - Connector Type: tab.connectorTypeFilter (null/'c'/'s') — the 3D view draws BOTH
- *     connectorType 'c' (Connectors) and 's' (Streams) together with no distinction by
- *     default, unlike the 2D canvas's own per-view chkShowConnectorType/chkShowStreamType
- *     checkboxes; since a 3D tab isn't backed by a view, this is the tab-scoped
- *     equivalent instead, offered here rather than as its own toolbar control. */
+ *   - Filter to Stream: one clickable item per stream this part actually carries (plus,
+ *     when it carries more than one, an "All of the above" item for the old lump-them-
+ *     together behavior) — sets tab.activeStreams, the same field the toolbar's Stream
+ *     filter reads, so opening that dropdown afterward shows exactly this selection
+ *     already checked. A single combined "Filter to Streams: A, B" item used to be the
+ *     only option here, which made a multi-stream part's individual streams
+ *     unselectable one at a time — reported directly: "if the stream has multiple I
+ *     can't select one or the other."
+ * Connector Type used to also live here (a quick null/'c'/'s' filter) but has moved to
+ * the toolbar's own Connector Type filter (main.js), matching Stream/Type/Section's
+ * existing dropdown pattern instead of being buried in a right-click menu — see
+ * tab.activeConnectorTypes (state.js's createTab). */
 function showNodeContextMenu(app, tab, partId, clientX, clientY) {
   document.querySelectorAll('.view3d-context-menu').forEach((m) => m.remove());
   const store = app.store;
@@ -349,25 +584,21 @@ function showNodeContextMenu(app, tab, partId, clientX, clientY) {
   if (!part) return;
 
   const streams = part.streams || [];
-  const connectorTypeOptions = [
-    { value: null, label: 'All' },
-    { value: 'c', label: 'Connectors' },
-    { value: 's', label: 'Streams' },
-  ];
+  const isSoleActiveStream = (s) => !!tab.activeStreams && tab.activeStreams.length === 1 && tab.activeStreams[0] === s;
+  const isAllStreamsActive = streams.length > 1 && !!tab.activeStreams && tab.activeStreams.length === streams.length && streams.every((s) => tab.activeStreams.includes(s));
   const items = [
     { header: true, label: part.label },
-    {
-      label: streams.length ? `Filter to Streams: ${streams.join(', ')}` : 'This node has no streams',
-      disabled: streams.length === 0,
-      onClick: () => { tab.activeStreams = [...streams]; app.render(); },
-    },
+    { header: true, label: 'Filter to Stream' },
+    ...(streams.length
+      ? streams.map((s) => ({
+          label: `${isSoleActiveStream(s) ? '✓ ' : '  '}${s}`,
+          onClick: () => { tab.activeStreams = [s]; app.render(); },
+        }))
+      : [{ label: 'This node has no streams', disabled: true, onClick: () => {} }]),
+    ...(streams.length > 1
+      ? [{ label: `${isAllStreamsActive ? '✓ ' : '  '}All of the above (${streams.join(', ')})`, onClick: () => { tab.activeStreams = [...streams]; app.render(); } }]
+      : []),
     ...(tab.activeStreams != null ? [{ label: 'Clear Stream Filter', onClick: () => { tab.activeStreams = null; app.render(); } }] : []),
-    { separator: true },
-    { header: true, label: 'Connector Type' },
-    ...connectorTypeOptions.map((opt) => ({
-      label: `${(tab.connectorTypeFilter ?? null) === opt.value ? '✓' : '  '} ${opt.label}`,
-      onClick: () => { tab.connectorTypeFilter = opt.value; app.render(); },
-    })),
   ];
 
   const menu = document.createElement('div');
@@ -513,12 +744,14 @@ function makeSectionLabelSprite(text, color) {
 /** Draws one section's boundary — a flat rectangle outline (LineLoop, no fill) around
  * its cluster of cubes within THIS type's own grid at THIS type's own Z, padded by
  * SECTION_BOUNDARY_PADDING so it doesn't clip through the cubes — plus a billboarded
- * text-sprite label floating just above its top edge. Section clustering (the row-break
- * grouping this boundary visualizes) has always been per-TYPE, never aggregated across
- * types/Z-layers (see layoutGridWithSectionBreaks and its Stage 2 history) — so a
- * section spanning multiple types gets one boundary+label per type it appears in, at
- * that type's own Z, matching the clustering it's actually outlining rather than
- * inventing a new cross-layer aggregation this file has never done. Both objects are
+ * text-sprite label floating just above its top edge. The BOUNDARY DRAWING itself stays
+ * per-TYPE (never aggregated into one box spanning multiple Z-layers) — so a section
+ * spanning multiple types still gets one boundary+label per type it appears in, at that
+ * type's own Z, matching the cluster it's actually outlining. Its ROW POSITION, though,
+ * is now globally shared across every type (Stage 6.1's computeStreamLanes) — a
+ * section's cluster sits at the same row range in every type it appears in, so its
+ * boundaries end up vertically aligned across Z-layers even though each is still its
+ * own separate drawn object. Both objects are
  * tracked on inst.sectionBoundaries for clearSectionBoundaries to dispose on the next
  * resync. */
 function addSectionBoundary(inst, sectionName, bounds, z) {
@@ -603,7 +836,7 @@ function createInstance(app, tab, container) {
 
   const inst = {
     renderer, scene, camera, controls, container, resizeObserver, animId: null,
-    typeMeshes: new Map(), connectorLines: null, hasFramedOnce: false, lastSignature: null,
+    typeMeshes: new Map(), connectorLineGroups: new Map(), connectorMarkerMeshes: new Map(), hasFramedOnce: false, lastSignature: null,
     focusMarker: null, focusedPartId: null, jumpedForPartId: null, focusedPartPosition: null,
     simMeshes: new Map(), lastSimSignature: null, partPositions: null,
     sectionBoundaries: [],
@@ -645,8 +878,64 @@ function createInstance(app, tab, container) {
     const hit = pickPartAtClientXY(inst, e.clientX, e.clientY);
     if (hit) jumpToMatching2DView(app, tab.id, hit.partId);
   });
+  // Right-click-drag to reposition a node in free 3D space (part.pin3D) — reported
+  // directly: "in 3d view can it be supported to right click an object and move it
+  // around?" Distinguished from a plain right-click (which opens showNodeContextMenu)
+  // the same way left-click-vs-OrbitControls-drag already is above: only a genuine drag
+  // (moved past CLICK_DRAG_TOLERANCE) counts. RIGHT is already free of any OrbitControls
+  // behavior (mouseButtons.RIGHT: null, above), so a right-drag never fights the camera.
+  // Dragging moves along a plane facing the camera, through the part's own CURRENT
+  // position — standard screen-space-drag-in-3D technique, lets the drag reach anywhere
+  // in that view's depth-perpendicular plane without needing separate depth controls.
+  // The dragged instance's own matrix updates live (immediate visual feedback);
+  // connector lines only catch up once the drag ends and a real resync runs — rebuilding
+  // every connector's shared per-relationship BufferGeometry on every mousemove isn't
+  // worth it for what's ultimately just cosmetic mid-drag lag.
+  let rightDownPos = null, rightDragPartId = null, rightDragging = false, rightJustDragged = false;
+  const dragPlane = new THREE.Plane();
+  const dragPoint = new THREE.Vector3();
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    if (e.button !== 2) return;
+    const hit = pickPartAtClientXY(inst, e.clientX, e.clientY);
+    rightDownPos = { x: e.clientX, y: e.clientY };
+    rightDragPartId = hit ? hit.partId : null;
+    rightDragging = false;
+  });
+  renderer.domElement.addEventListener('pointermove', (e) => {
+    if (rightDragPartId == null) return;
+    if (!rightDragging) {
+      if (Math.hypot(e.clientX - rightDownPos.x, e.clientY - rightDownPos.y) <= CLICK_DRAG_TOLERANCE) return;
+      rightDragging = true;
+      const current = inst.partPositions.get(rightDragPartId);
+      const camDir = new THREE.Vector3();
+      inst.camera.getWorldDirection(camDir);
+      const anchor = current ? new THREE.Vector3(current.x, current.y, current.z) : new THREE.Vector3();
+      dragPlane.setFromNormalAndCoplanarPoint(camDir, anchor);
+    }
+    const rect = inst.renderer.domElement.getBoundingClientRect();
+    pointerNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    pointerNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointerNDC, inst.camera);
+    if (raycaster.ray.intersectPlane(dragPlane, dragPoint)) {
+      updateInstancePosition(inst, rightDragPartId, dragPoint.x, dragPoint.y, dragPoint.z);
+    }
+  });
+  renderer.domElement.addEventListener('pointerup', (e) => {
+    if (e.button !== 2) return;
+    if (rightDragging && rightDragPartId != null) {
+      const part = app.store.findPart(rightDragPartId);
+      if (part) {
+        part.pin3D = { x: dragPoint.x, y: dragPoint.y, z: dragPoint.z };
+        app.store.touchPart(part);
+        app.recordAndRender();
+      }
+      rightJustDragged = true;
+    }
+    rightDownPos = null; rightDragPartId = null; rightDragging = false;
+  });
   renderer.domElement.addEventListener('contextmenu', (e) => {
     e.preventDefault(); // OrbitControls also does this unconditionally; harmless twice
+    if (rightJustDragged) { rightJustDragged = false; return; } // a real drag just happened -- don't also open the menu
     const hit = pickPartAtClientXY(inst, e.clientX, e.clientY);
     if (hit) showNodeContextMenu(app, tab, hit.partId, e.clientX, e.clientY);
   });
@@ -702,13 +991,13 @@ function disposeInstance(inst) {
 function computeSignature(app, tab) {
   const { store } = app;
   return JSON.stringify([
-    store.doc.parts.map((p) => `${p.id}:${p.type}:${(p.streams || []).join('+')}:${p.section || ''}`).join(','),
-    store.doc.connectors.map((c) => `${c.id}:${c.from}:${c.to}`).join(','),
+    store.doc.parts.map((p) => `${p.id}:${p.type}:${(p.streams || []).join('+')}:${p.section || ''}:${p.pin3D ? `${p.pin3D.x},${p.pin3D.y},${p.pin3D.z}` : ''}`).join(','),
+    store.doc.connectors.map((c) => `${c.id}:${c.from}:${c.to}:${c.relationship || ''}:${c.connectorType || ''}`).join(','),
     tab.activeStreams,
     tab.activeElementTypes,
     tab.activeSections,
-    tab.connectorTypeFilter,
-    preferredStreamTemplateName(),
+    tab.activeConnectorTypes,
+    preferredView3DLayerOrderTemplate(),
     document.body.dataset.theme,
   ]);
 }
@@ -725,19 +1014,33 @@ function syncSceneData(app, tab, inst) {
     mesh.material.dispose();
   }
   inst.typeMeshes.clear();
-  if (inst.connectorLines) {
-    inst.scene.remove(inst.connectorLines);
-    inst.connectorLines.geometry.dispose();
-    inst.connectorLines.material.dispose();
-    inst.connectorLines = null;
+  for (const lines of inst.connectorLineGroups.values()) {
+    inst.scene.remove(lines);
+    lines.geometry.dispose();
+    lines.material.dispose();
   }
+  inst.connectorLineGroups.clear();
+  for (const mesh of inst.connectorMarkerMeshes.values()) {
+    inst.scene.remove(mesh);
+    mesh.geometry.dispose(); // shared per-family geometry within one rebuild -- dispose() is idempotent, safe to call once per mesh
+    mesh.material.dispose();
+  }
+  inst.connectorMarkerMeshes.clear();
   clearSectionBoundaries(inst);
   inst.scene.background = new THREE.Color(themeBackgroundColor());
 
-  const parts = store.doc.parts.filter((p) => passesStreamFilter(tab, p.streams) && passesElementTypeFilter(tab, p.type) && passesSectionFilter(tab, p.section));
+  // Layer Order (the toolbar's own template picker) doubles as a type filter, not just
+  // an ordering preference: a type NEITHER the selected template's value[] NOR its
+  // passive[] from/to pairs mention isn't shown at all — "All"'s value[] covers every
+  // known type, so this is a no-op there (today's default, unchanged); picking a real
+  // template like "Enterprise" narrows the scene down to just the types it actually
+  // cares about (value[] AND passive[] combined — see resolveLayerOrder's own comment
+  // for why passive[]'s types must count as visible too).
+  const { groupOrder, templateTypeOrder, visibleTypes } = resolveLayerOrder(store);
+  const parts = store.doc.parts.filter((p) =>
+    passesStreamFilter(tab, p.streams) && passesElementTypeFilter(tab, p.type) && passesSectionFilter(tab, p.section) &&
+    visibleTypes.has(String(p.type).toLowerCase()));
   if (parts.length === 0) { inst.partPositions = new Map(); return; }
-
-  const { groupOrder, templateTypeOrder, cubeTypeOrder } = resolveLayerOrder(store);
 
   const byType = new Map();
   for (const p of parts) {
@@ -753,11 +1056,20 @@ function syncSceneData(app, tab, inst) {
       type, el,
       groupIdx: groupIdx === -1 ? groupOrder.length : groupIdx,
       templateIdx: templateTypeOrder.has(lower) ? templateTypeOrder.get(lower) : Infinity,
-      cubeIdx: cubeTypeOrder.has(lower) ? cubeTypeOrder.get(lower) : Infinity,
       tkOrder: el?.tkDisplayOrder ?? 999,
     };
   });
-  typeEntries.sort((a, b) => (a.groupIdx - b.groupIdx) || (a.templateIdx - b.templateIdx) || (a.cubeIdx - b.cubeIdx) || (a.tkOrder - b.tkOrder) || a.type.localeCompare(b.type));
+  typeEntries.sort((a, b) => (a.groupIdx - b.groupIdx) || (a.templateIdx - b.templateIdx) || (a.tkOrder - b.tkOrder) || a.type.localeCompare(b.type));
+
+  // Stage 6.1: ONE shared column width + ONE shared row-band per (section, stream) lane,
+  // computed across every currently-visible part regardless of type, so a given lane
+  // sits at the identical row range (and therefore world Y) in EVERY type's own layer —
+  // see computeStreamLanes' own comment for the full rationale/tradeoff. A pinned part
+  // (part.pin3D, set by right-click-dragging it — see the pointerdown/pointermove/
+  // pointerup handlers below) skips the auto-layout grid entirely, so it's excluded from
+  // lane occupancy here too — it would otherwise inflate a lane's cell count without
+  // actually occupying a grid cell.
+  const { cols: laneCols, laneRowOffset, totalRows: laneRows } = computeStreamLanes(parts.filter((p) => !p.pin3D), tab.activeStreams);
 
   let z = 0;
   let prevGroupIdx = null;
@@ -769,11 +1081,21 @@ function syncSceneData(app, tab, inst) {
     if (prevGroupIdx !== null && entry.groupIdx !== prevGroupIdx) z += GROUP_LAYER_GAP;
     prevGroupIdx = entry.groupIdx;
 
-    // Cluster by section (a new row starts at every section boundary), then by
-    // representative stream within a section — see layoutGridWithSectionBreaks' own
-    // comment for why this needs an actual row count, not a simple ceil(count/cols).
-    const typeParts = [...byType.get(entry.type)].sort((a, b) =>
-      (a.section || '').localeCompare(b.section || '') || representativeStream(a).localeCompare(representativeStream(b)) || a.id.localeCompare(b.id));
+    // Cluster by section, then by representative stream within a section (representativeStream
+    // itself prefers a stream from the active Stream filter when one's set, so a multi-
+    // stream part clusters by whichever stream is actually being looked at rather than
+    // an arbitrary alphabetical pick across all its streams) — parts must be pre-sorted
+    // this way so layoutTypeIntoLanes sees each lane's own parts contiguously. Pinned
+    // parts (part.pin3D) are pulled out of the auto-layout grid entirely — placed at
+    // their own stored position below instead — and appended AFTER the grid-laid-out
+    // ones, so mesh.userData.partIds/the InstancedMesh instance count still cover every
+    // part of this type either way.
+    const repStream = (p) => representativeStream(p, tab.activeStreams);
+    const allTypeParts = byType.get(entry.type);
+    const pinnedParts = allTypeParts.filter((p) => p.pin3D);
+    const gridParts = allTypeParts.filter((p) => !p.pin3D).sort((a, b) =>
+      (a.section || '').localeCompare(b.section || '') || repStream(a).localeCompare(repStream(b)) || a.id.localeCompare(b.id));
+    const typeParts = [...gridParts, ...pinnedParts];
     const count = typeParts.length;
     const color = new THREE.Color(groupFill(app, entry.el));
     const geometry = new THREE.BoxGeometry(NODE_SIZE, NODE_SIZE, NODE_SIZE);
@@ -784,15 +1106,17 @@ function syncSceneData(app, tab, inst) {
     mesh.userData.z = z;
     mesh.userData.partIds = typeParts.map((p) => p.id);
 
-    const cols = Math.ceil(Math.sqrt(count));
-    const { placements, rows } = layoutGridWithSectionBreaks(typeParts, cols);
+    const cols = laneCols, rows = laneRows;
+    const gridPlacements = layoutTypeIntoLanes(gridParts, tab.activeStreams, laneRowOffset, cols);
+    const placements = [
+      ...gridPlacements.map(({ part, col, row }) => ({ part, x: (col - (cols - 1) / 2) * NODE_SPACING, y: (row - (rows - 1) / 2) * NODE_SPACING, z })),
+      ...pinnedParts.map((part) => ({ part, x: part.pin3D.x, y: part.pin3D.y, z: part.pin3D.z })),
+    ];
     const sectionBounds = new Map(); // section name -> {minX, maxX, minY, maxY}, this type's own grid only
-    placements.forEach(({ part, col, row }, i) => {
-      const x = (col - (cols - 1) / 2) * NODE_SPACING;
-      const y = (row - (rows - 1) / 2) * NODE_SPACING;
-      matrix.setPosition(x, y, z);
+    placements.forEach(({ part, x, y, z: partZ }, i) => {
+      matrix.setPosition(x, y, partZ);
       mesh.setMatrixAt(i, matrix);
-      partPositions.set(part.id, { x, y, z, model: part.model });
+      partPositions.set(part.id, { x, y, z: partZ, model: part.model });
       minX = Math.min(minX, x); maxX = Math.max(maxX, x);
       minY = Math.min(minY, y); maxY = Math.max(maxY, y);
 
@@ -837,28 +1161,117 @@ function syncSceneData(app, tab, inst) {
     }
   }
 
-  // Connector lines: one visible iff BOTH endpoints are currently visible (same
-  // convention the 2D canvas already uses — see passesStreamFilter's own comment), AND
-  // it matches tab.connectorTypeFilter if one is set (null = both 'c'/Connectors and
-  // 's'/Streams together, the default — see showNodeContextMenu's own comment for where
-  // this gets set). A single LineSegments/BufferGeometry for every visible connector, one
-  // draw call total, the line-drawing equivalent of the InstancedMesh approach above.
-  const linePositions = [];
+  // Connector lines + direction markers: one connector visible iff BOTH endpoints are
+  // currently visible (same convention the 2D canvas already uses — see
+  // passesStreamFilter's own comment), AND its connectorType matches
+  // tab.activeConnectorTypes if that's set (null = both 'c'/Connectors and 's'/Streams
+  // together, the default — set via the toolbar's Connector Type filter, main.js).
+  // Reported directly: asked to add direction indicators "ideally matching line end
+  // settings, and line characteristics as well" — so rather than one shared undirected
+  // LineSegments for every connector (the original Stage 2 approach), connectors are
+  // grouped by relationship (custom.json's relationshipStyles, the SAME lookup the 2D
+  // canvas's own edge rendering uses), and each group gets its own colored/dashed
+  // LineSegments plus, where that relationship's lineEnds entry has a real marker
+  // (fromLineEndSettingType/toLineEndSettingType), an InstancedMesh of small
+  // cone/diamond/sphere shapes at the marked end, oriented along the connector — see
+  // resolveMarkerFamily/resolveMarkerAppearance above for the SVG-path-to-3D-primitive
+  // approximation this relies on, and DASH_SCALE's own comment for the dash-unit
+  // conversion. Still bounded to a handful of draw calls total (one line mesh + up to
+  // two marker meshes per DISTINCT relationship actually present, not per connector),
+  // consistent with the type-grouped InstancedMesh approach above.
+  const styleGroups = new Map(); // relationship name -> { style, positions:number[], toMarkers, fromMarkers }
+  const activeConnectorTypes = tab.activeConnectorTypes;
   for (const c of store.doc.connectors) {
-    if (tab.connectorTypeFilter != null && c.connectorType !== tab.connectorTypeFilter) continue;
+    if (activeConnectorTypes != null && !activeConnectorTypes.includes(c.connectorType)) continue;
     const fromPos = partPositions.get(c.from);
     const toPos = partPositions.get(c.to);
     if (!fromPos || !toPos) continue;
-    linePositions.push(fromPos.x, fromPos.y, fromPos.z, toPos.x, toPos.y, toPos.z);
+
+    const relKey = c.relationship || '';
+    let group = styleGroups.get(relKey);
+    if (!group) {
+      const style = (store.settings.relationshipStyles || []).find((s) => ciEq(s.type, relKey));
+      group = { style, positions: [], toMarkers: [], fromMarkers: [] };
+      styleGroups.set(relKey, group);
+    }
+    group.positions.push(fromPos.x, fromPos.y, fromPos.z, toPos.x, toPos.y, toPos.z);
+
+    const dir = new THREE.Vector3(toPos.x - fromPos.x, toPos.y - fromPos.y, toPos.z - fromPos.z);
+    if (group.style && dir.lengthSq() > 0) {
+      dir.normalize();
+      const toFamily = resolveMarkerFamily(group.style.toLineEndSettingType);
+      if (toFamily) group.toMarkers.push({ pos: new THREE.Vector3(toPos.x, toPos.y, toPos.z), dir, family: toFamily });
+      const fromFamily = resolveMarkerFamily(group.style.fromLineEndSettingType);
+      if (fromFamily) group.fromMarkers.push({ pos: new THREE.Vector3(fromPos.x, fromPos.y, fromPos.z), dir: dir.clone().negate(), family: fromFamily });
+    }
   }
-  if (linePositions.length > 0) {
-    const lineGeometry = new THREE.BufferGeometry();
-    lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
-    const lineMaterial = new THREE.LineBasicMaterial({ color: new THREE.Color(themeConnectorColor()), transparent: true, opacity: 0.35 });
-    const lines = new THREE.LineSegments(lineGeometry, lineMaterial);
-    lines.userData.connectorCount = linePositions.length / 6;
+
+  const markerGeometryByFamily = {
+    cone: new THREE.ConeGeometry(MARKER_CONE_RADIUS, MARKER_CONE_HEIGHT, 10),
+    diamond: (() => { const g = new THREE.OctahedronGeometry(MARKER_DIAMOND_RADIUS, 0); g.scale(1, MARKER_DIAMOND_STRETCH, 1); return g; })(),
+    sphere: new THREE.SphereGeometry(MARKER_SPHERE_RADIUS, 10, 8),
+  };
+  const m4 = new THREE.Matrix4(), quat = new THREE.Quaternion(), unitScale = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
+
+  const addMarkerMesh = (relKey, end, markers, lineEndKey, fallbackStroke) => {
+    if (markers.length === 0) return;
+    const family = resolveMarkerFamily(lineEndKey);
+    if (!family) return;
+    const { solid, color } = resolveMarkerAppearance(store, lineEndKey, fallbackStroke);
+    const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(color), wireframe: !solid });
+    const mesh = new THREE.InstancedMesh(markerGeometryByFamily[family], material, markers.length);
+    markers.forEach((mk, i) => {
+      quat.setFromUnitVectors(up, mk.dir);
+      const pos = mk.pos.clone().sub(mk.dir.clone().multiplyScalar(MARKER_OFFSET));
+      m4.compose(pos, quat, unitScale);
+      mesh.setMatrixAt(i, m4);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.userData.relationship = relKey;
+    mesh.userData.end = end;
+    mesh.userData.family = family;
+    inst.scene.add(mesh);
+    inst.connectorMarkerMeshes.set(`${relKey}|${end}`, mesh);
+  };
+
+  for (const [relKey, group] of styleGroups) {
+    if (group.positions.length === 0) continue;
+    const stroke = group.style?.stroke || themeConnectorColor();
+    const dash = group.style?.dash || [];
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(group.positions, 3));
+    let material;
+    if (dash.length > 0) {
+      const dashSize = Math.max(dash[0] / DASH_SCALE, 0.02);
+      const gapSize = Math.max((dash[1] ?? dash[0]) / DASH_SCALE, 0.02);
+      material = new THREE.LineDashedMaterial({ color: new THREE.Color(stroke), dashSize, gapSize, transparent: true, opacity: 0.55 });
+      // Per-CONNECTOR line distance, reset to 0 at the start of every 2-vertex segment —
+      // deliberately NOT the built-in cumulative computeLineDistances() helper (designed
+      // for one continuous polyline), which would carry an arbitrary running total across
+      // this buffer's many disjoint segments, starting most of them mid-dash.
+      const vertexCount = group.positions.length / 3;
+      const lineDistances = new Float32Array(vertexCount);
+      for (let i = 0; i < vertexCount; i += 2) {
+        const ax = group.positions[i * 3], ay = group.positions[i * 3 + 1], az = group.positions[i * 3 + 2];
+        const bx = group.positions[i * 3 + 3], by = group.positions[i * 3 + 4], bz = group.positions[i * 3 + 5];
+        lineDistances[i] = 0;
+        lineDistances[i + 1] = Math.hypot(bx - ax, by - ay, bz - az);
+      }
+      geometry.setAttribute('lineDistance', new THREE.Float32BufferAttribute(lineDistances, 1));
+    } else {
+      material = new THREE.LineBasicMaterial({ color: new THREE.Color(stroke), transparent: true, opacity: 0.55 });
+    }
+    const lines = new THREE.LineSegments(geometry, material);
+    lines.userData.connectorCount = group.positions.length / 6;
+    lines.userData.relationship = relKey;
     inst.scene.add(lines);
-    inst.connectorLines = lines;
+    inst.connectorLineGroups.set(relKey, lines);
+
+    if (group.style) {
+      addMarkerMesh(relKey, 'to', group.toMarkers, group.style.toLineEndSettingType, stroke);
+      addMarkerMesh(relKey, 'from', group.fromMarkers, group.style.fromLineEndSettingType, stroke);
+    }
   }
 
   // Frame the camera to the data's actual extent — only the FIRST time this tab gets
@@ -935,12 +1348,28 @@ function getDebugSceneInfo(tabId) {
   const sectionLabels = inst.sectionBoundaries
     .filter((obj) => obj.type === 'Sprite')
     .map((obj) => ({ sectionName: obj.userData.sectionName, position: { x: obj.position.x, y: obj.position.y, z: obj.position.z } }));
+  const connectorGroups = {};
+  let connectorCount = 0;
+  for (const [relKey, lines] of inst.connectorLineGroups) {
+    connectorCount += lines.userData.connectorCount;
+    connectorGroups[relKey] = {
+      count: lines.userData.connectorCount,
+      color: `#${lines.material.color.getHexString()}`,
+      dashed: lines.material.type === 'LineDashedMaterial',
+      meshUuid: lines.uuid,
+    };
+  }
+  const connectorMarkers = {};
+  for (const [key, mesh] of inst.connectorMarkerMeshes) {
+    connectorMarkers[key] = { count: mesh.count, family: mesh.userData.family, color: `#${mesh.material.color.getHexString()}`, wireframe: mesh.material.wireframe };
+  }
   return {
     types,
     meshCount: inst.typeMeshes.size,
     hasFramedOnce: inst.hasFramedOnce,
-    connectorCount: inst.connectorLines ? inst.connectorLines.userData.connectorCount : 0,
-    connectorLinesUuid: inst.connectorLines ? inst.connectorLines.uuid : null,
+    connectorCount,
+    connectorGroups,
+    connectorMarkers,
     focusedPartId: inst.focusedPartId,
     jumpedForPartId: inst.jumpedForPartId,
     focusMarkerVisible: inst.focusMarker ? inst.focusMarker.visible : false,

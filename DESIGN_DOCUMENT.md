@@ -521,6 +521,80 @@ so a future session doesn't have to re-derive it from scratch):
     across streams from two different sections keeps whichever section it was first
     created with, rather than flipping to whichever stream runs last).
 
+- **Stage 6 series (done)** — four further real-usage fixes; see `view3d.js`'s own
+  inline Stage 5.2/6/6.1/6.2/6.3 header comments for full rationale/tradeoffs on each.
+  - **Cross-layer stream crisscrossing.** Stage 5.2 fixed a multi-stream part clustering
+    under an arbitrary alphabetically-first stream regardless of the active filter, and
+    forced a row break on a stream change within one type's own grid. Stage 6.1 went
+    further: each type's Z-layer had still been computing its own row/col grid entirely
+    independently, so a stream's row in one layer had no relationship to that stream's
+    row in the next — `layoutGridWithSectionBreaks` was replaced by
+    `computeStreamLanes`/`layoutTypeIntoLanes`, giving every `(section, stream)` lane ONE
+    shared column width and row-band across ALL currently-visible parts regardless of
+    type, so a lane sits at the identical world Y in every layer. Traded off knowingly: a
+    type with few parts in a lane still reserves that lane's full (globally tallest)
+    height.
+  - **Connector direction indicators + Connector Type as a toolbar filter (Stage 6).**
+    Connector lines used to be one flat, undirected, neutral-colored `LineSegments` for
+    every connector. Now grouped by relationship (`settings.relationshipStyles`, the SAME
+    lookup 2D's edge rendering uses) into per-relationship colored/dashed `LineSegments`,
+    plus a cone/diamond/sphere `InstancedMesh` marker (`resolveMarkerFamily` — a
+    best-effort SVG-path-to-3D-primitive approximation, not pixel-exact) at whichever
+    end(s) that relationship's `lineEnds` entry marks. `tab.connectorTypeFilter`
+    (right-click-only, single-select) was renamed `tab.activeConnectorTypes` and promoted
+    to its own toolbar dropdown, matching Stream/Type/Section's existing pattern.
+  - **`cubeOrder` retired into a `streamTemplates` entry (Stage 6.2).** `cubeOrder` used
+    to be a separate top-level `custom.json` field, ALWAYS blended in underneath whichever
+    stream template happened to be preferred elsewhere (Remap/Generate Stream's shared
+    "last used" pick) as `resolveLayerOrder`'s fallback ordering for any type the active
+    template's `value[]` didn't mention. It's now just another `streamTemplates` entry
+    named `"All"` (`value[]` is the old `cubeOrder` list, verbatim), selected via a new
+    toolbar-only "Layer Order" `<select>` (`view3DLayerOrderTemplate` in Local Settings —
+    deliberately its OWN preference, separate from Remap/Generate Stream's). Defaults to
+    `"All"` (today's out-of-the-box look, unchanged). `resolveLayerOrder`'s
+    `templateTypeOrder` now does double duty: it's still the sequencing for whatever the
+    selected template DOES mention, but `syncSceneData`'s own parts filter ALSO uses it to
+    decide what renders at all — a type the selected template's `value[]` doesn't mention
+    isn't shown in the scene, period (corrected directly after an initial version only
+    reordered it via the `tkDisplayOrder`/alphabetical fallback instead — "anything that
+    template's value[] doesn't mention should not be shown"). Corrected AGAIN right
+    after: that fix also hid a type mentioned ONLY in the selected template's
+    `passive[]` from/to pairs (its auxiliary/side relationships — e.g. Enterprise's
+    BusinessFunction, never part of `value[]`'s main chain) — "the layer order appears
+    to be missing the passive elements and their connectors, when a 'Layer Order' is
+    selected that includes passives." `resolveLayerOrder`'s `visibleTypes` set is now
+    `value[]` types UNION every `passive[]` entry's `from`/`to` type; `templateTypeOrder`
+    (drives actual Z-ordering) still comes from `value[]` alone — a passive-only type has
+    no natural chain position, so it falls to the `tkDisplayOrder`/alphabetical fallback
+    tier, same as any other type `value[]` doesn't mention already did; only VISIBILITY
+    was ever the bug. `"All"`'s `value[]` covers every known type, so nothing is hidden
+    by default; picking a short template like `"Enterprise"` narrows the WHOLE scene
+    down to just the types it actually cares about — `value[]` plus `passive[]`
+    combined.
+  - **Right-click-drag to reposition + Reset Pinned 3D Positions (Stage 6.3).** Reported
+    directly: "in 3d view can it be supported to right click an object and move it
+    around?" — then, for the persistence model: "let's try option 2 persist, with new
+    locations treated as pinned. Create new option somewhere to reset - which clears all
+    'pinned' new locations." New `Part.pin3D` field (`null`, or a real `{x,y,z}` world
+    position, persisted with the document). Right-click-dragging a node past
+    `CLICK_DRAG_TOLERANCE` (the SAME drag-vs-click distinction the left-click focus
+    handler already uses) sets it, dragging along a plane facing the camera through the
+    part's current position (`Plane.setFromNormalAndCoplanarPoint` + `Raycaster` against
+    it — standard screen-space-drag-in-3D). A pinned part skips
+    `computeStreamLanes`/`layoutTypeIntoLanes`'s auto-layout grid entirely (excluded from
+    lane occupancy too, so it doesn't inflate a lane's reserved height without occupying
+    a cell) and renders at exactly its stored position instead. New Advanced menu item
+    "Reset Pinned 3D Positions" (`App.promptResetPinned3DPositions`) clears EVERY part's
+    `pin3D` back to `null` in one bulk, confirmed action — deliberately no per-part
+    unpin, matching what was actually asked for. `RIGHT` was already unbound in
+    `OrbitControls.mouseButtons` (Stage 5.1, freed for the context menu), so a right-drag
+    never fights the camera. Testing note: Playwright's own `page.mouse.down(button:
+    'right')` fires a synthetic `contextmenu` event prematurely, ON mousedown rather than
+    after release — a documented Chromium/CDP automation quirk, not real-browser
+    behavior — so the permanent regression check dispatches raw `PointerEvent`s plus a
+    manually-fired `contextmenu` event, in the actual order a real browser uses, rather
+    than relying on `page.mouse`.
+
 ## 10. Testing strategy
 
 `tests/run_all.py` — no test framework, matching the app's own zero-dependency stance.

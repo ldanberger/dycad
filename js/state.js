@@ -36,6 +36,8 @@ async function BatchScript_QuickStart() {
   // Zoom out a bit so the whole thing is visible at a glance.
   tab.viewport.zoom = 0.6;
 
+  remap(app, tab, { pattern: 'default' });
+
   app.recordAndRender();
   messageLog('Done');
 }
@@ -284,9 +286,14 @@ class Store {
     return this.doc.connectors.find((c) => ciEq(c.from, from) && ciEq(c.to, to) && ciEq(c.model, model) && ciEq(c.connectorType, connectorType));
   }
 
-  createPart({ type, label, model, streams = [], note = '', order = 0, other = {}, xIds = '', description = '', script = '', scriptEnabled = false, section = '' }) {
+  // pin3D: null (auto-layout, the default) or a real {x,y,z} world position — set by
+  // right-click-dragging a node in the 3D View (view3d.js). A pinned part skips
+  // computeStreamLanes/layoutTypeIntoLanes' grid entirely and renders at exactly this
+  // position instead; Advanced > Reset Pinned 3D Positions clears every part's pin3D
+  // back to null at once. Persisted (part of the document), so a pin survives Save/Load.
+  createPart({ type, label, model, streams = [], note = '', order = 0, other = {}, xIds = '', description = '', script = '', scriptEnabled = false, section = '', pin3D = null }) {
     const stamp = nowStamp();
-    const part = { id: newId(), type, label: label ?? '', rawLabel: label ?? '', model, streams, note, order, other, xIds, description, script, scriptEnabled: !!scriptEnabled, section, createdAt: stamp, updatedAt: stamp };
+    const part = { id: newId(), type, label: label ?? '', rawLabel: label ?? '', model, streams, note, order, other, xIds, description, script, scriptEnabled: !!scriptEnabled, section, pin3D, createdAt: stamp, updatedAt: stamp };
     this.doc.parts.push(part);
     return part;
   }
@@ -491,12 +498,14 @@ class Store {
       // change the existing filter behavior for anyone already using it.
       connectorLevels: 0,
       selectedSectionId: null,
-      // 3D-tab-only: which connectorType(s) to draw — null = both 'c' (Connectors) and
-      // 's' (Streams) together, the default; set via the 3D node right-click menu's
-      // Connector Type quick filter. A 3D tab isn't backed by a view, so this can't live
-      // on view.chkShowConnectorType/chkShowStreamType the way the 2D canvas's own
-      // equivalent does — this is the 3D-only counterpart, tab-scoped instead.
-      connectorTypeFilter: null,
+      // 3D-tab-only: same null-vs-[] convention as activeStreams/activeElementTypes/
+      // activeSections above — null = both 'c' (Connectors) and 's' (Streams) shown, the
+      // default; an explicit array narrows to just those connectorType code(s). Set via
+      // the toolbar's Connector Type filter (main.js), the same dropdown-menu pattern as
+      // the other three filters — a 3D tab isn't backed by a view, so this can't live on
+      // view.chkShowConnectorType/chkShowStreamType the way the 2D canvas's own
+      // equivalent does; this is the 3D-only, tab-scoped counterpart instead.
+      activeConnectorTypes: null,
     };
     this.tabs.push(tab);
     return tab;
@@ -610,6 +619,7 @@ function migrateDoc(obj, nodeSizeMultiplier = 1.2) {
       script: p.script ?? '',
       scriptEnabled: p.scriptEnabled === true || p.scriptEnabled === 'true',
       section: p.section ?? '',
+      pin3D: p.pin3D ?? null,
       createdAt: p.createdAt ?? '', updatedAt: p.updatedAt ?? '',
     })),
     connectors: (obj.connectors || []).map((c) => ({

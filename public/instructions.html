@@ -320,24 +320,48 @@ doesn't also delete the selected node) and require the current tab to be a canva
   <li><strong>Connector levels</strong> — when a Stream, Type, or Section filter is active, how many extra hops
   of connected nodes to also show beyond the ones that directly match (blank = unlimited). Lets you see a
   filtered node's immediate context instead of it floating in isolation.</li>
+  <li><strong>Connector Type filter</strong> (3D View only) — which connectorType(s) draw at all: 'c'
+  Connectors and/or 's' Streams. Same select-all/exclude-all pattern as Stream/Type/Section. Disabled on a
+  canvas tab, where this is instead a per-view setting (Show Connector Type / Show Stream Type).</li>
   <li><strong>Toolkit filters</strong> (left sidebar) — Source chips (TOGAF/ArchiMate/Other) and Group chips
   (Application/Business/Data/etc., shown in light blue) narrow which element types appear in the drag-and-drop
   toolkit itself.</li>
   <li><strong>Catalog tables</strong> — Parts, Connectors, Views, and ViewMembers each have a full sortable
-  table (via the header menu), independent of any one diagram — useful for bulk review or finding something
-  by name rather than hunting across views. Selecting a row shows the same property panel a canvas selection
-  would.</li>
+  table, independent of any one diagram — useful for bulk review or finding something by name rather than
+  hunting across views. Selecting a row shows the same property panel a canvas selection would. Click a column
+  header to sort by just that column; <strong>shift+click another header to add it as a secondary sort</strong>
+  (e.g. click "Type" then shift+click "Label" to sort by type, then by label within each type) — each active
+  column shows its rank (①②③...) and direction. Shift+click an already-active column again to flip just its
+  own direction; a plain click on any column resets back to a single-column sort. The same multi-column sort
+  works in the SFCCE preview table (Catalogs &gt; SFCE) too.</li>
 </ul>
 <p><strong>Explore &gt; 3D View</strong> — a rotatable/zoomable 3D scene over your Parts and Connectors
 directly (not any one 2D view's placement of them). Parts are grouped into layers by
 element type, stacked into broader bands by element group, colored the same as the toolbox/canvas; within a
-layer, parts cluster into their own band by Section, then by Stream — each Section's own cluster within a
-type's layer gets a visible boundary outline and a floating text label with its name, always facing you as
-you rotate. Connector lines are drawn between Parts the same way they'd be hidden on the 2D canvas — a
-connector only shows once both its ends are visible. The Stream, Type, and Section filters (top toolbar)
-work here too, narrowing which parts (and their connectors, and their section boundaries) appear. Layer
-order follows your current Stream Template where it says anything about a type,
-and a built-in fallback order for everything else. Click a part to focus it (a yellow outline highlights
+layer, parts cluster into their own band by Section, then by Stream. Each (Section, Stream) band reserves
+the SAME row across every element type's layer, not just within its own — so a given Section/Stream's parts
+line up at the same height whether they're a Business Function or a Data Entity, keeping the connectors
+between adjacent layers (the main dependency chain) far less tangled than if each layer packed its own grid
+independently. Each Section's own cluster within a type's layer gets a visible boundary outline and a
+floating text label with its name, always facing you as you rotate. Connector lines are drawn between Parts
+the same way they'd be hidden on the 2D canvas — a
+connector only shows once both its ends are visible — and are styled per relationship the same way the 2D
+canvas is: each relationship's own color, dashed-vs-solid line, and a small direction marker (a cone, an
+elongated diamond, or a sphere, approximating that relationship's 2D line-end shape) at whichever end(s)
+it points — e.g. an arrow cone into the "to" end for most relationships, a diamond at the "from" end for
+Composition/Aggregation. The Stream, Type, Section, and <strong>Connector Type</strong> filters (top
+toolbar) all work here too, narrowing which parts (and their connectors, and their section boundaries)
+appear — Connector Type is 3D-only, since it chooses which connectorType(s) ('c' Connectors, 's' Streams)
+draw at all, a concept the 2D canvas instead controls per-view. The <strong>Layer Order</strong> selector
+(top toolbar, 3D-only) picks which streamTemplate decides both layer sequence AND which element types show
+up at all — independent of whichever template Remap/Generate Stream last used, since this is a separate
+concern from generating a stream. Defaults to <strong>All</strong>, a built-in template covering every known
+element type in a fixed reference order (so nothing is hidden by default); picking any other real template
+(e.g. "Enterprise") narrows the WHOLE scene down to just the types that template actually cares about — its
+main value[] chain plus any type its passive relationships (e.g. Enterprise's Business Function, tied to
+Business Process) mention — anything neither list touches doesn't render at all, not just falls to the back
+of the order. Click a
+part to focus it (a yellow outline highlights
 it) and show its properties in the panel on the right, with the same controls as selecting it in a 2D
 view. Zoom in further while it's focused and you'll jump straight to a 2D view that already has it placed,
 with that part selected there — or double-click a part to jump immediately, skipping the zoom. A part not
@@ -347,9 +371,15 @@ wherever you were already looking. Once you've stepped or run a simulation, ever
 gets a small colored marker floating above it — green for normal, blue (pulsing) for one that just changed
 this tick, red for one that errored — the same colors the 2D canvas's simulation badges use, so results
 read the same way in both places. It shows the current tick only, not a history you can scrub back
-through. Right-click a part for a quick menu: filter to just that part's own Streams, or narrow which
-connector types are drawn (Connectors, Streams, or both — 3D draws every connector type together by
-default). Panning uses middle-click-drag here (right-click is reserved for that menu instead).</p>
+through. Right-click a part for a quick menu: filter to just <strong>one</strong> of that part's own
+Streams (each stream it carries gets its own item — picking one switches to just that one rather than
+combining them; pick "All of the above" to filter to every stream the part carries at once, like before).
+<strong>Right-click and drag</strong> a part instead to move it anywhere in 3D space — dropping it "pins"
+it there (saved with the document), and it's excluded from the auto-layout grid entirely from then on, so
+it won't shift when other parts are added/removed. A dragged part doesn't also open the quick menu. Pin as
+many parts as you like, then <strong>Advanced &gt; Reset Pinned 3D Positions</strong> to unpin all of them
+at once and let auto-layout take back over (there's no per-part unpin — it's an all-or-nothing reset).
+Panning uses middle-click-drag here (right-click is reserved for the menu/drag instead).</p>
 
 <h2 id="properties">5. Property Panels</h2>
 <p>Selecting a node or connector on canvas shows two layers, deliberately kept separate:</p>
@@ -459,8 +489,18 @@ sandboxed <code>ctx</code>, since it's an explicit tool a person runs, not somet
 unattended) via the bindings <code>app</code>, <code>store</code>, <code>model</code> (the currently-selected
 simulation model), <code>findParts</code>, <code>log(...)</code> (prints to the console's own output area),
 <code>messageLog(...)</code> (writes to the persistent Message Log instead), and the raw commands
-<code>generateIndustry(app, industryKey, onProgress, placeInView)</code> and
-<code>populateFromTemplate(app, tab, templateName)</code>.</p>
+<code>generateIndustry(app, industryKey, onProgress, placeInView)</code>,
+<code>populateFromTemplate(app, tab, templateName)</code>,
+<code>remap(app, tab, options)</code> (options: <code>sortKeys</code>, <code>templateName</code>,
+<code>pattern</code> — <code>'default'</code>/<code>'none'</code>/<code>'force'</code> —
+<code>limitColumnsToView</code>, <code>visiblePartVmIds</code>, <code>forcePreferRight</code>,
+<code>forceGroupRows</code>; all optional, same defaults as the Remap dialog),
+<code>smartCheckView(app, tab, options)</code> (options: <code>missingConnectors</code>,
+<code>missingConnectorsAndNodes</code>, <code>levels</code>, <code>syncWithInventory</code>), and
+<code>smartCheckNode(app, tab, partId, options)</code> (same options as smartCheckView, plus
+<code>upstream</code>, <code>downstream</code>, <code>byStream</code>, <code>streams</code>). A
+script builds its own <code>tab</code> when it needs one, e.g. via
+<code>app.createCanvasTab(view)</code> / <code>app.switchToTab(tab.id)</code>.</p>
 <p>The editor's text is a real script FILE, not a one-off REPL entry: it's saved as you go (both to this browser's
 localStorage and, if you edit it, alongside File &gt; Save Local Settings — see below), and Run doesn't clear it
 afterward. Run (or Ctrl+Enter) defines everything currently in the box — so any <code>function foo() {...}</code>
