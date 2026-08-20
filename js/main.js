@@ -3447,6 +3447,16 @@ function wireGlobalEvents(app) {
     }
   });
 
+  // View Scope (3D-only) — narrows the 3D scene to exactly one 2D view's own placed
+  // content. A plain <select>, like Layer Order, since it's a single choice not a
+  // multi-checkbox filter.
+  document.getElementById('view3d-scope-select').addEventListener('change', (e) => {
+    const tab = store.activeTab();
+    if (!tab || tab.type !== '3d') return;
+    tab.view3DScopeViewId = e.target.value || null;
+    app.render();
+  });
+
   document.getElementById('stream-filter-btn').addEventListener('click', (e) => {
     e.stopPropagation();
     const menu = document.getElementById('stream-filter-menu');

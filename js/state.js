@@ -518,6 +518,14 @@ class Store {
       // Set via the toolbar's Highlight picker (main.js), same dropdown-menu pattern as
       // Type/Connector Type.
       highlightedTypes: [],
+      // 3D-tab-only: null (default — the whole document's parts/connectors, today's
+      // out-of-the-box behavior, unchanged) or a specific View id — narrows the 3D
+      // scene down to exactly what that view actually has placed (its own part AND
+      // connector viewMembers), the same content you'd see looking at that view in 2D.
+      // Set via the toolbar's View Scope picker (main.js). Distinct from "Current
+      // View" (the canvas view SWITCHER, a navigation control) — this is a 3D-only
+      // DATA filter, doesn't change what tab you're on.
+      view3DScopeViewId: null,
     };
     this.tabs.push(tab);
     return tab;

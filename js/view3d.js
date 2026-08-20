@@ -1,6 +1,10 @@
 // view3d.js — the 3D View tab: a rotatable/zoomable WebGL scene over the SAME parts and
-// connectors data every other view reads (never viewMembers or views — this is a
-// data-level visualization, not another placement of the 2D canvas's own nodes).
+// connectors data every other view reads. Defaults to the WHOLE document, independent
+// of any one view's placement of them (never viewMembers or views on its own) — a
+// data-level visualization, not another placement of the 2D canvas's own nodes; the
+// toolbar's View Scope picker (Stage 6.5) can optionally narrow it down to exactly one
+// view's own placed content, but that's an explicit, opt-in filter layered on top, not
+// the default relationship between this file and viewMembers/views.
 //
 // Stage 0 (done): plumbing only — persistent per-tab renderer/scene/camera/controls,
 // proof the vendored Three.js loads and renders cleanly.
@@ -158,6 +162,22 @@
 // meaningful default). A distinct color from FOCUS_HIGHLIGHT_COLOR (yellow) on purpose:
 // a click-focused part and a highlighted type are different, simultaneously-visible
 // concepts.
+// Stage 6.5 (done): View Scope — a new toolbar <select> (3D-only, like Layer Order)
+// narrows the whole scene down to exactly what ONE chosen 2D view has placed, instead
+// of the whole document (today's default, still what "All" means). Reported directly:
+// "add the ability for 3d view to show data based on an existing view." Built as a new
+// filter on the EXISTING 3D tab rather than a separate tab/entry point, since it
+// composes cleanly with every other filter already here (Stream/Type/Section/
+// Connector Type/Layer Order/Highlight all still apply WITHIN the scoped set).
+// tab.view3DScopeViewId (null = unscoped) resolves to two id Sets — scopedPartIds,
+// scopedConnectorIds — straight from store.viewMembersForView(viewId), so a part or
+// connector shows only if it's ACTUALLY placed on that view (not merely "both
+// endpoints happen to also be visible," the way ordinary connector visibility works
+// elsewhere) — an exact mirror of that view's own 2D content. computeSignature grew a
+// dependency on the scoped view's own viewMembers (only computed when a scope is
+// actually set, to keep the common unscoped case exactly as cheap as before) — nothing
+// else this signature already hashes changes when a part is merely added to/removed
+// from a view, so without this a scoped rebuild could be silently skipped.
 //
 // Deliberately the ONLY module that imports the vendored Three.js/OrbitControls — every
 // other module stays free of a 3D dependency, and canvas.js only ever reaches this file
@@ -1010,6 +1030,14 @@ function disposeInstance(inst) {
  * connectors) to not be a bottleneck itself. */
 function computeSignature(app, tab) {
   const { store } = app;
+  // View Scope's own viewMembers aren't otherwise touched by anything else this
+  // signature hashes (adding/removing a part FROM a view doesn't change the part's own
+  // fields), so a scoped rebuild needs its own explicit dependency on them — only
+  // computed when a scope is actually set, to keep the common (unscoped) case as cheap
+  // as it always was.
+  const scopedViewMembersSig = tab.view3DScopeViewId
+    ? store.viewMembersForView(tab.view3DScopeViewId).map((vm) => `${vm.id}:${vm.objectType}:${vm.objectId}`).join(',')
+    : '';
   return JSON.stringify([
     store.doc.parts.map((p) => `${p.id}:${p.type}:${(p.streams || []).join('+')}:${p.section || ''}:${p.pin3D ? `${p.pin3D.x},${p.pin3D.y},${p.pin3D.z}` : ''}`).join(','),
     store.doc.connectors.map((c) => `${c.id}:${c.from}:${c.to}:${c.relationship || ''}:${c.connectorType || ''}`).join(','),
@@ -1018,6 +1046,8 @@ function computeSignature(app, tab) {
     tab.activeSections,
     tab.activeConnectorTypes,
     tab.highlightedTypes,
+    tab.view3DScopeViewId,
+    scopedViewMembersSig,
     preferredView3DLayerOrderTemplate(),
     document.body.dataset.theme,
   ]);
@@ -1064,9 +1094,22 @@ function syncSceneData(app, tab, inst) {
   // cares about (value[] AND passive[] combined — see resolveLayerOrder's own comment
   // for why passive[]'s types must count as visible too).
   const { groupOrder, templateTypeOrder, visibleTypes } = resolveLayerOrder(store);
+
+  // View Scope: narrows the scene down to exactly what ONE 2D view has placed — its
+  // own part AND connector viewMembers — rather than the whole document. null (the
+  // default) keeps today's whole-document behavior unchanged. scopedConnectorIds is
+  // read again below, in the connector-line-building pass.
+  const scopedPartIds = tab.view3DScopeViewId ? new Set(
+    store.viewMembersForView(tab.view3DScopeViewId).filter((vm) => vm.objectType === 'part').map((vm) => vm.objectId)
+  ) : null;
+  const scopedConnectorIds = tab.view3DScopeViewId ? new Set(
+    store.viewMembersForView(tab.view3DScopeViewId).filter((vm) => vm.objectType === 'connector').map((vm) => vm.objectId)
+  ) : null;
+
   const parts = store.doc.parts.filter((p) =>
     passesStreamFilter(tab, p.streams) && passesElementTypeFilter(tab, p.type) && passesSectionFilter(tab, p.section) &&
-    visibleTypes.has(String(p.type).toLowerCase()));
+    visibleTypes.has(String(p.type).toLowerCase()) &&
+    (!scopedPartIds || scopedPartIds.has(p.id)));
   if (parts.length === 0) { inst.partPositions = new Map(); return; }
 
   const byType = new Map();
@@ -1232,6 +1275,7 @@ function syncSceneData(app, tab, inst) {
   const activeConnectorTypes = tab.activeConnectorTypes;
   for (const c of store.doc.connectors) {
     if (activeConnectorTypes != null && !activeConnectorTypes.includes(c.connectorType)) continue;
+    if (scopedConnectorIds && !scopedConnectorIds.has(c.id)) continue;
     const fromPos = partPositions.get(c.from);
     const toPos = partPositions.get(c.to);
     if (!fromPos || !toPos) continue;

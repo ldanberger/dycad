@@ -2308,4 +2308,31 @@
 // checked across canvas/3D/table tabs). Both confirmed to catch their own regression
 // via a temporary revert. tests/README.md and public/instructions.html updated.
 // Full suite 87/87.
-export const APP_VERSION = '0.844';
+// 0.845: new 3D View "View Scope" toolbar picker. Reported directly: "add the
+// ability for 3d view to show data based on an existing view. This can be the same
+// 3d view or a new function" -- built as a new filter on the EXISTING 3D tab (a
+// <select>, like Layer Order) rather than a separate tab/entry point, so it composes
+// cleanly with every filter already there (Stream/Type/Section/Connector Type/Layer
+// Order/Highlight all still apply WITHIN the scoped set). tab.view3DScopeViewId
+// (null = unscoped, today's whole-document default, unchanged) resolves to two id
+// Sets straight from store.viewMembersForView(viewId) -- a part or connector shows
+// only if it's ACTUALLY placed on the scoped view, not merely "both endpoints happen
+// to also be visible" the way ordinary connector visibility works elsewhere in this
+// file -- an exact mirror of that view's own 2D content. computeSignature grew a
+// dependency on the scoped view's own viewMembers (only computed when a scope is
+// actually set, so the common unscoped case stays exactly as cheap as before) --
+// nothing else it already hashes changes when a part is merely added to/removed from
+// a view, so without this a scoped rebuild could be silently skipped. Also added to
+// last version's toolbar-hides-when-inactive mechanism (3D-only, like Connector
+// Type/Layer Order/Highlight).
+// New check_view3d_view_scope_filter: verifies the <select> lists every real view,
+// scoping narrows to exactly one view's own placed parts (a same-type part on a
+// DIFFERENT view must disappear) and exactly its own placed connectors (a second
+// connector whose both ends are visible but which was never itself given a
+// connector-viewMember on the scoped view must NOT show -- the one case that
+// distinguishes "placed on this view" from ordinary endpoint-based visibility), and
+// switching back to "All" restores the whole document. check_toolbar_filter_groups_
+// hidden_when_inactive extended for the new group. Both confirmed to catch their own
+// regression via a temporary revert. tests/README.md, public/instructions.html, and
+// DESIGN_DOCUMENT.md updated. Full suite 88/88.
+export const APP_VERSION = '0.845';

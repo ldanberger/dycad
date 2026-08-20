@@ -100,6 +100,24 @@ function renderToolbar(app) {
   viewSel.innerHTML = store.doc.views.map((v) => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.viewName)}</option>`).join('');
   viewSel.value = store.currentView || '';
 
+  const is3D = !!(tab && tab.type === '3d');
+
+  // View Scope (3D-only): narrows the 3D scene down to exactly what one specific 2D
+  // view has placed (its own part AND connector viewMembers), instead of the whole
+  // document — distinct from "Current View" above, which is a navigation control (it
+  // switches tabs), not a data filter. Default '' (mapped to null on tab) = unscoped,
+  // today's whole-document behavior.
+  const scopeSel = document.getElementById('view3d-scope-select');
+  const viewOptionsSig = store.doc.views.map((v) => v.id).join(',');
+  if (scopeSel.dataset.optionsSig !== viewOptionsSig) {
+    scopeSel.innerHTML = ['<option value="">All (whole document)</option>', ...store.doc.views.map((v) => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.viewName)}</option>`)].join('');
+    scopeSel.dataset.optionsSig = viewOptionsSig;
+  }
+  const scopeValue = (is3D && tab.view3DScopeViewId && store.findView(tab.view3DScopeViewId)) ? tab.view3DScopeViewId : '';
+  if (scopeSel.value !== scopeValue) scopeSel.value = scopeValue;
+  scopeSel.disabled = !is3D;
+  document.getElementById('view3d-scope-group').classList.toggle('hidden', !is3D);
+
   // Stream/Type/Section filters apply to canvas AND 3d tabs (3d reads store.doc.parts
   // directly, not any one view's viewMembers, but the same tab.activeStreams/
   // activeElementTypes/activeSections fields already exist on every tab type — see the
@@ -155,7 +173,6 @@ function renderToolbar(app) {
   // Connector Type is 3D-only (the 2D canvas already has this per-VIEW, via
   // view.chkShowConnectorType/chkShowStreamType — this is the 3D-only, tab-scoped
   // counterpart, since a 3D tab isn't backed by any one view).
-  const is3D = !!(tab && tab.type === '3d');
   const connTypeBtn = document.getElementById('connector-type-filter-btn');
   const rawActiveConnTypes = is3D ? tab.activeConnectorTypes : null;
   if (rawActiveConnTypes == null) {

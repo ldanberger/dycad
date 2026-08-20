@@ -452,21 +452,21 @@ def check_reset_pinned_3d_positions_moved_to_explore(page):
 
 
 def check_toolbar_filter_groups_hidden_when_inactive(page):
-    """Regression guard: the toolbar's tab-scoped filter controls (Stream, Types,
-    Section, Connector Type, Layer Order, Highlight, Levels) are now HIDDEN entirely
-    (not just disabled) on a tab type they don't apply to, instead of sitting there
-    disabled and confusing — reported directly: "Can the filters... be hidden unless
-    active for the current tab? For example Highlight has no purpose and is confusing
-    on other types of tabs." Checks all three tab types these controls actually
-    differ across: a canvas tab (Stream/Types/Section/Levels visible; Connector
-    Type/Layer Order/Highlight hidden — those three are 3D-only), a 3D tab (the
-    reverse: Connector Type/Layer Order/Highlight visible, Levels hidden — canvas-only
-    — Stream/Types/Section stay visible on both), and a table tab (catalog — ALL
-    SEVEN hidden, since none of them apply there at all)."""
+    """Regression guard: the toolbar's tab-scoped filter controls (View Scope, Stream,
+    Types, Section, Connector Type, Layer Order, Highlight, Levels) are now HIDDEN
+    entirely (not just disabled) on a tab type they don't apply to, instead of sitting
+    there disabled and confusing — reported directly: "Can the filters... be hidden
+    unless active for the current tab? For example Highlight has no purpose and is
+    confusing on other types of tabs." Checks all three tab types these controls
+    actually differ across: a canvas tab (Stream/Types/Section/Levels visible; View
+    Scope/Connector Type/Layer Order/Highlight hidden — those four are 3D-only), a 3D
+    tab (the reverse: View Scope/Connector Type/Layer Order/Highlight visible, Levels
+    hidden — canvas-only — Stream/Types/Section stay visible on both), and a table tab
+    (catalog — ALL EIGHT hidden, since none of them apply there at all)."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
-      const groupIds = ['stream-filter-group', 'element-type-filter-group', 'section-filter-group', 'connector-type-filter-group', 'view3d-layer-order-group', 'highlight-type-filter-group', 'connector-levels-group'];
+      const groupIds = ['view3d-scope-group', 'stream-filter-group', 'element-type-filter-group', 'section-filter-group', 'connector-type-filter-group', 'view3d-layer-order-group', 'highlight-type-filter-group', 'connector-levels-group'];
       const hiddenMap = () => Object.fromEntries(groupIds.map(id => [id, document.getElementById(id).classList.contains('hidden')]));
 
       const view = store.doc.views[0];
@@ -489,11 +489,11 @@ def check_toolbar_filter_groups_hidden_when_inactive(page):
     """)
     r = result
     problems = []
-    canvasExpectedHidden = {'stream-filter-group': False, 'element-type-filter-group': False, 'section-filter-group': False, 'connector-type-filter-group': True, 'view3d-layer-order-group': True, 'highlight-type-filter-group': True, 'connector-levels-group': False}
+    canvasExpectedHidden = {'view3d-scope-group': True, 'stream-filter-group': False, 'element-type-filter-group': False, 'section-filter-group': False, 'connector-type-filter-group': True, 'view3d-layer-order-group': True, 'highlight-type-filter-group': True, 'connector-levels-group': False}
     for gid, expectedHidden in canvasExpectedHidden.items():
         if r["onCanvas"][gid] != expectedHidden:
             problems.append(f"canvas tab: expected #{gid} hidden={expectedHidden}, got {r['onCanvas'][gid]}")
-    view3dExpectedHidden = {'stream-filter-group': False, 'element-type-filter-group': False, 'section-filter-group': False, 'connector-type-filter-group': False, 'view3d-layer-order-group': False, 'highlight-type-filter-group': False, 'connector-levels-group': True}
+    view3dExpectedHidden = {'view3d-scope-group': False, 'stream-filter-group': False, 'element-type-filter-group': False, 'section-filter-group': False, 'connector-type-filter-group': False, 'view3d-layer-order-group': False, 'highlight-type-filter-group': False, 'connector-levels-group': True}
     for gid, expectedHidden in view3dExpectedHidden.items():
         if r["on3D"][gid] != expectedHidden:
             problems.append(f"3D tab: expected #{gid} hidden={expectedHidden}, got {r['on3D'][gid]}")
@@ -502,7 +502,7 @@ def check_toolbar_filter_groups_hidden_when_inactive(page):
             problems.append(f"table tab: expected #{gid} hidden=True (none of these apply to a catalog table), got False")
     if problems:
         return False, "; ".join(problems) + f" (full: {r})"
-    return True, "toolbar filter groups (Stream/Types/Section/Connector Type/Layer Order/Highlight/Levels) show/hide correctly per tab type -- canvas gets Stream/Types/Section/Levels, 3D gets everything except Levels, and a table tab hides all seven"
+    return True, "toolbar filter groups (View Scope/Stream/Types/Section/Connector Type/Layer Order/Highlight/Levels) show/hide correctly per tab type -- canvas gets Stream/Types/Section/Levels, 3D gets everything except Levels, and a table tab hides all eight"
 
 
 def check_script_console_runs_main_function(page):
@@ -3580,6 +3580,94 @@ def check_view3d_node_context_menu(page):
     return True, "the 3D node right-click context menu offers a per-stream Filter to Stream item (picking one stream out of several genuinely narrows to just that one, and switches rather than stacking), with Connector Type no longer duplicated here"
 
 
+def check_view3d_view_scope_filter(page):
+    """Regression guard for the 3D View's "View Scope" toolbar picker — reported
+    directly: "add the ability for 3d view to show data based on an existing view."
+    Narrows the whole 3D scene down to exactly what ONE chosen 2D view has placed (its
+    own part AND connector viewMembers) — not merely "both endpoints happen to also be
+    visible" the way ordinary connector visibility works, an exact mirror of that
+    view's own 2D content. Fixture: 4 same-type parts + 2 connectors. P1/P2/P4 (plus
+    the P1-P2 connector) are placed on 'SceneA' via real viewMembers; P3 only on a
+    separate 'SceneB'; a SECOND connector (P2-P4) exists in the document and BOTH its
+    endpoints are placed on SceneA, but the connector itself has no connector-
+    viewMember there — the one case that actually distinguishes "explicitly placed on
+    this view" from "both endpoints happen to also be visible," which ordinary
+    connector-line visibility elsewhere in this file relies on. Verifies: the <select>
+    lists "All (whole document)" plus every real view; unscoped (default) shows all 4
+    parts; scoping to SceneA narrows to exactly its own 3 parts (not P3, even though
+    it's the same type/section/stream) and exactly 1 connector (P1-P2 only — NOT the
+    P2-P4 connector, despite both its ends being visible); and switching back to "All"
+    restores all 4 — proving the scope is a genuine toggle, not a one-way filter."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+
+      const viewA = store.addView('SceneA_' + Date.now());
+      const viewB = store.addView('SceneB_' + Date.now());
+      const p1 = store.createPart({ type: 'GeneralActor', label: 'P1', model: store.defaultModel, streams: [] });
+      const p2 = store.createPart({ type: 'GeneralActor', label: 'P2', model: store.defaultModel, streams: [] });
+      const p3 = store.createPart({ type: 'GeneralActor', label: 'P3', model: store.defaultModel, streams: [] });
+      const p4 = store.createPart({ type: 'GeneralActor', label: 'P4', model: store.defaultModel, streams: [] });
+      const conn12 = store.createConnector({ from: p1.id, to: p2.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      // Exists in the document, both ends placed on SceneA below, but deliberately
+      // NEVER given its own connector-viewMember there.
+      store.createConnector({ from: p2.id, to: p4.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      const vm1 = store.createViewMember({ view: viewA.id, objectType: 'part', objectId: p1.id, x: 0, y: 0 });
+      const vm2 = store.createViewMember({ view: viewA.id, objectType: 'part', objectId: p2.id, x: 200, y: 0 });
+      store.createViewMember({ view: viewA.id, objectType: 'part', objectId: p4.id, x: 400, y: 0 });
+      store.createViewMember({ view: viewA.id, objectType: 'connector', objectId: conn12.id, fromVmId: vm1.id, toVmId: vm2.id });
+      store.createViewMember({ view: viewB.id, objectType: 'part', objectId: p3.id, x: 0, y: 0 });
+
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 250));
+      const optionValues = [...document.getElementById('view3d-scope-select').options].map(o => o.value);
+      const infoUnscoped = view3d.getDebugSceneInfo(tab.id);
+
+      const sel = document.getElementById('view3d-scope-select');
+      sel.value = viewA.id;
+      sel.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 250));
+      const infoScopedA = view3d.getDebugSceneInfo(tab.id);
+      const scopedPartIds = infoScopedA.types.GeneralActor ? Object.keys(infoScopedA.types.GeneralActor.positions) : [];
+
+      sel.value = '';
+      sel.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 250));
+      const infoUnscopedAgain = view3d.getDebugSceneInfo(tab.id);
+
+      return {
+        optionValues, includesA: optionValues.includes(viewA.id), includesB: optionValues.includes(viewB.id),
+        unscopedCount: infoUnscoped.types.GeneralActor.count,
+        scopedACount: infoScopedA.types.GeneralActor ? infoScopedA.types.GeneralActor.count : 0,
+        scopedAConnCount: infoScopedA.connectorCount,
+        scopedPartIds, p1: p1.id, p2: p2.id, p3: p3.id, p4: p4.id,
+        unscopedAgainCount: infoUnscopedAgain.types.GeneralActor.count,
+      };
+    }
+    """)
+    r = result
+    problems = []
+    if "" not in r["optionValues"]:
+        problems.append(f"expected the View Scope <select> to include an 'All (whole document)' option (value ''), got {r['optionValues']}")
+    if not r["includesA"] or not r["includesB"]:
+        problems.append(f"expected the View Scope <select> to list both real views, got {r['optionValues']}")
+    if r["unscopedCount"] != 4:
+        problems.append(f"expected all 4 parts visible unscoped (default), got {r['unscopedCount']}")
+    if r["scopedACount"] != 3:
+        problems.append(f"expected exactly 3 parts visible scoped to SceneA (only what's actually placed there), got {r['scopedACount']}")
+    if sorted(r["scopedPartIds"]) != sorted([r["p1"], r["p2"], r["p4"]]):
+        problems.append(f"expected scoping to SceneA to show exactly P1+P2+P4 (not P3, even though it's the same type), got {r['scopedPartIds']}")
+    if r["scopedAConnCount"] != 1:
+        problems.append(f"expected exactly 1 connector visible scoped to SceneA (P1-P2, the one actually PLACED there) -- the P2-P4 connector must NOT show even though both its ends are visible, since it was never given its own connector-viewMember on SceneA, got {r['scopedAConnCount']}")
+    if r["unscopedAgainCount"] != 4:
+        problems.append(f"expected switching back to 'All' to restore all 4 parts, got {r['unscopedAgainCount']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {r})"
+    return True, "the 3D View's View Scope picker lists every real view, and narrows the scene down to exactly one view's own placed parts+connectors (not just anything of the same type), toggling cleanly back to the whole document"
+
+
 def check_view3d_connector_type_toolbar_filter(page):
     """Regression guard: the 3D View's Connector Type filter (which connectorType(s) --
     'c' Connectors, 's' Streams -- draw at all) moved from a right-click-only quick
@@ -5177,6 +5265,7 @@ CHECKS = [
     check_view3d_dispose_cancels_current_animation_frame,
     check_view3d_real_click_shows_panel_and_no_recenter,
     check_view3d_node_context_menu,
+    check_view3d_view_scope_filter,
     check_view3d_connector_type_toolbar_filter,
     check_view3d_connector_direction_markers,
     check_view3d_right_click_drag_pins_node,

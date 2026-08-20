@@ -521,9 +521,9 @@ so a future session doesn't have to re-derive it from scratch):
     across streams from two different sections keeps whichever section it was first
     created with, rather than flipping to whichever stream runs last).
 
-- **Stage 6 series (done)** — five further real-usage fixes; see `view3d.js`'s own
-  inline Stage 5.2/6/6.1/6.2/6.3/6.4 header comments for full rationale/tradeoffs on
-  each.
+- **Stage 6 series (done)** — six further real-usage fixes; see `view3d.js`'s own
+  inline Stage 5.2/6/6.1/6.2/6.3/6.4/6.5 header comments for full rationale/tradeoffs
+  on each.
   - **Cross-layer stream crisscrossing.** Stage 5.2 fixed a multi-stream part clustering
     under an arbitrary alphabetically-first stream regardless of the active filter, and
     forced a row break on a stream change within one type's own grid. Stage 6.1 went
@@ -609,6 +609,23 @@ so a future session doesn't have to re-derive it from scratch):
     completely untouched. Excluded from `pickPartAtClientXY`'s raycast target list (it
     only ever intersects `inst.typeMeshes.values()`), so the highlight overlay never
     interferes with click/drag/context-menu hit-testing.
+  - **View Scope (Stage 6.5).** Reported directly: "add the ability for 3d view to show
+    data based on an existing view." New toolbar `<select>` (3D-only, like Layer Order)
+    narrows the whole scene down to exactly what ONE chosen 2D view has placed, instead
+    of the whole document (still what "All" means, the default). Built as a new filter
+    on the EXISTING 3D tab rather than a separate tab/entry point, so it composes
+    cleanly with every other filter already there (Stream/Type/Section/Connector
+    Type/Layer Order/Highlight all still apply WITHIN the scoped set).
+    `tab.view3DScopeViewId` (`null` = unscoped) resolves to two id `Set`s —
+    `scopedPartIds`, `scopedConnectorIds` — straight from
+    `store.viewMembersForView(viewId)`, so a part or connector shows only if it's
+    ACTUALLY placed on that view, not merely "both endpoints happen to also be
+    visible" (the way ordinary connector visibility works elsewhere in this file) — an
+    exact mirror of that view's own 2D content. `computeSignature` grew a dependency on
+    the scoped view's own viewMembers (only computed when a scope is actually set, to
+    keep the common unscoped case exactly as cheap as before) — nothing else it already
+    hashes changes when a part is merely added to/removed from a view, so without this
+    a scoped rebuild could be silently skipped.
 
 ## 10. Testing strategy
 

@@ -310,10 +310,13 @@ doesn't also delete the selected node) and require the current tab to be a canva
 
 <h2 id="filtering">4. Filtering, Streams &amp; Catalogs</h2>
 <p>Every control below only appears in the toolbar while the current tab is one it actually applies to —
-e.g. Connector Type/Layer Order/Highlight only show up on a 3D View tab, Levels only on a canvas tab, and
-none of them show up at all on a catalog table or other non-diagram tab — rather than sitting there
-disabled and confusing.</p>
+e.g. View Scope/Connector Type/Layer Order/Highlight only show up on a 3D View tab, Levels only on a canvas
+tab, and none of them show up at all on a catalog table or other non-diagram tab — rather than sitting
+there disabled and confusing.</p>
 <ul>
+  <li><strong>View Scope</strong> (3D View only) — narrows the whole scene down to exactly what one chosen
+  2D view has placed (its own parts AND connectors), instead of the whole document. "All (whole document)"
+  is the default.</li>
   <li><strong>Stream filter</strong> — show only nodes/connectors tagged with a chosen stream; select-all/
   exclude-all and scrollable for models with many streams.</li>
   <li><strong>Type filter</strong> — show only chosen element types; select-all/exclude-all and scrollable for
@@ -344,7 +347,11 @@ disabled and confusing.</p>
   works in the SFCCE preview table (Catalogs &gt; SFCE) too.</li>
 </ul>
 <p><strong>Explore &gt; 3D View</strong> — a rotatable/zoomable 3D scene over your Parts and Connectors
-directly (not any one 2D view's placement of them). Parts are grouped into layers by
+directly, covering the whole document by default (not any one 2D view's placement of them) — unless you
+narrow it with the <strong>View Scope</strong> selector (top toolbar, 3D-only): pick a specific view there
+and the scene shows exactly what that view has placed (its own parts AND connectors), the same content
+you'd see looking at it in 2D, instead of everything in the document. Pick "All (whole document)" to go
+back to the default. Parts are grouped into layers by
 element type, stacked into broader bands by element group, colored the same as the toolbox/canvas; within a
 layer, parts cluster into their own band by Section, then by Stream. Each (Section, Stream) band reserves
 the SAME row across every element type's layer, not just within its own — so a given Section/Stream's parts
