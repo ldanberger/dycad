@@ -572,10 +572,10 @@ def check_script_console_runs_main_function(page):
 
 
 def check_batch_script_quickstart(page):
-    """Regression guard/new-feature check for the built-in BatchScript_QuickStart script
+    """Regression guard/new-feature check for the built-in default batch script
     (store.batchScriptCode's out-of-the-box default, DEFAULT_BATCH_SCRIPT_CODE in
-    state.js) — verifies it actually performs every step described when main() (which
-    calls it) is run via the real Script Console UI: (1) Generate Industry with the
+    state.js) — verifies main() actually runs BOTH starter scripts in sequence, via the
+    real Script Console UI. BatchScript_QuickStart: (1) Generate Industry with the
     default "general" industry, not placed on any view; (2) a new View "Business
     Functions" of type "org" (Business Function Organization); (3) Populate From
     Template using "Enterprise Functions" inside that view; (4) the "mof" (Mainstream
@@ -585,8 +585,16 @@ def check_batch_script_quickstart(page):
     remap's own applyRemapLayout routes it through applyRemapLayoutSectioned rather
     than pattern-based freeform placement — 'pattern' is accepted but not itself
     meaningful there; this just proves the call is wired in and doesn't throw); (7) the
-    3D View opened (and became the active tab) afterward; (8) "Done" written to the
-    persistent Message Log (not just the Script Console's own output area)."""
+    3D View opened along the way; (8) "Done" written to the persistent Message Log (not
+    just the Script Console's own output area). Then, reported directly: "add the
+    insertSmartStream example into the main() script after 3d view" —
+    BatchScript_InsertSmartStreamExample runs next (main() awaits QuickStart first, so
+    this genuinely happens after the 3D View step, not concurrently), tracing from the
+    "Production" Business Function QuickStart's own "general" industry data creates into
+    a new "Smart Stream Example" freeform view/tab, which ends up the ACTIVE tab once
+    main() finishes (not the 3D tab — proving the second script really did run
+    afterward, switching tabs again, rather than main() silently stopping after
+    QuickStart)."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -597,7 +605,7 @@ def check_batch_script_quickstart(page):
       const box = document.querySelector('.modal-box.modal-box-textedit');
 
       box.querySelector('.run').click();
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 2500));
       const consoleOutput = box.querySelector('#console-output').textContent;
       box.querySelector('.cancel').click();
       await new Promise(r => setTimeout(r, 60));
@@ -607,6 +615,8 @@ def check_batch_script_quickstart(page):
       const tab = store.tabs.find(t => t.viewId === view?.id);
       const genActor = store.doc.parts.find(p => p.type === 'BusinessCapability');
       const view3dTab = store.tabs.find(t => t.type === '3d');
+      const streamView = store.findView('Smart Stream Example');
+      const streamTab = streamView ? store.tabs.find(t => t.viewId === streamView.id) : null;
 
       return {
         viewCreated: !!view,
@@ -618,7 +628,9 @@ def check_batch_script_quickstart(page):
         messageLogHasDone: store.messageLog.some(e => JSON.stringify(e).includes('Done')),
         consoleOutput,
         view3dOpened: !!view3dTab,
-        view3dIsActive: view3dTab ? store.activeTabId === view3dTab.id : false,
+        streamExampleViewCreated: !!streamView,
+        streamExamplePartLabels: streamView ? store.viewMembersForView(streamView.id).filter(v => v.objectType === 'part').map(v => store.findPart(v.objectId).label) : [],
+        streamExampleTabIsActive: streamTab ? store.activeTabId === streamTab.id : false,
       };
     }
     """)
@@ -632,31 +644,38 @@ def check_batch_script_quickstart(page):
     if result["zoom"] != 0.6:
         problems.append(f"expected the view's tab zoomed to 60% (0.6), got {result['zoom']}")
     if not result["view3dOpened"]:
-        problems.append("expected the script to open the 3D View (app.openOrSwitch3DView()) after remap")
-    if not result["view3dIsActive"]:
-        problems.append("expected the 3D View to become the active tab after the script finishes")
+        problems.append("expected the script to open the 3D View (app.openOrSwitch3DView()) along the way")
     if "error" in result["consoleOutput"].lower():
         problems.append(f"expected the script to run end-to-end (including its remap(app, tab, {{pattern:'default'}}) step) without reporting an error, got console output: {result['consoleOutput']}")
     if not result["industryGenerated"]:
         problems.append("expected Generate Industry (default 'general') to have actually run, producing at least one BusinessCapability part")
     if not result["messageLogHasDone"]:
         problems.append("expected 'Done' written to the persistent Message Log")
+    if not result["streamExampleViewCreated"]:
+        problems.append("expected main() to also run BatchScript_InsertSmartStreamExample after BatchScript_QuickStart, creating a 'Smart Stream Example' view")
+    expected_stream_labels = sorted(['Production', 'Production Planning Process', 'Production Planning Consumer', 'Manage Production Planning', 'Manage Production Planning', 'Manufacturing Operations Process', 'Manufacturing Operations Consumer', 'Manage Manufacturing Operations', 'Manage Manufacturing Operations', 'Demand Forecast', 'Production Schedule', 'Bill of Materials'])
+    if sorted(result["streamExamplePartLabels"]) != expected_stream_labels:
+        problems.append(f"expected BatchScript_InsertSmartStreamExample to trace the full chain from 'Production', got {sorted(result['streamExamplePartLabels'])}")
+    if not result["streamExampleTabIsActive"]:
+        problems.append("expected the 'Smart Stream Example' tab (not the 3D tab) to be the ACTIVE tab once main() finishes -- proving InsertSmartStreamExample genuinely ran AFTER QuickStart's own 3D View step, not that main() stopped early")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "BatchScript_QuickStart (run via main(), the real Script Console UI) generates the default industry, builds a Business Functions org view from the Enterprise Functions template, adjusts the mof section's row count, zooms to 60%, opens the 3D View, and logs 'Done'"
+    return True, "main() (run via the real Script Console UI) runs BatchScript_QuickStart (generates the default industry, builds a Business Functions org view, adjusts the mof section's row count, zooms to 60%, opens the 3D View, logs 'Done') then BatchScript_InsertSmartStreamExample afterward, ending with the Smart Stream Example tab active"
 
 
 def check_script_console_remap_and_smart_check_bindings(page):
-    """Regression guard: remap, smartCheckView, and smartCheckNode became callable from a
-    Script Console main() (js/main.js's promptScriptConsole bindingNames/bindingValues),
-    with their full options objects actually wired through end to end -- not just present
-    as bindings. Reported directly: "add remap and the smartCheck functions too; add
-    options as parameters for full functionality if you can." Builds a small real view/
-    part/connector graph directly via store, then drives remap (pattern:'none', a real
-    sortKeys array) and smartCheckView/smartCheckNode (with a downstream/upstream option
-    pair that must actually filter, not just be accepted) purely through the real Script
-    Console UI -- proving both that the bindings exist and that options passed through
-    them have a genuine effect."""
+    """Regression guard: remap, smartCheckView, smartCheckNode, and insertSmartStream
+    became callable from a Script Console main() (js/main.js's promptScriptConsole
+    bindingNames/bindingValues), with their full options objects actually wired through
+    end to end -- not just present as bindings. Reported directly: "add remap and the
+    smartCheck functions too; add options as parameters for full functionality if you
+    can" and (for insertSmartStream) "confirm this can be called by script along with
+    parameters." Builds a small real view/part/connector graph directly via store, then
+    drives remap (pattern:'none', a real sortKeys array), smartCheckView/smartCheckNode
+    (with a downstream/upstream option pair that must actually filter, not just be
+    accepted), and insertSmartStream (startPartIds/direction/showTypes on a fresh
+    freeform view) purely through the real Script Console UI -- proving both that the
+    bindings exist and that options passed through them have a genuine effect."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -675,6 +694,14 @@ def check_script_console_remap_and_smart_check_bindings(page):
       // E->A: upstream of seed A, E not placed at all -- must NOT be pulled in with upstream:false.
       store.createConnector({ from: partE.id, to: partA.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
 
+      // Separate small chain for insertSmartStream, seeded from a specific instance.
+      const fn = store.createPart({ type: 'BusinessFunction', label: 'ConsoleFn', model: store.defaultModel, streams: [] });
+      const proc = store.createPart({ type: 'BusinessProcess', label: 'ConsoleProc', model: store.defaultModel, streams: [] });
+      const cap = store.createPart({ type: 'ApplicationCapability', label: 'ConsoleCap', model: store.defaultModel, streams: [] });
+      store.createConnector({ from: fn.id, to: proc.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      store.createConnector({ from: proc.id, to: cap.id, model: store.defaultModel, connectorType: 'c', relationship: 'Association', streams: [] });
+      const issView = store.addView('InsertSmartStreamConsoleTest_' + Date.now(), 'ff');
+
       app.promptScriptConsole();
       await new Promise(r => setTimeout(r, 60));
       const box = document.querySelector('.modal-box.modal-box-textedit');
@@ -687,6 +714,14 @@ def check_script_console_remap_and_smart_check_bindings(page):
           remap(app, tab, { pattern: 'none', sortKeys: ['type'] });
           smartCheckView(app, tab, { missingConnectors: true });
           smartCheckNode(app, tab, '${partA.id}', { missingConnectorsAndNodes: true, downstream: true, upstream: false });
+
+          const issView = store.findView('${issView.id}');
+          const issTab = app.createCanvasTab(issView);
+          app.switchToTab(issTab.id);
+          insertSmartStream(app, issTab, {
+            connectorType: 'c', startPartIds: ['${fn.id}'], direction: 'both', endType: null,
+            levels: null, showTypes: ['BusinessFunction', 'BusinessProcess', 'ApplicationCapability'],
+          });
         }
       `;
       box.querySelector('.run').click();
@@ -700,18 +735,23 @@ def check_script_console_remap_and_smart_check_bindings(page):
       const freshA = store.findViewMember(vmA.id);
       const freshB = store.findViewMember(vmB.id);
 
+      const issVms = store.viewMembersForView(issView.id);
+      const issPartLabels = issVms.filter(v => v.objectType === 'part').map(v => store.findPart(v.objectId).label).sort();
+      const issConnCount = issVms.filter(v => v.objectType === 'connector').length;
+
       return {
         ranWithoutError: !/error/i.test(output),
         remapMovedNodes: (freshA.x !== 900 || freshA.y !== 900) && (freshB.x !== 10 || freshB.y !== 10),
         smartCheckViewAddedConnector: vms.some(v => v.objectType === 'connector' && v.objectId === connAB.id),
         downstreamNodeAdded: partVmObjectIds.has(partD.id),
         upstreamNodeNotAdded: !partVmObjectIds.has(partE.id),
+        issPartLabels, issConnCount,
       };
     }
     """)
     problems = []
     if not result["ranWithoutError"]:
-        problems.append("expected remap/smartCheckView/smartCheckNode to run via the Script Console without error")
+        problems.append("expected remap/smartCheckView/smartCheckNode/insertSmartStream to run via the Script Console without error")
     if not result["remapMovedNodes"]:
         problems.append("expected remap(app, tab, {pattern:'none', sortKeys:['type']}) to actually reposition the view's nodes")
     if not result["smartCheckViewAddedConnector"]:
@@ -720,9 +760,11 @@ def check_script_console_remap_and_smart_check_bindings(page):
         problems.append("expected smartCheckNode(..., {missingConnectorsAndNodes:true, downstream:true, upstream:false}) to pull in the downstream-only node")
     if not result["upstreamNodeNotAdded"]:
         problems.append("expected smartCheckNode with upstream:false to NOT pull in the upstream-only node -- the direction option isn't actually filtering")
+    if result["issPartLabels"] != ["ConsoleCap", "ConsoleFn", "ConsoleProc"] or result["issConnCount"] != 2:
+        problems.append(f"expected insertSmartStream(app, issTab, {{startPartIds:[fn.id], direction:'both', showTypes:[...]}}) called from the console to trace and place the whole 3-part chain, got labels={result['issPartLabels']} connCount={result['issConnCount']}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "remap, smartCheckView, and smartCheckNode are callable from the Script Console's main(), and their options (pattern/sortKeys, missingConnectors, and direction filters) genuinely take effect"
+    return True, "remap, smartCheckView, smartCheckNode, and insertSmartStream are all callable from the Script Console's main(), and their options (pattern/sortKeys, missingConnectors, direction filters, and startPartIds/showTypes) genuinely take effect"
 
 
 def check_catalog_multi_column_sort(page):
@@ -2281,6 +2323,191 @@ def check_batch_script_code_persists_with_local_settings(page):
         return False, f"batchScriptCode did not auto-apply from its localStorage cache after reload: {after}"
 
     return True, "batchScriptCode loads from a Local Settings file, caches to localStorage, and auto-applies on the next page load with no file re-selection"
+
+
+def check_smart_stream_preset_local_persistence(page):
+    """Regression guard: Insert Smart Stream's named presets (store.smartStreamPresets)
+    are Local Settings — reported directly: "Add ability to create and maintain a list
+    of smartStream settings, called something like smartStreamPreset... These should be
+    saved local, not in the save json file." Covers: (1) a default preset named
+    "StreamSet1" ships out of the box, matching BatchScript_InsertSmartStreamExample's
+    own parameters exactly; (2) smartStreamPresets never appears in store.toJSON()'s
+    output (the actual Save JSON document) — it must never round-trip through the save
+    file; (3) same File > Load Local Settings + localStorage-cache + reload-survives
+    story as batchScriptCode/maxScriptEntities already have (see
+    check_batch_script_code_persists_with_local_settings) — proven independently here
+    since presets are a different LOCAL_SETTINGS_CACHE_KEY member with its own load/
+    cache code path (setCachedSmartStreamPresets)."""
+    default_presets = js(page, "async () => window.dycadApp.store.smartStreamPresets")
+    if not isinstance(default_presets, list) or not any(p.get("name") == "StreamSet1" for p in default_presets):
+        return False, f"expected a default preset named 'StreamSet1' to ship out of the box, got {default_presets}"
+    stream_set_1 = next(p for p in default_presets if p["name"] == "StreamSet1")
+    expected = {
+        "connectorType": "c", "startType": "BusinessFunction", "startInstanceLabels": ["Production"],
+        "direction": "both", "endType": "DataDataEntity", "levels": None,
+        "showTypes": ["ApplicationCapability", "BusinessFunction", "BusinessProcess", "BusinessCapability", "DataDataEntity", "GeneralActor", "TechnologyLogicalComponent"],
+    }
+    for key, val in expected.items():
+        if stream_set_1.get(key) != val:
+            return False, f"StreamSet1's {key} should be {val!r} (matching BatchScript_InsertSmartStreamExample), got {stream_set_1.get(key)!r} -- full preset: {stream_set_1}"
+
+    doc_json = js(page, "async () => JSON.stringify(window.dycadApp.store.toJSON())")
+    if "smartStreamPresets" in doc_json or "StreamSet1" in doc_json:
+        return False, "smartStreamPresets must never appear in store.toJSON() (the actual Save JSON document) -- these are Local Settings, not document data"
+
+    custom_presets = [{"name": "RegrPreset", "connectorType": "s", "startType": "BusinessActor", "startInstanceLabels": ["X"], "direction": "upstream", "endType": None, "levels": 3, "showTypes": ["BusinessActor"]}]
+
+    js(page, f"""
+    async () => {{
+      const text = {json.dumps(json.dumps({"smartStreamPresets": custom_presets}))};
+      const blob = new Blob([text], {{ type: 'application/json' }});
+      const file = new File([blob], 'test.json', {{ type: 'application/json' }});
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const input = document.getElementById('load-local-settings-input');
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+      await new Promise(r => setTimeout(r, 150));
+    }}
+    """)
+
+    before = js(page, """
+    async () => ({
+      presets: window.dycadApp.store.smartStreamPresets,
+      cached: localStorage.getItem('dycad-local-settings-cache'),
+    })
+    """)
+    if before["presets"] != custom_presets:
+        return False, f"smartStreamPresets didn't load correctly from the Local Settings file: {before}"
+    if not before["cached"] or json.loads(before["cached"]).get("smartStreamPresets") != custom_presets:
+        return False, f"smartStreamPresets wasn't cached to localStorage on load: {before}"
+
+    page.reload()
+    page.wait_for_timeout(1200)
+
+    after = js(page, "async () => ({ presets: window.dycadApp.store.smartStreamPresets })")
+    if after["presets"] != custom_presets:
+        return False, f"smartStreamPresets did not auto-apply from its localStorage cache after reload: {after}"
+
+    return True, "a default 'StreamSet1' preset ships matching BatchScript_InsertSmartStreamExample, smartStreamPresets never appears in the Save JSON document, and it loads from a Local Settings file, caches to localStorage, and auto-applies on the next page load with no file re-selection"
+
+
+def check_smart_stream_preset_dialog_save_and_load(page):
+    """Regression guard for the Insert Smart Stream dialog's Preset row (Save As.../
+    Load buttons, main.js's promptInsertSmartStream) — reported directly: "Add load
+    from or save to dialog either on page or another page/tab of the dialog." Covers:
+    Save As collects the CURRENT dialog field values (including only the CHECKED
+    Starting Element Instances, by label) into a named preset, adds it to
+    store.smartStreamPresets (or overwrites an existing same-named one), caches it, and
+    the Preset dropdown immediately offers the new name; Load re-populates every field
+    from a chosen preset -- connector type, direction, ending element, levels, the
+    Starting Element type AND re-rendering its instance checklist to check exactly the
+    labels the preset remembers, and the Element Types to Show checklist -- and degrades
+    gracefully (leaves that part unchecked, warns via an error-styled toast) when a
+    remembered starting-instance label no longer matches any real part."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const fn = store.createPart({ type: 'BusinessFunction', label: 'RegrPresetFn', model, streams: [] });
+      const proc = store.createPart({ type: 'BusinessProcess', label: 'RegrPresetProc', model, streams: [] });
+      const cap = store.createPart({ type: 'ApplicationCapability', label: 'RegrPresetCap', model, streams: [] });
+      store.createConnector({ from: fn.id, to: proc.id, connectorType: 'c', model, relationship: 'Association' });
+      store.createConnector({ from: proc.id, to: cap.id, connectorType: 'c', model, relationship: 'Association' });
+
+      const view = store.addView('RegrPresetDialog_view', 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const out = {};
+
+      // --- Save As: set some non-default field values, then save as a new preset. ---
+      app.promptInsertSmartStream(tab);
+      await new Promise(r => setTimeout(r, 30));
+      let box = document.querySelector('.modal-box.modal-box-wide');
+      box.querySelector('#ss-connector-type').value = 'c';
+      box.querySelector('#ss-direction').value = 'downstream';
+      box.querySelector('#ss-start-type').value = 'BusinessFunction';
+      box.querySelector('#ss-start-type').dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 30));
+      box.querySelector('#ss-end-type').value = 'ApplicationCapability';
+      box.querySelector('#ss-levels').value = '5';
+      [...box.querySelectorAll('.ss-type-cb')].forEach(cb => { cb.checked = (cb.value === 'BusinessFunction' || cb.value === 'BusinessProcess'); });
+
+      box.querySelector('#ss-preset-save').click();
+      await new Promise(r => setTimeout(r, 30));
+      const nameInput = [...document.querySelectorAll('.modal-box')].find(b => b.querySelector('h3')?.textContent === 'Save Smart Stream Preset').querySelector('input[data-key=\"name\"]');
+      nameInput.value = 'RegrDialogPreset';
+      [...document.querySelectorAll('.modal-box')].find(b => b.querySelector('h3')?.textContent === 'Save Smart Stream Preset').querySelector('.submit').click();
+      await new Promise(r => setTimeout(r, 30));
+
+      out.presetSavedToStore = (store.smartStreamPresets || []).some(p => p.name === 'RegrDialogPreset');
+      const saved = (store.smartStreamPresets || []).find(p => p.name === 'RegrDialogPreset');
+      out.savedShape = saved ? { connectorType: saved.connectorType, direction: saved.direction, startType: saved.startType, startInstanceLabels: saved.startInstanceLabels, endType: saved.endType, levels: saved.levels, showTypes: (saved.showTypes || []).sort() } : null;
+      const cachedAfterSave = JSON.parse(localStorage.getItem('dycad-local-settings-cache') || '{}').smartStreamPresets;
+      out.presetCachedAfterSave = Array.isArray(cachedAfterSave) && cachedAfterSave.some(p => p.name === 'RegrDialogPreset');
+      out.dropdownOffersNewPreset = [...box.querySelectorAll('#ss-preset-select option')].some(o => o.value === 'RegrDialogPreset');
+
+      box.querySelector('.cancel').click();
+      await new Promise(r => setTimeout(r, 30));
+
+      // --- Load: reopen fresh, load the just-saved preset, verify every field populated. ---
+      app.promptInsertSmartStream(tab);
+      await new Promise(r => setTimeout(r, 30));
+      box = document.querySelector('.modal-box.modal-box-wide');
+      box.querySelector('#ss-preset-select').value = 'RegrDialogPreset';
+      box.querySelector('#ss-preset-load').click();
+      await new Promise(r => setTimeout(r, 30));
+
+      out.loadedConnectorType = box.querySelector('#ss-connector-type').value;
+      out.loadedDirection = box.querySelector('#ss-direction').value;
+      out.loadedStartType = box.querySelector('#ss-start-type').value;
+      out.loadedEndType = box.querySelector('#ss-end-type').value;
+      out.loadedLevels = box.querySelector('#ss-levels').value;
+      out.loadedCheckedInstances = [...box.querySelectorAll('.ss-start-instance-cb')].filter(c => c.checked).map(c => c.closest('label').textContent.trim());
+      out.loadedCheckedTypes = [...box.querySelectorAll('.ss-type-cb')].filter(c => c.checked).map(c => c.value).sort();
+
+      box.querySelector('.cancel').click();
+      await new Promise(r => setTimeout(r, 30));
+
+      // --- Load with a starting-instance label that no longer exists anywhere. ---
+      store.smartStreamPresets = [...store.smartStreamPresets, { name: 'RegrGhostPreset', connectorType: 'c', startType: 'BusinessFunction', startInstanceLabels: ['NoSuchPartLabel'], direction: 'both', endType: null, levels: null, showTypes: ['BusinessFunction'] }];
+      app.promptInsertSmartStream(tab);
+      await new Promise(r => setTimeout(r, 30));
+      box = document.querySelector('.modal-box.modal-box-wide');
+      box.querySelector('#ss-preset-select').value = 'RegrGhostPreset';
+      box.querySelector('#ss-preset-load').click();
+      await new Promise(r => setTimeout(r, 30));
+      out.ghostLoadCheckedInstances = [...box.querySelectorAll('.ss-start-instance-cb')].filter(c => c.checked).map(c => c.closest('label').textContent.trim());
+      out.ghostLoadToastIsError = document.querySelector('.toast.error')?.textContent.includes('RegrGhostPreset') || false;
+      box.querySelector('.cancel').click();
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["presetSavedToStore"]:
+        problems.append("Save As should add the new preset to store.smartStreamPresets")
+    expected_saved = {"connectorType": "c", "direction": "downstream", "startType": "BusinessFunction", "startInstanceLabels": ["RegrPresetFn"], "endType": "ApplicationCapability", "levels": 5, "showTypes": ["BusinessFunction", "BusinessProcess"]}
+    if result["savedShape"] != expected_saved:
+        problems.append(f"Save As should capture the CURRENT dialog field values (including only checked instances/types), expected {expected_saved}, got {result['savedShape']}")
+    if not result["presetCachedAfterSave"]:
+        problems.append("Save As should cache the updated presets list to localStorage immediately")
+    if not result["dropdownOffersNewPreset"]:
+        problems.append("the Preset dropdown should immediately offer the newly saved preset's name, in the same dialog instance")
+    if (result["loadedConnectorType"], result["loadedDirection"], result["loadedStartType"], result["loadedEndType"], result["loadedLevels"]) != ("c", "downstream", "BusinessFunction", "ApplicationCapability", "5"):
+        problems.append(f"Load should repopulate connector type/direction/starting element/ending element/levels from the preset, got connectorType={result['loadedConnectorType']} direction={result['loadedDirection']} startType={result['loadedStartType']} endType={result['loadedEndType']} levels={result['loadedLevels']}")
+    if result["loadedCheckedInstances"] != ["RegrPresetFn"]:
+        problems.append(f"Load should re-render the Starting Element Instances checklist for the preset's type and check exactly the remembered label(s), got {result['loadedCheckedInstances']}")
+    if result["loadedCheckedTypes"] != ["BusinessFunction", "BusinessProcess"]:
+        problems.append(f"Load should check exactly the Element Types to Show the preset remembers, got {result['loadedCheckedTypes']}")
+    if result["ghostLoadCheckedInstances"] != []:
+        problems.append(f"loading a preset whose starting-instance label no longer matches any real part should leave the checklist unchecked (not silently check something else), got {result['ghostLoadCheckedInstances']}")
+    if not result["ghostLoadToastIsError"]:
+        problems.append("loading a preset with an unresolvable starting-instance label should show an error-styled toast naming the preset")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Insert Smart Stream's Preset row saves the current dialog state as a named, persisted preset (offered immediately in the dropdown) and loads one back in field-for-field, including re-checking Starting Element Instances by label and degrading gracefully when a label no longer resolves"
 
 
 def check_instructions_closed_persists_across_reload(page):
@@ -5051,6 +5278,360 @@ def check_add_existing_prefiltered_by_section(page):
     return True, "Add Existing pre-filters its row list AND places added parts based on the section right-clicked on (or currently selected), not wherever the generic first-type-matching-section placer would otherwise put them"
 
 
+def check_insert_smart_stream_traversal(page):
+    """Regression guard for commands.js's insertSmartStream (Insert Smart Stream —
+    freeform-view-only command that traces a chain of parts/connectors by element type
+    into the current view). Reported directly: "Add ability in freeform view to insert
+    a smartStream... starting element..., upstream/downstream or both indicator, ending
+    element..., children levels..., and a selector checklist of element types to show."
+    Builds a realistic branching chain — BusinessFunction -> two BusinessProcesses ->
+    ApplicationCapability -> two DataDataEntities, plus an unrelated BusinessActor
+    connected upstream of the function (to prove direction filtering) — and a separate
+    BusinessCollaboration/BusinessInterface pair linked ONLY by a Stream ('s') connector
+    (to prove connectorType filtering, since both would otherwise become seeds by type
+    regardless of any edge). Calls insertSmartStream directly (bypassing the dialog) for
+    precision, covering: (1) baseline downstream trace with an endType stops-further-
+    propagation part still collected; (2) levels cap; (3) showTypes pruning BOTH the
+    excluded parts and any connector touching one; (4) upstream direction; (5)
+    connectorType selecting only same-typed edges; (6) idempotent re-run adds nothing
+    once everything is already on the view; (7) rejects with a toast naming the view
+    type on a section-based view, adding nothing."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const mkPart = (type, label) => store.createPart({ type, label, model, streams: [] });
+      const mkConn = (from, to, connectorType) => store.createConnector({ from: from.id, to: to.id, connectorType, model, relationship: 'Association' });
+
+      const fn = mkPart('BusinessFunction', 'RegrISS_Fn');
+      const proc1 = mkPart('BusinessProcess', 'RegrISS_Proc1');
+      const proc2 = mkPart('BusinessProcess', 'RegrISS_Proc2');
+      const cap = mkPart('ApplicationCapability', 'RegrISS_Cap');
+      const de1 = mkPart('DataDataEntity', 'RegrISS_De1');
+      const de2 = mkPart('DataDataEntity', 'RegrISS_De2');
+      const unrelated = mkPart('BusinessActor', 'RegrISS_Unrelated');
+      mkConn(fn, proc1, 'c'); mkConn(fn, proc2, 'c');
+      mkConn(proc1, cap, 'c'); mkConn(proc2, cap, 'c');
+      mkConn(cap, de1, 'c'); mkConn(cap, de2, 'c');
+      mkConn(unrelated, fn, 'c');
+
+      const collab = mkPart('BusinessCollaboration', 'RegrISS_Collab');
+      const iface = mkPart('BusinessInterface', 'RegrISS_Iface');
+      mkConn(collab, iface, 's');
+
+      const allTypes = ['BusinessFunction', 'BusinessProcess', 'ApplicationCapability', 'DataDataEntity', 'BusinessActor', 'BusinessCollaboration', 'BusinessInterface'];
+      const freshView = (name) => {
+        const view = store.addView(name, 'ff');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        return { view, tab };
+      };
+      const state = (view) => {
+        const vms = store.viewMembersForView(view.id);
+        const partVms = vms.filter(v => v.objectType === 'part');
+        const connVms = vms.filter(v => v.objectType === 'connector');
+        return { partCount: partVms.length, connCount: connVms.length, types: partVms.map(v => store.findPart(v.objectId).type).sort() };
+      };
+
+      const out = {};
+
+      // 1) baseline: downstream, endType=DataDataEntity, unlimited levels, all types shown
+      let { view: v1, tab: t1 } = freshView('RegrISS_baseline');
+      commands.insertSmartStream(app, t1, { connectorType: 'c', startPartIds: [fn.id], direction: 'downstream', endType: 'DataDataEntity', levels: null, showTypes: allTypes });
+      out.baseline = state(v1);
+
+      // 2) levels=1 -> only the function + its two direct processes
+      let { view: v2, tab: t2 } = freshView('RegrISS_levels1');
+      commands.insertSmartStream(app, t2, { connectorType: 'c', startPartIds: [fn.id], direction: 'downstream', endType: null, levels: 1, showTypes: allTypes });
+      out.levels1 = state(v2);
+
+      // 3) showTypes excludes DataDataEntity -> cap's downstream edges to de1/de2 pruned too
+      let { view: v3, tab: t3 } = freshView('RegrISS_excludetype');
+      commands.insertSmartStream(app, t3, { connectorType: 'c', startPartIds: [fn.id], direction: 'downstream', endType: null, levels: null, showTypes: allTypes.filter(t => t !== 'DataDataEntity') });
+      out.excludeType = state(v3);
+
+      // 4) upstream from the capability -> reaches the processes, the function, and (continuing
+      //    upstream past the function) the unrelated actor too, but never the data entities
+      let { view: v4, tab: t4 } = freshView('RegrISS_upstream');
+      commands.insertSmartStream(app, t4, { connectorType: 'c', startPartIds: [cap.id], direction: 'upstream', endType: null, levels: null, showTypes: allTypes });
+      out.upstream = state(v4);
+
+      // 5) connectorType: 'c' from the collaboration reaches nothing extra (only an 's' edge exists);
+      //    'c' from the interface behaves the same. 's' DOES reach it.
+      let { view: v5, tab: t5 } = freshView('RegrISS_connTypeC');
+      commands.insertSmartStream(app, t5, { connectorType: 'c', startPartIds: [collab.id], direction: 'both', endType: null, levels: null, showTypes: allTypes });
+      out.connTypeC = state(v5);
+      let { view: v6, tab: t6 } = freshView('RegrISS_connTypeS');
+      commands.insertSmartStream(app, t6, { connectorType: 's', startPartIds: [collab.id], direction: 'both', endType: null, levels: null, showTypes: allTypes });
+      out.connTypeS = state(v6);
+
+      // 6) idempotent re-run on the same (baseline) view adds nothing further
+      commands.insertSmartStream(app, t1, { connectorType: 'c', startPartIds: [fn.id], direction: 'downstream', endType: 'DataDataEntity', levels: null, showTypes: allTypes });
+      out.rerun = state(v1);
+
+      // 7) rejected on a section-based view type, nothing added
+      const orgView = store.addView('RegrISS_org', 'org');
+      const orgTab = app.createCanvasTab(orgView);
+      app.switchToTab(orgTab.id);
+      commands.insertSmartStream(app, orgTab, { connectorType: 'c', startPartIds: [fn.id], direction: 'downstream', endType: null, levels: null, showTypes: allTypes });
+      out.sectionRejected = state(orgView);
+
+      // 8) no starting elements selected -> rejected, nothing added
+      let { view: v8, tab: t8 } = freshView('RegrISS_noseed');
+      commands.insertSmartStream(app, t8, { connectorType: 'c', startPartIds: [], direction: 'downstream', endType: null, levels: null, showTypes: allTypes });
+      out.noSeed = state(v8);
+
+      return out;
+    }
+    """)
+    problems = []
+    b = result["baseline"]
+    if b["partCount"] != 6 or b["connCount"] != 6 or b["types"] != sorted(["BusinessFunction", "BusinessProcess", "BusinessProcess", "ApplicationCapability", "DataDataEntity", "DataDataEntity"]):
+        problems.append(f"baseline downstream trace with endType=DataDataEntity: expected 6 parts/6 conns covering the whole chain (unrelated BusinessActor excluded by direction), got {b}")
+    l1 = result["levels1"]
+    if l1["partCount"] != 3 or l1["connCount"] != 2 or l1["types"] != sorted(["BusinessFunction", "BusinessProcess", "BusinessProcess"]):
+        problems.append(f"levels=1 should stop at the function's direct processes, got {l1}")
+    ex = result["excludeType"]
+    if ex["partCount"] != 4 or ex["connCount"] != 4 or "DataDataEntity" in ex["types"]:
+        problems.append(f"excluding DataDataEntity from showTypes should prune the data entities AND the capability's connectors to them, got {ex}")
+    up = result["upstream"]
+    if up["partCount"] != 5 or up["connCount"] != 5 or "DataDataEntity" in up["types"]:
+        problems.append(f"upstream from the capability should reach the processes, function, and (continuing upstream) the unrelated actor, but not the data entities, got {up}")
+    ctc = result["connTypeC"]
+    if ctc["partCount"] != 1 or ctc["connCount"] != 0:
+        problems.append(f"connectorType='c' trace from the collaboration should NOT follow the 's'-only edge to the interface, got {ctc}")
+    cts = result["connTypeS"]
+    if cts["partCount"] != 2 or cts["connCount"] != 1:
+        problems.append(f"connectorType='s' trace from the collaboration SHOULD follow the 's' edge to the interface, got {cts}")
+    rerun = result["rerun"]
+    if rerun["partCount"] != 6 or rerun["connCount"] != 6:
+        problems.append(f"re-running an identical trace on a view that already has every result should add nothing further, got {rerun}")
+    sr = result["sectionRejected"]
+    if sr["partCount"] != 0 or sr["connCount"] != 0:
+        problems.append(f"Insert Smart Stream must refuse to run on a section-based view type, got {sr}")
+    ns = result["noSeed"]
+    if ns["partCount"] != 0 or ns["connCount"] != 0:
+        problems.append(f"an empty startPartIds list must be rejected with nothing added, got {ns}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "insertSmartStream traces by connectorType/direction/levels/endType, prunes by showTypes (parts and their connectors), is idempotent, and refuses non-freeform views"
+
+
+def check_insert_smart_stream_dialog(page):
+    """Regression guard for the Insert Smart Stream dialog itself (main.js's
+    promptInsertSmartStream) — a bespoke modal (promptModal has no multi-checkbox
+    field type, so this dialog is hand-built) covering: the command is wired into the
+    Commands panel; Starting/Ending Element options are scoped to types actually
+    present in the current model (not the full toolbox type list, which would offer
+    types nothing could ever be traced to/from); the Element Types to Show checklist
+    is scoped to that SAME current-model type list too (reported directly: "reduce the
+    'Element Types to Show' list to only show those currently existing in default
+    model") and defaults to all checked; its Select All/Exclude All header checkbox
+    toggles every row and itself reflects the rows' state; the Starting Element
+    Instances checklist lists the actual part instances of the chosen Starting Element
+    type (re-rendering, all-checked, when the type changes) and genuinely narrows which
+    specific part(s) get used as seeds; the dialog renders as the wider modal-box-wide
+    variant (reported directly: "The 'Insert Smart Stream' form is long, can it be
+    reorganized to be shorter, perhaps wider?") rather than the default narrow modal
+    width; and submitting calls through to insertSmartStream with the collected field
+    values, landing the traced parts/connectors on the view."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const fn1 = store.createPart({ type: 'BusinessFunction', label: 'RegrISSD_Fn1', model, streams: [] });
+      const fn2 = store.createPart({ type: 'BusinessFunction', label: 'RegrISSD_Fn2', model, streams: [] });
+      const proc1 = store.createPart({ type: 'BusinessProcess', label: 'RegrISSD_Proc1', model, streams: [] });
+      const proc2 = store.createPart({ type: 'BusinessProcess', label: 'RegrISSD_Proc2', model, streams: [] });
+      store.createConnector({ from: fn1.id, to: proc1.id, connectorType: 'c', model, relationship: 'Association' });
+      store.createConnector({ from: fn2.id, to: proc2.id, connectorType: 'c', model, relationship: 'Association' });
+
+      const view = store.addView('RegrISSD_view', 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      app.render();
+
+      const out = {};
+      out.commandButtonPresent = !!document.querySelector('button[title^=\"Insert Smart Stream\"]');
+
+      app.promptInsertSmartStream(tab);
+      await new Promise(r => setTimeout(r, 30));
+      out.modalBoxIsWide = document.querySelector('.modal-box').classList.contains('modal-box-wide');
+      out.startOptions = [...document.querySelectorAll('#ss-start-type option')].map(o => o.value).sort();
+      const allCbs = [...document.querySelectorAll('.ss-type-cb')];
+      out.allCheckedByDefault = allCbs.every(cb => cb.checked);
+      out.typeValues = allCbs.map(cb => cb.value).sort();
+
+      // Starting Element Instances: defaults to the two BusinessFunction instances, all checked.
+      out.startInstanceLabels = [...document.querySelectorAll('#ss-start-instances-list label')].map(l => l.textContent.trim()).sort();
+      const startInstanceCbs = () => [...document.querySelectorAll('.ss-start-instance-cb')];
+      out.startInstancesAllCheckedByDefault = startInstanceCbs().every(cb => cb.checked);
+
+      // Switching Starting Element type re-renders the instance list for the new type.
+      document.querySelector('#ss-start-type').value = 'BusinessProcess';
+      document.querySelector('#ss-start-type').dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 30));
+      out.startInstanceLabelsAfterTypeSwitch = [...document.querySelectorAll('#ss-start-instances-list label')].map(l => l.textContent.trim()).sort();
+
+      // Switch back to BusinessFunction and uncheck Fn2 -> only Fn1's own branch should trace through.
+      document.querySelector('#ss-start-type').value = 'BusinessFunction';
+      document.querySelector('#ss-start-type').dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 30));
+      const fn2cb = startInstanceCbs().find(cb => cb.closest('label').textContent.trim() === 'RegrISSD_Fn2');
+      fn2cb.checked = false;
+      fn2cb.dispatchEvent(new Event('change'));
+      out.startSelectAllUncheckedAfterOneInstanceUnchecked = !document.querySelector('#ss-start-select-all').checked;
+
+      // Uncheck one Element Types to Show row -> the Select All header should reflect the mixed state.
+      allCbs[0].checked = false;
+      allCbs[0].dispatchEvent(new Event('change'));
+      out.selectAllUncheckedAfterOneRowUnchecked = !document.querySelector('#ss-types-select-all').checked;
+
+      // Re-check via the Select All header -> every row should end up checked again.
+      const selectAll = document.querySelector('#ss-types-select-all');
+      selectAll.checked = true;
+      selectAll.dispatchEvent(new Event('change'));
+      out.allCheckedAfterSelectAllToggle = [...document.querySelectorAll('.ss-type-cb')].every(cb => cb.checked);
+
+      document.querySelector('#ss-direction').value = 'downstream';
+      document.querySelector('.modal-box .submit').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      const vms = store.viewMembersForView(view.id);
+      out.placedPartCount = vms.filter(v => v.objectType === 'part').length;
+      out.placedConnCount = vms.filter(v => v.objectType === 'connector').length;
+      out.dialogClosed = !document.querySelector('.modal-overlay');
+      return out;
+    }
+    """)
+    problems = []
+    if not result["commandButtonPresent"]:
+        problems.append("Insert Smart Stream command button not found in the Commands panel")
+    if "BusinessFunction" not in result["startOptions"] or "BusinessProcess" not in result["startOptions"]:
+        problems.append(f"Starting Element options should include types present in the model, got {result['startOptions']}")
+    if not result["modalBoxIsWide"]:
+        problems.append("Insert Smart Stream dialog should render with the wider modal-box-wide variant, not the default narrow modal width")
+    if not result["allCheckedByDefault"] or result["typeValues"] != ["BusinessFunction", "BusinessProcess"]:
+        problems.append(f"Element Types to Show should be scoped to exactly the types present in the current model (BusinessFunction, BusinessProcess — not the full 77-type toolbox list) and default to all checked, got allCheckedByDefault={result['allCheckedByDefault']} typeValues={result['typeValues']}")
+    if result["startInstanceLabels"] != ["RegrISSD_Fn1", "RegrISSD_Fn2"]:
+        problems.append(f"Starting Element Instances should list the actual BusinessFunction parts by label, got {result['startInstanceLabels']}")
+    if not result["startInstancesAllCheckedByDefault"]:
+        problems.append("Starting Element Instances should default to all checked")
+    if result["startInstanceLabelsAfterTypeSwitch"] != ["RegrISSD_Proc1", "RegrISSD_Proc2"]:
+        problems.append(f"switching Starting Element to BusinessProcess should re-render the instance list to that type's own parts, got {result['startInstanceLabelsAfterTypeSwitch']}")
+    if not result["startSelectAllUncheckedAfterOneInstanceUnchecked"]:
+        problems.append("Starting Element Instances' Select All/Exclude All header should uncheck itself once any instance is unchecked")
+    if not result["selectAllUncheckedAfterOneRowUnchecked"]:
+        problems.append("Select All/Exclude All header should uncheck itself once any row is unchecked")
+    if not result["allCheckedAfterSelectAllToggle"]:
+        problems.append("toggling Select All back on should re-check every row")
+    if result["placedPartCount"] != 2 or result["placedConnCount"] != 1:
+        problems.append(f"submitting with Fn2 unchecked should trace only Fn1's own branch (Fn1+Proc1, 1 connector) -- proving the instance checklist actually narrows the seed set, not just the type -- got parts={result['placedPartCount']} conns={result['placedConnCount']}")
+    if not result["dialogClosed"]:
+        problems.append("dialog should close after submit")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Insert Smart Stream dialog is wired into Commands, scopes Starting/Ending options to types present in the model, its Starting Element Instances checklist re-renders per type and genuinely narrows the seed set, defaults both checklists to all-checked with working Select All/Exclude All toggles, and submits through to insertSmartStream"
+
+
+def check_insert_smart_stream_derived_connections(page):
+    """Regression guard for commands.js's insertSmartStream "derived connection"
+    behavior. Reported directly: "show the derived connections; for example if
+    business function is shown and then application capability, there is a derived
+    connection through business process." When a run of one or more excluded-type
+    parts sits between two surviving parts, insertSmartStream creates a genuine new
+    Connector linking the surviving endpoints directly (not a view-only decoration --
+    a real, persisted Connector, so it reuses the app's existing rendering/export/
+    inventory machinery), noting which hidden type(s) it passes through. Covers: (1) a
+    single hidden hop (Function -> hidden Process -> Capability) produces one derived
+    Function->Capability connector with a note naming Business Process; (2) a run of
+    TWO consecutive hidden types collapses into one derived edge naming both, in order;
+    (3) no derived edge is created when a real, direct connector already covers the
+    same pair; (4) re-running the identical trace is idempotent -- no duplicate derived
+    connector, because once created it becomes a normal directly-discoverable edge on
+    the next pass; (5) a real connector this command placed (not derived) has an empty
+    note, so the note field alone distinguishes the two."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const mkPart = (type, label) => store.createPart({ type, label, model, streams: [] });
+      const mkConn = (from, to, connectorType) => store.createConnector({ from: from.id, to: to.id, connectorType, model, relationship: 'Association' });
+      const freshView = (name) => {
+        const view = store.addView(name, 'ff');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        return { view, tab };
+      };
+      const state = (view) => {
+        const vms = store.viewMembersForView(view.id);
+        const partVms = vms.filter(v => v.objectType === 'part');
+        const connVms = vms.filter(v => v.objectType === 'connector');
+        const conns = connVms.map(v => {
+          const c = store.findConnector(v.objectId);
+          return { from: store.findPart(c.from)?.label, to: store.findPart(c.to)?.label, note: c.note };
+        });
+        return { partCount: partVms.length, connCount: connVms.length, conns };
+      };
+
+      const out = {};
+
+      // 1) single hidden hop
+      const fn = mkPart('BusinessFunction', 'RegrDC_Fn');
+      const proc = mkPart('BusinessProcess', 'RegrDC_Proc');
+      const cap = mkPart('ApplicationCapability', 'RegrDC_Cap');
+      mkConn(fn, proc, 'c'); mkConn(proc, cap, 'c');
+      const showFnCap = ['BusinessFunction', 'ApplicationCapability'];
+      let { view: v1, tab: t1 } = freshView('RegrDC_singleHop');
+      commands.insertSmartStream(app, t1, { connectorType: 'c', startPartIds: [fn.id], direction: 'downstream', endType: null, levels: null, showTypes: showFnCap });
+      out.singleHop = state(v1);
+
+      // 2) two consecutive hidden types collapse into one derived edge naming both, in order
+      const fn2 = mkPart('BusinessFunction', 'RegrDC_Fn2');
+      const proc2 = mkPart('BusinessProcess', 'RegrDC_Proc2');
+      const role2 = mkPart('BusinessRole', 'RegrDC_Role2');
+      const cap2 = mkPart('ApplicationCapability', 'RegrDC_Cap2');
+      mkConn(fn2, proc2, 'c'); mkConn(proc2, role2, 'c'); mkConn(role2, cap2, 'c');
+      let { view: v2, tab: t2 } = freshView('RegrDC_twoHiddenHops');
+      commands.insertSmartStream(app, t2, { connectorType: 'c', startPartIds: [fn2.id], direction: 'downstream', endType: null, levels: null, showTypes: showFnCap });
+      out.twoHiddenHops = state(v2);
+
+      // 3) a real, direct connector already covers the pair -> no derived edge created
+      const fn3 = mkPart('BusinessFunction', 'RegrDC_Fn3');
+      const proc3 = mkPart('BusinessProcess', 'RegrDC_Proc3');
+      const cap3 = mkPart('ApplicationCapability', 'RegrDC_Cap3');
+      mkConn(fn3, proc3, 'c'); mkConn(proc3, cap3, 'c'); mkConn(fn3, cap3, 'c');
+      let { view: v3, tab: t3 } = freshView('RegrDC_alreadyDirect');
+      commands.insertSmartStream(app, t3, { connectorType: 'c', startPartIds: [fn3.id], direction: 'downstream', endType: null, levels: null, showTypes: showFnCap });
+      out.alreadyDirect = state(v3);
+
+      // 4) idempotent re-run on the single-hop view -> no duplicate derived connector
+      commands.insertSmartStream(app, t1, { connectorType: 'c', startPartIds: [fn.id], direction: 'downstream', endType: null, levels: null, showTypes: showFnCap });
+      out.rerun = state(v1);
+
+      return out;
+    }
+    """)
+    problems = []
+    sh = result["singleHop"]
+    if sh["partCount"] != 2 or sh["connCount"] != 1 or sh["conns"] != [{"from": "RegrDC_Fn", "to": "RegrDC_Cap", "note": "Derived — implied via Business Process (not shown)"}]:
+        problems.append(f"a single hidden Business Process between Function and Capability should produce exactly one derived connector naming it, got {sh}")
+    th = result["twoHiddenHops"]
+    if th["partCount"] != 2 or th["connCount"] != 1 or th["conns"] != [{"from": "RegrDC_Fn2", "to": "RegrDC_Cap2", "note": "Derived — implied via Business Process, Business Role (not shown)"}]:
+        problems.append(f"two consecutive hidden types (Business Process then Business Role) should collapse into ONE derived connector naming both in order, got {th}")
+    ad = result["alreadyDirect"]
+    if ad["partCount"] != 2 or ad["connCount"] != 1 or ad["conns"] != [{"from": "RegrDC_Fn3", "to": "RegrDC_Cap3", "note": ""}]:
+        problems.append(f"when a real direct connector already links the pair, no extra derived connector should be created (and the real one's note must stay empty, distinguishing it from a derived one), got {ad}")
+    rr = result["rerun"]
+    if rr["partCount"] != 2 or rr["connCount"] != 1:
+        problems.append(f"re-running the same trace must not create a duplicate derived connector, got {rr}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "insertSmartStream creates a real, persisted derived Connector (noting which hidden type(s) it collapses) when excluded-type parts sit between two shown parts, collapses arbitrarily long hidden chains into one edge, skips it when a real direct connector already exists, and is idempotent on re-run"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
@@ -5246,6 +5827,8 @@ CHECKS = [
     check_pinned_field_dblclick_not_stolen_by_pin_icon,
     check_local_secrets_settings_split,
     check_batch_script_code_persists_with_local_settings,
+    check_smart_stream_preset_local_persistence,
+    check_smart_stream_preset_dialog_save_and_load,
     check_instructions_closed_persists_across_reload,
     check_load_sfcce,
     check_stream_template_shared_default,
@@ -5285,6 +5868,9 @@ CHECKS = [
     check_property_panel_relationship_edit_triggers_sync_prompt,
     check_delete_offers_inventory_cleanup,
     check_add_existing_prefiltered_by_section,
+    check_insert_smart_stream_traversal,
+    check_insert_smart_stream_dialog,
+    check_insert_smart_stream_derived_connections,
 ]
 
 

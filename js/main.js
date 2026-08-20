@@ -4,7 +4,7 @@ import { parseArchimateXml } from './archimate.js';
 import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
-import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart } from './commands.js';
+import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart } from './commands.js';
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection, computeSectionLayout, getAllowedTypesForView } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
@@ -148,6 +148,19 @@ function getCachedBatchScriptCode() {
  * Load Local Settings file handler (unlike maxScriptEntities/nodeSizeMultiplier, this
  * one is meant to be edited freely, not just loaded from a file). */
 function setCachedBatchScriptCode(code) { setLocalSettingsCache({ batchScriptCode: code }); }
+
+/** Reads the cached Insert Smart Stream presets list (if any). Returns null if nothing
+ * valid is cached — bootstrapApp then leaves the Store constructor's own
+ * DEFAULT_SMART_STREAM_PRESETS in place. */
+function getCachedSmartStreamPresets() {
+  const v = getLocalSettingsCache().smartStreamPresets;
+  return Array.isArray(v) ? v : null;
+}
+/** Writes the full Insert Smart Stream presets list to the localStorage cache so it
+ * survives a page refresh — called on every Save As from the dialog, not just from the
+ * Load Local Settings file handler (same "meant to be edited freely" reasoning as
+ * setCachedBatchScriptCode above). */
+function setCachedSmartStreamPresets(list) { setLocalSettingsCache({ smartStreamPresets: list }); }
 
 /** Reads the cached nodeSizeMultiplier value (if any). Returns null if nothing valid is
  * cached (fresh browser, cache cleared, or never loaded) — bootstrapApp then falls back
@@ -483,7 +496,13 @@ class App {
         <code>smartCheckView(app, tab, options)</code> (options: <code>missingConnectors,
         missingConnectorsAndNodes, levels, syncWithInventory</code>),
         <code>smartCheckNode(app, tab, partId, options)</code> (options: same as
-        smartCheckView plus <code>upstream, downstream, byStream, streams</code>). Run (or
+        smartCheckView plus <code>upstream, downstream, byStream, streams</code>),
+        <code>insertSmartStream(app, tab, options)</code> (freeform views only; options:
+        <code>connectorType</code> ('c'|'s'), <code>startPartIds</code> (array of part
+        ids — use <code>findParts</code> to look them up), <code>direction</code>
+        ('both'|'downstream'|'upstream'), <code>endType</code> (element type or null),
+        <code>levels</code> (number or null for unlimited), <code>showTypes</code>
+        (array of element types to keep)). Run (or
         Ctrl+Enter) defines everything below, then calls your top-level <code>main()</code> —
         it can call any other functions you've defined alongside it. Edits are saved
         automatically (Local Settings).
@@ -527,13 +546,13 @@ class App {
       persist();
       if (!code.trim()) return;
 
-      const bindingNames = ['app', 'store', 'model', 'findParts', 'log', 'messageLog', 'generateIndustry', 'populateFromTemplate', 'remap', 'smartCheckView', 'smartCheckNode'];
+      const bindingNames = ['app', 'store', 'model', 'findParts', 'log', 'messageLog', 'generateIndustry', 'populateFromTemplate', 'remap', 'smartCheckView', 'smartCheckNode', 'insertSmartStream'];
       const bindingValues = [
         this, this.store, this.store.simSelectedModel || null,
         findPartsForConsole,
         (...args) => appendOutput(args.map((a) => (typeof a === 'string' ? a : stringifyForConsole(a))).join(' ')),
         (msg) => pushMessageLog(this.store, typeof msg === 'string' ? msg : stringifyForConsole(msg)),
-        generateIndustry, populateFromTemplate, remap, smartCheckView, smartCheckNode,
+        generateIndustry, populateFromTemplate, remap, smartCheckView, smartCheckNode, insertSmartStream,
       ];
 
       let result, threw = false, errMessage = '';
@@ -924,6 +943,8 @@ class App {
       this.promptAddExisting(tab, canvasPos);
     } else if (key === 'populateFromTemplate') {
       this.promptPopulateFromTemplate(tab);
+    } else if (key === 'insertSmartStream') {
+      this.promptInsertSmartStream(tab);
     } else if (key === 'smartCheckNode') {
       this.promptSmartCheckNode(tab);
     }
@@ -1032,6 +1053,201 @@ class App {
         { key: 'template', label: 'Template', type: 'select', options: names, value: names[0] },
       ],
       onSubmit: (vals) => populateFromTemplate(this, tab, vals.template),
+    });
+  }
+
+  /** Bespoke (not the generic promptModal, which has no checklist field type) —
+   * "Insert Smart Stream" (freeform views only; insertSmartStream itself rejects with a
+   * toast naming the rule if the current view is section-based, same convention as
+   * every other view-type-restricted command in this app). Reported directly: "Add
+   * ability in freeform view to insert a smartStream. Through a dialog the user
+   * selects connector type..., starting element..., upstream/downstream or both
+   * indicator, ending element..., children levels..., and a selector checklist of
+   * element types to show." Starting/Ending Element options are scoped to types
+   * actually PRESENT in this model's own parts (an element type nothing exists for yet
+   * can never be reached by a traversal anyway); Element Types to Show lists every
+   * known element type (the traversal can discover any of them along the way),
+   * defaulting to all-checked — same Select-All/Exclude-All pattern the toolbar's own
+   * Type filter already uses. Picking a Starting Element type populates a second
+   * checklist of that type's actual instances (also all-checked by default) so the
+   * user can narrow the trace down to specific starting part(s), not just "every part
+   * of this type" — re-rendered on every Starting Element change. Laid out as a wide,
+   * two-column dialog (modal-box-wide): single-line fields in a 2-col grid up top, then
+   * the Starting Element Instances and Element Types to Show checklists side by side —
+   * shorter overall than stacking everything in the default narrow single column.
+   * Element Types to Show, like Starting/Ending Element, only lists types actually
+   * present in the current default model (an element type nothing exists for yet can
+   * never end up in the traced result anyway). A Preset row (top of the dialog) can
+   * save the current field values as a named smartStreamPreset (store.smartStreamPresets
+   * — Local Settings, cached to localStorage and bundled into File > Save/Load Local
+   * Settings, deliberately never touching the document/save file) or load one back in.
+   * A preset remembers its starting element by TYPE + part LABEL(s), not raw part
+   * id(s), so it can still resolve against a regenerated or different document later —
+   * any label that no longer matches a real part is simply left unchecked on load. */
+  promptInsertSmartStream(tab) {
+    const store = this.store;
+    const view = store.findView(tab.viewId);
+    if (view && isSectionViewType(view.viewType)) {
+      this.toast(`Insert Smart Stream only applies to freeform views — this view is section-based ("${view.viewType}").`, true);
+      return;
+    }
+    const modelParts = store.doc.parts.filter((p) => ciEq(p.model, store.defaultModel));
+    const typesInUse = [...new Set(modelParts.map((p) => p.type))]
+      .map((type) => { const el = elementByType(store, type); return { type, title: el?.title || type }; })
+      .sort((a, b) => a.title.localeCompare(b.title));
+    if (typesInUse.length === 0) { this.toast(`No parts in model "${store.defaultModel}" to trace a stream from.`, true); return; }
+    const instancesForType = (type) => modelParts.filter((p) => ciEq(p.type, type)).sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+
+    const root = document.getElementById('modal-root');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal-box modal-box-wide';
+    box.innerHTML = `<h3>Insert Smart Stream</h3>
+      <div class="prop-row"><label>Preset</label><select id="ss-preset-select">
+        <option value="">(none)</option>
+        ${(store.smartStreamPresets || []).map((p) => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('')}
+      </select><button type="button" id="ss-preset-load">Load</button><button type="button" id="ss-preset-save">Save As…</button></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;">
+        <div class="prop-row"><label>Connector Type</label><select id="ss-connector-type">
+          <option value="c">Connectors (c)</option>
+          <option value="s">Streams (s)</option>
+        </select></div>
+        <div class="prop-row"><label>Direction</label><select id="ss-direction">
+          <option value="both">Both</option>
+          <option value="downstream">Downstream</option>
+          <option value="upstream">Upstream</option>
+        </select></div>
+        <div class="prop-row"><label>Starting Element</label><select id="ss-start-type">${typesInUse.map((t) => `<option value="${escapeHtml(t.type)}">${escapeHtml(t.title)}</option>`).join('')}</select></div>
+        <div class="prop-row"><label>Ending Element</label><select id="ss-end-type">
+          <option value="">(none)</option>
+          ${typesInUse.map((t) => `<option value="${escapeHtml(t.type)}">${escapeHtml(t.title)}</option>`).join('')}
+        </select></div>
+        <div class="prop-row"><label>Children Levels</label><input type="number" id="ss-levels" min="0" step="1" placeholder="Unlimited" title="How many hops beyond the starting element to include (blank = unlimited)." /></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;margin-top:8px;">
+        <div>
+          <div style="font-size:12px;color:var(--text-muted);">Starting Element Instances</div>
+          <div class="prop-row checkbox"><input type="checkbox" id="ss-start-select-all" checked /><label for="ss-start-select-all">Select All / Exclude All</label></div>
+          <div id="ss-start-instances-list" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:5px;padding:6px 8px;"></div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--text-muted);">Element Types to Show</div>
+          <div class="prop-row checkbox"><input type="checkbox" id="ss-types-select-all" checked /><label for="ss-types-select-all">Select All / Exclude All</label></div>
+          <div id="ss-types-list" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:5px;padding:6px 8px;">
+            ${typesInUse.map((t) => `<label style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer;"><input type="checkbox" class="ss-type-cb" value="${escapeHtml(t.type)}" checked />${escapeHtml(t.title)}</label>`).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Insert</button></div>`;
+    overlay.appendChild(box);
+    root.appendChild(overlay);
+
+    const startInstanceCbs = () => [...box.querySelectorAll('.ss-start-instance-cb')];
+    const renderStartInstances = () => {
+      const type = box.querySelector('#ss-start-type').value;
+      const instances = instancesForType(type);
+      box.querySelector('#ss-start-instances-list').innerHTML = instances.map((p) => `<label style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer;"><input type="checkbox" class="ss-start-instance-cb" value="${escapeHtml(p.id)}" checked />${escapeHtml(p.label || p.id)}</label>`).join('');
+      box.querySelector('#ss-start-select-all').checked = true;
+      startInstanceCbs().forEach((cb) => cb.addEventListener('change', () => {
+        box.querySelector('#ss-start-select-all').checked = startInstanceCbs().every((c) => c.checked);
+      }));
+    };
+    box.querySelector('#ss-start-type').addEventListener('change', renderStartInstances);
+    box.querySelector('#ss-start-select-all').addEventListener('change', (e) => {
+      startInstanceCbs().forEach((cb) => { cb.checked = e.target.checked; });
+    });
+    renderStartInstances();
+
+    const typeCbs = () => [...box.querySelectorAll('.ss-type-cb')];
+    box.querySelector('#ss-types-select-all').addEventListener('change', (e) => {
+      typeCbs().forEach((cb) => { cb.checked = e.target.checked; });
+    });
+    typeCbs().forEach((cb) => cb.addEventListener('change', () => {
+      box.querySelector('#ss-types-select-all').checked = typeCbs().every((c) => c.checked);
+    }));
+
+    box.querySelector('#ss-preset-load').addEventListener('click', () => {
+      const name = box.querySelector('#ss-preset-select').value;
+      if (!name) { this.toast('Select a preset to load.', true); return; }
+      const preset = (store.smartStreamPresets || []).find((p) => p.name === name);
+      if (!preset) { this.toast(`Preset "${name}" not found.`, true); return; }
+
+      box.querySelector('#ss-connector-type').value = preset.connectorType || 'c';
+      box.querySelector('#ss-direction').value = preset.direction || 'both';
+      box.querySelector('#ss-end-type').value = preset.endType || '';
+      box.querySelector('#ss-levels').value = preset.levels != null ? String(preset.levels) : '';
+
+      const startTypeSelect = box.querySelector('#ss-start-type');
+      const hasStartType = [...startTypeSelect.options].some((o) => o.value === preset.startType);
+      if (hasStartType) startTypeSelect.value = preset.startType;
+      renderStartInstances();
+      const labels = new Set(preset.startInstanceLabels || []);
+      let matchedAny = false;
+      startInstanceCbs().forEach((cb) => {
+        const match = labels.has(cb.closest('label').textContent.trim());
+        cb.checked = match;
+        if (match) matchedAny = true;
+      });
+      box.querySelector('#ss-start-select-all').checked = startInstanceCbs().length > 0 && startInstanceCbs().every((c) => c.checked);
+
+      const showSet = new Set(preset.showTypes || []);
+      typeCbs().forEach((cb) => { cb.checked = showSet.has(cb.value); });
+      box.querySelector('#ss-types-select-all').checked = typeCbs().length > 0 && typeCbs().every((c) => c.checked);
+
+      const warnings = [];
+      if (!hasStartType) warnings.push(`Starting Element type "${preset.startType}" has no parts in this model — left unchanged.`);
+      if (!matchedAny) warnings.push("none of the preset's starting instance labels were found — check Starting Element Instances manually.");
+      this.toast(warnings.length ? `Preset "${name}" loaded (${warnings.join(' ')})` : `Preset "${name}" loaded.`, warnings.length > 0);
+    });
+
+    box.querySelector('#ss-preset-save').addEventListener('click', () => {
+      this.promptModal({
+        title: 'Save Smart Stream Preset',
+        fields: [{ key: 'name', label: 'Preset Name', value: box.querySelector('#ss-preset-select').value || '' }],
+        onSubmit: (vals) => {
+          const name = (vals.name || '').trim();
+          if (!name) { this.toast('Preset name is required.', true); return; }
+          const levelsRaw = box.querySelector('#ss-levels').value.trim();
+          const preset = {
+            name,
+            connectorType: box.querySelector('#ss-connector-type').value,
+            startType: box.querySelector('#ss-start-type').value,
+            startInstanceLabels: startInstanceCbs().filter((c) => c.checked).map((c) => c.closest('label').textContent.trim()),
+            direction: box.querySelector('#ss-direction').value,
+            endType: box.querySelector('#ss-end-type').value || null,
+            levels: levelsRaw === '' ? null : Math.max(0, parseInt(levelsRaw, 10) || 0),
+            showTypes: typeCbs().filter((c) => c.checked).map((c) => c.value),
+          };
+          const list = [...(store.smartStreamPresets || [])];
+          const idx = list.findIndex((p) => p.name === name);
+          if (idx >= 0) list[idx] = preset; else list.push(preset);
+          store.smartStreamPresets = list;
+          setCachedSmartStreamPresets(list);
+          // Refresh the Preset dropdown in place so the new/updated name is selectable immediately.
+          const sel = box.querySelector('#ss-preset-select');
+          sel.innerHTML = `<option value="">(none)</option>${list.map((p) => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('')}`;
+          sel.value = name;
+          this.toast(`Saved preset "${name}".`);
+        },
+      });
+    });
+
+    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+    box.querySelector('.submit').addEventListener('click', () => {
+      const startPartIds = startInstanceCbs().filter((c) => c.checked).map((c) => c.value);
+      if (startPartIds.length === 0) { this.toast('Select at least one Starting Element Instance.', true); return; }
+      const levelsRaw = box.querySelector('#ss-levels').value.trim();
+      const options = {
+        connectorType: box.querySelector('#ss-connector-type').value,
+        startPartIds,
+        direction: box.querySelector('#ss-direction').value,
+        endType: box.querySelector('#ss-end-type').value || null,
+        levels: levelsRaw === '' ? null : Math.max(0, parseInt(levelsRaw, 10) || 0),
+        showTypes: typeCbs().filter((c) => c.checked).map((c) => c.value),
+      };
+      overlay.remove();
+      insertSmartStream(this, tab, options);
     });
   }
 
@@ -1902,16 +2118,17 @@ class App {
    * the main save file — the pinned-fields config, maxScriptEntities (the
    * ctx.createPart/ctx.createConnector safety cap, see simulation.js),
    * nodeSizeMultiplier (the default node box size new views are created with, see
-   * state.js's defaultNodeSize), and batchScriptCode (the Script Console's persistent
-   * text, Advanced menu) — into a single downloadable file, so they travel together
-   * between browsers/machines. Deliberately excludes secrets (see saveLocalSecrets
-   * above) — these two were bundled together in an earlier version of this feature;
-   * split apart because secrets must never be cached to localStorage while these
-   * settings now deliberately ARE (see loadLocalSettings's handler), so bundling them
-   * would have meant either caching secrets too (unacceptable) or a settings load
-   * leaving secrets in some ambiguous state. */
+   * state.js's defaultNodeSize), batchScriptCode (the Script Console's persistent
+   * text, Advanced menu), and smartStreamPresets (Insert Smart Stream's named dialog
+   * presets) — into a single downloadable file, so they travel together between
+   * browsers/machines. Deliberately excludes secrets (see saveLocalSecrets above) —
+   * these two were bundled together in an earlier version of this feature; split apart
+   * because secrets must never be cached to localStorage while these settings now
+   * deliberately ARE (see loadLocalSettings's handler), so bundling them would have
+   * meant either caching secrets too (unacceptable) or a settings load leaving secrets
+   * in some ambiguous state. */
   saveLocalSettings() {
-    const data = { pinnedFields: getAllPinnedFields(), maxScriptEntities: this.store.maxScriptEntities, nodeSizeMultiplier: this.store.nodeSizeMultiplier, batchScriptCode: this.store.batchScriptCode };
+    const data = { pinnedFields: getAllPinnedFields(), maxScriptEntities: this.store.maxScriptEntities, nodeSizeMultiplier: this.store.nodeSizeMultiplier, batchScriptCode: this.store.batchScriptCode, smartStreamPresets: this.store.smartStreamPresets };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2925,6 +3142,8 @@ async function bootstrapApp() {
   if (cachedCap !== null) store.maxScriptEntities = cachedCap;
   const cachedBatchScript = getCachedBatchScriptCode();
   if (cachedBatchScript !== null) store.batchScriptCode = cachedBatchScript;
+  const cachedPresets = getCachedSmartStreamPresets();
+  if (cachedPresets !== null) store.smartStreamPresets = cachedPresets;
 
   document.body.appendChild(buildMarkerDefs(store));
 
@@ -3189,9 +3408,10 @@ function wireGlobalEvents(app) {
     }
   });
   // File > Load Local Settings: user PREFERENCES only (pinnedFields, maxScriptEntities,
-  // nodeSizeMultiplier, batchScriptCode) — separate from secrets above. Caches
-  // maxScriptEntities/nodeSizeMultiplier/batchScriptCode to localStorage (see
-  // setCachedMaxScriptEntities/setCachedNodeSizeMultiplier/setCachedBatchScriptCode) so
+  // nodeSizeMultiplier, batchScriptCode, smartStreamPresets) — separate from secrets
+  // above. Caches maxScriptEntities/nodeSizeMultiplier/batchScriptCode/
+  // smartStreamPresets to localStorage (see setCachedMaxScriptEntities/
+  // setCachedNodeSizeMultiplier/setCachedBatchScriptCode/setCachedSmartStreamPresets) so
   // they survive a page refresh without re-loading this file; pinnedFields already
   // caches itself the moment setAllPinnedFields runs. Same dual-shape acceptance as
   // Load Local Secrets, for the same pre-split-file reason.
@@ -3222,12 +3442,18 @@ function wireGlobalEvents(app) {
         app.store.batchScriptCode = obj.batchScriptCode;
         setCachedBatchScriptCode(obj.batchScriptCode);
       }
+      const hasPresets = Array.isArray(obj.smartStreamPresets);
+      if (hasPresets) {
+        app.store.smartStreamPresets = obj.smartStreamPresets;
+        setCachedSmartStreamPresets(obj.smartStreamPresets);
+      }
       app.render(); // picks up the new pin config immediately if a property panel is open
       const parts = [];
       if (obj.pinnedFields) parts.push('pinned fields');
       if (hasCap) parts.push(`max script entities: ${app.store.maxScriptEntities}`);
       if (hasMult) parts.push(`node size multiplier: ${app.store.nodeSizeMultiplier}`);
       if (hasBatchScript) parts.push('script console text');
+      if (hasPresets) parts.push('smart stream presets');
       app.toast(parts.length ? `Local settings loaded (${parts.join(', ')}).` : 'Local settings file had nothing recognized to load.');
     } catch (err) {
       app.toast(`Local settings load failed: ${err.message}`, true);

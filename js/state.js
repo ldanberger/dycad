@@ -3,15 +3,19 @@
 /** Store.batchScriptCode's out-of-the-box default — the Script Console's Run button
  * calls whatever top-level `main()` this text defines (see App.promptScriptConsole,
  * main.js), which can in turn call any number of other functions defined alongside it.
- * This one gives a working starting point: main() calling a single starter batch
- * script, BatchScript_QuickStart(), which builds a basic Business Functions
- * organization view from the built-in "general" industry data end to end. Naming
- * convention for future additions: `BatchScript_<Name>`, so main() can pick and choose
- * which one(s) to run without renaming anything. */
+ * This one gives a working starting point: main() calling two starter batch scripts in
+ * sequence — BatchScript_QuickStart(), which builds a basic Business Functions
+ * organization view from the built-in "general" industry data end to end (ending with
+ * the 3D View), then BatchScript_InsertSmartStreamExample(), which traces a Smart
+ * Stream from data QuickStart itself just generated. Naming convention for future
+ * additions: `BatchScript_<Name>`, so main() can pick and choose which one(s) to run
+ * without renaming anything. */
 const DEFAULT_BATCH_SCRIPT_CODE = `// main() is what the Script Console's Run button actually calls. Define whatever
 // batch scripts you like below, and have main() call whichever one(s) you want to run.
-function main() {
-  return BatchScript_QuickStart();
+async function main() {
+  await BatchScript_QuickStart();
+  // Runs after BatchScript_QuickStart's own 3D View step above.
+  return BatchScript_InsertSmartStreamExample();
 }
 
 // A starter batch script: builds a basic Business Functions organization view from the
@@ -45,7 +49,62 @@ async function BatchScript_QuickStart() {
 
   messageLog('Done');
 }
+
+// Example: Insert Smart Stream called directly with explicit options (same shape the
+// dialog builds from the user's picks -- see promptInsertSmartStream in main.js).
+// Called by main() above, after BatchScript_QuickStart. Depends on a Business Function
+// named "Production", which BatchScript_QuickStart's "general" industry data creates
+// (adjust the label/types below to match your own model if you remove that call).
+async function BatchScript_InsertSmartStreamExample() {
+  let tab = store.activeTab();
+  if (!tab || tab.type !== 'canvas' || store.findView(tab.viewId)?.viewType !== 'ff') {
+    const view = store.addView('Smart Stream Example', 'ff');
+    tab = app.createCanvasTab(view);
+    app.switchToTab(tab.id);
+  }
+
+  const start = findParts({ type: 'BusinessFunction', model: store.defaultModel }).find((p) => p.label === 'Production');
+  if (!start) { log('No Business Function named "Production" found in model "' + store.defaultModel + '".'); return; }
+
+  insertSmartStream(app, tab, {
+    connectorType: 'c',
+    startPartIds: [start.id],
+    direction: 'both',
+    endType: 'DataDataEntity',
+    levels: null,
+    showTypes: ['ApplicationCapability', 'BusinessFunction', 'BusinessProcess', 'BusinessCapability', 'DataDataEntity', 'GeneralActor', 'TechnologyLogicalComponent'],
+  });
+
+  app.recordAndRender();
+  messageLog('Insert Smart Stream example done');
+}
 `;
+
+/** Store.smartStreamPresets' out-of-the-box default — named, reusable Insert Smart
+ * Stream dialog settings (main.js's promptInsertSmartStream), saved/loaded via that
+ * dialog's own Preset row. Same Local Settings persistence story as
+ * DEFAULT_BATCH_SCRIPT_CODE above (cached to localStorage, bundled into File > Save/
+ * Load Local Settings, both handled in main.js) — deliberately never touches this.doc,
+ * so presets are a personal toolkit that survives across different documents/models,
+ * not something that round-trips through Save/Load JSON. Starting element is
+ * remembered by TYPE + part LABEL(s), not raw part id(s) — ids are only ever valid
+ * within the specific document they were created in, while a label is far more likely
+ * to still resolve to a real part next time the preset is applied, possibly against a
+ * regenerated or entirely different document. This one entry mirrors
+ * BatchScript_InsertSmartStreamExample above exactly, so the same trace is available
+ * both as a runnable script and as a ready-made dialog preset out of the box. */
+const DEFAULT_SMART_STREAM_PRESETS = [
+  {
+    name: 'StreamSet1',
+    connectorType: 'c',
+    startType: 'BusinessFunction',
+    startInstanceLabels: ['Production'],
+    direction: 'both',
+    endType: 'DataDataEntity',
+    levels: null,
+    showTypes: ['ApplicationCapability', 'BusinessFunction', 'BusinessProcess', 'BusinessCapability', 'DataDataEntity', 'GeneralActor', 'TechnologyLogicalComponent'],
+  },
+];
 
 function newId() {
   return (crypto.randomUUID && crypto.randomUUID()) || `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -179,6 +238,14 @@ class Store {
     // batch operations, not part of the model itself. Defaults to a ready-to-run
     // starter script (DEFAULT_BATCH_SCRIPT_CODE, above) rather than blank.
     this.batchScriptCode = DEFAULT_BATCH_SCRIPT_CODE;
+    // Named Insert Smart Stream dialog presets (main.js's promptInsertSmartStream) —
+    // same Local Settings persistence story as batchScriptCode just above (cached to
+    // localStorage, bundled into File > Save/Load Local Settings, both handled in
+    // main.js). Never touches this.doc, so presets are a personal toolkit that
+    // survives across different documents/models, not something that round-trips
+    // through Save/Load JSON. Defaults to one ready-made preset (DEFAULT_SMART_STREAM_
+    // PRESETS, above) mirroring BatchScript_InsertSmartStreamExample.
+    this.smartStreamPresets = DEFAULT_SMART_STREAM_PRESETS;
     // Filename of the last file that fully replaced store.doc (Save/Load JSON's own
     // "Load JSON" button, File > Load, File > Load Example) — NOT set by Import Data,
     // which merges additively into whatever's already loaded rather than replacing it.

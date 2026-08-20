@@ -177,6 +177,33 @@ canvas. Availability depends on what's selected — greyed out means the current
     <tr><td><strong>Populate From Template</strong></td><td>Fills a view from a page template matching its
     view type (e.g. a full "Enterprise Functions" section layout) — reuses existing parts by label/type/model
     match where possible rather than duplicating them.</td></tr>
+    <tr><td><strong>Insert Smart Stream</strong></td><td>Freeform views only. Traces a chain of existing parts
+    into the current view by element type: pick a Connector Type (Connectors or Streams), a Starting Element
+    type — which populates a Starting Element Instances checklist of that type's actual parts, defaulting to
+    all checked, so you can narrow the trace down to specific starting part(s) rather than every part of that
+    type — a Direction (Upstream, Downstream, or Both), an optional Ending Element type, how many Children
+    Levels to follow (blank = unlimited), and an Element Types to Show checklist (scoped to only the element
+    types actually present in the current default model, and defaulting to all of them checked). Starting from
+    the checked instance(s), it follows connectors of the chosen Connector Type in the
+    chosen direction(s) up to the level limit — a part matching the Ending Element type is still included but
+    doesn't itself propagate any further, so other branches keep expanding independently. The result is then
+    narrowed to only the checked element types (a connector is only placed if both its endpoints survived that
+    narrowing), and only genuinely new parts/connectors get added — anything already on the view is left alone.
+    Since only real, existing connectors are ever placed, they keep whatever line/arrowhead styling their own
+    relationship already has. When one or more hidden (unchecked) element types sit between two shown parts —
+    e.g. Business Function shown, Application Capability shown, but Business Process hidden in between — a
+    genuine new "derived" connector is added directly linking the two, so the relationship isn't lost just
+    because the type in the middle is hidden; its Note field records which hidden type(s) it stands in for. No
+    derived connector is added where a real, direct one already exists, and re-running the same trace never
+    creates a duplicate. Also callable directly from a batch script — see <a href="#simulation">Script
+    Console</a> below. A Preset row at the top of the dialog can save the current field values as a named,
+    reusable preset (<strong>Save As…</strong>) or load one back in (<strong>Load</strong>) — presets remember
+    the starting element by type and part label(s), not raw part ids, so they still resolve sensibly against a
+    regenerated or different document later (any label that no longer matches a real part is simply left
+    unchecked on load). Presets are Local Settings, not part of the model — they never end up in a saved JSON
+    file, but do travel with File &gt; Save/Load Local Settings and auto-apply from this browser's cache on
+    reload, same as the Script Console's own text. One preset, "StreamSet1", ships out of the box, matching the
+    Script Console's own BatchScript_InsertSmartStreamExample.</td></tr>
     <tr><td><strong>Smart Check View</strong></td><td>(Advanced menu) Repairs gaps between a view and the
     underlying model: adds any connector that should exist between two nodes already on the view, and
     optionally pulls in nodes connected to what's already there (with a Levels setting for how many hops to
@@ -447,8 +474,8 @@ Enabled" in Root Properties, then write the script body in the Script field.</p>
     <tr><td><code>ctx.secrets</code></td><td>Read-only access to your Local Secrets (File &gt; Load Local
     Secrets — e.g. an API key) that should never end up saved into a shared model file. Deliberately
     memory-only — never cached to localStorage either, so it must be re-loaded each browser session, unlike
-    File &gt; Load/Save Local Settings (pinned fields, Max Script Entities, node size, and the Script Console's
-    own text) which IS cached and auto-applies on startup.</td></tr>
+    File &gt; Load/Save Local Settings (pinned fields, Max Script Entities, node size, the Script Console's own
+    text, and Insert Smart Stream's saved presets) which IS cached and auto-applies on startup.</td></tr>
     <tr><td><code>ctx.setState(patch)</code></td><td>For asynchronous work (e.g. a fetch whose result arrives
     later) — merges into this part's state at the start of the <em>next</em> tick rather than immediately.</td></tr>
     <tr><td><code>ctx.loadedFileName</code></td><td>The filename of the last file that fully replaced the model
@@ -517,7 +544,14 @@ simulation model), <code>findParts</code>, <code>log(...)</code> (prints to the 
 <code>smartCheckView(app, tab, options)</code> (options: <code>missingConnectors</code>,
 <code>missingConnectorsAndNodes</code>, <code>levels</code>, <code>syncWithInventory</code>), and
 <code>smartCheckNode(app, tab, partId, options)</code> (same options as smartCheckView, plus
-<code>upstream</code>, <code>downstream</code>, <code>byStream</code>, <code>streams</code>). A
+<code>upstream</code>, <code>downstream</code>, <code>byStream</code>, <code>streams</code>), and
+<code>insertSmartStream(app, tab, options)</code> (freeform views only; options:
+<code>connectorType</code> — <code>'c'</code>/<code>'s'</code> — <code>startPartIds</code> (an array
+of specific part ids to seed from — use <code>findParts</code> to look them up by type/model, then
+filter to the label(s) you want), <code>direction</code> —
+<code>'both'</code>/<code>'downstream'</code>/<code>'upstream'</code> — <code>endType</code> (an
+element type, or <code>null</code>), <code>levels</code> (a number, or <code>null</code> for
+unlimited), and <code>showTypes</code> (an array of element types to keep in the result)). A
 script builds its own <code>tab</code> when it needs one, e.g. via
 <code>app.createCanvasTab(view)</code> / <code>app.switchToTab(tab.id)</code>.</p>
 <p>The editor's text is a real script FILE, not a one-off REPL entry: it's saved as you go (both to this browser's
@@ -525,9 +559,15 @@ localStorage and, if you edit it, alongside File &gt; Save Local Settings — se
 afterward. Run (or Ctrl+Enter) defines everything currently in the box — so any <code>function foo() {...}</code>
 you write becomes callable — then calls exactly one predetermined entry point, a top-level <code>main()</code>,
 which is free to call whatever other functions you've defined alongside it (they all share the same bindings
-automatically, without needing them passed in). The default script's <code>main()</code> calls one starter batch
-script, <code>BatchScript_QuickStart()</code> — the convention for adding your own is
-<code>BatchScript_&lt;Name&gt;</code>, with <code>main()</code> picking which one(s) to run.</p>
+automatically, without needing them passed in). The default script's <code>main()</code> runs two starter batch
+scripts in sequence — the convention for adding your own is <code>BatchScript_&lt;Name&gt;</code>, with
+<code>main()</code> picking which one(s) to run, in whatever order. First,
+<code>BatchScript_QuickStart()</code> builds the "Business Functions" view end to end, ending with the 3D View.
+Then <code>BatchScript_InsertSmartStreamExample()</code> runs — a full <code>insertSmartStream</code> call
+(Connectors, both directions, starting from a Business Function named "Production" out to Data Entity, several
+element types shown) against the very data <code>BatchScript_QuickStart</code> just generated, landing on a new
+"Smart Stream Example" view. It's the same trace as the "StreamSet1" preset that ships with the Insert Smart
+Stream dialog (see Commands above) — one usable both as a script and as a ready-made dialog preset.</p>
 
 <h3>Code Summary</h3>
 <p>Advanced &gt; Code Summary opens a read-only listing of the Script Console's own text plus every part's own

@@ -464,6 +464,7 @@ button, select, input { font-family: inherit; font-size: inherit; color: inherit
 .modal-box h3 { margin: 0 0 12px 0; font-size: 14px; }
 .modal-box .prop-row { margin-bottom: 12px; }
 .modal-box-textedit { width: min(640px, 90vw); }
+.modal-box-wide { width: min(620px, 92vw); }
 .text-edit-area {
   width: 100%; box-sizing: border-box; height: 50vh; min-height: 240px; resize: vertical;
   font-family: var(--mono); font-size: 12.5px; line-height: 1.5;

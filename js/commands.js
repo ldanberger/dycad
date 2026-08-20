@@ -2310,6 +2310,231 @@ function populateFromTemplate(app, tab, templateName) {
   app.toast(`Populated from "${templateName}": ${addedCount} added, ${createdCount} created, ${skippedCount} skipped, ${connCount} connector${connCount === 1 ? '' : 's'}.`);
 }
 
+/** "Insert Smart Stream" (freeform views only) — traces a chain of EXISTING parts and
+ * connectors starting from every part of `startType`, expanding hop-by-hop through
+ * connectors of ONE chosen connectorType, in the chosen direction(s), for up to
+ * `levels` hops (null = unlimited) — the same BFS-expansion shape smartCheckNode's own
+ * missingConnectorsAndNodes already uses, just seeded by an element TYPE instead of one
+ * specific part, and independent of what's already on the view rather than growing
+ * outward from it. A part matching `endType` (if given) still gets collected, but
+ * doesn't itself expand any further — the natural "stop at the destination" boundary
+ * the dialog's "ending element" field describes; other branches that haven't reached it
+ * yet keep expanding until they do (or the level budget runs out). The final
+ * `showTypes` checklist then prunes the traced set down to just the types actually
+ * wanted on screen; a connector only places if BOTH its ends survived that pruning
+ * (same "both ends visible" convention used everywhere else in this app a connector's
+ * display depends on its parts'). Reported directly: "Add ability in freeform view to
+ * insert a smartStream... starting element... upstream/downstream or both... ending
+ * element... children levels... selector checklist of element types to show... Use
+ * connector line and line end settings of top most parents if possible" — satisfied
+ * for free here since every placed connector is a REAL, pre-existing Connector with
+ * its own real relationship; 2D rendering already looks up line/lineEnd style live
+ * from that relationship (canvas.js), so nothing new needs synthesizing.
+ * Placed left-to-right by hop distance from the nearest seed (column) then discovery
+ * order within that hop (row) — a reasonable starting layout, not a substitute for
+ * Remap if the result needs cleaning up afterward. Parts/connectors already on the
+ * view keep their existing position/aren't duplicated. Uses createBulkLookupCache for
+ * findNonOverlappingPosition's own view-scoped lookups (this can place hundreds of
+ * nodes in one call — see CLAUDE.md's bulk-operation guidance) and a bespoke adjacency
+ * index (built once, not part of that cache — it's shaped for stream GENERATION's
+ * find-or-create needs, not traversal) for the hop-expansion itself. */
+function insertSmartStream(app, tab, options) {
+  const { connectorType, startPartIds, direction, endType, levels, showTypes } = options;
+  const { store } = app;
+  const view = store.findView(tab.viewId);
+  if (!view) return;
+  if (isSectionViewType(view.viewType)) {
+    app.toast(`Insert Smart Stream only applies to freeform views — this view is section-based ("${view.viewType}").`, true);
+    return;
+  }
+
+  const modelName = store.defaultModel;
+  const seeds = (startPartIds || []).map((id) => store.findPart(id)).filter(Boolean);
+  if (seeds.length === 0) {
+    app.toast('No starting elements selected.', true);
+    return;
+  }
+
+  const downstream = direction === 'downstream' || direction === 'both';
+  const upstream = direction === 'upstream' || direction === 'both';
+
+  // Adjacency index: partId -> connectors (of the chosen connectorType+model) touching
+  // it — built once, so the hop-expansion loop below never rescans the whole
+  // store.doc.connectors array per part (the naive-per-call-scan CLAUDE.md's bulk-
+  // operation guidance warns about).
+  const connsByPart = new Map();
+  for (const c of store.doc.connectors) {
+    if (!ciEq(c.connectorType, connectorType) || !ciEq(c.model, modelName)) continue;
+    if (!connsByPart.has(c.from)) connsByPart.set(c.from, []);
+    connsByPart.get(c.from).push(c);
+    if (!connsByPart.has(c.to)) connsByPart.set(c.to, []);
+    connsByPart.get(c.to).push(c);
+  }
+
+  const collectedPartIds = new Set(seeds.map((p) => p.id));
+  const collectedConnIds = new Set();
+  let frontier = new Set(seeds.map((p) => p.id));
+  let hop = 0;
+  while (frontier.size > 0 && (levels == null || hop < levels)) {
+    const nextFrontier = new Set();
+    for (const presentId of frontier) {
+      for (const c of connsByPart.get(presentId) || []) {
+        const otherId = c.from === presentId ? c.to : c.from;
+        const edgeIsDownstream = c.from === presentId;
+        if (!(edgeIsDownstream ? downstream : upstream)) continue;
+        collectedConnIds.add(c.id);
+        if (!collectedPartIds.has(otherId)) {
+          collectedPartIds.add(otherId);
+          nextFrontier.add(otherId);
+        }
+      }
+    }
+    // A part matching endType is still collected above, but doesn't propagate any
+    // further — it's the chain's own natural destination, not a hard stop for
+    // branches that haven't reached it yet.
+    if (endType) {
+      for (const id of [...nextFrontier]) {
+        const part = store.findPart(id);
+        if (part && ciEq(part.type, endType)) nextFrontier.delete(id);
+      }
+    }
+    frontier = nextFrontier;
+    hop += 1;
+  }
+
+  const finalPartIdSet = new Set(
+    [...collectedPartIds].filter((id) => {
+      const part = store.findPart(id);
+      return part && showTypes.some((t) => ciEq(t, part.type));
+    })
+  );
+  if (finalPartIdSet.size === 0) {
+    app.toast('No parts matched — check the Element Types to Show checklist.', true);
+    return;
+  }
+  const finalConnIds = [...collectedConnIds].filter((id) => {
+    const conn = store.findConnector(id);
+    return conn && finalPartIdSet.has(conn.from) && finalPartIdSet.has(conn.to);
+  });
+
+  // Derived connections: when a run of one or more excluded-type parts sits between
+  // two surviving parts (e.g. Business Function -> [hidden Business Process] ->
+  // Application Capability), create a genuine new Connector linking the surviving
+  // endpoints directly, instead of just silently dropping the relationship. Persisted
+  // as a real Connector (not a view-only decoration) so it reuses every bit of existing
+  // rendering/export/inventory machinery — the note field documents which hidden
+  // type(s) it passes through, and it's styled after the FIRST real hop's relationship
+  // (the same "topmost parent" styling convention the rest of this command already
+  // follows). Naturally idempotent on re-run: once created, it's a normal
+  // directly-discoverable edge the next time connsByPart is built, so this loop finds
+  // it already satisfied and skips it via existingPairs.
+  const existingPairs = new Set(finalConnIds.map((id) => { const c = store.findConnector(id); return `${c.from}|${c.to}`; }));
+  const derivedPairs = new Map(); // "from|to" -> { from, to, relationship, viaTypes: string[] }
+  for (const survivorId of finalPartIdSet) {
+    const visited = new Set([survivorId]);
+    let frontier = [{ partId: survivorId, firstHopRelationship: null, viaTypes: [] }];
+    while (frontier.length > 0) {
+      const next = [];
+      for (const { partId: cur, firstHopRelationship, viaTypes } of frontier) {
+        for (const c of connsByPart.get(cur) || []) {
+          if (c.from !== cur || !collectedPartIds.has(c.to) || visited.has(c.to)) continue;
+          visited.add(c.to);
+          const hopRelationship = firstHopRelationship ?? c.relationship;
+          if (finalPartIdSet.has(c.to)) {
+            if (c.to !== survivorId) {
+              const key = `${survivorId}|${c.to}`;
+              if (!existingPairs.has(key) && !derivedPairs.has(key)) {
+                derivedPairs.set(key, { from: survivorId, to: c.to, relationship: hopRelationship, viaTypes });
+              }
+            }
+          } else {
+            const viaPart = store.findPart(c.to);
+            const viaTitle = elementByType(store, viaPart.type)?.title || viaPart.type;
+            next.push({ partId: c.to, firstHopRelationship: hopRelationship, viaTypes: [...viaTypes, viaTitle] });
+          }
+        }
+      }
+      frontier = next;
+    }
+  }
+  for (const { from, to, relationship, viaTypes } of derivedPairs.values()) {
+    const conn = store.createConnector({
+      from, to, model: modelName, connectorType, relationship,
+      note: `Derived — implied via ${[...new Set(viaTypes)].join(', ')} (not shown)`,
+    });
+    finalConnIds.push(conn.id);
+    // Register in connsByPart too so the placement hop-distance BFS just below can
+    // walk this brand-new edge like any other — it was built before this connector existed.
+    if (!connsByPart.has(conn.from)) connsByPart.set(conn.from, []);
+    connsByPart.get(conn.from).push(conn);
+    if (!connsByPart.has(conn.to)) connsByPart.set(conn.to, []);
+    connsByPart.get(conn.to).push(conn);
+  }
+
+  // Hop distance from the nearest seed, for left-to-right placement below — a simple
+  // second BFS over the already-final (pruned) part set, since collectedPartIds' own
+  // discovery order doesn't survive the showTypes filter above.
+  const hopOf = new Map(seeds.filter((p) => finalPartIdSet.has(p.id)).map((p) => [p.id, 0]));
+  let placeFrontier = new Set(hopOf.keys());
+  let placeHop = 0;
+  while (placeFrontier.size > 0) {
+    placeHop += 1;
+    const next = new Set();
+    for (const presentId of placeFrontier) {
+      for (const c of connsByPart.get(presentId) || []) {
+        if (!finalConnIds.includes(c.id)) continue;
+        const otherId = c.from === presentId ? c.to : c.from;
+        if (finalPartIdSet.has(otherId) && !hopOf.has(otherId)) { hopOf.set(otherId, placeHop); next.add(otherId); }
+      }
+    }
+    placeFrontier = next;
+  }
+
+  const lookupCache = createBulkLookupCache(store);
+  const { w: nodeW, h: nodeH } = getNodeSize(view);
+  const spacing = view.spacingScale || 1;
+  const stepX = (nodeW + 60) * spacing, stepY = (nodeH + 30) * spacing;
+  const existingPartVms = store.viewMembersForView(view.id).filter((vm) => vm.objectType === 'part');
+  const baseX = existingPartVms.length ? Math.max(...existingPartVms.map((vm) => vm.x)) + stepX : 60;
+  const baseY = 60;
+  const rowByHop = new Map(); // hop level -> next free row index, for stacking siblings
+
+  let addedParts = 0, addedConns = 0;
+  for (const partId of finalPartIdSet) {
+    if (lookupCache.vmsByPartView.has(`${partId}|${view.id}`)) continue; // already placed on this view
+    const part = lookupCache.partsById.get(partId);
+    if (!part) continue;
+    const h = hopOf.get(partId) ?? 0;
+    const row = rowByHop.get(h) || 0;
+    rowByHop.set(h, row + 1);
+    const desired = { x: baseX + h * stepX, y: baseY + row * stepY };
+    const pos = store.findNonOverlappingPosition(view.id, desired.x, desired.y, undefined, nodeW, nodeH, spacing, lookupCache);
+    const vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: partId, x: pos.x, y: pos.y, fillColor: elementGroupFill(store, part.type) });
+    cacheRegisterVm(lookupCache, vm);
+    addedParts += 1;
+  }
+
+  for (const connId of finalConnIds) {
+    if (lookupCache.connVmsByConnView.has(`${connId}|${view.id}`)) continue; // already placed on this view
+    const conn = store.findConnector(connId);
+    const fromVm = lookupCache.vmsByPartView.get(`${conn.from}|${view.id}`);
+    const toVm = lookupCache.vmsByPartView.get(`${conn.to}|${view.id}`);
+    if (!fromVm || !toVm) continue; // shouldn't happen — both ends were just placed or already there
+    const connVm = store.createViewMember({ view: view.id, objectType: 'connector', objectId: connId, fromVmId: fromVm.id, toVmId: toVm.id });
+    cacheRegisterConnVm(lookupCache, connVm);
+    addedConns += 1;
+  }
+
+  if (addedParts === 0 && addedConns === 0) {
+    app.toast('Smart Stream: everything traced was already on this view.');
+    return;
+  }
+  redrawAndResolveLayout(app, { viewId: view.id, selection: new Set() });
+  app.recordAndRender();
+  const derivedSuffix = derivedPairs.size > 0 ? ` (${derivedPairs.size} derived)` : '';
+  app.toast(`Inserted Smart Stream: ${addedParts} part${addedParts === 1 ? '' : 's'}, ${addedConns} connector${addedConns === 1 ? '' : 's'}${derivedSuffix}.`);
+}
+
 function generateInventoryView(app) {
   const { store } = app;
   const model = store.defaultModel;
@@ -2843,4 +3068,4 @@ function duplicateSection(app, tab, sectionInstanceId) {
   app.toast(`Duplicated section "${originalName}" as "${newSection.name}" (${oldVmToNewVm.size} node${oldVmToNewVm.size === 1 ? '' : 's'}, ${connDupCount} connector${connDupCount === 1 ? '' : 's'}).`);
 }
 
-export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, duplicateSection, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart };
+export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart };

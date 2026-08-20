@@ -2335,4 +2335,138 @@
 // hidden_when_inactive extended for the new group. Both confirmed to catch their own
 // regression via a temporary revert. tests/README.md, public/instructions.html, and
 // DESIGN_DOCUMENT.md updated. Full suite 88/88.
-export const APP_VERSION = '0.845';
+// 0.846: new freeform-view-only "Insert Smart Stream" command. Reported directly:
+// "Add ability in freeform view to insert a smartStream. Through a dialog the user
+// selects connector type (currently 'c' or 's'), starting element..., upstream/
+// downstream or both indicator, ending element..., children levels..., and a selector
+// checklist of element types to show." commands.js's insertSmartStream seeds a BFS
+// from every part of the chosen Starting Element type, walks connectors of the chosen
+// Connector Type in the chosen direction(s) up to a hop limit (blank = unlimited,
+// mirroring Smart Check's own Levels convention), lets a part matching the optional
+// Ending Element type still get collected without itself propagating further (so
+// sibling branches keep expanding independently), then prunes the traced set down to
+// the checked Element Types to Show -- a connector only survives if BOTH its endpoints
+// did. Only ever places real, pre-existing connectors (never synthetic ones), so line/
+// arrowhead styling is inherited for free from each connector's own relationship via
+// the existing relationshipStyles lookup, satisfying "use connector line and line end
+// settings of top most parents" with no new rendering code. Already-placed parts/
+// connectors are skipped, not duplicated, so re-running is idempotent. Refuses to run
+// on section-based views with a toast naming the view type, same convention as
+// populateFromTemplate. main.js's promptInsertSmartStream is a bespoke modal (not the
+// generic promptModal, which has no multi-checkbox field type) with a Select All/
+// Exclude All checklist header matching the existing Type filter's own convention;
+// Starting/Ending Element options are scoped to types actually present in the current
+// model. Fixed a real bug found while testing: the showTypes prune was comparing
+// part.type with a case-sensitive Array#includes, inconsistent with every other
+// comparison in this same function (all via ciEq) -- switched to a ciEq-based match.
+// Two new permanent checks: check_insert_smart_stream_traversal (connectorType/
+// direction/levels/endType/showTypes filtering including connector-pruning-by-endpoint,
+// idempotent re-run, and the freeform-only restriction) and
+// check_insert_smart_stream_dialog (command wiring, Starting/Ending option scoping,
+// checklist default-all-checked + Select All/Exclude All sync, and submit wiring
+// through to insertSmartStream). Both confirmed to catch their own regression via a
+// temporary revert. tests/README.md, public/instructions.html, and DESIGN_DOCUMENT.md
+// updated. Full suite 90/90.
+// 0.847: two follow-up requests on Insert Smart Stream. Reported directly: "when
+// starting element is identified, show a sublist of those elements available for user
+// to select - this is the part to start at. Also, show the derived connections; for
+// example if business function is shown and then application capability, there is a
+// derived connection through business process." (1) main.js's promptInsertSmartStream
+// now renders a Starting Element Instances checklist (all-checked by default,
+// re-rendered whenever the Starting Element type changes) listing that type's actual
+// parts by label, so the trace can be seeded from specific instance(s) instead of
+// every part of the type; insertSmartStream's options now take startPartIds (explicit
+// part ids) instead of startType. (2) When one or more excluded-type parts sit between
+// two surviving parts (any number of consecutive hidden hops, not just one), a genuine
+// new Connector is now created linking the surviving endpoints directly -- a real,
+// persisted connector (not a view-only decoration), reusing all existing rendering/
+// export/inventory code with zero new render paths, per user confirmation on both
+// design questions (real Connector vs. visual-only line; any-length vs. single-hop
+// chains). Styled after the FIRST real hop's relationship (the existing "topmost
+// parent" styling convention), with a note recording which hidden type(s) it passes
+// through (e.g. "Derived -- implied via Business Process (not shown)"). Skipped when a
+// real direct connector already covers the same pair; naturally idempotent on re-run,
+// since a derived connector becomes a normal directly-discoverable edge the next time
+// connsByPart is built. Three checks updated/added: check_insert_smart_stream_traversal
+// (startType calls switched to startPartIds; new empty-selection-rejected case),
+// check_insert_smart_stream_dialog (new Starting Element Instances checklist assertions
+// -- lists real instances, re-renders per type switch, Select All/Exclude All sync, and
+// genuinely narrows which parts seed the trace), and new
+// check_insert_smart_stream_derived_connections (single hidden hop, a two-hop hidden
+// chain collapsing into one edge, skipped when a real direct connector exists, and
+// idempotent re-run). All three confirmed to catch their own regression via a temporary
+// revert -- including one revert (dropping the "already exists" guard) that visibly
+// broke all three at once, since it duplicated every direct real edge as a spurious
+// derived one. tests/README.md and public/instructions.html updated. Full suite 91/91.
+// 0.848: three more Insert Smart Stream refinements. Reported directly: "reduce the
+// 'Element Types to Show' list to only show those currently existing in default model.
+// Also confirm this can be called by script along with parameters, add an example...
+// The 'Insert Smart Stream' form is long, can it be reorganized to be shorter, perhaps
+// wider?" (1) Element Types to Show (main.js's promptInsertSmartStream) now reuses the
+// same typesInUse list already computed for Starting/Ending Element, instead of the
+// full 77-type settings.elements toolbox -- a type nothing exists for in the current
+// model could never appear in a traced result anyway. (2) insertSmartStream is now a
+// Script Console binding (bindingNames/bindingValues in promptScriptConsole, alongside
+// remap/smartCheckView/smartCheckNode), documented in the console's own help text and
+// in instructions.html; state.js's DEFAULT_BATCH_SCRIPT_CODE gained a new
+// BatchScript_InsertSmartStreamExample() (not called by main() by default) showing a
+// full call with the reported parameters (Connectors, Business Function seeded from a
+// part labeled "Production", Both directions, ending at Data Entity, unlimited levels,
+// seven element types shown) against the exact data BatchScript_QuickStart's "general"
+// industry generates, so it's a genuinely runnable template, not a hypothetical one.
+// (3) The dialog is now a new modal-box-wide CSS variant (620px, vs. the default
+// 360px), reorganized into a 2-column grid for the single-line fields plus the
+// Starting Element Instances and Element Types to Show checklists laid out side by
+// side instead of stacked -- noticeably shorter overall. check_insert_smart_stream_
+// dialog updated (exact scoped type list, modal-box-wide class) and
+// check_script_console_remap_and_smart_check_bindings extended to also drive
+// insertSmartStream through the real console with startPartIds/direction/showTypes.
+// Both confirmed to catch their own regression via a temporary revert (three separate
+// reverts: type-list scoping, the wide class, and the console binding, each caught by
+// exactly the check meant to guard it). tests/README.md and public/instructions.html
+// updated. Full suite 91/91.
+// 0.849: Insert Smart Stream presets, plus wiring the example into the default script.
+// Reported directly: "add the insertSmartStream example into the main() script after
+// 3d view. Add ability to create and maintain a list of smartStream settings, called
+// something like smartStreamPreset. Add load from or save to dialog either on page or
+// another page/tab of the dialog. These should be saved local, not in the save json
+// file. Save first smartStreamPreset named 'StreamSet1' with parameters used in
+// example." (1) state.js's DEFAULT_BATCH_SCRIPT_CODE main() is now async and awaits
+// BatchScript_QuickStart before calling BatchScript_InsertSmartStreamExample -- runs
+// genuinely AFTER QuickStart's own 3D View step, not concurrently with it, since
+// QuickStart must finish first. (2) New store.smartStreamPresets: an array of named
+// {name, connectorType, startType, startInstanceLabels, direction, endType, levels,
+// showTypes} presets, following the EXACT same Local Settings pattern batchScriptCode
+// already established (a Store field living OUTSIDE this.doc, so store.toJSON() -- the
+// actual Save JSON document -- never includes it; cached to localStorage via a new
+// getCachedSmartStreamPresets/setCachedSmartStreamPresets pair; bundled into File >
+// Save/Load Local Settings alongside pinnedFields/maxScriptEntities/nodeSizeMultiplier/
+// batchScriptCode; auto-applied at bootstrapApp from its localStorage cache). Starting
+// element is remembered by TYPE + part LABEL(s), not raw part id(s) -- ids only ever
+// resolve within the document they were created in, while a label is far more likely
+// to still resolve later against a regenerated or different document. Ships with one
+// default preset, "StreamSet1" (DEFAULT_SMART_STREAM_PRESETS, state.js), mirroring
+// BatchScript_InsertSmartStreamExample's own parameters exactly. (3) main.js's
+// promptInsertSmartStream dialog gained a Preset row (top of the dialog, "on page" per
+// the request's own either/or) with a dropdown + Load/Save As... buttons. Save As
+// (via the existing generic promptModal, stacked on top of the still-open Insert Smart
+// Stream dialog) captures every current field value -- including only the CHECKED
+// Starting Element Instances, by label -- into a named preset, overwriting any existing
+// preset of the same name; the dropdown immediately offers the new/updated name. Load
+// repopulates every field, re-renders the Starting Element Instances checklist for the
+// preset's own Starting Element type first, then checks exactly the remembered
+// label(s) -- any label no longer matching a real part is simply left unchecked, with
+// an error-styled toast naming what didn't resolve, rather than silently substituting
+// something else. check_batch_script_quickstart extended to also verify
+// BatchScript_InsertSmartStreamExample runs after QuickStart (ending with the Smart
+// Stream Example tab active, not the 3D tab -- proof it genuinely ran afterward, not
+// that main() stopped early). Two new checks: check_smart_stream_preset_local_
+// persistence (default StreamSet1's exact shape, exclusion from store.toJSON(), and
+// the full Local Settings file/localStorage/reload-survives story) and check_smart_
+// stream_preset_dialog_save_and_load (Save As capturing current state correctly, Load
+// repopulating every field including the instance checklist, and the missing-label
+// graceful-degradation path). All three confirmed to catch their own regression via a
+// temporary revert -- including one revert (main() no longer awaiting+chaining the
+// second script) that failed three separate assertions in the same check at once.
+// tests/README.md and public/instructions.html updated. Full suite 93/93.
+export const APP_VERSION = '0.849';
