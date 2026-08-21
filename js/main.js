@@ -4,7 +4,7 @@ import { parseArchimateXml } from './archimate.js';
 import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
-import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL } from './commands.js';
+import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL } from './commands.js';
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection, computeSectionLayout, getAllowedTypesForView } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
@@ -48,6 +48,19 @@ function stringifyForConsole(v) {
   if (v === undefined) return 'undefined';
   if (v === null) return 'null';
   try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+}
+
+/** Converts a free-text label (e.g. a DataDataEntity's own label, "Customer Order") into
+ * a snake_case identifier fragment ("customer_order") — used only to name auto-created FK
+ * attributes (finishConnect below) as `<parent_snake>_<pk_name_snake>`, matching typical
+ * SQL naming convention for a foreign key column. */
+function toSnakeCase(label) {
+  return String(label || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase() || 'field';
 }
 
 /** Projects a point outward from a rectangle's center toward (dx,dy) to the rectangle's
@@ -457,6 +470,47 @@ class App {
       this.promptTextEdit({ title: 'Export DDL', value: text, readonly: true, onSave: () => {} });
     } catch (err) {
       this.toast(err.message, true);
+    }
+  }
+
+  /** Data Modeling > Autofill: extracts and calls a top-level `dataAutoFill()` function
+   * out of store.batchScriptCode (see DEFAULT_BATCH_SCRIPT_CODE, state.js) and runs it
+   * against the current view. Deliberately the SAME compile-and-run mechanism the
+   * Script Console's own Run button uses (promptScriptConsole above) — same bindings,
+   * same store.batchScriptCode source of truth — just naming a different top-level
+   * function as the entry point instead of main(), so this menu item stays live to
+   * whatever a person has edited dataAutoFill() into via Advanced > Script Console,
+   * rather than running a hidden, separately-maintained copy of the same logic. */
+  async promptAutofill() {
+    const tab = this.store.activeTab();
+    if (!tab || tab.type !== 'canvas') { this.toast('Open a canvas view with Data Entity Details tables first.', true); return; }
+
+    const code = this.store.batchScriptCode || '';
+    const bindingNames = ['app', 'store', 'model', 'findParts', 'log', 'messageLog', 'generateIndustry', 'populateFromTemplate', 'remap', 'smartCheckView', 'smartCheckNode', 'insertSmartStream'];
+    const logToMessageLog = (...args) => pushMessageLog(this.store, args.map((a) => (typeof a === 'string' ? a : stringifyForConsole(a))).join(' '));
+    const bindingValues = [
+      this, this.store, this.store.simSelectedModel || null,
+      (query) => { const { type, model } = query || {}; return this.store.doc.parts.filter((p) => (!type || ciEq(p.type, type)) && (!model || ciEq(p.model, model))); },
+      logToMessageLog, logToMessageLog,
+      generateIndustry, populateFromTemplate, remap, smartCheckView, smartCheckNode, insertSmartStream,
+    ];
+
+    let fn;
+    try {
+      fn = new Function(...bindingNames, `${code}\n;return typeof dataAutoFill === 'function' ? dataAutoFill : null;`)(...bindingValues);
+    } catch (err) {
+      this.toast(`Autofill script has a syntax error: ${err.message}`, true);
+      return;
+    }
+    if (typeof fn !== 'function') {
+      this.toast('No dataAutoFill() function found in the batch script — check Advanced > Script Console.', true);
+      return;
+    }
+    try {
+      const result = await fn();
+      this.toast(typeof result === 'string' ? result : 'Autofill complete.');
+    } catch (err) {
+      this.toast(err.message || String(err), true);
     }
   }
 
@@ -903,7 +957,39 @@ class App {
 
   finishConnect(tab, fromVm, toVm, relationKey, connectorType = 'c') {
     const rel = (this.store.settings.relations || []).find((r) => r.key === relationKey);
-    const conn = this.store.createConnector({ from: fromVm.objectId, to: toVm.objectId, model: this.store.defaultModel, connectorType, relationship: rel?.name || 'Association' });
+
+    // Data Modeling: a manually drag-created 'd' (crow's-foot) connector auto-creates a
+    // matching FK attribute on the target if one doesn't already exist, instead of
+    // leaving the person to build it by hand. Reported directly: "when connector
+    // dragged/created, auto create a fk in target of primary key from source, if it
+    // doesn't exist ... Auto populate From Cardinality as One, and To Cardinality as
+    // Many. Connectors are created from parent to children." This is the REVERSE of
+    // importDDL's own convention (fromCardinality: 'many', toCardinality: 'one') —
+    // there, "from" is DDL's referencing/child table (its own FOREIGN KEY clause names
+    // it), so "many" is correct on that side; here "from" is the parent/PK side being
+    // dragged from, so "one" is correct on that side. Two different, intentionally
+    // non-conflicting conventions for two different creation paths, not a bug to
+    // reconcile between them.
+    let fromAttribute, toAttribute, fromCardinality, toCardinality;
+    if (connectorType === 'd') {
+      const fromPart = this.store.findPart(fromVm.objectId);
+      const toPart = this.store.findPart(toVm.objectId);
+      const pkAttr = (fromPart?.attributes || []).find((a) => a.isPrimaryKey);
+      if (pkAttr) {
+        const fkName = `${toSnakeCase(fromPart.label)}_${toSnakeCase(pkAttr.name)}`;
+        let fkAttr = (toPart.attributes || []).find((a) => ciEq(a.name, fkName));
+        if (!fkAttr) {
+          fkAttr = { id: newId(), name: fkName, dataType: pkAttr.dataType, nullable: false, isPrimaryKey: false };
+          toPart.attributes = [...(toPart.attributes || []), fkAttr];
+        }
+        fromAttribute = pkAttr.id;
+        toAttribute = fkAttr.id;
+        fromCardinality = 'one';
+        toCardinality = 'many';
+      }
+    }
+
+    const conn = this.store.createConnector({ from: fromVm.objectId, to: toVm.objectId, model: this.store.defaultModel, connectorType, relationship: rel?.name || 'Association', fromAttribute, toAttribute, fromCardinality, toCardinality });
     this.store.createViewMember({ view: tab.viewId, objectType: 'connector', objectId: conn.id, fromVmId: fromVm.id, toVmId: toVm.id });
     this.recordAndRender();
   }
@@ -1008,11 +1094,23 @@ class App {
     } else if (key === 'splitNode') {
       splitNode(this, tab, selIds[0]);
     } else if (key === 'levelUp') {
-      this.promptModal({
-        title: 'Level Up',
-        fields: [{ key: 'name', label: 'New view name', value: 'New View' }],
-        onSubmit: (vals) => levelUp(this, tab, vals.name),
-      });
+      // Data Modeling: Level Up on a single selected DataEntityDetails node is the
+      // reverse of Level Down on a DataDataEntity -- create/open its DataDataEntity
+      // parent directly, no dialog, same as double-click/"Add/Edit Entity Details"
+      // needing no dialog in the other direction. Every other selection (none,
+      // multiple, or a different type) keeps the ordinary "prompt for a new view
+      // name" Level Up unchanged.
+      const singleVm = selIds.length === 1 ? this.store.findViewMember(selIds[0]) : null;
+      const singlePart = singleVm && singleVm.objectType === 'part' && this.store.findPart(singleVm.objectId);
+      if (singlePart && ciEq(singlePart.type, 'DataEntityDetails')) {
+        levelUpEntityDetails(this, tab, singleVm.id);
+      } else {
+        this.promptModal({
+          title: 'Level Up',
+          fields: [{ key: 'name', label: 'New view name', value: 'New View' }],
+          onSubmit: (vals) => levelUp(this, tab, vals.name),
+        });
+      }
     } else if (key === 'levelDown') {
       levelDown(this, tab, selIds);
     } else if (key === 'generate') {
@@ -3903,12 +4001,16 @@ function wireGlobalEvents(app) {
 
   // ===== Data Modeling menu (crow's-foot ERD: entity attributes, PK/FK, DDL
   // import/export) — "Add/Edit Entity Details" is the menu-triggered equivalent of
-  // double-clicking a DataDataEntity node (see promptAddEditEntityDetails); Import/
-  // Export DDL are the only two commands that need a real dialog/file-picker, so they
-  // dispatch through app methods below rather than being handled inline here, matching
-  // how Advanced's own generateIndustry/scriptConsole items work. =====
+  // double-clicking a DataDataEntity node (see promptAddEditEntityDetails); "Autofill"
+  // runs the user-editable dataAutoFill() batch script (see promptAutofill below and
+  // DEFAULT_BATCH_SCRIPT_CODE, state.js); Import/Export DDL are the only two commands
+  // that need a real dialog/file-picker, so they dispatch through app methods below
+  // rather than being handled inline here, matching how Advanced's own
+  // generateIndustry/scriptConsole items work. =====
   const DATA_MODELING_LINKS = [
     { label: 'Add/Edit Entity Details', action: 'addEditEntityDetails' },
+    { separator: true },
+    { label: 'Autofill', action: 'autofill' },
     { separator: true },
     { label: 'Import DDL...', action: 'importDDL' },
     { label: 'Export DDL', action: 'exportDDL' },
@@ -3918,6 +4020,7 @@ function wireGlobalEvents(app) {
   dataModelingMenu.querySelectorAll('.dd-item').forEach((item) => {
     item.addEventListener('click', () => {
       if (item.dataset.action === 'addEditEntityDetails') app.promptAddEditEntityDetails();
+      else if (item.dataset.action === 'autofill') app.promptAutofill();
       else if (item.dataset.action === 'importDDL') document.getElementById('import-ddl-input').click();
       else if (item.dataset.action === 'exportDDL') app.promptExportDDL();
       dataModelingMenu.classList.add('hidden');

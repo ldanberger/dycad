@@ -5625,7 +5625,7 @@ def check_data_modeling_attributes_and_data_connector(page):
       };
       setInput('.attr-name', 'order_id', false);
       await new Promise(r => setTimeout(r, 30));
-      setInput('.attr-datatype', 'INTEGER', false);
+      setInput('.attr-datatype', 'numeric', false);
       await new Promise(r => setTimeout(r, 30));
       setInput('.attr-pk', true, true);
       await new Promise(r => setTimeout(r, 30));
@@ -5636,11 +5636,14 @@ def check_data_modeling_attributes_and_data_connector(page):
 
       const t1AttrsAfterUI = store.findPart(t1.id).attributes;
 
-      // (2) FK derivation: set the connector's fromAttribute to t1's real attribute id,
+      // (2) FK derivation: set the connector's fromAttribute to t1's real attribute id
+      // and toAttribute to t2's own primary key (a realistic FK->PK reference -- FK
+      // derivation looks at BOTH ends, see isAttributeForeignKey's own doc comment),
       // confirm the FK badge appears on THAT row and nowhere else, and that no
       // isForeignKey key was ever written onto the attribute object.
       const realAttrId = t1AttrsAfterUI[0].id;
       conn.fromAttribute = realAttrId;
+      conn.toAttribute = 'regr-b1';
       selectNode(vm1.id); // re-render to recompute the FK badge from the connector's new fromAttribute
       const fkBadgeRows = [...document.querySelectorAll('tr[data-attr-id]')].filter(tr => tr.querySelector('.attr-fk-badge'));
       const hasIsForeignKeyField = 'isForeignKey' in t1AttrsAfterUI[0];
@@ -5681,8 +5684,8 @@ def check_data_modeling_attributes_and_data_connector(page):
     if result["rowsAfterAdd"] != 2:
         problems.append(f"expected 2 rows after two '+ Add Attribute' clicks, got {result['rowsAfterAdd']}")
     attrs = result["t1AttrsAfterUI"]
-    if len(attrs) != 1 or attrs[0]["name"] != "order_id" or attrs[0]["dataType"] != "INTEGER" or attrs[0]["isPrimaryKey"] is not True:
-        problems.append(f"expected exactly one attribute {{name:'order_id', dataType:'INTEGER', isPrimaryKey:true}} after UI edits + delete, got {attrs}")
+    if len(attrs) != 1 or attrs[0]["name"] != "order_id" or attrs[0]["dataType"] != "numeric" or attrs[0]["isPrimaryKey"] is not True:
+        problems.append(f"expected exactly one attribute {{name:'order_id', dataType:'numeric', isPrimaryKey:true}} after UI edits + delete, got {attrs}")
     if not result["fkBadgeOnCorrectRow"] or result["fkBadgeCount"] != 1:
         problems.append(f"expected exactly one FK badge, on the attribute referenced by the connector's fromAttribute, got count={result['fkBadgeCount']} correctRow={result['fkBadgeOnCorrectRow']}")
     if result["hasIsForeignKeyField"]:
@@ -5693,7 +5696,7 @@ def check_data_modeling_attributes_and_data_connector(page):
         problems.append(f"expected To Attribute options scoped to t2's own attributes ['(none)', 'id'], got {result['toOptionLabels']}")
     if result["attributesAfterReload"] != attrs:
         problems.append(f"expected Part.attributes to survive a Save/Load JSON round-trip unchanged, got {result['attributesAfterReload']}")
-    expectedConnFields = {"connectorType": "d", "fromAttribute": result["t1AttrsAfterUI"][0]["id"], "toAttribute": "", "fromCardinality": "", "toCardinality": ""}
+    expectedConnFields = {"connectorType": "d", "fromAttribute": result["t1AttrsAfterUI"][0]["id"], "toAttribute": "regr-b1", "fromCardinality": "", "toCardinality": ""}
     if result["connFieldsAfterReload"] != expectedConnFields:
         problems.append(f"expected connector's connectorType/fromAttribute/toAttribute/fromCardinality/toCardinality to survive a Save/Load JSON round-trip, expected {expectedConnFields}, got {result['connFieldsAfterReload']}")
     if problems:
@@ -6017,9 +6020,12 @@ def check_data_modeling_node_attributes_and_manual_connector_creation(page):
       const plainConn = store.doc.connectors.find(c => c.from === dd1.id && c.to === dd2.id);
       const plainConnectorType = plainConn ? plainConn.connectorType : null;
 
-      // (3) FK becomes settable once a 'd' connector exists -- set fromAttribute and
-      // confirm the node's own rendering picks it up live
+      // (3) FK becomes settable once a 'd' connector exists -- set fromAttribute (and
+      // toAttribute to t2's own primary key, a realistic FK->PK reference -- FK
+      // derivation looks at BOTH ends, see isAttributeForeignKey's own doc comment)
+      // and confirm the node's own rendering picks it up live
       ddConn.fromAttribute = 'ra2';
+      ddConn.toAttribute = 'rb1';
       app.recordAndRender();
       const nodeTextAfterFk = document.querySelector(`[data-vm-id="${vm1.id}"]`).innerText;
 
@@ -6067,6 +6073,442 @@ def check_data_modeling_node_attributes_and_manual_connector_creation(page):
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
     return True, "DataEntityDetails nodes render their own attribute list on the canvas (toggleable via chkShowAttributes), drag-to-connect infers connectorType 'd' between two DataEntityDetails (staying 'c' for other type pairs like DataDataEntity), and connectorType is now a genuinely editable select so FK relationships (and any other type change) are always reachable through the UI"
+
+
+def check_data_modeling_attribute_editing_and_auto_fk(page):
+    """Regression guard for six issues reported directly in one follow-up round on the
+    Data Modeling feature: "when keying in data entity details attributes, tab should
+    take user to next field ... need ability to move attribute up or down. type should
+    be drop down list of acceptable types ... unable to enable pk in property panel
+    attribute section for dataentitydetail. when connector dragged/created, auto create
+    a fk in target of primary key from source, if it doesn't exist ... Auto populate
+    From Cardinality as One, and To Cardinality as Many ... problem: double click on
+    datadataentity or menu data Modeling -> add edit entity details creates a new
+    datadataentity, should be a dataentitydetail element for the details." Root causes
+    and fixes: (a) levelDownSingle (commands.js) unconditionally copied the parent
+    Part's own type onto the decomposition child -- correct for every other element
+    type but wrong for DataDataEntity, now special-cased to DataEntityDetails; (b) the
+    attribute table's Data Type cell was a free-text input, now a <select> with fixed
+    options (numeric/string/boolean/date/blob/json), always including the attribute's
+    current value as an extra selected option when it isn't one of those (so a
+    DDL-imported concrete SQL type like "VARCHAR(100)" isn't silently clobbered); (c)
+    the panel's blur-triggered full re-render (app.recordAndRender() on every field
+    'change') destroyed the DOM mid-Tab-transition, so native browser tab-order landed
+    on a now-nonexistent element and focus fell back to <body> entirely -- this was
+    also the actual root cause of "unable to enable pk", since a keyboard-driven user
+    could never tab their way to the PK checkbox; fixed via explicit keydown Tab
+    handlers that commit the field themselves and re-focus the correct next field
+    (name -> data type -> nullable -> PK -> next row's name, or the Add Attribute
+    button after the last row) in whatever DOM exists afterward; (d) added ▲/▼
+    move-up/move-down buttons per attribute row; (e) beginConnect/finishConnect
+    (main.js) now auto-creates a matching FK attribute on the drag target when the
+    source has a primary key and no matching FK already exists, and sets
+    fromCardinality:'one'/toCardinality:'many' -- deliberately the REVERSE of
+    importDDL's own convention (see check_data_modeling_menu_and_ddl_import_export),
+    which is correct for its own DDL-declared-on-the-child-table convention; the two
+    are intentionally different, not to be reconciled."""
+    result_setup = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+
+      // (a) levelDownSingle child type, via BOTH double-click (openOrCreateLinkedView)
+      // and the "Add/Edit Entity Details" menu command (promptAddEditEntityDetails) --
+      // both funnel through the same function, and the second call must REUSE the same
+      // child (the pre-existing Part-level Level Down guard), not create a second one.
+      const view = store.addView('RegrDMFields_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const parentEntity = store.createPart({ type: 'DataDataEntity', label: 'RegrCustomer', model, streams: [] });
+      const parentVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: parentEntity.id, x: 60, y: 60 });
+      app.recordAndRender();
+      app.openOrCreateLinkedView(tab, parentVm.id);
+      const countAfterDoubleClick = store.doc.parts.length;
+      const typesAfterDoubleClick = store.doc.parts.filter(p => p.id !== parentEntity.id).map(p => p.type);
+
+      tab.selection = new Set([parentVm.id]);
+      app.render();
+      app.promptAddEditEntityDetails();
+      const countAfterMenu = store.doc.parts.length;
+      const typesAfterMenu = store.doc.parts.filter(p => p.id !== parentEntity.id).map(p => p.type);
+
+      // Add/Edit Entity Details switches the active tab to the decomposition's linked
+      // view -- switch back to this test's own view before continuing.
+      app.switchToTab(tab.id);
+
+      // (b) Data Type dropdown, with the current non-listed value preserved
+      const t1 = store.createPart({ type: 'DataEntityDetails', label: 'RegrOrders2', model, streams: [],
+        attributes: [{ id: 'fa1', name: 'id', dataType: 'VARCHAR(100)', nullable: false, isPrimaryKey: true }] });
+      const vmT1 = store.createViewMember({ view: view.id, objectType: 'part', objectId: t1.id, x: 60, y: 300 });
+      app.recordAndRender();
+      tab.selection = new Set([vmT1.id]);
+      app.render();
+      const dtSelect = document.querySelector('.attr-datatype');
+      const dtTag = dtSelect.tagName;
+      const dtOptions = [...dtSelect.options].map(o => o.value);
+      const dtSelectedValue = dtSelect.value;
+
+      return { viewId: view.id, tabId: tab.id, t1Id: t1.id, countAfterDoubleClick, typesAfterDoubleClick, countAfterMenu, typesAfterMenu, dtTag, dtOptions, dtSelectedValue };
+    }
+    """)
+
+    # (c) Tab navigation across name -> data type -> nullable -> PK -> next row/Add
+    # button, driven via real trusted key events (page.keyboard), and PK toggled via a
+    # real keyboard space-press at wherever focus actually lands -- proving the fix
+    # works for an actual keyboard-driven user, not just a direct programmatic click.
+    page.locator('.attr-add-btn').click()
+    page.wait_for_timeout(150)
+    name_inputs = page.locator('.attr-name')
+    new_row_name = name_inputs.nth(name_inputs.count() - 1)
+    new_row_name.click()
+    new_row_name.fill('regr_new_field')
+    page.keyboard.press('Tab')
+    page.wait_for_timeout(150)
+    after_tab1 = page.evaluate("document.activeElement.className + '/' + document.activeElement.tagName")
+    page.keyboard.press('Tab')
+    page.wait_for_timeout(150)
+    after_tab2 = page.evaluate("document.activeElement.className + '/' + document.activeElement.tagName")
+    page.keyboard.press('Tab')
+    page.wait_for_timeout(150)
+    after_tab3 = page.evaluate("document.activeElement.className + '/' + document.activeElement.tagName")
+    page.keyboard.press(' ')
+    page.wait_for_timeout(150)
+
+    # (d) reorder: move the just-added (now PK) attribute up above the original 'id' row
+    order_before = js(page, f"() => window.dycadApp.store.findPart('{result_setup['t1Id']}').attributes.map(a => a.name)")
+    up_btns = page.locator('.attr-move-up-btn')
+    up_btns.nth(up_btns.count() - 1).click()
+    page.wait_for_timeout(150)
+    order_after = js(page, f"() => window.dycadApp.store.findPart('{result_setup['t1Id']}').attributes.map(a => a.name)")
+
+    attrs_after_pk = js(page, f"() => window.dycadApp.store.findPart('{result_setup['t1Id']}').attributes")
+
+    # (e) auto-FK-creation-with-cardinality on drag
+    result2 = js(page, f"""
+    async () => {{
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const view = store.findView('{result_setup["viewId"]}');
+      const tab = store.activeTab();
+      const src = store.createPart({{ type: 'DataEntityDetails', label: 'Regr Parent Co', model, streams: [],
+        attributes: [{{ id: 'pkX', name: 'id', dataType: 'numeric', nullable: false, isPrimaryKey: true }}] }});
+      const dst = store.createPart({{ type: 'DataEntityDetails', label: 'RegrChild', model, streams: [], attributes: [] }});
+      const srcVm = store.createViewMember({{ view: view.id, objectType: 'part', objectId: src.id, x: 60, y: 600 }});
+      const dstVm = store.createViewMember({{ view: view.id, objectType: 'part', objectId: dst.id, x: 400, y: 600 }});
+      app.recordAndRender();
+      app.beginConnect(tab, srcVm.id, dstVm.id, 0, 0);
+      const fkConn = store.doc.connectors.find(c => c.from === src.id && c.to === dst.id && c.connectorType === 'd');
+      const dstAttrsAfterDrag = store.findPart(dst.id).attributes;
+      return {{ fkConn, dstAttrsAfterDrag, srcPkId: src.attributes[0].id }};
+    }}
+    """)
+
+    problems = []
+    if result_setup["countAfterDoubleClick"] == 0 or 'DataEntityDetails' not in result_setup["typesAfterDoubleClick"] or 'DataDataEntity' in result_setup["typesAfterDoubleClick"]:
+        problems.append(f"double-click decomposition should produce a DataEntityDetails child, not DataDataEntity, got types {result_setup['typesAfterDoubleClick']}")
+    if result_setup["countAfterMenu"] != result_setup["countAfterDoubleClick"]:
+        problems.append(f"Add/Edit Entity Details menu command should reuse the existing decomposition, not create a second one (part count {result_setup['countAfterDoubleClick']} -> {result_setup['countAfterMenu']})")
+    if 'DataDataEntity' in result_setup["typesAfterMenu"]:
+        problems.append(f"Add/Edit Entity Details menu command must not create a DataDataEntity child, got types {result_setup['typesAfterMenu']}")
+    if result_setup["dtTag"] != 'SELECT':
+        problems.append(f"expected the Data Type cell to be a <select>, got {result_setup['dtTag']}")
+    if not all(t in result_setup["dtOptions"] for t in ['numeric', 'string', 'boolean', 'date', 'blob', 'json']):
+        problems.append(f"expected the fixed data type options, got {result_setup['dtOptions']}")
+    if result_setup["dtSelectedValue"] != 'VARCHAR(100)':
+        problems.append(f"expected the attribute's existing non-listed data type to be preserved as the selected value, got {result_setup['dtSelectedValue']!r}")
+    if 'attr-datatype' not in after_tab1:
+        problems.append(f"expected Tab from the Name field to focus the Data Type select, got {after_tab1!r}")
+    if 'attr-nullable' not in after_tab2:
+        problems.append(f"expected Tab from Data Type to focus the Nullable checkbox, got {after_tab2!r}")
+    if 'attr-pk' not in after_tab3:
+        problems.append(f"expected Tab from Nullable to focus the PK checkbox, got {after_tab3!r}")
+    if not any(a["name"] == "regr_new_field" and a["isPrimaryKey"] for a in attrs_after_pk):
+        problems.append(f"expected PK to be enabled via a keyboard-only flow (Tab, Tab, Tab, Space), got {attrs_after_pk}")
+    if order_after[0] != order_before[1]:
+        problems.append(f"expected the move-up button to reorder attributes, before={order_before} after={order_after}")
+    fk_conn = result2["fkConn"]
+    dst_attrs = result2["dstAttrsAfterDrag"]
+    if not fk_conn:
+        problems.append("expected a 'd' connector to be created by beginConnect between two DataEntityDetails tables")
+    elif len(dst_attrs) != 1 or dst_attrs[0]["isPrimaryKey"] or dst_attrs[0]["name"] != "regr_parent_co_id":
+        problems.append(f"expected exactly one auto-created, non-PK FK attribute named 'regr_parent_co_id' on the drag target, got {dst_attrs}")
+    elif fk_conn["fromCardinality"] != "one" or fk_conn["toCardinality"] != "many":
+        problems.append(f"expected the auto-created connector to have fromCardinality 'one' / toCardinality 'many', got {fk_conn['fromCardinality']!r}/{fk_conn['toCardinality']!r}")
+    elif fk_conn["fromAttribute"] != result2["srcPkId"] or fk_conn["toAttribute"] != dst_attrs[0]["id"]:
+        problems.append(f"expected the connector's fromAttribute/toAttribute to reference the source PK and the new FK attribute, got {fk_conn['fromAttribute']!r}/{fk_conn['toAttribute']!r}")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "Decomposing a DataDataEntity (double-click or the menu command) produces a reused DataEntityDetails child; the attribute table's Data Type is a dropdown preserving unlisted values; Tab moves focus name->type->nullable->PK->next row correctly (fixing PK's keyboard reachability too); attributes can be reordered; and drag-creating a 'd' connector auto-creates a matching FK attribute with One/Many cardinality"
+
+
+def check_data_modeling_autofill(page):
+    """Regression guard/new-feature check for Data Modeling > Autofill, reported
+    directly: "add a new command to menu 'Data Modeling' called autofill, which will
+    call a script called dataAutoFill. This script (store/save/edit same as
+    BatchScript_QuickStart approach) will loop through dataentitydetail nodes on
+    current view, and if attributes have not been created yet (don't override
+    existing) it will create an attribute using the label + 'Id', of type numeric,
+    flag as primary key. Also create an attribute called label + 'Name', of type
+    string, and null enabled. Also create an attribute called label + 'Description',
+    of type string, and null enabled. Next loop through data connectors. If the
+    'from' attribute have not been set: set From to the pk of the from node/part. set
+    To to the same field name in to node/part after creating it (numeric null fk),
+    set cardinality as from: one and to: one or many." Implemented as a new
+    dataAutoFill() function living in DEFAULT_BATCH_SCRIPT_CODE (state.js) --
+    editable via Script Console exactly like BatchScript_QuickStart, persisted the
+    same way via store.batchScriptCode -- but NOT called from main() (it would break
+    on a fresh document with no Data Entity Details tables yet). The new menu item
+    (App.promptAutofill, main.js) extracts and calls dataAutoFill() specifically, by
+    name, using the same compile-with-bindings mechanism the Script Console's own Run
+    button uses for main(). Covers: the menu item existing and reachable; a clean
+    error toast (not a crash) when there's no active canvas tab; a table with NO
+    attributes yet getting all three scaffolded (Id: numeric/PK/not-null,
+    Name/Description: string/nullable) named exactly `<label>Id`/`<label>Name`/
+    `<label>Description`; a table that ALREADY has attributes being left completely
+    untouched ("don't override existing"); a 'd' connector with no fromAttribute set
+    getting wired to the source's own PK and a same-named, auto-created (numeric,
+    nullable, non-PK) attribute on the target, with fromCardinality:'one'/
+    toCardinality:'oneOrMany'; a 'd' connector that ALREADY has fromAttribute set
+    being left completely untouched; that dataAutoFill() is NOT part of main()'s own
+    call chain (editing/running the default Script Console script is unaffected by
+    this feature's addition); and a follow-up bug reported directly after using this
+    exact feature: "foreign key flag still not appearing anywhere, field is created
+    in autofill script when parent connected to child but not flagged as foreign
+    key... Tried manually creating isForeignKey: true, didn't work still not
+    showing." Root cause: isAttributeForeignKey (render.js) hardcoded "the attribute
+    referenced by a 'd' connector's fromAttribute is the FK" -- true only for DDL
+    import's own convention (fromAttribute = child's FK column); Autofill and
+    drag-to-connect deliberately store it the OPPOSITE way (fromAttribute = source's
+    own PK, toAttribute = the newly-created FK), so their FK attributes never
+    matched. There is no stored isForeignKey field anywhere (confirmed: manually
+    adding one does nothing, since nothing reads it) -- fixed by deriving FK status
+    from whichever end of a 'd' connector's pair references an attribute actually
+    flagged isPrimaryKey, checking BOTH ends instead of hardcoding one, which is
+    correct for all three creation conventions at once. Covered here by confirming
+    the FK badge genuinely appears (property panel AND the canvas node's own
+    rendering) on the attribute Autofill just auto-created."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+
+      const menuItems = [...document.querySelectorAll('#data-modeling-menu .dd-item')].map(i => i.textContent);
+
+      // The Instructions tab is open by default on a fresh page (not type 'canvas') --
+      // running Autofill against it should produce a specific error toast, not a crash.
+      const startTab = store.activeTab();
+      const noCanvasTabOk = !startTab || startTab.type !== 'canvas';
+      await app.promptAutofill();
+      const noTabToasts = [...document.querySelectorAll('.toast')].map(t => t.textContent);
+
+      const view = store.addView('RegrAutofill_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const customer = store.createPart({ type: 'DataEntityDetails', label: 'RegrCustomer', model, streams: [] });
+      const order = store.createPart({ type: 'DataEntityDetails', label: 'RegrOrder', model, streams: [] });
+      const product = store.createPart({ type: 'DataEntityDetails', label: 'RegrProduct', model, streams: [],
+        attributes: [{ id: 'regr-existing1', name: 'sku', dataType: 'string', nullable: false, isPrimaryKey: true }] });
+      const vmC = store.createViewMember({ view: view.id, objectType: 'part', objectId: customer.id, x: 0, y: 0 });
+      const vmO = store.createViewMember({ view: view.id, objectType: 'part', objectId: order.id, x: 300, y: 0 });
+      const vmP = store.createViewMember({ view: view.id, objectType: 'part', objectId: product.id, x: 600, y: 0 });
+      const conn1 = store.createConnector({ from: customer.id, to: order.id, model, connectorType: 'd', relationship: 'Association' });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn1.id, fromVmId: vmC.id, toVmId: vmO.id });
+      const conn2 = store.createConnector({ from: order.id, to: product.id, model, connectorType: 'd', relationship: 'Association',
+        fromAttribute: 'regr-preset', toAttribute: 'regr-existing1', fromCardinality: 'many', toCardinality: 'one' });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn2.id, fromVmId: vmO.id, toVmId: vmP.id });
+      app.recordAndRender();
+
+      await app.promptAutofill();
+      const toasts = [...document.querySelectorAll('.toast')].map(t => t.textContent);
+
+      // Reported directly, a separate bug found using this exact feature: "foreign
+      // key flag still not appearing anywhere, field is created in autofill script
+      // when parent connected to child but not flagged as foreign key." Select
+      // Order's node and confirm the auto-created FK attribute (CustomerId) actually
+      // shows the FK badge, both in the property panel and on the canvas node itself
+      // -- isAttributeForeignKey (render.js) originally hardcoded "fromAttribute is
+      // always the FK", which only matches DDL import's own convention; Autofill/
+      // drag-to-connect deliberately store it the other way around (fromAttribute =
+      // source's PK, toAttribute = the new FK), so the badge never showed for
+      // anything Autofill or drag-to-connect ever created.
+      tab.selection = new Set([vmO.id]);
+      app.render();
+      const orderFkBadgeCount = document.querySelectorAll('.attr-fk-badge').length;
+      const orderNodeText = document.querySelector(`[data-vm-id="${vmO.id}"]`).innerText;
+
+      const codeHasFn = /function dataAutoFill/.test(store.batchScriptCode);
+      const mainBody = store.batchScriptCode.split('async function main()')[1].split('}')[0];
+      const mainCallsAutofill = mainBody.includes('dataAutoFill(');
+
+      return {
+        menuItems,
+        noCanvasTabOk, noTabToast: noTabToasts[noTabToasts.length - 1],
+        customerAttrs: store.findPart(customer.id).attributes,
+        orderAttrs: store.findPart(order.id).attributes,
+        productAttrs: store.findPart(product.id).attributes,
+        conn1: store.findConnector(conn1.id),
+        conn2: store.findConnector(conn2.id),
+        lastToast: toasts[toasts.length - 1],
+        orderFkBadgeCount, orderNodeText,
+        codeHasFn, mainCallsAutofill,
+      };
+    }
+    """)
+    problems = []
+    if 'Autofill' not in result["menuItems"]:
+        problems.append(f"expected an 'Autofill' item in the Data Modeling menu, got {result['menuItems']}")
+    if result["noCanvasTabOk"] and (not result["noTabToast"] or "canvas" not in result["noTabToast"].lower()):
+        problems.append(f"expected a specific error toast when there's no active canvas tab, got {result['noTabToast']!r}")
+    cust = result["customerAttrs"]
+    if len(cust) != 3 or [a["name"] for a in cust] != ["RegrCustomerId", "RegrCustomerName", "RegrCustomerDescription"]:
+        problems.append(f"expected Customer to get exactly 3 scaffolded attributes named <label>Id/<label>Name/<label>Description, got {cust}")
+    else:
+        pk = cust[0]
+        if pk["dataType"] != "numeric" or pk["nullable"] is not False or pk["isPrimaryKey"] is not True:
+            problems.append(f"expected the scaffolded Id attribute to be numeric/not-null/PK, got {pk}")
+        nm = cust[1]
+        if nm["dataType"] != "string" or nm["nullable"] is not True or nm["isPrimaryKey"] is not False:
+            problems.append(f"expected the scaffolded Name attribute to be string/nullable/non-PK, got {nm}")
+    if len(result["productAttrs"]) != 1 or result["productAttrs"][0]["id"] != "regr-existing1":
+        problems.append(f"expected a table that already has attributes to be left completely untouched, got {result['productAttrs']}")
+    conn1 = result["conn1"]
+    if not cust or conn1["fromAttribute"] != cust[0]["id"]:
+        problems.append(f"expected conn1's fromAttribute to be wired to the source's own PK, got {conn1.get('fromAttribute')!r}")
+    if conn1["fromCardinality"] != "one" or conn1["toCardinality"] != "oneOrMany":
+        problems.append(f"expected conn1's cardinality to be set to one/oneOrMany, got {conn1['fromCardinality']!r}/{conn1['toCardinality']!r}")
+    order_fk = [a for a in result["orderAttrs"] if a["id"] == conn1.get("toAttribute")]
+    if len(order_fk) != 1:
+        problems.append(f"expected a new FK attribute on Order matching conn1's toAttribute, got order attrs {result['orderAttrs']}")
+    elif cust and (order_fk[0]["name"] != cust[0]["name"] or order_fk[0]["dataType"] != "numeric" or order_fk[0]["nullable"] is not True or order_fk[0]["isPrimaryKey"] is not False):
+        problems.append(f"expected the auto-created FK attribute to be same-named/numeric/nullable/non-PK, got {order_fk[0]}")
+    conn2 = result["conn2"]
+    if conn2["fromAttribute"] != "regr-preset" or conn2["fromCardinality"] != "many":
+        problems.append(f"expected a connector that already had fromAttribute set to be left completely untouched, got {conn2}")
+    if not result["lastToast"] or "Autofill" not in result["lastToast"]:
+        problems.append(f"expected a specific Autofill summary toast, got {result['lastToast']!r}")
+    if not result["codeHasFn"]:
+        problems.append("expected dataAutoFill() to be defined in the default batch script (store.batchScriptCode)")
+    if result["mainCallsAutofill"]:
+        problems.append("expected main() to NOT call dataAutoFill() -- it would break on a fresh document with no Data Entity Details tables yet")
+    if result["orderFkBadgeCount"] != 1:
+        problems.append(f"expected exactly one FK badge in Order's property panel (on the autofill-created FK attribute), got {result['orderFkBadgeCount']}")
+    if "(FK)" not in result["orderNodeText"]:
+        problems.append(f"expected the Order node's own canvas rendering to show a (FK) marker on the autofill-created attribute, got {result['orderNodeText']!r}")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "Data Modeling > Autofill runs the user-editable dataAutoFill() batch script against the current view: scaffolds Id/Name/Description on tables with no attributes yet (leaving already-detailed tables untouched), wires From/To Attribute + One/OneOrMany cardinality on 'd' connectors with no fromAttribute yet (leaving already-wired ones untouched), the auto-created FK attribute genuinely shows its FK badge (both in the property panel and on the canvas node), and dataAutoFill() stays out of main()'s own call chain"
+
+
+def check_level_up_creates_data_data_entity(page):
+    """Regression guard/new-feature check, reported directly: "Enhancement: when a
+    single dataentitydetail is selected and user selects 'level-up' command, create
+    (if doesn't already exist, otherwise just open) a new datadataentity part/node of
+    the same label name with link/connector result as when done in reverse where
+    user selected datadataentity and did level-down." Implemented as a special case
+    inside runCommand's 'levelUp' branch (main.js): when exactly one selected
+    ViewMember is a DataEntityDetails part, dispatches to the new
+    levelUpEntityDetails (commands.js) instead of the ordinary "prompt for a new view
+    name" Level Up -- every other selection (none, multiple, or a different type)
+    keeps the unchanged original behavior. levelUpEntityDetails first checks for an
+    EXISTING parent via findCompositionParentConn (the reverse walk of the same
+    Composition-lookup levelDownSingle's own reuse guard uses) -- if found, just
+    opens/selects wherever that parent Part is placed, no duplicate created. If not,
+    creates a new DataDataEntity part with the SAME label, a fresh dedicated view
+    (same dedup-suffix naming levelDownSingle uses), an unplaced Composition
+    connector (from: new parent, to: this DataEntityDetails part) -- the exact same
+    link shape levelDownSingle produces in the other direction -- and the new
+    parent's own ViewMember linkedViewName pointing back down at the CURRENT
+    (Entity Details) view, so double-clicking the new parent node
+    (openOrCreateLinkedView) navigates straight back to it. Covers: first Level Up
+    creates exactly one new DataDataEntity part + the Composition connector +
+    correct linkedViewName, and switches to a view named after the label;
+    double-clicking that new parent node navigates back to the original Entity
+    Details view; a SECOND Level Up on the same Entity Details node reuses the
+    existing parent (no duplicate part, switches to the SAME view) instead of
+    creating another one; and a selection that ISN'T a single DataEntityDetails part
+    still gets the ordinary Level Up dialog, unaffected by this feature."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const view = store.addView('RegrLevelUp_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const details = store.createPart({ type: 'DataEntityDetails', label: 'RegrLevelUpWidget', model, streams: [],
+        attributes: [{ id: 'lu1', name: 'id', dataType: 'numeric', nullable: false, isPrimaryKey: true }] });
+      const vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: details.id, x: 100, y: 100 });
+      app.recordAndRender();
+      tab.selection = new Set([vm.id]);
+      app.render();
+
+      app.runCommand('levelUp');
+      await new Promise(r => setTimeout(r, 60));
+
+      const parentParts = store.doc.parts.filter(p => p.label === 'RegrLevelUpWidget' && p.type === 'DataDataEntity');
+      const conn = store.doc.connectors.find(c => c.relationship === 'Composition' && c.to === details.id);
+      let activeTab = store.activeTab();
+      let activeView = store.findView(activeTab.viewId);
+      const parentPartId = parentParts[0]?.id;
+      const parentVm = parentPartId ? store.viewMembersForView(activeView.id).find(v => v.objectType === 'part' && v.objectId === parentPartId) : null;
+
+      // Double-click the new parent node -> should navigate back down to this view.
+      app.openOrCreateLinkedView(activeTab, parentVm.id);
+      await new Promise(r => setTimeout(r, 60));
+      const viewIdAfterDoubleClick = store.activeTab().viewId;
+
+      // Go back to the Entity Details view, select it, Level Up a SECOND time.
+      const detailsTab2 = app.createCanvasTab(view);
+      app.switchToTab(detailsTab2.id);
+      detailsTab2.selection = new Set([vm.id]);
+      app.render();
+      app.runCommand('levelUp');
+      await new Promise(r => setTimeout(r, 60));
+      const parentPartsAfterSecond = store.doc.parts.filter(p => p.label === 'RegrLevelUpWidget' && p.type === 'DataDataEntity');
+      activeTab = store.activeTab();
+      activeView = store.findView(activeTab.viewId);
+
+      // Sanity: an unrelated selection (none) still gets the ordinary dialog.
+      const detailsTab3 = app.createCanvasTab(view);
+      app.switchToTab(detailsTab3.id);
+      detailsTab3.selection = new Set();
+      app.render();
+      app.runCommand('levelUp');
+      await new Promise(r => setTimeout(r, 60));
+      const modalOpen = !!document.querySelector('.modal-box');
+      document.querySelector('.modal-box .cancel')?.click();
+
+      return {
+        parentPartsCount: parentParts.length,
+        conn,
+        parentPartId,
+        parentVmLinkedViewName: parentVm ? parentVm.linkedViewName : null,
+        originalViewId: view.id,
+        viewIdAfterDoubleClick,
+        parentPartsAfterSecondCount: parentPartsAfterSecond.length,
+        viewNameAfterSecond: activeView ? activeView.viewName : null,
+        modalOpen,
+      };
+    }
+    """)
+    problems = []
+    if result["parentPartsCount"] != 1:
+        problems.append(f"expected exactly 1 new DataDataEntity part named after the label, got {result['parentPartsCount']}")
+    if not result["conn"] or result["conn"]["from"] != result["parentPartId"] or result["conn"]["relationship"] != "Composition":
+        problems.append(f"expected an unplaced Composition connector from the new parent to the Entity Details part, got {result['conn']}")
+    if result["parentVmLinkedViewName"] != result["originalViewId"]:
+        problems.append(f"expected the new parent's own ViewMember linkedViewName to point back at the Entity Details view, got {result['parentVmLinkedViewName']!r} vs {result['originalViewId']!r}")
+    if result["viewIdAfterDoubleClick"] != result["originalViewId"]:
+        problems.append(f"expected double-clicking the new parent node to navigate back to the Entity Details view, got {result['viewIdAfterDoubleClick']!r}")
+    if result["parentPartsAfterSecondCount"] != 1:
+        problems.append(f"expected a SECOND Level Up to reuse the existing parent (still exactly 1), got {result['parentPartsAfterSecondCount']}")
+    if result["viewNameAfterSecond"] != "RegrLevelUpWidget":
+        problems.append(f"expected the second Level Up to switch to the existing parent's view, got {result['viewNameAfterSecond']!r}")
+    if not result["modalOpen"]:
+        problems.append("expected Level Up with no relevant selection to still show its ordinary dialog")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "Level Up on a single selected DataEntityDetails node creates (or reuses) its DataDataEntity parent with the same link shape Level Down produces in reverse (Composition connector + linkedViewName back down), while every other selection keeps the ordinary Level Up dialog"
 
 
 def check_smart_check_composition_top_down(page):
@@ -7298,6 +7740,9 @@ CHECKS = [
     check_data_modeling_crowfoot_rendering,
     check_data_modeling_menu_and_ddl_import_export,
     check_data_modeling_node_attributes_and_manual_connector_creation,
+    check_data_modeling_attribute_editing_and_auto_fk,
+    check_data_modeling_autofill,
+    check_level_up_creates_data_data_entity,
     check_smart_check_composition_top_down,
     check_smart_check_composition_bottom_up,
     check_smart_check_node_composition_redirect,

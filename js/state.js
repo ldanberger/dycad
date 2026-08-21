@@ -10,7 +10,14 @@
  * from data QuickStart itself just generated; then BatchScript_RemapExample(), which
  * remaps that same Smart Stream view with Edge Assignment and both layout-optimization
  * checkboxes. Naming convention for future additions: `BatchScript_<Name>`, so main()
- * can pick and choose which one(s) to run without renaming anything. */
+ * can pick and choose which one(s) to run without renaming anything.
+ *
+ * `dataAutoFill()` (below, after the three BatchScript_* functions) is a different
+ * kind of entry point: it's invoked directly by the Data Modeling > Autofill menu item
+ * (App.promptAutofill, main.js) by name, NOT through main() — main() unconditionally
+ * chaining it would break on a fresh document with no Data Entity Details tables yet.
+ * It's still edited/persisted exactly like everything else here (Script Console,
+ * store.batchScriptCode, Local Settings). */
 const DEFAULT_BATCH_SCRIPT_CODE = `// main() is what the Script Console's Run button actually calls. Define whatever
 // batch scripts you like below, and have main() call whichever one(s) you want to run.
 async function main() {
@@ -120,6 +127,64 @@ async function BatchScript_RemapExample() {
   });
 
   messageLog('Remap example done');
+}
+
+// Data Modeling > Autofill (menu command — NOT called from main() above, since it
+// depends on the CURRENT view already having Data Entity Details tables on it, which
+// won't be true for a fresh document). Scaffolds Id/Name/Description attributes onto
+// any Data Entity Details table on the current view that doesn't have attributes yet
+// (a table that already has ANY attributes is left completely untouched — never
+// merged with or topped up), then wires up From/To Attribute + cardinality on any 'd'
+// connector on the view whose From Attribute isn't set yet: From becomes the source
+// table's own primary key, To becomes a same-named attribute on the target table
+// (reusing one that's already there instead of duplicating it), cardinality defaults
+// to One (from) / One or Many (to). See App.promptAutofill (main.js), which extracts
+// and calls this specific function by name — same store.batchScriptCode mechanism as
+// main() itself, just a different named entry point, so editing this function here
+// changes what the Data Modeling > Autofill menu item does.
+function dataAutoFill() {
+  const tab = store.activeTab();
+  if (!tab || tab.type !== 'canvas') throw new Error('Open a canvas view with Data Entity Details tables first.');
+
+  const vms = store.viewMembersForView(tab.viewId).filter((v) => v.objectType === 'part');
+  const parts = vms.map((v) => store.findPart(v.objectId)).filter((p) => p && p.type === 'DataEntityDetails');
+  if (parts.length === 0) throw new Error('This view has no Data Entity Details tables to autofill.');
+
+  let tablesScaffolded = 0;
+  for (const part of parts) {
+    if ((part.attributes || []).length > 0) continue;
+    part.attributes = [
+      { id: crypto.randomUUID(), name: part.label + 'Id', dataType: 'numeric', nullable: false, isPrimaryKey: true },
+      { id: crypto.randomUUID(), name: part.label + 'Name', dataType: 'string', nullable: true, isPrimaryKey: false },
+      { id: crypto.randomUUID(), name: part.label + 'Description', dataType: 'string', nullable: true, isPrimaryKey: false },
+    ];
+    tablesScaffolded += 1;
+  }
+
+  const partIdSet = new Set(parts.map((p) => p.id));
+  const conns = store.doc.connectors.filter((c) => c.connectorType === 'd' && partIdSet.has(c.from) && partIdSet.has(c.to));
+  let connectorsWired = 0, connectorsSkippedNoPk = 0;
+  for (const conn of conns) {
+    if (conn.fromAttribute) continue; // already set -- don't override
+    const fromPart = store.findPart(conn.from);
+    const toPart = store.findPart(conn.to);
+    const pkAttr = (fromPart.attributes || []).find((a) => a.isPrimaryKey);
+    if (!pkAttr) { connectorsSkippedNoPk += 1; continue; } // nothing to point the FK at yet
+    let fkAttr = (toPart.attributes || []).find((a) => (a.name || '').toLowerCase() === pkAttr.name.toLowerCase());
+    if (!fkAttr) {
+      fkAttr = { id: crypto.randomUUID(), name: pkAttr.name, dataType: 'numeric', nullable: true, isPrimaryKey: false };
+      toPart.attributes = [...(toPart.attributes || []), fkAttr];
+    }
+    conn.fromAttribute = pkAttr.id;
+    conn.toAttribute = fkAttr.id;
+    conn.fromCardinality = 'one';
+    conn.toCardinality = 'oneOrMany';
+    connectorsWired += 1;
+  }
+
+  app.recordAndRender();
+  const skipSuffix = connectorsSkippedNoPk > 0 ? (', ' + connectorsSkippedNoPk + ' connector(s) skipped (source table has no primary key yet)') : '';
+  return 'Autofill: ' + tablesScaffolded + ' table(s) scaffolded, ' + connectorsWired + ' connector(s) wired' + skipSuffix + '.';
 }
 `;
 

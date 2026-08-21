@@ -412,7 +412,8 @@ type rather than replacing or extending it — a `DataDataEntity` used in a Stre
 Capability Map stays exactly as it was; ERD detail lives on a *separate* Level Down
 child, so the two concerns (business-level data entity vs. physical table schema)
 never collide. New top-level "Data Modeling" menu (`index.html`/`main.js`, positioned
-after Explore): **Add/Edit Entity Details**, **Import DDL...**, **Export DDL**.
+after Explore): **Add/Edit Entity Details**, **Autofill**, **Import DDL...**,
+**Export DDL**.
 
 **`DataEntityDetails`** (`public/custom.json`'s `settings.elements`, "Data" group) is
 the new element type carrying ERD detail — `Part.attributes`, an array of `{id, name,
@@ -440,11 +441,23 @@ pre-existing `findCompositionParentConn`) and linking to its existing view inste
 (t/m/n/y/c/s/b/h) gained a new letter, `'a'`, rendering an inline editable table
 (add/edit/delete rows) rather than a single input — the first field type that isn't a
 scalar value. `isForeignKey` is deliberately **not** a stored field on the attribute —
-it's computed live (`some 'd' connector's fromAttribute === this attribute's id`) and
-shown as a read-only badge, so it can never drift out of sync with the connectors that
-are the actual source of truth for what references what (the same principle
-Composition/`mirrorOf` already follow elsewhere in this codebase, applied to a new
-kind of reference).
+it's computed live and shown as a read-only badge, so it can never drift out of sync
+with the connectors that are the actual source of truth for what references what (the
+same principle Composition/`mirrorOf` already follow elsewhere in this codebase,
+applied to a new kind of reference). The derivation (`isAttributeForeignKey`,
+`render.js`) checks BOTH ends of a `'d'` connector's `fromAttribute`/`toAttribute`
+pair, not just `fromAttribute` — this app has three independent `'d'` connector
+creation paths, and they don't agree on which end holds the actual FK column (DDL
+import: `fromAttribute` = child's FK column, `toAttribute` = parent's referenced
+column; manual drag-to-connect and Autofill, both later additions: the OPPOSITE,
+`fromAttribute` = source's own PK, `toAttribute` = the newly-created FK — see their
+own sections below). A single hardcoded "`fromAttribute` is always the FK" check (the
+original implementation) was a real, reported bug: attributes created by Autofill or
+drag-to-connect never showed the FK badge, and manually adding an `isForeignKey: true`
+key did nothing, since the field doesn't exist. Fixed convention-agnostically: whichever
+end of the pair references an attribute that IS flagged `isPrimaryKey` is the
+"referenced" (parent) side, and the OTHER end is the actual foreign key — correct
+regardless of which literal field each convention happens to store which role in.
 
 **Connector type `'d'`** (crow's-foot relationships between two `DataEntityDetails`):
 the third `connectorType` value alongside `'c'`/`'s'`. Unlike adding a new *element*
@@ -524,6 +537,153 @@ built the *data model, rendering, and DDL import* for `'d'` connectors, but neve
   options, editable like `relationship` already was — the broader, reusable fix
   (any connector's type can now be changed after the fact, not just ones between two
   `DataEntityDetails` tables) rather than only patching the one auto-inferred path.
+
+**Attribute-editing ergonomics and auto-FK-on-drag** — six issues reported together in
+a follow-up round, once the feature was actually being used: *"when keying in data
+entity details attributes, tab should take user to next field... need ability to move
+attribute up or down. type should be drop down list of acceptable types... unable to
+enable pk in property panel attribute section... when connector dragged/created, auto
+create a fk in target of primary key from source... problem: double click on
+datadataentity or menu data Modeling -> add edit entity details creates a new
+datadataentity, should be a dataentitydetail element for the details."*
+- **`levelDownSingle` copied the parent's own type unconditionally** — correct for
+  every OTHER element type's Level Down, but wrong for `DataDataEntity`, whose
+  decomposition child must be `DataEntityDetails`. Fixed with a single special case
+  (`ciEq(part.type, 'DataDataEntity') ? 'DataEntityDetails' : part.type`) in the one
+  function both entry points (double-click and the menu command) already share, so
+  both were fixed together with no duplicated logic.
+- **Data Type became a fixed dropdown** (`ATTRIBUTE_DATA_TYPES` in `render.js`:
+  numeric/string/boolean/date/blob/json) instead of free text — but DDL import still
+  needs to land arbitrary concrete SQL types (`VARCHAR(100)`, etc.), so
+  `renderAttributeListField` always injects the attribute's current value as an extra
+  selected `<option>` when it isn't one of the fixed six, rather than silently
+  clobbering it on next render.
+- **Tab-key navigation lost focus to `<body>` entirely**, and this turned out to be
+  the actual root cause of the separately-reported *"unable to enable pk"* too: a
+  keyboard-driven person could never tab their way to the PK checkbox at all. Root
+  cause — every attribute field's `'change'` handler calls `app.recordAndRender()`,
+  which rebuilds the whole property panel's DOM; the native browser tab-order target
+  (resolved against the OLD DOM *before* the rebuild) no longer existed by the time
+  focus would actually land. Fixed with explicit `keydown` handlers on Name/Data
+  Type/Nullable/PK that `preventDefault()`, commit the field themselves
+  (deterministic — not dependent on native blur/change timing, which differs between
+  a text input's blur-triggered change and a select's immediate change), then
+  explicitly re-locate and focus the correct next field (`focusAttrField`, keyed by
+  the table's own stable container id + the row's attribute id, since row order
+  doesn't change from a Tab) in whatever DOM exists afterward: name → data type →
+  nullable → PK → next row's name, or the Add Attribute button after the last row.
+- **Row reordering** — ▲/▼ buttons per attribute row, swapping array position and
+  recommitting, matching the existing delete button's wiring pattern exactly.
+- **Auto-FK-creation-with-cardinality on drag** (`main.js`'s `finishConnect`): when a
+  manually drag-created connector infers `connectorType: 'd'` and its source (the
+  drag's "from"/parent side — *"Connectors are created from parent to children"*) has
+  a primary key, the target automatically gets a matching FK attribute if it doesn't
+  already have one — named `` `${toSnakeCase(fromPart.label)}_${toSnakeCase(pkAttr.name)}` ``
+  (a small new `toSnakeCase` helper), reusing a same-named existing attribute
+  case-insensitively rather than duplicating it — and the connector gets
+  `fromCardinality: 'one'`/`toCardinality: 'many'`. This is deliberately the *reverse*
+  of `importDDL`'s own convention (`fromCardinality: 'many'`, `toCardinality: 'one'`)
+  — there, "from" is DDL's own referencing/child table (its `FOREIGN KEY` clause names
+  it), so "many" is correct on that side; here "from" is the parent/PK side being
+  dragged *from*, so "one" is correct. Two intentionally different conventions for two
+  different creation paths, not reconciled between them.
+
+**Autofill** (`dataAutoFill()` in `DEFAULT_BATCH_SCRIPT_CODE`, `state.js`; `App.
+promptAutofill`, `main.js`) — a different kind of Data Modeling command from every
+other one on the menu: it's not a fixed function in `commands.js`, it's a *named
+function living inside the user-editable batch script* (`store.batchScriptCode`, the
+same text the Script Console's `main()` is defined in). Reported directly: *"add a new
+command to menu 'Data Modeling' called autofill, which will call a script called
+dataAutoFill. This script (store/save/edit same as BatchScript_QuickStart approach)
+will loop through dataentitydetail nodes on current view, and if attributes have not
+been created yet (don't override existing) it will create an attribute using the label
++ 'Id', of type numeric, flag as primary key. Also create an attribute called label +
+'Name', of type string, and null enabled. Also create an attribute called label +
+'Description', of type string, and null enabled. Next loop through data connectors. If
+the 'from' attribute have not been set: set From to the pk of the from node/part. set
+To to the same field name in to node/part after creating it (numeric null fk), set
+cardinality as from: one and to: one or many."*
+- `promptAutofill` compiles `store.batchScriptCode` with the exact same bindings
+  (`app`/`store`/`model`/`findParts`/`log`/`messageLog`/the raw `commands.js` command
+  functions) `promptScriptConsole`'s own Run button uses via `new Function(...)` — but
+  extracts and calls a top-level `dataAutoFill` instead of `main`, so editing
+  `dataAutoFill()` in Script Console genuinely changes what the menu item does,
+  without needing a separate storage/editing mechanism of its own.
+- `dataAutoFill()` itself lives in `DEFAULT_BATCH_SCRIPT_CODE` alongside the three
+  `BatchScript_*` example functions, but is deliberately **not** called from `main()`
+  — `main()` unconditionally chains all three starter scripts on a fresh document with
+  no Data Entity Details tables yet, and `dataAutoFill` would just throw there.
+- Scoped to whatever `DataEntityDetails` parts + `'d'` connectors are placed on the
+  *current view* (`store.viewMembersForView`), the same "current view, not whole
+  model" scoping as `exportDDL`.
+- Pass 1 (attribute scaffolding): a table with **zero** attributes gets exactly three
+  — `<label>Id` (numeric, not null, PK), `<label>Name` (string, nullable),
+  `<label>Description` (string, nullable) — literal string concatenation of the
+  table's own label, not slugified/snake-cased (the labels are typically already
+  reasonable identifiers, e.g. "Customer" → "CustomerId"). A table that already has
+  *any* attributes at all is left completely untouched — "don't override existing"
+  means don't touch that table, not "fill in only the missing ones of these three."
+- Pass 2 (connector wiring): a `'d'` connector whose `fromAttribute` isn't set yet gets
+  `fromAttribute` = the source table's own PK attribute id, `toAttribute` = a
+  same-named attribute on the target table (case-insensitive reuse if one's already
+  there, otherwise created — numeric, nullable, not a PK), and
+  `fromCardinality:'one'`/`toCardinality:'oneOrMany'`. A connector that already has
+  `fromAttribute` set is left completely untouched. Deliberately a THIRD naming/
+  cardinality convention alongside the manual-drag one (`main.js`'s `finishConnect`,
+  which snake-cases `<parent-label>_<pk-name>` and uses one/many) and `importDDL`'s
+  (many/one) — here the target attribute reuses the source PK's own name verbatim
+  (already label-prefixed by pass 1, e.g. "CustomerId" on both ends), and cardinality
+  is one/oneOrMany specifically for this bulk-scaffolding case. Three intentionally
+  different conventions for three different creation paths, none reconciled with the
+  others — each is correct for its own context (typed-by-hand DDL text, one
+  interactively-drawn connector, or a whole view's worth scaffolded in bulk).
+- `newId()`/`ciEq()` aren't in the Script Console's binding set (a `new Function(...)`
+  body doesn't share the module's lexical closure, only what's explicitly passed in),
+  so `dataAutoFill()` uses the true global `crypto.randomUUID()` directly and a plain
+  `.toLowerCase()` comparison instead — no new bindings needed for this feature.
+
+**FK derivation bug, found using Autofill itself**: reported directly, *"foreign key
+flag still not appearing anywhere, field is created in autofill script when parent
+connected to child but not flagged as foreign key... Tried manually creating
+isForeignKey: true, didn't work still not showing."* Confirmed there is no
+`isForeignKey` field anywhere — see `isAttributeForeignKey`'s own updated doc comment,
+`render.js`, for the full explanation and fix: the original hardcoded
+"`fromAttribute` is always the FK" check only ever matched DDL import's own
+convention; Autofill and drag-to-connect store the pair the other way around, so
+their FK attributes never showed the badge. Fixed to check both ends, deriving FK
+status from whichever end references an attribute actually flagged `isPrimaryKey`.
+
+**Level Up on a DataEntityDetails node** (`js/commands.js`'s new
+`levelUpEntityDetails`; dispatched from `runCommand`'s existing `'levelUp'` branch,
+`main.js`) — the reverse of Level Down's `DataDataEntity` → `DataEntityDetails`
+special case, reported directly: *"when a single dataentitydetail is selected and
+user selects 'level-up' command, create (if doesn't already exist, otherwise just
+open) a new datadataentity part/node of the same label name with link/connector
+result as when done in reverse where user selected datadataentity and did
+level-down."* `runCommand`'s ordinary Level Up (generic, `enabled: isCanvas`, unaware
+of selection) is unconditionally unchanged for every other case — this only
+special-cases exactly one selected `DataEntityDetails` ViewMember.
+- "Doesn't already exist" is checked via `findCompositionParentConn(store, part.id)`
+  — the SAME Composition-lookup `levelDownSingle`'s own reuse guard uses (see the
+  Level Down Part-level guard, above), just walked in the other direction: this part
+  is the Composition's `to` (child) side, its parent (if any) is `conn.from`. If
+  found, this just opens/selects wherever that parent Part happens to already be
+  placed (its first ViewMember found) — a `DataDataEntity` can legitimately be placed
+  on more than one view (ordinary usage, e.g. shared across several Streams), so
+  "first placement found" is a deterministic choice, not a uniqueness guarantee.
+- If no parent exists yet, creates one: a new `DataDataEntity` part with the SAME
+  label, a fresh dedicated view (the identical `New View`/dedup-suffix naming
+  `levelDownSingle` uses), and the identical link shape `levelDownSingle` produces in
+  the other direction — an unplaced Composition connector (`from`: new parent, `to`:
+  this `DataEntityDetails` part) plus the new parent's own ViewMember's
+  `linkedViewName` pointing DOWN at the CURRENT view (the Entity Details view the
+  command was invoked from) — so double-clicking the new parent node
+  (`openOrCreateLinkedView`) navigates straight back down to this exact view, mirroring
+  how a normal Level Down's parent-side `vm.linkedViewName` already works.
+- The command palette's own hint text (`getCommandDefs`, `render.js`) changes to
+  *"Level Up — create (or open) this table's Data Entity parent"* only while a single
+  `DataEntityDetails` node is selected, so the toolbar/context-menu button itself
+  reflects which behavior will actually run.
 
 **DDL import/export** (`js/ddl.js`, a new pure-logic module alongside `sfce.js`/
 `archimate.js` — no DOM dependency, testable under plain `node`): a deliberately

@@ -428,7 +428,7 @@ function getCommandDefs(app) {
   return [
     { key: 'duplicateStream', label: 'Duplicate Stream', hint: 'Duplicate Stream — clone a stream to a new name', enabled: !!singlePart && (singlePart.streams || []).length > 0 },
     { key: 'splitNode', label: 'Split Node', hint: 'Split Node — create a sibling, rewire outgoing edges', enabled: !!singlePart },
-    { key: 'levelUp', label: 'Level Up', hint: 'Level Up — open a new parent view containing this view\'s nodes', enabled: isCanvas },
+    { key: 'levelUp', label: 'Level Up', hint: (singlePart && ciEq(singlePart.type, 'DataEntityDetails')) ? 'Level Up — create (or open) this table\'s Data Entity parent' : 'Level Up — open a new parent view containing this view\'s nodes', enabled: isCanvas },
     { key: 'levelDown', label: 'Level Down', hint: 'Level Down — push 2+ selected nodes into a sub-view', enabled: selCount >= 2 },
     { key: 'generate', label: 'Generate Stream', hint: 'Generate Stream — build a stream from a template', enabled: isCanvas },
     { key: 'copy', label: 'Copy', hint: 'Copy — copy the selected nodes', enabled: hasNodeSelection },
@@ -699,16 +699,52 @@ function formatFieldValue(val) {
 }
 
 /** Is `attrId` (a DataEntityDetails attribute's id) a foreign key? Deliberately NOT a
- * stored field on the attribute itself — computed live here, true exactly when some
- * 'd' (data/ERD) connector's fromAttribute references this attribute's id, so it can
- * never drift out of sync with the actual crow's-foot connectors that are the real
- * source of truth for what references what (the same "connectors are the source of
- * truth" principle Composition/mirrorOf already follow elsewhere in this codebase).
- * Shared by the property panel's attribute table (below) and the canvas node's own
- * attribute-list rendering (canvas.js's buildNodeEl), so both agree. */
+ * stored field on the attribute itself (there is no `isForeignKey` key anywhere in the
+ * data model — setting one by hand does nothing, since nothing ever reads it) —
+ * computed live here instead, so it can never drift out of sync with the actual
+ * crow's-foot connectors that are the real source of truth for what references what
+ * (the same "connectors are the source of truth" principle Composition/mirrorOf
+ * already follow elsewhere in this codebase). Shared by the property panel's
+ * attribute table (below) and the canvas node's own attribute-list rendering
+ * (canvas.js's buildNodeEl), so both agree.
+ *
+ * Deliberately checks BOTH ends of a 'd' connector, not just `fromAttribute` — this
+ * app has THREE independent 'd' connector creation paths, and they don't agree on
+ * which end (`fromAttribute` or `toAttribute`) holds the actual foreign-key column:
+ * DDL import (`importDDL`, commands.js) sets `fromAttribute` to the child/referencing
+ * table's own FK column (matching a `FOREIGN KEY (col)` clause) and `toAttribute` to
+ * the parent's referenced column; manual drag-to-connect and the Autofill script
+ * (`finishConnect`, main.js; `dataAutoFill`, state.js) do the OPPOSITE on purpose, per
+ * a direct report: "auto create a fk in target of primary key from source... This is
+ * reverse of current logic which flagged the parent as having fk" — `fromAttribute`
+ * is the SOURCE's own primary key, `toAttribute` is the newly-created FK column on
+ * the target. A single hardcoded "`fromAttribute` is always the FK" check (the
+ * original implementation) is only ever right for one of these two conventions —
+ * confirmed as a real bug: attributes created by dataAutoFill/drag-to-connect never
+ * showed the FK badge, no matter what. Instead: whichever end of the pair references
+ * an attribute that IS flagged `isPrimaryKey` is the "referenced" side, and the OTHER
+ * end is the actual foreign key — this holds regardless of which literal field
+ * (`fromAttribute`/`toAttribute`) each convention happens to store which role in. */
 function isAttributeForeignKey(store, attrId) {
-  return store.doc.connectors.some((c) => c.connectorType === 'd' && c.fromAttribute === attrId);
+  const attrOf = (partId, id) => {
+    const part = store.findPart(partId);
+    return part && (part.attributes || []).find((a) => a.id === id);
+  };
+  return store.doc.connectors.some((c) => {
+    if (c.connectorType !== 'd' || !c.fromAttribute || !c.toAttribute) return false;
+    if (c.fromAttribute === attrId) return !!attrOf(c.to, c.toAttribute)?.isPrimaryKey;
+    if (c.toAttribute === attrId) return !!attrOf(c.from, c.fromAttribute)?.isPrimaryKey;
+    return false;
+  });
 }
+
+/** Fixed data-type choices offered in the attribute table's Data Type dropdown. Kept
+ * intentionally coarse (not real SQL types) since this is the modeling-level type, not
+ * a DDL dialect's concrete column type — DDL import still needs to land arbitrary
+ * concrete types (e.g. "VARCHAR(100)"), which is why renderAttributeListField below
+ * always injects the attribute's current value as an extra selected option when it
+ * doesn't match one of these, instead of silently clobbering it. */
+const ATTRIBUTE_DATA_TYPES = ['numeric', 'string', 'boolean', 'date', 'blob', 'json'];
 
 /** Builds the HTML for an `'a'` (attribute list) field — used by the Data Modeling
  * feature's `DataEntityDetails` element type (public/custom.json's
@@ -716,23 +752,45 @@ function isAttributeForeignKey(store, attrId) {
  * nullable, isPrimaryKey} rows. Shown as a read-only "FK" badge per row (see
  * isAttributeForeignKey above), not an editable checkbox. */
 function renderAttributeListField(app, id, attributes) {
-  const rows = attributes.map((attr) => `
+  const rows = attributes.map((attr, idx) => {
+    const currentNotListed = attr.dataType && !ATTRIBUTE_DATA_TYPES.includes(attr.dataType);
+    const dtOptions = (currentNotListed ? `<option value="${escapeHtml(attr.dataType)}" selected>${escapeHtml(attr.dataType)}</option>` : '')
+      + ATTRIBUTE_DATA_TYPES.map((t) => `<option value="${t}" ${attr.dataType === t ? 'selected' : ''}>${t}</option>`).join('');
+    return `
     <tr data-attr-id="${escapeHtml(attr.id)}">
       <td><input type="text" class="attr-name" value="${escapeHtml(attr.name || '')}" placeholder="name" /></td>
-      <td><input type="text" class="attr-datatype" value="${escapeHtml(attr.dataType || '')}" placeholder="type" /></td>
+      <td><select class="attr-datatype">${dtOptions}</select></td>
       <td class="attr-check-cell"><input type="checkbox" class="attr-nullable" ${attr.nullable ? 'checked' : ''} title="Nullable" /></td>
       <td class="attr-check-cell"><input type="checkbox" class="attr-pk" ${attr.isPrimaryKey ? 'checked' : ''} title="Primary Key" /></td>
       <td class="attr-check-cell">${isAttributeForeignKey(app.store, attr.id) ? '<span class="attr-fk-badge" title="Referenced by a Data connector">FK</span>' : ''}</td>
+      <td class="attr-check-cell">
+        <button type="button" class="attr-move-up-btn" data-attr-id="${escapeHtml(attr.id)}" title="Move up" ${idx === 0 ? 'disabled' : ''}>▲</button>
+        <button type="button" class="attr-move-down-btn" data-attr-id="${escapeHtml(attr.id)}" title="Move down" ${idx === attributes.length - 1 ? 'disabled' : ''}>▼</button>
+      </td>
       <td><button type="button" class="attr-delete-btn" data-attr-id="${escapeHtml(attr.id)}" title="Delete attribute">✕</button></td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
   return `
     <div class="attr-list-container" id="${id}">
       <table class="attr-table">
-        <thead><tr><th>Name</th><th>Data Type</th><th>Null</th><th>PK</th><th>FK</th><th></th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="6" class="empty-hint">No attributes yet.</td></tr>'}</tbody>
+        <thead><tr><th>Name</th><th>Data Type</th><th>Null</th><th>PK</th><th>FK</th><th>Move</th><th></th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="7" class="empty-hint">No attributes yet.</td></tr>'}</tbody>
       </table>
       <button type="button" class="attr-add-btn" data-attr-add="1">+ Add Attribute</button>
     </div>`;
+}
+
+/** Re-locates and focuses one cell of the attribute table by (containerId, attrId,
+ * field) after the table's own DOM has potentially just been rebuilt (see the Tab-key
+ * handling in renderShowFieldsPanel below for why a rebuild can happen mid-navigation).
+ * field === 'add' focuses the "+ Add Attribute" button instead of a row cell. */
+function focusAttrField(containerId, attrId, field) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  if (field === 'add') { container.querySelector('[data-attr-add]')?.focus(); return; }
+  const selector = { name: '.attr-name', datatype: '.attr-datatype', nullable: '.attr-nullable', pk: '.attr-pk' }[field];
+  if (!selector) return;
+  container.querySelector(`tr[data-attr-id="${attrId}"] ${selector}`)?.focus();
 }
 
 function renderShowFieldsPanel(app, tab, entityKeyOrSpec, accessors, buttonHandlers, container, ctx, options = {}) {
@@ -828,15 +886,76 @@ function renderShowFieldsPanel(app, tab, entityKeyOrSpec, accessors, buttonHandl
               commit((acc.get() || []).filter((a) => a.id !== btn.dataset.attrId));
             });
           });
+          listEl.querySelectorAll('.attr-move-up-btn').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const attrs = [...(acc.get() || [])];
+              const i = attrs.findIndex((a) => a.id === btn.dataset.attrId);
+              if (i > 0) { [attrs[i - 1], attrs[i]] = [attrs[i], attrs[i - 1]]; commit(attrs); }
+            });
+          });
+          listEl.querySelectorAll('.attr-move-down-btn').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const attrs = [...(acc.get() || [])];
+              const i = attrs.findIndex((a) => a.id === btn.dataset.attrId);
+              if (i >= 0 && i < attrs.length - 1) { [attrs[i + 1], attrs[i]] = [attrs[i], attrs[i + 1]]; commit(attrs); }
+            });
+          });
           listEl.querySelectorAll('tr[data-attr-id]').forEach((tr) => {
             const attrId = tr.dataset.attrId;
             const updateField = (field, value) => {
               commit((acc.get() || []).map((a) => (a.id === attrId ? { ...a, [field]: value } : a)));
             };
-            tr.querySelector('.attr-name')?.addEventListener('change', (e) => updateField('name', e.target.value));
-            tr.querySelector('.attr-datatype')?.addEventListener('change', (e) => updateField('dataType', e.target.value));
-            tr.querySelector('.attr-nullable')?.addEventListener('change', (e) => updateField('nullable', e.target.checked));
-            tr.querySelector('.attr-pk')?.addEventListener('change', (e) => updateField('isPrimaryKey', e.target.checked));
+            const nameEl = tr.querySelector('.attr-name');
+            const dtEl = tr.querySelector('.attr-datatype');
+            const nullEl = tr.querySelector('.attr-nullable');
+            const pkEl = tr.querySelector('.attr-pk');
+            nameEl?.addEventListener('change', (e) => updateField('name', e.target.value));
+            dtEl?.addEventListener('change', (e) => updateField('dataType', e.target.value));
+            nullEl?.addEventListener('change', (e) => updateField('nullable', e.target.checked));
+            pkEl?.addEventListener('change', (e) => updateField('isPrimaryKey', e.target.checked));
+
+            // Tab-key navigation across name -> data type -> nullable -> PK -> next row's
+            // name (or the Add Attribute button after the last row). A plain 'change'
+            // listener plus native Tab isn't enough here: committing a field's edit calls
+            // app.recordAndRender(), which rebuilds this whole table's DOM, so the native
+            // tab-order target (resolved against the OLD DOM before the rebuild) no longer
+            // exists by the time focus would land — focus falls back to <body> instead of
+            // the next field. Reported directly: "when keying in data entity details
+            // attributes, tab should take user to next field." Fix: preventDefault, commit
+            // the field ourselves (deterministic, not dependent on native blur/change
+            // timing), then explicitly re-locate and focus the next field in whatever DOM
+            // exists afterward (rebuilt or not).
+            const focusNext = (field) => {
+              const order = ['name', 'datatype', 'nullable', 'pk'];
+              const pos = order.indexOf(field);
+              if (pos < order.length - 1) { focusAttrField(listEl.id, attrId, order[pos + 1]); return; }
+              const attrs = acc.get() || [];
+              const idx = attrs.findIndex((a) => a.id === attrId);
+              if (idx >= 0 && idx + 1 < attrs.length) focusAttrField(listEl.id, attrs[idx + 1].id, 'name');
+              else focusAttrField(listEl.id, null, 'add');
+            };
+            nameEl?.addEventListener('keydown', (e) => {
+              if (e.key !== 'Tab' || e.shiftKey) return;
+              e.preventDefault();
+              updateField('name', nameEl.value);
+              focusNext('name');
+            });
+            dtEl?.addEventListener('keydown', (e) => {
+              if (e.key !== 'Tab' || e.shiftKey) return;
+              e.preventDefault();
+              updateField('dataType', dtEl.value);
+              focusNext('datatype');
+            });
+            nullEl?.addEventListener('keydown', (e) => {
+              if (e.key !== 'Tab' || e.shiftKey) return;
+              e.preventDefault();
+              focusNext('nullable');
+            });
+            pkEl?.addEventListener('keydown', (e) => {
+              if (e.key !== 'Tab' || e.shiftKey) return;
+              e.preventDefault();
+              focusNext('pk');
+            });
           });
         }
       }

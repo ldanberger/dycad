@@ -2863,4 +2863,167 @@
 // public/instructions.html's Data Modeling section rewritten to describe the new
 // drag-to-create flow and the Attributes view toggle instead of the old "set
 // Connector Type manually" instructions. Full suite 104/104.
-export const APP_VERSION = '0.857';
+//
+// 0.858: Six fixes reported together in one follow-up round on Data Modeling: "when
+// keying in data entity details attributes, tab should take user to next field. for
+// example from name to type. need ability to move attribute up or down. type should
+// be drop down list of acceptable types (numeric, string, boolean, date, blob, json).
+// unable to enable pk in property panel attribute section for dataentitydetail. when
+// connector dragged/created, auto create a fk in target of primary key from source,
+// if it doesn't exist. This is reverse of current logic which flagged the parent as
+// having fk. Auto populate From Cardinality as One, and To Cardinality as Many.
+// Connectors are created from parent to children. problem: double click on
+// datadataentity or menu data Modeling -> add edit entity details creates a new
+// datadataentity, should be a dataentitydetail element for the details."
+// (1) levelDownSingle (commands.js) unconditionally copied the decomposed Part's own
+// type onto its new decomposition child -- correct for every other element type, but
+// wrong for DataDataEntity specifically. Fixed with a special case: decomposing a
+// DataDataEntity now creates a DataEntityDetails child instead. Both entry points
+// (double-click's openOrCreateLinkedView and the "Add/Edit Entity Details" menu
+// command) funnel through this same function, so both are fixed together, and the
+// existing Part-level decomposition-reuse guard means invoking either entry point a
+// second time reuses the same child rather than creating another one.
+// (2) The attribute table's Data Type cell was a free-text input. Now a <select>
+// with fixed options (numeric/string/boolean/date/blob/json) -- always injecting the
+// attribute's current value as an extra selected option when it isn't one of those,
+// so a DDL-imported concrete SQL type (e.g. "VARCHAR(100)") isn't silently clobbered.
+// (3) Tab-key navigation lost focus to <body> entirely when leaving the Name field --
+// and this was ALSO the actual root cause of "unable to enable pk": a keyboard-driven
+// person could never tab their way to the PK checkbox at all. Root cause: committing
+// any attribute field's edit calls app.recordAndRender(), which rebuilds the whole
+// property panel's DOM; the native browser tab-order target (resolved against the OLD
+// DOM before the rebuild) no longer existed by the time focus would land. Fixed with
+// explicit keydown handlers on Name/Data Type/Nullable/PK that preventDefault, commit
+// the field deterministically themselves (not relying on native blur/change timing),
+// then explicitly re-locate and focus the correct next field (name -> data type ->
+// nullable -> PK -> next row's name, or the Add Attribute button after the last row)
+// in whatever DOM exists afterward.
+// (4) Added per-row up/down move buttons to the attribute table, swapping the
+// attribute's position in the array and re-rendering, matching the existing delete
+// button's wiring pattern.
+// (5) A manually drag-created 'd' connector now auto-creates a matching FK attribute
+// on the target when the source (the drag's "from"/parent side, per "Connectors are
+// created from parent to children") has a primary key and no matching FK already
+// exists on the target -- named `<parent_label_snake>_<pk_name_snake>` via a new
+// toSnakeCase helper, reusing an existing same-named attribute instead of duplicating
+// it if one's already there -- and sets fromCardinality:'one'/toCardinality:'many' on
+// the connector. This is deliberately the REVERSE of importDDL's own convention
+// (fromCardinality:'many', toCardinality:'one'), which is correct there because DDL's
+// own FOREIGN KEY clause is declared on the child/referencing table, making that side
+// "from" -- two intentionally different conventions for two different creation paths,
+// not reconciled between them.
+// New check_data_modeling_attribute_editing_and_auto_fk (tests/run_all.py) covers all
+// six together, each proven against its own reverted regression (confirmed to fail
+// with an informative message, then restored): decomposition child type via both
+// entry points with reuse; the Data Type select's fixed options plus preserved
+// unlisted value; real keyboard-driven Tab navigation through all four fields
+// (name->type->nullable->PK) landing on the right element each time, with PK actually
+// toggled via keyboard at the end; row reordering; and the auto-created FK attribute
+// plus its One/Many cardinality on a drag-created connector.
+// DESIGN_DOCUMENT.md SS7a and tests/README.md updated; public/instructions.html's
+// Data Modeling section updated for Tab navigation, the Data Type dropdown, row
+// reordering, and auto-FK-on-drag. Full suite 105/105.
+//
+// 0.859: New Data Modeling menu command, reported directly: "add a new command to
+// menu 'Data Modeling' called autofill, which will call a script called dataAutoFill.
+// This script (store/save/edit same as BatchScript_QuickStart approach) will loop
+// through dataentitydetail nodes on current view, and if attributes have not been
+// created yet (don't override existing) it will create an attribute using the label +
+// 'Id', of type numeric, flag as primary key. Also create an attribute called label +
+// 'Name', of type string, and null enabled. Also create an attribute called label +
+// 'Description', of type string, and null enabled. Next loop through data connectors.
+// If the 'from' attribute have not been set: set From to the pk of the from
+// node/part. set To to the same field name in to node/part after creating it
+// (numeric null fk), set cardinality as from: one and to: one or many. Connectors are
+// created from parent to children."
+// Implemented as a NEW kind of command for this menu: rather than a fixed function in
+// commands.js, dataAutoFill() is a named function living inside the same
+// user-editable batch script as BatchScript_QuickStart (DEFAULT_BATCH_SCRIPT_CODE,
+// state.js) -- same storage (store.batchScriptCode), same editor (Advanced > Script
+// Console), same Local Settings persistence. It's deliberately NOT called from
+// main() (which would break it on a fresh document with no Data Entity Details
+// tables yet); instead the new Data Modeling > Autofill menu item (App.
+// promptAutofill, main.js) compiles store.batchScriptCode with the exact same
+// bindings promptScriptConsole's own Run button uses, but extracts and calls
+// dataAutoFill specifically -- so editing dataAutoFill() in the Script Console
+// genuinely changes what the menu item does.
+// Pass 1 scaffolds three attributes (<label>Id numeric/not-null/PK, <label>Name and
+// <label>Description both string/nullable) onto any Data Entity Details table on the
+// current view that has ZERO attributes so far -- a table with even one existing
+// attribute is left completely untouched, not merged with or topped up. Pass 2 wires
+// up any 'd' connector on the view whose From Attribute isn't set yet: From becomes
+// the source table's own primary key, To becomes a same-named attribute on the
+// target table (reusing a case-insensitive match instead of duplicating it),
+// cardinality defaults to One (from) / One or Many (to) -- deliberately a third
+// naming/cardinality convention alongside the manual-drag one (finishConnect,
+// snake-cased name, one/many) and importDDL's (many/one), each correct for its own
+// creation path, not reconciled between them. newId()/ciEq() aren't in the Script
+// Console's binding set (a `new Function(...)` body doesn't share the module's
+// lexical closure), so dataAutoFill() uses the true global crypto.randomUUID()
+// directly instead.
+// New check_data_modeling_autofill (tests/run_all.py) covers: the menu item existing;
+// a specific error toast when there's no active canvas tab; correct scaffolding on an
+// empty table; an already-detailed table left untouched (proven via reverting the
+// guard and confirming that specific assertion fails); correct connector wiring on an
+// unset connector; an already-wired connector left untouched (same revert-and-confirm
+// proof); and dataAutoFill() staying out of main()'s own call chain. DESIGN_DOCUMENT.md
+// SS7a, tests/README.md, and public/instructions.html (both the new Data Modeling >
+// Autofill subsection and a note in the Script Console section) updated. Full suite
+// 106/106.
+//
+// 0.860: Two issues reported directly after using the Autofill/Level Down/Level Up
+// Data Modeling features:
+// (1) "foreign key flag still not appearing anywhere, field is created in autofill
+// script when parent connected to child but not flagged as foreign key... Tried
+// manually creating isForeignKey: true, didn't work still not showing. Field name
+// related to ForeignKey not showing in saved data, what is it called and is it the
+// same format as primary key like isForeignKey : true?" There is no isForeignKey
+// field anywhere in the data model (confirmed: setting one by hand does nothing,
+// since nothing reads it) -- FK status is fully derived. Root cause of it not
+// showing: isAttributeForeignKey (render.js) hardcoded "the attribute referenced by
+// a 'd' connector's fromAttribute is the FK" -- correct only for DDL import's own
+// convention (fromAttribute = child's FK column, toAttribute = parent's referenced
+// column); the LATER Autofill/drag-to-connect convention (0.859/0.858) deliberately
+// stores it the opposite way (fromAttribute = source's own PK, toAttribute = the
+// newly-created FK), so nothing either of those two paths ever created showed the
+// badge. Fixed convention-agnostically: checks BOTH ends of the fromAttribute/
+// toAttribute pair, and whichever end references an attribute actually flagged
+// isPrimaryKey marks the OTHER end as the real foreign key -- correct for all three
+// creation conventions regardless of which literal field each one stores which role
+// in. check_data_modeling_autofill extended to confirm the FK badge genuinely
+// appears (property panel AND canvas node) on the attribute Autofill creates,
+// proven against the reverted bug. Two PRE-EXISTING tests (check_data_modeling_
+// attributes_and_data_connector, check_data_modeling_node_attributes_and_manual_
+// connector_creation) had artificial fromAttribute-only test setups that the new,
+// more correct derivation logic no longer satisfies (neither end was a real PK in
+// their scenarios) -- updated both to also set a matching toAttribute pointing at a
+// genuine PK, modeling a realistic FK->PK reference instead (not a regression --
+// same category of expected test-assumption update as check_view3d_connector_type_
+// toolbar_filter's own update earlier this project).
+// (2) Enhancement: "when a single dataentitydetail is selected and user selects
+// 'level-up' command, create (if doesn't already exist, otherwise just open) a new
+// datadataentity part/node of the same label name with link/connector result as
+// when done in reverse where user selected datadataentity and did level-down." New
+// levelUpEntityDetails (commands.js), dispatched from runCommand's existing
+// 'levelUp' branch (main.js) only when exactly one DataEntityDetails ViewMember is
+// selected -- every other selection keeps the ordinary "prompt for a new view name"
+// Level Up unchanged. Checks for an existing parent via findCompositionParentConn
+// (the reverse walk of levelDownSingle's own reuse guard) and just opens/selects it
+// if found; otherwise creates a new DataDataEntity part with the same label, a
+// fresh dedicated view (same dedup-suffix naming as levelDownSingle), and the
+// identical link shape levelDownSingle produces in reverse -- an unplaced
+// Composition connector plus the new parent's own linkedViewName pointing back down
+// at the current Entity Details view, so double-clicking the new parent navigates
+// straight back. The command palette's own Level Up hint text now reflects which
+// behavior will run while a single DataEntityDetails node is selected.
+// New check_level_up_creates_data_data_entity covers: first Level Up creates exactly
+// one new part + Composition connector + correct linkedViewName and switches to a
+// view named after the label; double-clicking the new parent navigates back;
+// a SECOND Level Up reuses the existing parent instead of duplicating (proven via
+// forcing findCompositionParentConn's result to null and confirming failure, then
+// reverting); and an unrelated selection still gets the ordinary Level Up dialog
+// (proven by disabling the special case and confirming the whole check throws).
+// DESIGN_DOCUMENT.md SS7a, tests/README.md, and public/instructions.html (Level Up's
+// own row, the new Data Modeling reverse-direction paragraph, and the FK badge
+// description) updated. Full suite 107/107.
+export const APP_VERSION = '0.860';

@@ -849,6 +849,86 @@ function levelUp(app, tab, newViewName) {
   app.toast(`Created view "${newViewName}" (Level Up) with ${partVms.length} node${partVms.length === 1 ? '' : 's'} carried up.`);
 }
 
+/** Data Modeling: Level Up on a single selected DataEntityDetails node is the exact
+ * reverse of Level Down on a DataDataEntity (levelDownSingle's DataDataEntity ->
+ * DataEntityDetails special case, above) -- reported directly: "when a single
+ * dataentitydetail is selected and user selects 'level-up' command, create (if
+ * doesn't already exist, otherwise just open) a new datadataentity part/node of the
+ * same label name with link/connector result as when done in reverse where user
+ * selected datadataentity and did level-down." Dispatched from runCommand (main.js)
+ * INSTEAD of the generic levelUp above, only when exactly one DataEntityDetails part
+ * is selected -- every other selection (none, multiple, or a different type) still
+ * gets the ordinary "prompt for a new view name" Level Up unchanged.
+ *
+ * "Doesn't already exist" is checked via findCompositionParentConn -- the SAME
+ * Composition-lookup levelDownSingle's own Part-level reuse guard uses, just walked
+ * in the other direction (this part is the "to"/child side; its parent, if any, is
+ * conn.from). If found, this just opens/selects wherever that parent Part happens to
+ * be placed (its first ViewMember) instead of creating a duplicate -- a DataDataEntity
+ * can be placed on more than one view (ordinary usage, e.g. shared across Streams),
+ * so "first placement found" is a reasonable, deterministic choice, not a guarantee
+ * of uniqueness.
+ *
+ * If no parent exists yet, creates one: a new DataDataEntity part with the SAME label,
+ * a fresh dedicated view (same "New View"/dedup-suffix naming levelDownSingle uses),
+ * and the identical link shape levelDownSingle produces in the other direction -- an
+ * unplaced Composition connector (from: new parent, to: this DataEntityDetails part)
+ * plus the parent's own new ViewMember's linkedViewName pointing DOWN at the CURRENT
+ * view (the one this DataEntityDetails node already lives on) -- so double-clicking
+ * the new parent node navigates straight back down to this exact Entity Details view,
+ * exactly mirroring how the parent's own vm.linkedViewName works after a normal Level
+ * Down. */
+function levelUpEntityDetails(app, tab, vmId) {
+  const { store } = app;
+  const vm = store.findViewMember(vmId);
+  const part = vm && store.findPart(vm.objectId);
+  if (!part) return;
+
+  const parentConn = findCompositionParentConn(store, part.id);
+  if (parentConn) {
+    const parentVm = store.doc.viewMembers.find((v) => v.objectType === 'part' && ciEq(v.objectId, parentConn.from));
+    if (parentVm) {
+      const parentPart = store.findPart(parentConn.from);
+      const parentView = store.findView(parentVm.view);
+      const parentTab = app.createCanvasTab(parentView);
+      app.switchToTab(parentTab.id);
+      parentTab.selection = new Set([parentVm.id]);
+      app.recordAndRender();
+      app.toast(`Opened existing Data Entity "${parentPart.label}".`);
+      return;
+    }
+    // Composition connector exists but its parent Part has no placement anywhere --
+    // not reachable via any normal flow (the parent was necessarily placed somewhere
+    // to have been decomposed from in the first place), but fall through rather than
+    // silently doing nothing if it ever happens.
+  }
+
+  const parentPart = parentConn
+    ? store.findPart(parentConn.from)
+    : store.createPart({ type: 'DataDataEntity', label: part.label, model: part.model, streams: [...(part.streams || [])], note: part.note, order: part.order, other: part.other });
+  if (!parentConn) {
+    store.createConnector({ from: parentPart.id, to: part.id, model: part.model, connectorType: 'c', relationship: 'Composition' });
+  }
+
+  let newViewName = parentPart.label || 'New View';
+  if (store.findView(newViewName)) {
+    let n = 1;
+    while (store.findView(`${newViewName} ${n}`)) n++;
+    newViewName = `${newViewName} ${n}`;
+  }
+  const view = store.addView(newViewName);
+  const newTab = app.createCanvasTab(view);
+  const parentVm = store.createViewMember({
+    view: view.id, objectType: 'part', objectId: parentPart.id,
+    x: 200, y: 150, fillColor: elementGroupFill(store, 'DataDataEntity'),
+    linkedViewName: tab.viewId, // links back down to this Entity Details view
+  });
+
+  app.recordAndRender();
+  app.switchToTab(newTab.id);
+  app.toast(`Created Data Entity "${parentPart.label}" (Level Up), linked to "${part.label}".`);
+}
+
 // ===================== LEVEL DOWN =====================
 /**
  * Single-node variant used by double-click when a node has no linkedViewName yet:
@@ -885,7 +965,15 @@ function levelDownSingle(app, tab, vmId) {
   // the original's label unchanged (unlike Split Node's "(split)" suffix) since the new
   // view is already named after it and conceptually still represents "this node, one
   // level of detail down" — not a sibling needing visual disambiguation.
-  const newPart = store.createPart({ type: part.type, label: part.label, model: part.model, streams: [...(part.streams || [])], note: part.note, order: part.order, other: part.other });
+  //
+  // Data Modeling special case: decomposing a DataDataEntity should produce a
+  // DataEntityDetails anchor (the type that actually carries an attribute list),
+  // not another DataDataEntity — reported directly: "double click on datadataentity
+  // or menu data Modeling -> add edit entity details creates a new datadataentity,
+  // should be a dataentitydetail element for the details." Every OTHER element type
+  // still copies the parent's own type exactly, as before.
+  const childType = ciEq(part.type, 'DataDataEntity') ? 'DataEntityDetails' : part.type;
+  const newPart = store.createPart({ type: childType, label: part.label, model: part.model, streams: [...(part.streams || [])], note: part.note, order: part.order, other: part.other });
   const selfVm = store.createViewMember({
     view: view.id, objectType: 'part', objectId: newPart.id,
     x: 200, y: 150, fillColor: vm.fillColor,
@@ -3724,4 +3812,4 @@ function exportDDL(app, viewId) {
 }
 
 
-export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL };
+export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL };

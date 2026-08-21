@@ -191,7 +191,9 @@ canvas. Availability depends on what's selected — greyed out means the current
     <tr><td><strong>Split Node</strong></td><td>Creates a sibling copy of the selected part and rewires its
     outgoing connectors to the new copy — handy for splitting one node's responsibilities into two.</td></tr>
     <tr><td><strong>Level Up</strong></td><td>Opens a new parent view containing this view's nodes, letting you
-    build a higher-level diagram that this one nests under.</td></tr>
+    build a higher-level diagram that this one nests under. Exception: if exactly one Data Entity Details node
+    is selected, Level Up instead creates (or, if one already exists, just opens) its Data Entity parent — see
+    Data Modeling below.</td></tr>
     <tr><td><strong>Level Down</strong></td><td>Pushes two or more selected nodes into a new sub-view,
     replacing them here with a single node linked down to that detail view (double-click to navigate down;
     double-click the linked placeholder to come back up). Double-clicking a single node that has no linked
@@ -617,6 +619,10 @@ Stream dialog (see Commands above) — one usable both as a script and as a read
 <strong>Layered</strong> pattern (both Minimize Crossings and Minimize Connector Length enabled, no Edge
 Assignment needed — Business Function and General Actor land on the top row for free, as true graph roots)
 — reusing the existing tab rather than opening a new one.</p>
+<p>Not every function in the script is meant to be reached through <code>main()</code>, though — the default
+script also defines <code>dataAutoFill()</code>, which <strong>Data Modeling &gt; Autofill</strong> (see above)
+calls directly by name instead, since it only makes sense to run against a view that already has Data Entity
+Details tables on it. Editing <code>dataAutoFill()</code> here changes what that menu item does.</p>
 
 <h3>Code Summary</h3>
 <p>Advanced &gt; Code Summary opens a read-only listing of the Script Console's own text plus every part's own
@@ -685,23 +691,50 @@ to open its own detail view), just triggered from the menu. The first time, it c
 Composition connector. Running it again on the SAME Data Entity — even from a different view, if that
 Data Entity appears in more than one place — reopens the existing Entity Details rather than creating a
 second, disconnected one.</p>
+<p>The reverse direction works too: select a single <strong>Data Entity Details</strong> node and run
+<strong>Level Up</strong> (Commands toolbar or right-click) — the first time, it creates a new
+<strong>Data Entity</strong> node of the same name on its own new view, linked back down to this Entity
+Details view the same way Add/Edit Entity Details links down from the Data Entity side. Running Level Up
+again on the same Entity Details node reopens that existing Data Entity instead of creating another one.</p>
 <p>A Data Entity Details node has its own <strong>Attributes</strong> table in the property panel: click
-<strong>+ Add Attribute</strong> for a new row, fill in Name/Data Type, and check Null/PK as needed. The
-same attribute list also shows directly on the node itself on the canvas (name : data type, 🔑 for
-primary key) — toggle it per-view with the <strong>Attributes</strong> checkbox next to Description/Types
-in the view's own properties, same as any other node-content toggle. A "FK" badge appears automatically,
-both on the node and in the panel, next to any attribute referenced by a Data connector's From Attribute —
-it's computed live from your actual connectors, not something you set yourself, so it can never get out of
-sync with what's really connected.</p>
+<strong>+ Add Attribute</strong> for a new row, fill in Name and pick a <strong>Data Type</strong> from the
+dropdown (numeric, string, boolean, date, blob, json — if an attribute already has some other value, e.g.
+a concrete SQL type brought in via DDL import, that value stays available as an extra option so it's never
+silently overwritten), and check Null/PK as needed. Tab moves you through each row in order — Name, Data
+Type, Null, PK, then the next row's Name — so you can key in a whole table's attributes without touching
+the mouse. The ▲/▼ buttons on each row reorder attributes. The same attribute list also shows directly on
+the node itself on the canvas (name : data type, 🔑 for primary key) — toggle it per-view with the
+<strong>Attributes</strong> checkbox next to Description/Types in the view's own properties, same as any
+other node-content toggle. A "FK" badge appears automatically, both on the node and in the panel, on whichever
+end of a Data connector's From/To Attribute pair points at the OTHER end's Primary Key — it's computed live
+from your actual connectors and their attributes' PK flags, not something you set yourself (there is no
+"Is Foreign Key" field to check — setting one by hand does nothing), so it can never get out of sync with
+what's really connected.</p>
+<h3>Autofill</h3>
+<p><strong>Data Modeling &gt; Autofill</strong> scaffolds a whole view's worth of tables and relationships in
+one click. For every Data Entity Details node on the current view that doesn't have any attributes yet, it
+creates three: <code>&lt;label&gt;Id</code> (numeric, primary key), <code>&lt;label&gt;Name</code> and
+<code>&lt;label&gt;Description</code> (both string, nullable) — a table that already has even one attribute
+is left completely untouched, never merged with or topped up. Then, for every Data connector on the view
+whose From Attribute isn't set yet, it wires From to the source table's own primary key and To to a
+same-named attribute on the target table (created if it doesn't already exist there), with cardinality set
+to One (from) / One or Many (to) — a connector that already has its From Attribute set is left alone.</p>
+<p>Autofill isn't a hidden built-in command — it runs a real, editable script called <code>dataAutoFill()</code>
+that lives in the same place as the Script Console's own example scripts (Advanced &gt; Script Console;
+see the <code>BatchScript_QuickStart</code> example there). Open the console to see or change exactly what
+Autofill does — anything you edit there takes effect the next time you run Autofill from the menu.</p>
 <h3>Crow's-foot relationships</h3>
 <p>Drag from one Data Entity Details node to another (the small handle at its bottom-right corner) the same
 way you'd draw any connector — between two Data Entity Details nodes this automatically creates a
 crow's-foot (<strong>Connector Type: Data (d)</strong>) relationship instead of a plain one, no extra step
-needed. Its property panel adds four fields: From/To Attribute (pick which column on each table the
-relationship actually connects — the dropdown only offers that table's own attributes; this is also how
-you set a foreign key, since FK status is derived from here) and From/To Cardinality (One, Many, Zero or
-One, One or Many), which control which crow's-foot symbol is drawn at each end. Cardinality is set
-explicitly for now, not inferred from your primary/foreign key settings.</p>
+needed. If the table you dragged FROM has a primary key attribute, a matching foreign key attribute is
+created automatically on the table you dragged TO (named after the source table and its primary key, reusing
+an existing attribute of the same name instead of duplicating it if one's already there), and From/To
+Cardinality are set to One/Many automatically. Its property panel exposes four fields: From/To Attribute
+(pick which column on each table the relationship actually connects — the dropdown only offers that table's
+own attributes; this is also how you set a foreign key manually, since FK status is derived from here) and
+From/To Cardinality (One, Many, Zero or One, One or Many), which control which crow's-foot symbol is drawn
+at each end — free to change after the fact if the auto-populated One/Many isn't what you meant.</p>
 <p><strong>Connector Type</strong> is a regular editable field on every connector (not just Data ones) — so
 if you drew an ordinary connector and want to turn it into a crow's-foot relationship instead (or the other
 way around), just change its Connector Type in the property panel directly.</p>
