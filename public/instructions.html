@@ -16,6 +16,7 @@ This page is a working reference, not a tutorial — skim the headings, come bac
     <li><a href="#properties">Property Panels</a></li>
     <li><a href="#simulation">Simulation Scripting</a></li>
     <li><a href="#archimate">ArchiMate Import</a></li>
+    <li><a href="#data-modeling">Data Modeling</a></li>
     <li><a href="#tips">Tips &amp; Things to Know</a></li>
   </ol>
 </nav>
@@ -670,6 +671,49 @@ directly onto DyCAD's own model:</p>
 </ul>
 <p>Re-importing the same file is safe — it matches existing records by the file's own stable ids and updates
 them in place rather than duplicating.</p>
+
+<h2 id="data-modeling">7a. Data Modeling</h2>
+<p>The <strong>Data Modeling</strong> menu adds entity-relationship (ERD) detail — typed attributes, primary/
+foreign keys, and crow's-foot notation — on top of the Data Model's existing Data Entity element, without
+changing what a Data Entity already means elsewhere in your model (Streams, Capability Maps, etc. all keep
+working exactly as before).</p>
+<h3>Add/Edit Entity Details</h3>
+<p>Select a single <strong>Data Entity</strong> node and choose <strong>Data Modeling &gt; Add/Edit Entity
+Details</strong> — this is the same "level down" mechanism used elsewhere in the app (double-clicking a node
+to open its own detail view), just triggered from the menu. The first time, it creates a new
+<strong>Data Entity Details</strong> node on its own view, linked back to the Data Entity via a structural
+Composition connector. Running it again on the SAME Data Entity — even from a different view, if that
+Data Entity appears in more than one place — reopens the existing Entity Details rather than creating a
+second, disconnected one.</p>
+<p>A Data Entity Details node has its own <strong>Attributes</strong> table in the property panel: click
+<strong>+ Add Attribute</strong> for a new row, fill in Name/Data Type, and check Null/PK as needed. The
+same attribute list also shows directly on the node itself on the canvas (name : data type, 🔑 for
+primary key) — toggle it per-view with the <strong>Attributes</strong> checkbox next to Description/Types
+in the view's own properties, same as any other node-content toggle. A "FK" badge appears automatically,
+both on the node and in the panel, next to any attribute referenced by a Data connector's From Attribute —
+it's computed live from your actual connectors, not something you set yourself, so it can never get out of
+sync with what's really connected.</p>
+<h3>Crow's-foot relationships</h3>
+<p>Drag from one Data Entity Details node to another (the small handle at its bottom-right corner) the same
+way you'd draw any connector — between two Data Entity Details nodes this automatically creates a
+crow's-foot (<strong>Connector Type: Data (d)</strong>) relationship instead of a plain one, no extra step
+needed. Its property panel adds four fields: From/To Attribute (pick which column on each table the
+relationship actually connects — the dropdown only offers that table's own attributes; this is also how
+you set a foreign key, since FK status is derived from here) and From/To Cardinality (One, Many, Zero or
+One, One or Many), which control which crow's-foot symbol is drawn at each end. Cardinality is set
+explicitly for now, not inferred from your primary/foreign key settings.</p>
+<p><strong>Connector Type</strong> is a regular editable field on every connector (not just Data ones) — so
+if you drew an ordinary connector and want to turn it into a crow's-foot relationship instead (or the other
+way around), just change its Connector Type in the property panel directly.</p>
+<h3>Import/Export DDL</h3>
+<p><strong>Import DDL...</strong> reads a <code>.sql</code> file's <code>CREATE TABLE</code> statements
+(a common subset — column definitions, inline or table-level <code>PRIMARY KEY</code>, table-level
+<code>FOREIGN KEY ... REFERENCES</code> — not every SQL dialect's full syntax) and builds one Data Entity
+Details node per table, with Data connectors for every foreign key, on a new view. If anything in the file
+falls outside that subset, nothing is imported and you'll see exactly which table/line caused the problem.
+<strong>Export DDL</strong> generates DDL text back from whatever Data Entity Details nodes and Data
+connectors are on the <em>current view</em> (not the whole model) and shows it in a read-only text box you
+can select and copy from.</p>
 
 <h2 id="tips">8. Tips &amp; Things to Know</h2>
 <ul>

@@ -1,10 +1,15 @@
 // canvas.js — the interactive canvas: nodes (viewMembers of type 'part'), edges (viewMembers of type 'connector')
 import { ciEq } from './state.js';
-import { escapeHtml, groupFill, iconSvgFor } from './render.js';
+import { escapeHtml, groupFill, iconSvgFor, isAttributeForeignKey } from './render.js';
 import { elementByType } from './rules.js';
 import { isSectionViewType, computeSectionLayout, pixelToNearestGrid, isTypeAllowedInSection, findFreeCellOrGrowSection, CELL_W, CELL_H, rescaleSectionPositions } from './sections.js';
 import { computeRoutedPath } from './routing.js';
 import { pushMessageLog } from './simulation.js';
+
+/** connectorType 'd' (Data Modeling / crow's-foot) connectors' fromCardinality/
+ * toCardinality values -> the lineEnds entry (public/custom.json) drawing that
+ * cardinality's symbol. See drawEdge below. */
+const CARDINALITY_LINE_ENDS = { one: 'crowOne', many: 'crowMany', zeroOrOne: 'crowZeroOrOne', oneOrMany: 'crowOneOrMany' };
 
 function ensurePageEl(app, tab) {
   let el = document.getElementById(`page-${tab.id}`);
@@ -303,6 +308,7 @@ function redrawEdges(app, tab, edgeLayer, partVms, connVms) {
     if (!passesStreamFilter(tab, conn.streams)) continue;
     if (conn.connectorType === 'c' && view?.chkShowConnectorType === false) continue;
     if (conn.connectorType === 's' && view?.chkShowStreamType === false) continue;
+    if (conn.connectorType === 'd' && view?.chkShowDataType === false) continue;
     const fromVm = partVmById.get(cvm.fromVmId);
     const toVm = partVmById.get(cvm.toVmId);
     if (!fromVm || !toVm) continue;
@@ -485,11 +491,19 @@ function drawEdge(app, edgeLayer, cvm, conn, fromVm, toVm, tab, allPartVms) {
   path.setAttribute('stroke-width', String(selected ? Math.max(strokeWidth, 2.5) : strokeWidth));
   path.setAttribute('fill', 'none');
   if (dash.length) path.setAttribute('stroke-dasharray', dash.join(','));
-  if (style?.toLineEndSettingType && app.store.settings.lineEnds[style.toLineEndSettingType]?.path) {
-    path.setAttribute('marker-end', `url(#marker-${style.toLineEndSettingType}-${conn.endSize || 'medium'})`);
+  // Crow's-foot (Data Modeling) connectors: line ends come from the connector's OWN
+  // fromCardinality/toCardinality, not the relationship-driven lineEnds lookup every
+  // other connector uses — a cardinality symbol describes THIS relationship's shape,
+  // not a fixed per-relationship-type style. Falls through to the normal
+  // relationship-driven lookup when no cardinality is set (e.g. a fresh 'd' connector
+  // before its ends are configured), so it never renders with no marker at all.
+  const toLineEndType = (conn.connectorType === 'd' && CARDINALITY_LINE_ENDS[conn.toCardinality]) || style?.toLineEndSettingType;
+  const fromLineEndType = (conn.connectorType === 'd' && CARDINALITY_LINE_ENDS[conn.fromCardinality]) || style?.fromLineEndSettingType;
+  if (toLineEndType && app.store.settings.lineEnds[toLineEndType]?.path) {
+    path.setAttribute('marker-end', `url(#marker-${toLineEndType}-${conn.endSize || 'medium'})`);
   }
-  if (style?.fromLineEndSettingType && app.store.settings.lineEnds[style.fromLineEndSettingType]?.path) {
-    path.setAttribute('marker-start', `url(#marker-${style.fromLineEndSettingType}-${conn.endSize || 'medium'})`);
+  if (fromLineEndType && app.store.settings.lineEnds[fromLineEndType]?.path) {
+    path.setAttribute('marker-start', `url(#marker-${fromLineEndType}-${conn.endSize || 'medium'})`);
   }
   edgeLayer.appendChild(path);
 
@@ -590,6 +604,25 @@ function buildNodeEl(app, tab, vm, part) {
   const showKeys = view?.chkShowKeys;
   const showDescription = view?.chkShowDescription;
 
+  // Data Modeling: a DataEntityDetails node shows its own attribute list right on the
+  // canvas (name : dataType, PK marked, FK looked up live the same way the property
+  // panel's own attribute table does — see isAttributeForeignKey, render.js) instead
+  // of only in the side panel, gated by its own view toggle (chkShowAttributes,
+  // sibling to chkShowDescription/chkShowKeys). Node height/width is uniform per
+  // VIEW, not per node (getNodeSize above) — redrawNodeSizes' own content-measuring
+  // pass (canvas.js) already grows the whole view to fit whatever's actually
+  // rendered here, so a view containing wide attribute lists ends up with taller
+  // nodes across the board rather than needing a separate per-node sizing mechanism.
+  let attributesHtml = '';
+  if (view?.chkShowAttributes && ciEq(part.type, 'DataEntityDetails') && (part.attributes || []).length) {
+    const rows = part.attributes.map((a) => {
+      const pk = a.isPrimaryKey ? '🔑 ' : '';
+      const fk = isAttributeForeignKey(app.store, a.id) ? ' (FK)' : '';
+      return `<div class="fnode-attr-row">${pk}${escapeHtml(a.name || '(unnamed)')}${fk}: ${escapeHtml(a.dataType || '')}</div>`;
+    }).join('');
+    attributesHtml = `<div class="fnode-attributes">${rows}</div>`;
+  }
+
   let simBadgeHtml = '';
   if (view?.chkShowSimValues) {
     // Badges reflect the PART's shared simulation state (scoped to its own model), not
@@ -629,6 +662,7 @@ function buildNodeEl(app, tab, vm, part) {
     </div>
     <div class="fnode-label">${escapeHtml(part.label)}</div>
     ${showDescription && part.description ? `<div class="fnode-description">${escapeHtml(part.description)}</div>` : ''}
+    ${attributesHtml}
     ${showKeys ? `<div class="fnode-type" style="opacity:.5;">vm:${escapeHtml(vm.id)}<br>obj:${escapeHtml(part.id)}</div>` : ''}
     ${part.order > 0 ? `<div class="fnode-badge">${part.order}</div>` : ''}
     ${simBadgeHtml}

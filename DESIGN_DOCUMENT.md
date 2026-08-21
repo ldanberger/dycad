@@ -45,21 +45,22 @@ There is no client-side router and no history API usage — the whole app is one
 | `js/rules.js` | Relationship-validity lookups (`validRelationOptions`, `elementByType`, `defaultRelationKeyFor`) — all keyed off `settings.relationshipPairs`/`settings.elements` |
 | `js/render.js` | Header/toolbox/property-panel rendering; the schema-driven `renderShowFieldsPanel` that every editable-field UI in the app is built from; catalog row rendering; light/dark theme application |
 | `js/canvas.js` | The interactive canvas itself: node/edge SVG rendering, drag/connect/lasso-select, zoom/pan, node sizing (`redrawNodeSizes`/`redrawAndResolveLayout`), generic table-tab rendering (`renderTablePage`, drives catalogs *and* the SFCE Catalog page), the Instructions tab's content-fetch renderer, connector routing dispatch (delegates path computation to `routing.js`) |
-| `js/commands.js` | Every command: `createStream`, `duplicateStream`, `splitNode`, `levelUp`/`levelDown`/`levelDownSingle`, `copyNodes`/`pasteNodes`, `remap`/`applyRemapLayout`, `mergeNodes`, `generateInventoryView`, `generateIndustry`, `addExistingPartsToView`, `populateFromTemplate`, `insertSmartStream`, `duplicateSection`, `smartCheckView`, plus the bulk-generation lookup cache (`createBulkLookupCache`) |
+| `js/commands.js` | Every command: `createStream`, `duplicateStream`, `splitNode`, `levelUp`/`levelDown`/`levelDownSingle`, `copyNodes`/`pasteNodes`, `remap`/`applyRemapLayout`, `mergeNodes`, `generateInventoryView`, `generateIndustry`, `addExistingPartsToView`, `populateFromTemplate`, `insertSmartStream`, `duplicateSection`, `smartCheckView`, `importDDL`/`exportDDL` (Data Modeling, wiring `ddl.js`'s pure parse/generate logic into the Store), plus the bulk-generation lookup cache (`createBulkLookupCache`) |
 | `js/layout.js` | Force-directed Remap pattern: `computeAdjacentGridLayout` (per-component BFS placement), `findConnectedComponents` (Union-Find), `packClustersOnGrid` (shelf packer), `computeClusteredGridLayout` (full pipeline) |
 | `js/routing.js` | Obstacle-avoiding connector path computation (`computeRoutedPath`): visibility-graph + Dijkstra for `direct`, axis-aligned variant for `manhattan` |
 | `js/sections.js` | Section-based view geometry: `computeSectionLayout`, `pixelToNearestGrid` (hit-testing), `isTypeAllowedInSection`, `findFreeCellInSection`/`findFreeCellOrGrowSection`, `rescaleSectionPositions`, `duplicateSectionDefinition` |
 | `js/archimate.js` | ArchiMate 3.0 Exchange Format import: element/relationship/view parsing, junction flattening, nested-shape (Composition/Aggregation) detection |
 | `js/sfce.js` | Pure logic (no DOM) for the Load SFCE wizard and industry-tree operations: `flattenJsonRecords` (generic nested-JSON flattener), `buildRowsFromRecords`, `detectSharedFunctions`/`resolveSharedFunctions`, `buildIndustryTree`, `flattenIndustryTree` (for the SFCE Catalog page) |
+| `js/ddl.js` | Pure logic (no DOM) for Data Modeling's DDL import/export: `parseDDL` (a scoped `CREATE TABLE` subset — not a general SQL grammar), `generateDDL` (the reverse), `splitTopLevel` (paren/quote-aware delimiter splitting) |
 | `js/simulation.js` | Per-model tick engine (`stepSimulation`, `startContinuousRun`/`pauseContinuousRun`/`stopContinuousRun`), the `ctx` contract implementation, Message Log (`pushMessageLog`), simulation snapshot save/load |
 | `js/view3d.js` | The 3D View tab: a rotatable/zoomable WebGL scene over `store.doc.parts`/`connectors` (never viewMembers/views). The only module that imports the vendored Three.js/OrbitControls (`js/vendor/`) — reached exclusively via a dynamic `import()` from `canvas.js`'s `renderView3DPage`, so the ~800KB vendored library never loads unless the tab is actually opened. Persists its renderer/scene/camera/controls per tab id across re-renders instead of tearing down and rebuilding the WebGL context on every `app.render()` call the way the 2D canvas page does |
 | `js/main.js` | `App` class: all UI-facing methods (every `prompt*` dialog, tab management, toast/message-log hookup, theme/panel-width persistence), global event wiring, the File/Advanced dropdown menus, bootstrap |
 | `js/version.js` | `APP_VERSION` plus a per-release changelog as code comments — the authoritative history of *why* things are the way they are; consult before assuming something is unintentional |
 
 Dependency direction is roughly `main.js → commands.js → {canvas.js, sections.js,
-layout.js, routing.js, sfce.js} → {state.js, rules.js}` with `render.js` consumed by
-both `main.js` and `canvas.js` for panel rendering. No module imports `main.js` — the
-`App` class is the top of the graph.
+layout.js, routing.js, sfce.js, ddl.js} → {state.js, rules.js}` with `render.js`
+consumed by both `main.js` and `canvas.js` for panel rendering. No module imports
+`main.js` — the `App` class is the top of the graph.
 
 ## 4. Data model
 
@@ -402,6 +403,143 @@ gets cleared).
 into flat rows — one per Function/Capability/Entity combination, id and description at
 every level, blank Section column for trees that don't have one — fed directly into
 the generic table-tab mechanism (§5.2). Read-only; no new rendering code.
+
+## 7a. The Data Modeling subsystem (crow's-foot ERD)
+
+Entity-relationship modeling (typed attributes, primary/foreign keys, crow's-foot
+notation, DDL import/export) layered on top of the existing `DataDataEntity` element
+type rather than replacing or extending it — a `DataDataEntity` used in a Stream/
+Capability Map stays exactly as it was; ERD detail lives on a *separate* Level Down
+child, so the two concerns (business-level data entity vs. physical table schema)
+never collide. New top-level "Data Modeling" menu (`index.html`/`main.js`, positioned
+after Explore): **Add/Edit Entity Details**, **Import DDL...**, **Export DDL**.
+
+**`DataEntityDetails`** (`public/custom.json`'s `settings.elements`, "Data" group) is
+the new element type carrying ERD detail — `Part.attributes`, an array of `{id, name,
+dataType, nullable, isPrimaryKey}`. Reached via Level Down from an existing
+`DataDataEntity` (`App.promptAddEditEntityDetails`, the menu-triggered twin of
+double-clicking a node — see the guard below) or created directly by DDL import
+(freestanding, no parent `DataDataEntity` at all — a bulk schema import isn't
+decomposing anything that already existed).
+
+**Level Down Part-level guard** (`js/main.js`'s `openOrCreateLinkedView`,
+`js/commands.js`'s new `findCompositionChildConn`/`findCompositionChildView`): a real,
+general gap found while designing this feature, not something new to it.
+`vm.linkedViewName` (the existing double-click "already decomposed, just reopen it"
+check) lives on the *ViewMember*, not the Part — the same Part shown as two different
+ViewMembers (e.g. the same `DataDataEntity` appearing on two different Stream views,
+completely ordinary) had two independent `linkedViewName`s, so decomposing it from one
+view and then double-clicking (or using Add/Edit Entity Details on) the OTHER instance
+created a second, orphaned decomposition instead of reusing the first. Fixed by
+checking, before falling through to `levelDownSingle`, whether the Part already has a
+Composition child *anywhere* in the doc (`findCompositionChildConn`, the mirror of the
+pre-existing `findCompositionParentConn`) and linking to its existing view instead.
+
+**`attributes`' `'a'` showFields widget** (`render.js`'s `renderShowFieldsPanel`,
+`renderAttributeListField`): the schema-driven property panel's field-type vocabulary
+(t/m/n/y/c/s/b/h) gained a new letter, `'a'`, rendering an inline editable table
+(add/edit/delete rows) rather than a single input — the first field type that isn't a
+scalar value. `isForeignKey` is deliberately **not** a stored field on the attribute —
+it's computed live (`some 'd' connector's fromAttribute === this attribute's id`) and
+shown as a read-only badge, so it can never drift out of sync with the connectors that
+are the actual source of truth for what references what (the same principle
+Composition/`mirrorOf` already follow elsewhere in this codebase, applied to a new
+kind of reference).
+
+**Connector type `'d'`** (crow's-foot relationships between two `DataEntityDetails`):
+the third `connectorType` value alongside `'c'`/`'s'`. Unlike adding a new *element*
+type (pure `custom.json` data — every read site already resolves `settings.elements`
+dynamically), `connectorType` values are load-bearing string literals scattered across
+several files, so `'d'` needed real code changes at each: `main.js`'s
+`CONNECTOR_TYPE_ITEMS` (toolbar filter) and Insert Smart Stream's connector-type
+`<select>`; `canvas.js`'s `chkShowDataType` visibility toggle (view-level, its own
+`showFields` entry, sibling to `chkShowConnectorType`/`chkShowStreamType`) and its
+crow's-foot marker rendering (below). Routing style is NOT given its own
+`routingStyleData` field — `'d'` connectors simply fall into the existing
+`routingStyle` (non-stream) bucket via `drawEdge`'s existing ternary, since that was
+already functionally correct and a dedicated field would be unused scope creep.
+
+A `'d'` connector stores four fields beyond the usual `from`/`to`: `fromAttribute`/
+`toAttribute` (attribute *ids*, not names — stable across a column rename) and
+`fromCardinality`/`toCardinality` (one of `'one'|'many'|'zeroOrOne'|'oneOrMany'`,
+explicit per the user's own call — auto-derivation from PK/FK/nullable "may need to
+revisit at a later step"). The property panel's From/To Attribute selects are the
+first "options depend on ANOTHER field's current value" case `render.js`'s
+`selectOptionsFor` has needed — `ctx.fromPartId`/`ctx.toPartId` (added alongside the
+existing `ctx.fromType`/`ctx.toType`) let it look up whichever table is on that
+specific end and list only its own attributes.
+
+**Crow's-foot rendering** (`canvas.js`'s `drawEdge`, `CARDINALITY_LINE_ENDS`): reuses
+the existing `lineEnds`/marker-def machinery (`buildMarkerDefs`, driven generically by
+`settings.lineEnds`) rather than inventing a parallel rendering path — four new
+`lineEnds` entries (`crowOne`/`crowMany`/`crowZeroOrOne`/`crowOneOrMany`) are plain SVG
+path data, exactly like every existing arrow/diamond marker. `'d'` connectors look up
+their marker by `fromCardinality`/`toCardinality` instead of the normal
+relationship-driven `lineEnds` lookup, falling back to the relationship-driven one when
+no cardinality is set yet (a fresh, unconfigured connector). A real bug found and fixed
+during development: `crowZeroOrOne`'s circle was originally centered at a negative Y
+that fell outside the shared marker `viewBox` (`buildMarkerDefs`' hardcoded
+`"-12 -2 24 24"`, Y range -2..22) — silently clipping almost the entire circle down to
+an unrecognizable sliver, invisible to any check of the marker's DOM attributes (fill/
+stroke/path were all "correct"; only the actual rendered geometry was wrong). Confirmed
+visually via a zoomed screenshot; the permanent regression test parses the shipped
+path data directly and asserts its Y-bounds fit the viewBox, reproducing the exact bug.
+
+**Creating `'d'` connectors and attributes actually being visible** — three real gaps
+found and fixed immediately after the feature above first shipped, reported directly:
+*"attributes on dataentitydetail are not appearing visually on node. unable to enable
+FK. unable to create crows foot connector with another dataentitydetail, or at
+datadataentity level."* All three traced back to the same root cause: the pieces above
+built the *data model, rendering, and DDL import* for `'d'` connectors, but never the
+*manual, canvas-driven* path a person actually uses day to day.
+- **Attributes weren't drawn on the node itself** — `buildNodeEl` (`canvas.js`) never
+  read `Part.attributes` at all, only the property panel did. Fixed by rendering each
+  attribute as `name : dataType` (🔑 for PK, `(FK)` via the same live
+  `isAttributeForeignKey` lookup the property panel uses — factored out of
+  `render.js`'s `renderAttributeListField` into a shared export so canvas and panel
+  can never disagree) inside the node, gated by a new `chkShowAttributes` view toggle
+  (sibling to `chkShowDescription`/`chkShowKeys`). Node height/width is uniform per
+  *view*, not per node (`getNodeSize`) — rather than building a whole new per-node
+  sizing mechanism, this relies on `redrawNodeSizes`' existing content-measuring pass
+  (which already calls `buildNodeEl` itself to measure) to naturally grow the view's
+  shared node size to fit whatever attribute lists are now being rendered.
+- **Drawing a connector by dragging always created `'c'`** — `main.js`'s
+  `beginConnect`/`finishConnect` (the drag-a-node's-`.fnode-handle`-to-another-node
+  flow) hardcoded `connectorType: 'c'` unconditionally; there was no toolbar toggle,
+  modifier key, or dialog offering `'d'` anywhere in that path, so a `'d'` connector
+  could only ever come from DDL import. Fixed by inferring `connectorType: 'd'`
+  automatically when *both* drag endpoints are `DataEntityDetails` — the same
+  "infer by type context, no picker needed for the common case" pattern the stream
+  companion-connector logic already uses for `'s'`/`'c'` — while every other type
+  pairing (including `DataDataEntity → DataDataEntity`, the *"or at datadataentity
+  level"* half of the report) still gets a plain `'c'` connector as before.
+- **`connectorType` had no edit surface anywhere** — its own `showFields` entry was
+  `access:'r'` (readonly text), and neither the edge popover (`showEdgePopover`,
+  relationship-only) nor any context menu exposed a way to change it, so even an
+  *existing* connector's type could never be corrected manually — the actual root
+  cause of *"unable to enable FK"*, since FK is derived from a `'d'` connector's
+  `fromAttribute` (above) and there was no way to ever get one to exist except the
+  one now-inferred drag case. Fixed generally, not just for the inferred case:
+  `connectorType` is now a genuine `'s'` (select) field with real `c`/`s`/`d`
+  options, editable like `relationship` already was — the broader, reusable fix
+  (any connector's type can now be changed after the fact, not just ones between two
+  `DataEntityDetails` tables) rather than only patching the one auto-inferred path.
+
+**DDL import/export** (`js/ddl.js`, a new pure-logic module alongside `sfce.js`/
+`archimate.js` — no DOM dependency, testable under plain `node`): a deliberately
+*scoped* `CREATE TABLE` subset (MySQL/Postgres-flavored: column definitions, inline or
+table-level `PRIMARY KEY`, table-level `FOREIGN KEY ... REFERENCES`), not a general SQL
+grammar — no npm packages are allowed in this project, so the parser is hand-written
+string scanning (`splitTopLevel` splits on a delimiter only at paren-depth zero and
+outside quotes, so `DECIMAL(10,2)` and `REFERENCES t(c)` don't fracture a column list).
+Anything outside the subset throws with a specific message naming the exact
+table/entry that failed (not a silent drop or a generic failure) — `Import DDL...`
+(`commands.js`'s `importDDL`, wired to the `import-ddl-input` file picker exactly like
+ArchiMate import) creates all-or-nothing: if `parseDDL` throws, nothing is created.
+`generateDDL` is the reverse, scoped to whichever `DataEntityDetails` parts + `'d'`
+connectors are actually placed on the *current view* (matching Insert Smart Stream's
+own per-view scoping, not whole-model) — shown via the existing `promptTextEdit`
+readonly viewer (same one Code Summary uses), not a bespoke dialog.
 
 ## 8. Simulation engine
 

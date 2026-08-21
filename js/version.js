@@ -2732,4 +2732,135 @@
 // length-only version (part 1+3 without part 2) -- both fail with an informative
 // message; the final fix passes. DESIGN_DOCUMENT.md SS6.1a and tests/README.md
 // updated. Full suite 99/99.
-export const APP_VERSION = '0.855';
+//
+// 0.856: New "Data Modeling" feature (crow's-foot ERD): entity attributes, primary/
+// foreign keys, crow's-foot relationship notation, and DDL import/export, layered on
+// top of the existing DataDataEntity element rather than changing what it already
+// means in Streams/Capability Maps. Reported directly: "I'd like to add data
+// modeling capabilities that support crows foot notation, entity attributes,
+// foreign keys, primary keys, data types etc. One new menu item after explore
+// called 'Data Modeling'. To include import and export of standard formats. This
+// will be a new connector type 'd'." -- design worked out collaboratively (a
+// DataDataEntity stays unchanged; ERD detail lives on a Level Down child of a new
+// element type; "just ddl" for import/export; explicit cardinality "may need to
+// revisit at a later step"; isForeignKey derived from connectors, not stored).
+// New new element type: DataEntityDetails (public/custom.json, "Data" group),
+// carrying the new Part.attributes field (array of {id, name, dataType, nullable,
+// isPrimaryKey}). New connectorType 'd' wired through every branch point that
+// mattered (unlike a new element type, connectorType values are load-bearing string
+// literals scattered across several files, not schema-only): main.js's
+// CONNECTOR_TYPE_ITEMS toolbar filter and Insert Smart Stream's connector-type
+// select, canvas.js's new chkShowDataType view-level visibility toggle (its own
+// showFields entry, sibling to chkShowConnectorType/chkShowStreamType) and its
+// crow's-foot marker rendering. A 'd' connector stores fromAttribute/toAttribute
+// (attribute IDs, stable across a rename) and fromCardinality/toCardinality
+// (explicit, one of one/many/zeroOrOne/oneOrMany).
+// A real, general Level Down gap found and fixed while designing this: vm.
+// linkedViewName (the existing double-click "already decomposed" guard) lives on
+// the ViewMember, not the Part -- the SAME Part shown as two different ViewMembers
+// (ordinary: e.g. one DataDataEntity on two different Stream views) got TWO
+// independent, orphaned decompositions instead of the second reusing the first's.
+// Fixed via new findCompositionChildConn/findCompositionChildView (commands.js, the
+// mirror of the existing findCompositionParentConn) -- checked before falling
+// through to levelDownSingle, in both the double-click path (openOrCreateLinkedView)
+// and the new menu-triggered "Add/Edit Entity Details" (promptAddEditEntityDetails).
+// New 'a' showFields widget (render.js's renderShowFieldsPanel/
+// renderAttributeListField) -- the first field type that isn't a scalar value: an
+// inline editable table (add/edit/delete rows) for Part.attributes. isForeignKey is
+// deliberately NOT stored on the attribute -- computed live (some 'd' connector's
+// fromAttribute references this attribute's id) and shown as a read-only badge, so
+// it can never drift out of sync with the connectors that are the real source of
+// truth (same principle Composition/mirrorOf already follow elsewhere in this
+// codebase). New "options depend on another field's value" case in render.js's
+// selectOptionsFor -- the 'd' connector's From/To Attribute selects list only
+// whichever table is on THAT end's own attributes (ctx.fromPartId/toPartId, new
+// alongside the existing ctx.fromType/toType).
+// Crow's-foot rendering (canvas.js's drawEdge, new CARDINALITY_LINE_ENDS) reuses the
+// existing lineEnds/marker-def machinery (four new lineEnds entries -- crowOne/
+// crowMany/crowZeroOrOne/crowOneOrMany -- are plain SVG path data, same as every
+// existing arrow/diamond marker) rather than inventing a parallel rendering path,
+// falling back to the normal relationship-driven marker when no cardinality is set
+// yet. A real bug found and fixed during development: crowZeroOrOne's circle was
+// originally centered at a negative Y that fell outside the shared marker viewBox
+// (buildMarkerDefs' hardcoded "-12 -2 24 24", Y range -2..22) -- silently clipping
+// almost the entire circle down to an unrecognizable sliver, invisible to any check
+// of the marker's DOM attributes (fill/stroke/path were all "correct"; only the
+// actual rendered geometry was wrong) -- confirmed visually via a zoomed screenshot,
+// then fixed by repositioning the circle into positive-Y space.
+// New "Data Modeling" top-level menu (index.html/main.js), positioned after Explore:
+// Add/Edit Entity Details (the menu-triggered equivalent of double-clicking a
+// DataDataEntity node, requiring exactly one selected), Import DDL... (file picker,
+// same wiring pattern as ArchiMate import), Export DDL (shown via the existing
+// promptTextEdit readonly viewer, same one Code Summary uses). New js/ddl.js module
+// (pure logic, no DOM, alongside sfce.js/archimate.js): parseDDL/generateDDL, a
+// deliberately SCOPED CREATE TABLE subset (column definitions, inline/table-level
+// PRIMARY KEY, table-level FOREIGN KEY ... REFERENCES) -- not a general SQL grammar,
+// hand-written string scanning since no npm packages are allowed in this project.
+// Anything outside the subset throws with a specific message naming the exact
+// table/entry that failed, not a silent drop; Import DDL creates all-or-nothing (if
+// parseDDL throws, nothing is created). Export DDL is scoped to the CURRENT view's
+// own DataEntityDetails parts + 'd' connectors only (matching Insert Smart Stream's
+// own per-view scoping), not the whole model.
+// New permanent regression tests, each proven against its own reverted regression:
+// check_level_down_reuses_existing_decomposition_across_viewmembers (the Part-level
+// guard, isolated from the older label-matching fallback by renaming the first
+// decomposition's view); check_data_modeling_attributes_and_data_connector
+// (attribute add/edit/delete via the real 'a' widget, derived-not-stored
+// isForeignKey, From/To Attribute dropdown scoping, Save/Load JSON round-trip);
+// check_data_modeling_crowfoot_rendering (four distinct markers, graceful fallback
+// when unconfigured, the exact circle-clipping bug reproduced by parsing the
+// shipped path data, the chkShowDataType toggle); check_data_modeling_menu_and_ddl_
+// import_export (the real menu + file-input UI end to end, specific error toasts
+// for malformed DDL/empty exports/missing selections, decomposition reuse proven via
+// the menu entry point specifically). check_view3d_connector_type_toolbar_filter
+// updated for the new 'd' toolbar item (its exact-array assertion was stale, not a
+// real regression). DESIGN_DOCUMENT.md SS7a, tests/README.md, and
+// public/instructions.html updated. Full suite 103/103.
+//
+// 0.857: Fixed three real gaps in Data Modeling, reported directly right after it
+// shipped: "attributes on dataentitydetail are not appearing visually on node.
+// unable to enable FK. unable to create crows foot connector with another
+// dataentitydetail, or at datadataentity level." All three traced back to the same
+// root cause: 0.856 built the data model, rendering, and DDL import for 'd'
+// connectors, but never the manual, canvas-driven path a person actually uses day
+// to day. (1) buildNodeEl (canvas.js) never rendered Part.attributes at all -- only
+// the property panel did. Fixed: each attribute now renders as "name : dataType"
+// (with a PK key emoji and a live FK marker, using a shared isAttributeForeignKey
+// helper factored out of render.js's renderAttributeListField so canvas and panel
+// can never disagree) directly on DataEntityDetails nodes, gated by a new
+// chkShowAttributes view toggle (sibling to chkShowDescription/chkShowKeys). Node
+// size is uniform per VIEW not per node, so this relies on redrawNodeSizes' own
+// existing content-measuring pass (which already calls buildNodeEl to measure) to
+// grow the view's shared node size to fit attribute lists, rather than building a
+// new per-node sizing mechanism. (2) Drag-to-connect (main.js's beginConnect/
+// finishConnect) hardcoded connectorType:'c' unconditionally -- there was no
+// toolbar toggle, modifier key, or dialog anywhere in that path offering 'd', so a
+// crow's-foot connector could only ever come from DDL import, never from drawing
+// one by hand. Fixed by inferring connectorType:'d' automatically when BOTH drag
+// endpoints are DataEntityDetails (the same "infer by type context, no picker
+// needed" pattern the stream companion-connector logic already uses for 's'/'c'),
+// while every other type pairing -- including DataDataEntity -> DataDataEntity,
+// the "or at datadataentity level" half of the report -- still gets a plain 'c'
+// connector as before. (3) connectorType had NO edit surface anywhere: its own
+// showFields entry was access:'r' (readonly text), and neither the edge popover
+// (relationship-only) nor any context menu exposed a way to change it -- so even an
+// EXISTING connector's type could never be corrected manually. This was the actual
+// root cause of "unable to enable FK": FK is derived from a 'd' connector's
+// fromAttribute, and there was no way to ever get a 'd' connector to exist except
+// the one now-auto-inferred drag case. Fixed generally, not just for the inferred
+// case: connectorType is now a genuine 's' (select) field with real c/s/d options,
+// editable exactly like relationship already was -- so any connector's type,
+// however it was created, can always be changed afterward as a manual escape
+// hatch, not just the one auto-inferred pairing.
+// New check_data_modeling_node_attributes_and_manual_connector_creation
+// (tests/run_all.py) covers all three together, proven against three separate
+// reverted regressions (each confirmed to fail with an informative message, then
+// restored): the node's own rendered innerText includes its attributes with live
+// PK/FK markers; dragging DataEntityDetails->DataEntityDetails infers 'd' while
+// DataDataEntity->DataDataEntity stays 'c'; the connectorType select is genuinely
+// enabled with the right options and a value change actually persists.
+// DESIGN_DOCUMENT.md SS7a and tests/README.md updated;
+// public/instructions.html's Data Modeling section rewritten to describe the new
+// drag-to-create flow and the Attributes view toggle instead of the old "set
+// Connector Type manually" instructions. Full suite 104/104.
+export const APP_VERSION = '0.857';

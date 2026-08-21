@@ -1,10 +1,11 @@
 // commands.js — Duplicate Stream, Split Node, Level Up, Level Down, Generate (createStream)
-import { ciEq } from './state.js';
+import { ciEq, newId } from './state.js';
 import { elementByType, findRelationshipPair } from './rules.js';
 import { isSectionViewType, createSectionPlacer, computeSectionLayout, isTypeAllowedInSection, findFreeCellInSection, findFreeCellOrGrowSection, duplicateSectionDefinition, BASE_X, BASE_Y, SECTION_GAP, NODE_INSET_X, NODE_INSET_Y } from './sections.js';
 import { redrawNodeSizes, redrawAndResolveLayout, getNodeSize } from './canvas.js';
 import { computeClusteredGridLayout } from './layout.js';
 import { pushMessageLog } from './simulation.js';
+import { parseDDL, generateDDL } from './ddl.js';
 
 function elementGroupFill(store, type) {
   const el = elementByType(store, type);
@@ -1329,6 +1330,27 @@ function remapSortValue(store, template, part, key, connectionOrderMap, viewRele
  * anchor. Shared by smartCheckView/smartCheckNode's composition-awareness below. */
 function findCompositionParentConn(store, partId) {
   return store.doc.connectors.find((c) => ciEq(c.relationship, 'Composition') && ciEq(c.to, partId));
+}
+
+/** Composition connector where `partId` is the "from" (composing/parent) side, if
+ * any -- the reverse of findCompositionParentConn above. Guards against creating a
+ * SECOND decomposition of the same Part: `vm.linkedViewName` (openOrCreateLinkedView,
+ * main.js) lives on the ViewMember, not the Part, so the same Part appearing as a
+ * DIFFERENT ViewMember on another view has its own, independent linkedViewName --
+ * double-clicking that other instance would otherwise create an entirely separate
+ * child Part/view/Composition link for the SAME parent Part. */
+function findCompositionChildConn(store, partId) {
+  return store.doc.connectors.find((c) => ciEq(c.relationship, 'Composition') && ciEq(c.from, partId));
+}
+
+/** The View a Part's EXISTING Composition child (if any) is actually placed on --
+ * resolves findCompositionChildConn's target part id to the one view it lives in, so
+ * callers can reuse/switch to it instead of running Level Down again. */
+function findCompositionChildView(store, partId) {
+  const conn = findCompositionChildConn(store, partId);
+  if (!conn) return null;
+  const childVm = store.doc.viewMembers.find((v) => v.objectType === 'part' && ciEq(v.objectId, conn.to));
+  return childVm ? store.findView(childVm.view) : null;
 }
 
 /**
@@ -3614,4 +3636,92 @@ function duplicateSection(app, tab, sectionInstanceId) {
   app.toast(`Duplicated section "${originalName}" as "${newSection.name}" (${oldVmToNewVm.size} node${oldVmToNewVm.size === 1 ? '' : 's'}, ${connDupCount} connector${connDupCount === 1 ? '' : 's'}).`);
 }
 
-export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart };
+// ===================== DATA MODELING: DDL IMPORT/EXPORT =====================
+/** Data Modeling > Import DDL...: parses DDL text (ddl.js's parseDDL — a deliberately
+ * scoped CREATE TABLE subset, not a general SQL grammar) and creates one
+ * 'DataEntityDetails' Part per table (attributes built directly from the parsed
+ * columns, each getting a real id so 'd' connectors can reference them), placed in a
+ * simple grid on a new freeform view, with a 'd' connector for every FOREIGN KEY
+ * (fromCardinality 'many'/toCardinality 'one' by default — the ordinary FK-references-
+ * PK shape; a person can change either end afterward via the property panel).
+ * Deliberately does NOT create a parent DataDataEntity/Composition link for each
+ * table — that's what "Add/Edit Entity Details" (below) is for, decomposing an
+ * EXISTING business-level Data Entity that was already part of a Stream/Capability Map;
+ * a bulk DDL import is introducing brand-new schema structure with no such parent to
+ * attach to, so it stays a plain, freestanding set of DataEntityDetails tables. Throws
+ * (propagated to the caller, e.g. the menu's own try/catch) if parseDDL itself throws —
+ * nothing partial gets created. */
+function importDDL(app, ddlText) {
+  const { store } = app;
+  const { tables, foreignKeys } = parseDDL(ddlText);
+  const model = store.defaultModel;
+
+  let viewName = 'DDL Import', n = 1;
+  while (store.findView(viewName)) { viewName = `DDL Import ${n}`; n += 1; }
+  const view = store.addView(viewName, 'ff');
+  const tab = app.createCanvasTab(view);
+  app.switchToTab(tab.id);
+
+  const { w: nodeW, h: nodeH } = getNodeSize(view);
+  const stepX = nodeW + 80, stepY = nodeH + 60;
+  const perRow = Math.max(1, Math.ceil(Math.sqrt(tables.length)));
+  const lookupCache = createBulkLookupCache(store);
+  const partByTableName = new Map();
+
+  tables.forEach((table, i) => {
+    const part = store.createPart({
+      type: 'DataEntityDetails', label: table.name, model, streams: [],
+      attributes: table.columns.map((c) => ({ id: newId(), name: c.name, dataType: c.dataType, nullable: c.nullable, isPrimaryKey: c.isPrimaryKey })),
+    });
+    cacheRegisterPart(lookupCache, part);
+    partByTableName.set(table.name.toLowerCase(), part);
+    const col = i % perRow, row = Math.floor(i / perRow);
+    const vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: 60 + col * stepX, y: 60 + row * stepY, fillColor: elementGroupFill(store, 'DataEntityDetails') });
+    cacheRegisterVm(lookupCache, vm);
+  });
+
+  let fkCount = 0, fkSkipped = 0;
+  for (const fk of foreignKeys) {
+    const fromPart = partByTableName.get(fk.fromTable.toLowerCase());
+    const toPart = partByTableName.get(fk.toTable.toLowerCase());
+    const fromAttr = fromPart?.attributes.find((a) => ciEq(a.name, fk.fromColumn));
+    const toAttr = toPart?.attributes.find((a) => ciEq(a.name, fk.toColumn));
+    if (!fromPart || !toPart || !fromAttr || !toAttr) { fkSkipped += 1; continue; } // REFERENCES a table/column parseDDL didn't find a definition for -- skipped, not fabricated
+    const conn = store.createConnector({
+      from: fromPart.id, to: toPart.id, model, connectorType: 'd', relationship: 'Association',
+      fromAttribute: fromAttr.id, toAttribute: toAttr.id, fromCardinality: 'many', toCardinality: 'one',
+    });
+    const fromVm = lookupCache.vmsByPartView.get(`${fromPart.id}|${view.id}`);
+    const toVm = lookupCache.vmsByPartView.get(`${toPart.id}|${view.id}`);
+    store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn.id, fromVmId: fromVm.id, toVmId: toVm.id });
+    fkCount += 1;
+  }
+
+  redrawAndResolveLayout(app, { viewId: view.id, selection: new Set() });
+  app.recordAndRender();
+  const skippedSuffix = fkSkipped > 0 ? ` (${fkSkipped} FOREIGN KEY reference${fkSkipped === 1 ? '' : 's'} skipped — table/column not found)` : '';
+  app.toast(`Imported ${tables.length} table${tables.length === 1 ? '' : 's'}, ${fkCount} foreign key${fkCount === 1 ? '' : 's'}${skippedSuffix} onto "${viewName}".`);
+}
+
+/** Data Modeling > Export DDL: the reverse of importDDL, scoped to whatever
+ * 'DataEntityDetails' parts + 'd' connectors are actually PLACED on the given view
+ * (matching Insert Smart Stream's own "acts on one view" scoping) -- not the whole
+ * model, so exporting reflects exactly the diagram a person is looking at. Returns the
+ * generated DDL text directly (the caller decides how to show it — the Data Modeling
+ * menu uses the existing promptTextEdit readonly-viewer, same one Code Summary uses).
+ * Throws if there are no DataEntityDetails parts on the view at all, since generating
+ * an empty DDL file silently isn't useful — matches parseDDL's own "no CREATE TABLE
+ * statements found" complaint, for a consistent error experience on both sides. */
+function exportDDL(app, viewId) {
+  const { store } = app;
+  const vms = store.viewMembersForView(viewId);
+  const partVmIds = new Set(vms.filter((v) => v.objectType === 'part').map((v) => v.objectId));
+  const parts = [...partVmIds].map((id) => store.findPart(id)).filter((p) => p && ciEq(p.type, 'DataEntityDetails'));
+  if (parts.length === 0) throw new Error('This view has no Data Entity Details tables to export.');
+  const partIdSet = new Set(parts.map((p) => p.id));
+  const conns = store.doc.connectors.filter((c) => c.connectorType === 'd' && partIdSet.has(c.from) && partIdSet.has(c.to));
+  return generateDDL(parts, conns);
+}
+
+
+export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL };

@@ -1,5 +1,5 @@
 // render.js — header, toolbox, properties panel rendering (canvas rendering lives in canvas.js)
-import { ciEq } from './state.js';
+import { ciEq, newId } from './state.js';
 import { getAllowedTypesForView, isSectionViewType, rescaleSectionPositions } from './sections.js';
 import { redrawAndResolveLayout } from './canvas.js';
 import { validRelationOptions } from './rules.js';
@@ -524,6 +524,14 @@ function selectOptionsFor(app, entityKey, fieldName, currentValue, ctx) {
   if ((entityKey === 'part' || entityKey === 'viewMember') && fieldName === 'model') {
     return (app.store.doc.models || []).map((m) => `<option value="${escapeHtml(m.modelName)}" ${ciEq(m.modelName, currentValue) ? 'selected' : ''}>${escapeHtml(m.modelName)}</option>`).join('');
   }
+  if (entityKey === 'connector' && fieldName === 'connectorType') {
+    const options = [
+      { value: 'c', label: 'Connector (c)' },
+      { value: 's', label: 'Stream (s)' },
+      { value: 'd', label: 'Data (d)' },
+    ];
+    return options.map((o) => `<option value="${o.value}" ${o.value === currentValue ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+  }
   if (entityKey === 'connector' && fieldName === 'relationship') {
     const currentKey = relationKeyForConnector(app, { relationship: currentValue });
     // limit to relations allowed for this connector's actual (fromType, toType) pair
@@ -537,6 +545,32 @@ function selectOptionsFor(app, entityKey, fieldName, currentValue, ctx) {
     // existing (possibly no-longer-valid) choice doesn't silently vanish from the list
     const list = options.some((r) => r.key === currentKey) || !currentKey ? options : [...options, relations.find((r) => r.key === currentKey)].filter(Boolean);
     return list.map((r) => `<option value="${r.key}" ${r.key === currentKey ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('');
+  }
+  // 'd' (data/ERD) connectors' From/To Attribute: options are whichever attributes
+  // exist on THAT END's own table (a "depends on another field's current value" select
+  // — the from/to Part ids come through via ctx.fromPartId/toPartId, set alongside
+  // fromType/toType wherever a connector's ctx is built). A table with no attributes
+  // (or a non-'d' connector, whose ends aren't DataEntityDetails tables at all) falls
+  // through to the generic single-current-value option below.
+  if (entityKey === 'connector' && (fieldName === 'fromAttribute' || fieldName === 'toAttribute')) {
+    const partId = fieldName === 'fromAttribute' ? ctx?.fromPartId : ctx?.toPartId;
+    const part = partId ? app.store.findPart(partId) : null;
+    const attrs = part?.attributes || [];
+    const blank = `<option value="" ${!currentValue ? 'selected' : ''}>(none)</option>`;
+    if (attrs.length) {
+      return blank + attrs.map((a) => `<option value="${escapeHtml(a.id)}" ${a.id === currentValue ? 'selected' : ''}>${escapeHtml(a.name || '(unnamed)')}</option>`).join('');
+    }
+    return `<option value="" selected>(no attributes on this table)</option>`;
+  }
+  if (entityKey === 'connector' && (fieldName === 'fromCardinality' || fieldName === 'toCardinality')) {
+    const options = [
+      { value: '', label: '(none)' },
+      { value: 'one', label: 'One (1)' },
+      { value: 'many', label: 'Many (N)' },
+      { value: 'zeroOrOne', label: 'Zero or one (0..1)' },
+      { value: 'oneOrMany', label: 'One or many (1..N)' },
+    ];
+    return options.map((o) => `<option value="${o.value}" ${o.value === (currentValue || '') ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
   }
   return `<option value="${escapeHtml(currentValue ?? '')}">${escapeHtml(currentValue ?? '')}</option>`;
 }
@@ -641,7 +675,8 @@ function renderPinnedSection(app, tab, pinGroup, sources, body) {
 /**
  * Renders a properties panel driven entirely by settings.showFields[entityKey].fields.
  * Two independent axes per field: `show` = widget type ('y' checkbox, 'n' numeric,
- * 'c' color, 't' text, 'm' multiline, 's' selector, 'b' button, 'h' hidden), `access` =
+ * 'c' color, 't' text, 'm' multiline, 's' selector, 'b' button, 'h' hidden, 'a'
+ * editable attribute list — see renderAttributeListField below), `access` =
  * 'r' readonly / 'w' editable. `access:'r'` always renders plain readonly text regardless
  * of `show` (a readonly selector has nothing to select). `accessors` maps field name ->
  * { get(), set(value) }; fields listed in showFields with no matching accessor are
@@ -661,6 +696,43 @@ function formatFieldValue(val) {
   if (typeof val === 'boolean') return val ? 'true' : 'false';
   if (val !== null && typeof val === 'object') { try { return JSON.stringify(val); } catch { return String(val); } }
   return String(val ?? '');
+}
+
+/** Is `attrId` (a DataEntityDetails attribute's id) a foreign key? Deliberately NOT a
+ * stored field on the attribute itself — computed live here, true exactly when some
+ * 'd' (data/ERD) connector's fromAttribute references this attribute's id, so it can
+ * never drift out of sync with the actual crow's-foot connectors that are the real
+ * source of truth for what references what (the same "connectors are the source of
+ * truth" principle Composition/mirrorOf already follow elsewhere in this codebase).
+ * Shared by the property panel's attribute table (below) and the canvas node's own
+ * attribute-list rendering (canvas.js's buildNodeEl), so both agree. */
+function isAttributeForeignKey(store, attrId) {
+  return store.doc.connectors.some((c) => c.connectorType === 'd' && c.fromAttribute === attrId);
+}
+
+/** Builds the HTML for an `'a'` (attribute list) field — used by the Data Modeling
+ * feature's `DataEntityDetails` element type (public/custom.json's
+ * showFields.part.fields.attributes), an editable table of {id, name, dataType,
+ * nullable, isPrimaryKey} rows. Shown as a read-only "FK" badge per row (see
+ * isAttributeForeignKey above), not an editable checkbox. */
+function renderAttributeListField(app, id, attributes) {
+  const rows = attributes.map((attr) => `
+    <tr data-attr-id="${escapeHtml(attr.id)}">
+      <td><input type="text" class="attr-name" value="${escapeHtml(attr.name || '')}" placeholder="name" /></td>
+      <td><input type="text" class="attr-datatype" value="${escapeHtml(attr.dataType || '')}" placeholder="type" /></td>
+      <td class="attr-check-cell"><input type="checkbox" class="attr-nullable" ${attr.nullable ? 'checked' : ''} title="Nullable" /></td>
+      <td class="attr-check-cell"><input type="checkbox" class="attr-pk" ${attr.isPrimaryKey ? 'checked' : ''} title="Primary Key" /></td>
+      <td class="attr-check-cell">${isAttributeForeignKey(app.store, attr.id) ? '<span class="attr-fk-badge" title="Referenced by a Data connector">FK</span>' : ''}</td>
+      <td><button type="button" class="attr-delete-btn" data-attr-id="${escapeHtml(attr.id)}" title="Delete attribute">✕</button></td>
+    </tr>`).join('');
+  return `
+    <div class="attr-list-container" id="${id}">
+      <table class="attr-table">
+        <thead><tr><th>Name</th><th>Data Type</th><th>Null</th><th>PK</th><th>FK</th><th></th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="6" class="empty-hint">No attributes yet.</td></tr>'}</tbody>
+      </table>
+      <button type="button" class="attr-add-btn" data-attr-add="1">+ Add Attribute</button>
+    </div>`;
 }
 
 function renderShowFieldsPanel(app, tab, entityKeyOrSpec, accessors, buttonHandlers, container, ctx, options = {}) {
@@ -700,6 +772,8 @@ function renderShowFieldsPanel(app, tab, entityKeyOrSpec, accessors, buttonHandl
       html.push(row(label, `<textarea id="${id}">${escapeHtml(val ?? '')}</textarea>`, fieldName, pinBtn, id));
     } else if (def.show === 's') {
       html.push(row(label, `<select id="${id}">${selectOptionsFor(app, sourceEntityKey, fieldName, val, ctx)}</select>`, fieldName, pinBtn, id));
+    } else if (def.show === 'a') {
+      html.push(`<div class="prop-row attr-list-row">${pinBtn}<label data-field="${fieldName}">${escapeHtml(label)}</label>${renderAttributeListField(app, id, val || [])}</div>`);
     } else { // 't' or unrecognized -> plain text
       html.push(row(label, `<input type="text" id="${id}" value="${escapeHtml(formatFieldValue(val))}" />`, fieldName, pinBtn, id));
     }
@@ -714,8 +788,9 @@ function renderShowFieldsPanel(app, tab, entityKeyOrSpec, accessors, buttonHandl
 
     // Step 33: double-click a field's label to open it in the larger generic text-edit
     // modal — any text-type field, readonly display or writable, but not checkboxes or
-    // buttons (those aren't text).
-    if (def.show !== 'b' && def.show !== 'y') {
+    // buttons (those aren't text), and not an 'a' attribute list (it's a whole table,
+    // not a single text value — it gets its own add/edit/delete wiring below instead).
+    if (def.show !== 'b' && def.show !== 'y' && def.show !== 'a') {
       const labelEl = container.querySelector(`label[data-field="${fieldName}"]`);
       if (labelEl) {
         labelEl.classList.add('dbl-edit-label');
@@ -738,6 +813,34 @@ function renderShowFieldsPanel(app, tab, entityKeyOrSpec, accessors, buttonHandl
           app.render();
         });
       }
+    }
+
+    if (def.show === 'a') {
+      if (def.access !== 'r') {
+        const listEl = document.getElementById(`sf-${idNs}-${fieldName}`);
+        if (listEl) {
+          const commit = (newAttrs) => { acc.set(newAttrs); app.recordAndRender(); };
+          listEl.querySelector('[data-attr-add]')?.addEventListener('click', () => {
+            commit([...(acc.get() || []), { id: newId(), name: '', dataType: '', nullable: false, isPrimaryKey: false }]);
+          });
+          listEl.querySelectorAll('.attr-delete-btn').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              commit((acc.get() || []).filter((a) => a.id !== btn.dataset.attrId));
+            });
+          });
+          listEl.querySelectorAll('tr[data-attr-id]').forEach((tr) => {
+            const attrId = tr.dataset.attrId;
+            const updateField = (field, value) => {
+              commit((acc.get() || []).map((a) => (a.id === attrId ? { ...a, [field]: value } : a)));
+            };
+            tr.querySelector('.attr-name')?.addEventListener('change', (e) => updateField('name', e.target.value));
+            tr.querySelector('.attr-datatype')?.addEventListener('change', (e) => updateField('dataType', e.target.value));
+            tr.querySelector('.attr-nullable')?.addEventListener('change', (e) => updateField('nullable', e.target.checked));
+            tr.querySelector('.attr-pk')?.addEventListener('change', (e) => updateField('isPrimaryKey', e.target.checked));
+          });
+        }
+      }
+      continue;
     }
 
     if (def.access === 'r') continue; // nothing else to wire for readonly fields
@@ -822,6 +925,8 @@ function renderViewProperties(app, tab) {
     spacingScale: { get: () => view.spacingScale ?? 1, set: (v) => { const oldScale = view.spacingScale || 1; app.store.applySpacingScale(view.id, Number(v) || 1); if (isSectionViewType(view.viewType)) rescaleSectionPositions(app.store, view, { spacingScale: oldScale }); } },
     chkShowConnectorType: { get: () => view.chkShowConnectorType, set: (v) => { view.chkShowConnectorType = v; } },
     chkShowStreamType: { get: () => view.chkShowStreamType, set: (v) => { view.chkShowStreamType = v; } },
+    chkShowDataType: { get: () => view.chkShowDataType, set: (v) => { view.chkShowDataType = v; } },
+    chkShowAttributes: { get: () => view.chkShowAttributes, set: (v) => { view.chkShowAttributes = v; } },
     chkShowElementTypes: { get: () => view.chkShowElementTypes, set: (v) => { view.chkShowElementTypes = v; redrawAndResolveLayout(app, tab); } },
     chkShowKeys: { get: () => view.chkShowKeys, set: (v) => { view.chkShowKeys = v; redrawAndResolveLayout(app, tab); } },
     chkShowDescription: { get: () => view.chkShowDescription, set: (v) => { view.chkShowDescription = v; redrawAndResolveLayout(app, tab); } },
@@ -980,6 +1085,7 @@ function renderPartOnlyProperties(app, part) {
     other: { get: () => part.other, set: () => {} },
     xIds: { get: () => part.xIds, set: (v) => { part.xIds = v; app.store.touchPart(part); } },
     streams: { get: () => part.streams || [], set: (v) => { part.streams = v.split(',').map((s) => s.trim()).filter(Boolean); app.store.touchPart(part); } },
+    attributes: { get: () => part.attributes || [], set: (v) => { part.attributes = v; app.store.touchPart(part); } },
     scriptEnabled: { get: () => part.scriptEnabled, set: (v) => { part.scriptEnabled = v; app.store.touchPart(part); } },
     script: { get: () => part.script, set: (v) => { part.script = v; app.store.touchPart(part); } },
     createdAt: { get: () => part.createdAt, set: () => {} },
@@ -1001,10 +1107,14 @@ function renderConnectorOnlyProperties(app, conn) {
     from: { get: () => fromPart ? `${conn.from} — ${fromPart.label} (${fromPart.type})` : conn.from, set: () => {} },
     to: { get: () => toPart ? `${conn.to} — ${toPart.label} (${toPart.type})` : conn.to, set: () => {} },
     relationship: { get: () => conn.relationship, set: (relationKey) => { app.applyRelationToConnector(conn, relationKey); app.store.touchConnector(conn); app.promptSyncInventoryConnector(conn); } },
+    fromAttribute: { get: () => conn.fromAttribute || '', set: (v) => { conn.fromAttribute = v; app.store.touchConnector(conn); } },
+    toAttribute: { get: () => conn.toAttribute || '', set: (v) => { conn.toAttribute = v; app.store.touchConnector(conn); } },
+    fromCardinality: { get: () => conn.fromCardinality || '', set: (v) => { conn.fromCardinality = v; app.store.touchConnector(conn); } },
+    toCardinality: { get: () => conn.toCardinality || '', set: (v) => { conn.toCardinality = v; app.store.touchConnector(conn); } },
     model: { get: () => conn.model, set: () => {} },
     note: { get: () => conn.note, set: (v) => { conn.note = v; app.store.touchConnector(conn); } },
     streams: { get: () => conn.streams || [], set: (v) => { conn.streams = v.split(',').map((s) => s.trim()).filter(Boolean); app.store.touchConnector(conn); app.promptSyncInventoryConnector(conn); } },
-    connectorType: { get: () => conn.connectorType, set: () => {} },
+    connectorType: { get: () => conn.connectorType, set: (v) => { conn.connectorType = v; app.store.touchConnector(conn); } },
     fromLineEndSettings: { get: () => conn.fromLineEndSettings, set: () => {} },
     toLineEndSettings: { get: () => conn.toLineEndSettings, set: () => {} },
     stroke: { get: () => conn.stroke, set: () => {} },
@@ -1016,7 +1126,7 @@ function renderConnectorOnlyProperties(app, conn) {
     createdAt: { get: () => conn.createdAt, set: () => {} },
     updatedAt: { get: () => conn.updatedAt, set: () => {} },
   };
-  const relCtx = { fromType: fromPart?.type, toType: toPart?.type };
+  const relCtx = { fromType: fromPart?.type, toType: toPart?.type, fromPartId: conn.from, toPartId: conn.to };
   renderPinnedSection(app, null, 'table', [{ entityKey: 'connector', accessors, ctx: relCtx }], body);
   const container = document.createElement('div');
   body.appendChild(container);
@@ -1034,6 +1144,8 @@ function renderViewOnlyProperties(app, view) {
     spacingScale: { get: () => view.spacingScale ?? 1, set: (v) => { const oldScale = view.spacingScale || 1; app.store.applySpacingScale(view.id, Number(v) || 1); if (isSectionViewType(view.viewType)) rescaleSectionPositions(app.store, view, { spacingScale: oldScale }); } },
     chkShowConnectorType: { get: () => view.chkShowConnectorType, set: (v) => { view.chkShowConnectorType = v; } },
     chkShowStreamType: { get: () => view.chkShowStreamType, set: (v) => { view.chkShowStreamType = v; } },
+    chkShowDataType: { get: () => view.chkShowDataType, set: (v) => { view.chkShowDataType = v; } },
+    chkShowAttributes: { get: () => view.chkShowAttributes, set: (v) => { view.chkShowAttributes = v; } },
     chkShowElementTypes: { get: () => view.chkShowElementTypes, set: (v) => { view.chkShowElementTypes = v; } },
     chkShowKeys: { get: () => view.chkShowKeys, set: (v) => { view.chkShowKeys = v; } },
     chkShowDescription: { get: () => view.chkShowDescription, set: (v) => { view.chkShowDescription = v; } },
@@ -1132,6 +1244,7 @@ function renderPartProperties(app, vm) {
     other: { get: () => part.other, set: () => {} },
     xIds: { get: () => part.xIds, set: (v) => { part.xIds = v; app.store.touchPart(part); } },
     description: { get: () => part.description, set: (v) => { part.description = v; app.store.touchPart(part); } },
+    attributes: { get: () => part.attributes || [], set: (v) => { part.attributes = v; app.store.touchPart(part); } },
     script: { get: () => part.script, set: (v) => { part.script = v; app.store.touchPart(part); } },
     scriptEnabled: { get: () => part.scriptEnabled, set: (v) => { part.scriptEnabled = v; app.store.touchPart(part); } },
     createdAt: { get: () => part.createdAt, set: () => {} },
@@ -1192,8 +1305,12 @@ function renderConnectorProperties(app, vm) {
     model: { get: () => conn.model, set: () => {} },
     streams: { get: () => conn.streams || [], set: (v) => { conn.streams = v.split(',').map((s) => s.trim()).filter(Boolean); app.store.touchConnector(conn); app.promptSyncInventoryConnector(conn); } },
     note: { get: () => conn.note, set: (v) => { conn.note = v; app.store.touchConnector(conn); } },
-    connectorType: { get: () => conn.connectorType, set: () => {} },
+    connectorType: { get: () => conn.connectorType, set: (v) => { conn.connectorType = v; app.store.touchConnector(conn); } },
     relationship: { get: () => conn.relationship, set: (relationKey) => { app.applyRelationToConnector(conn, relationKey); app.store.touchConnector(conn); app.promptSyncInventoryConnector(conn); } },
+    fromAttribute: { get: () => conn.fromAttribute || '', set: (v) => { conn.fromAttribute = v; app.store.touchConnector(conn); } },
+    toAttribute: { get: () => conn.toAttribute || '', set: (v) => { conn.toAttribute = v; app.store.touchConnector(conn); } },
+    fromCardinality: { get: () => conn.fromCardinality || '', set: (v) => { conn.fromCardinality = v; app.store.touchConnector(conn); } },
+    toCardinality: { get: () => conn.toCardinality || '', set: (v) => { conn.toCardinality = v; app.store.touchConnector(conn); } },
     fromLineEndSettings: { get: () => conn.fromLineEndSettings, set: () => {} },
     toLineEndSettings: { get: () => conn.toLineEndSettings, set: () => {} },
     stroke: { get: () => conn.stroke, set: () => {} },
@@ -1207,7 +1324,7 @@ function renderConnectorProperties(app, vm) {
   };
 
   const tab = app.store.activeTab();
-  const relCtx = { fromType: fromPart?.type, toType: toPart?.type };
+  const relCtx = { fromType: fromPart?.type, toType: toPart?.type, fromPartId: conn.from, toPartId: conn.to };
 
   renderPinnedSection(app, tab, 'connector', [
     { entityKey: 'viewMember', accessors: vmAccessors },
@@ -1453,4 +1570,4 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, kindFromType, iconSvgFor, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields };
+export { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, kindFromType, iconSvgFor, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields, isAttributeForeignKey };

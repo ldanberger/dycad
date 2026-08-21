@@ -68,6 +68,11 @@
           "access": "w",
           "label": "Description"
         },
+        "attributes": {
+          "show": "a",
+          "access": "w",
+          "label": "Attributes"
+        },
         "script": {
           "show": "m",
           "access": "w",
@@ -212,14 +217,34 @@
           "label": "Note"
         },
         "connectorType": {
-          "show": "t",
-          "access": "r",
+          "show": "s",
+          "access": "w",
           "label": "Connector Type"
         },
         "relationship": {
           "show": "s",
           "access": "w",
           "label": "Relationship"
+        },
+        "fromAttribute": {
+          "show": "s",
+          "access": "w",
+          "label": "From Attribute (Data connectors only)"
+        },
+        "toAttribute": {
+          "show": "s",
+          "access": "w",
+          "label": "To Attribute (Data connectors only)"
+        },
+        "fromCardinality": {
+          "show": "s",
+          "access": "w",
+          "label": "From Cardinality (Data connectors only)"
+        },
+        "toCardinality": {
+          "show": "s",
+          "access": "w",
+          "label": "To Cardinality (Data connectors only)"
         },
         "fromLineEndSettings": {
           "show": "t",
@@ -364,6 +389,11 @@
           "access": "w",
           "label": "Streams"
         },
+        "chkShowDataType": {
+          "show": "y",
+          "access": "w",
+          "label": "Data"
+        },
         "chkShowElementTypes": {
           "show": "y",
           "access": "w",
@@ -373,6 +403,11 @@
           "show": "y",
           "access": "w",
           "label": "Description"
+        },
+        "chkShowAttributes": {
+          "show": "y",
+          "access": "w",
+          "label": "Attributes"
         },
         "chkShowKeys": {
           "show": "y",
@@ -516,6 +551,38 @@
       "strokeWidth": 2,
       "strokeWidthNormal": 2,
       "fill": "transparent"
+    },
+    "crowOne": {
+      "path": " M -6 6 L 6 6 ",
+      "stroke": "black",
+      "strokeNormal": "black",
+      "strokeWidth": 2,
+      "strokeWidthNormal": 2,
+      "fill": "none"
+    },
+    "crowMany": {
+      "path": " M 0 0 L -7 12 M 0 0 L 7 12 M 0 0 L 0 12 ",
+      "stroke": "black",
+      "strokeNormal": "black",
+      "strokeWidth": 2,
+      "strokeWidthNormal": 2,
+      "fill": "none"
+    },
+    "crowZeroOrOne": {
+      "path": " M -6 6 L 6 6 M -4 16 a 4 4 0 1 0 8 0 a 4 4 0 1 0 -8 0 ",
+      "stroke": "black",
+      "strokeNormal": "black",
+      "strokeWidth": 2,
+      "strokeWidthNormal": 2,
+      "fill": "white"
+    },
+    "crowOneOrMany": {
+      "path": " M -6 6 L 6 6 M 0 6 L -7 16 M 0 6 L 7 16 M 0 6 L 0 16 ",
+      "stroke": "black",
+      "strokeNormal": "black",
+      "strokeWidth": 2,
+      "strokeWidthNormal": 2,
+      "fill": "none"
     }
   },
   "highlightLineStrokeColor": "orange",
@@ -986,6 +1053,18 @@
     },
     {
       "typeA": "DataDataEntity",
+      "typeB": "DataEntityDetails",
+      "default": "c",
+      "relations": "c"
+    },
+    {
+      "typeA": "DataEntityDetails",
+      "typeB": "DataEntityDetails",
+      "default": "o",
+      "relations": "o"
+    },
+    {
+      "typeA": "DataDataEntity",
       "typeB": "DataPhysicalComponent",
       "default": "r",
       "relations": "rq"
@@ -1314,6 +1393,17 @@
       "prefix": "",
       "suffix": "",
       "path": "M 11,1 H 29 V 19 H 11 V 1 M 11,5 H 29"
+    },
+    {
+      "type": "DataEntityDetails",
+      "title": "Data Entity Details",
+      "group": "Data",
+      "tkDisplayOrder": 2,
+      "cornerRadius": 0,
+      "sources": "at",
+      "prefix": "",
+      "suffix": "",
+      "path": "M 11,1 H 29 V 19 H 11 V 1 M 11,5 H 29 M 11,9 H 29 M 11,13 H 29"
     },
     {
       "type": "GeneralActor",
@@ -2089,7 +2179,7 @@
         "BusinessActor", "BusinessCapability", "BusinessFunction", "BusinessProcess", "BusinessInterface", "BusinessService", "BusinessCollaboration", "BusinessObject", "BusinessRole", "Contract", "Product", "Representation", "BusinessEvent",
         "ApplicationApplication", "DataObject", "ApplicationComponent", "ApplicationLogicalComponent", "ApplicationPhysicalComponent", "ApplicationCapability", "ApplicationFunction", "ApplicationProcess", "ApplicationService", "ApplicationCollaboration", "ApplicationEvent", "ApplicationInteraction", "ApplicationInterface",
         "TechnologyCapability", "TechnologyFunction", "TechnologyLogicalComponent", "TechnologyPhysicalComponent", "TechnologyProcess", "TechnologyService", "CommunicationNetwork", "Device", "DistributionNetwork", "Equipment", "Facility", "Material", "Node", "Path", "SystemSoftware", "TechnologyEvent", "TechnologyInteraction", "TechnologyInterface",
-        "DataDataEntity", "DataLogicalComponent", "DataPhysicalComponent",
+        "DataDataEntity", "DataEntityDetails", "DataLogicalComponent", "DataPhysicalComponent",
         "Deliverable", "Gap", "ImplementationEvent", "Plateau", "WorkPackage",
         "Unknown"
       ]

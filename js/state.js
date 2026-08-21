@@ -234,7 +234,7 @@ class Store {
       currentView: 'home',
       models: [{ modelName: 'Reference' }, { modelName: 'As-is' }, { modelName: 'To-be' }, { modelName: 'Gap' }],
       views: [
-        { id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1 },
+        { id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1 },
       ],
       parts: [],
       connectors: [],
@@ -347,7 +347,7 @@ class Store {
   addView(viewName, viewType = 'ff') {
     const id = viewName;
     if (this.findView(id)) return this.findView(id);
-    const view = { id, viewName, viewType, chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(this.nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1 };
+    const view = { id, viewName, viewType, chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(this.nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1 };
     this.doc.views.push(view);
     this.ensureViewSections(view);
     return view;
@@ -423,9 +423,9 @@ class Store {
   // computeStreamLanes/layoutTypeIntoLanes' grid entirely and renders at exactly this
   // position instead; Advanced > Reset Pinned 3D Positions clears every part's pin3D
   // back to null at once. Persisted (part of the document), so a pin survives Save/Load.
-  createPart({ type, label, model, streams = [], note = '', order = 0, other = {}, xIds = '', description = '', script = '', scriptEnabled = false, section = '', pin3D = null }) {
+  createPart({ type, label, model, streams = [], note = '', order = 0, other = {}, xIds = '', description = '', script = '', scriptEnabled = false, section = '', pin3D = null, attributes = [] }) {
     const stamp = nowStamp();
-    const part = { id: newId(), type, label: label ?? '', rawLabel: label ?? '', model, streams, note, order, other, xIds, description, script, scriptEnabled: !!scriptEnabled, section, pin3D, createdAt: stamp, updatedAt: stamp };
+    const part = { id: newId(), type, label: label ?? '', rawLabel: label ?? '', model, streams, note, order, other, xIds, description, script, scriptEnabled: !!scriptEnabled, section, pin3D, attributes, createdAt: stamp, updatedAt: stamp };
     this.doc.parts.push(part);
     return part;
   }
@@ -438,12 +438,13 @@ class Store {
   /** Same as touchPart, for connectors. */
   touchConnector(conn) { if (conn) conn.updatedAt = nowStamp(); }
 
-  createConnector({ from, to, model, connectorType = 'c', relationship = '', streams = [], note = '', mirrorOf = null }) {
+  createConnector({ from, to, model, connectorType = 'c', relationship = '', streams = [], note = '', mirrorOf = null, fromAttribute = '', toAttribute = '', fromCardinality = '', toCardinality = '' }) {
     const styleFields = connectorStyleFields(relationship, this.settings);
     const stamp = nowStamp();
     const connector = {
       id: newId(), from, to, model, streams, note, mirrorOf,
       connectorType,
+      fromAttribute, toAttribute, fromCardinality, toCardinality,
       ...styleFields,
       createdAt: stamp, updatedAt: stamp,
     };
@@ -754,7 +755,7 @@ function migrateDoc(obj, nodeSizeMultiplier = 1.2) {
     defaultModel: obj.defaultModel || (obj.models?.[0]?.modelName ?? 'Reference'),
     currentView: obj.currentView || 'home',
     models: obj.models && obj.models.length ? obj.models : [{ modelName: 'Reference' }],
-    views: obj.views && obj.views.length ? obj.views.map((v) => ({ ...v, viewType: v.viewType || 'ff', sections: v.sections ?? [], nodeWidth: v.nodeWidth ?? defaultNodeSize(nodeSizeMultiplier).nodeWidth, nodeHeight: v.nodeHeight ?? defaultNodeSize(nodeSizeMultiplier).nodeHeight, remapSortKeys: v.remapSortKeys ?? null, remapLastOptions: v.remapLastOptions ?? null, chkShowConnectorType: v.chkShowConnectorType ?? (v.chkShowConnectors ?? true), chkShowStreamType: v.chkShowStreamType ?? (v.chkShowConnectors ?? true), chkShowDescription: v.chkShowDescription ?? true, chkShowSimValues: v.chkShowSimValues ?? false, chkShowScriptBadge: v.chkShowScriptBadge ?? false, routingStyle: v.routingStyle ?? 'default', routingStyleStream: v.routingStyleStream ?? 'default', spacingScale: v.spacingScale ?? 1 })) : [{ id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1 }],
+    views: obj.views && obj.views.length ? obj.views.map((v) => ({ ...v, viewType: v.viewType || 'ff', sections: v.sections ?? [], nodeWidth: v.nodeWidth ?? defaultNodeSize(nodeSizeMultiplier).nodeWidth, nodeHeight: v.nodeHeight ?? defaultNodeSize(nodeSizeMultiplier).nodeHeight, remapSortKeys: v.remapSortKeys ?? null, remapLastOptions: v.remapLastOptions ?? null, chkShowConnectorType: v.chkShowConnectorType ?? (v.chkShowConnectors ?? true), chkShowStreamType: v.chkShowStreamType ?? (v.chkShowConnectors ?? true), chkShowDataType: v.chkShowDataType ?? true, chkShowDescription: v.chkShowDescription ?? true, chkShowAttributes: v.chkShowAttributes ?? true, chkShowSimValues: v.chkShowSimValues ?? false, chkShowScriptBadge: v.chkShowScriptBadge ?? false, routingStyle: v.routingStyle ?? 'default', routingStyleStream: v.routingStyleStream ?? 'default', spacingScale: v.spacingScale ?? 1 })) : [{ id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1 }],
     parts: (obj.parts || []).map((p) => ({
       id: p.id, type: p.type, label: p.label ?? p.id, rawLabel: p.rawLabel ?? p.label ?? p.id,
       model: p.model ?? (obj.defaultModel || 'Reference'),
@@ -768,6 +769,7 @@ function migrateDoc(obj, nodeSizeMultiplier = 1.2) {
       scriptEnabled: p.scriptEnabled === true || p.scriptEnabled === 'true',
       section: p.section ?? '',
       pin3D: p.pin3D ?? null,
+      attributes: p.attributes ?? [],
       createdAt: p.createdAt ?? '', updatedAt: p.updatedAt ?? '',
     })),
     connectors: (obj.connectors || []).map((c) => ({
@@ -783,6 +785,8 @@ function migrateDoc(obj, nodeSizeMultiplier = 1.2) {
       strokeNormal: c.strokeNormal ?? c.stroke ?? '#333', strokeWidthNormal: c.strokeWidthNormal ?? c.strokeWidth ?? 2,
       dash: c.dash ?? [], fill: c.fill ?? '#333',
       mirrorOf: c.mirrorOf ?? null,
+      fromAttribute: c.fromAttribute ?? '', toAttribute: c.toAttribute ?? '',
+      fromCardinality: c.fromCardinality ?? '', toCardinality: c.toCardinality ?? '',
       createdAt: c.createdAt ?? '', updatedAt: c.updatedAt ?? '',
     })),
     viewMembers: (obj.viewMembers || []).map((vm) => ({

@@ -4,7 +4,7 @@ import { parseArchimateXml } from './archimate.js';
 import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
-import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart } from './commands.js';
+import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL } from './commands.js';
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection, computeSectionLayout, getAllowedTypesForView } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
@@ -390,8 +390,13 @@ class App {
     return tab;
   }
 
-  /** Double-click a node: open its linked view if it still resolves; else try a view
-   * matching the node's label; else create one (single-node level-down). */
+  /** Double-click a node: open its linked view if it still resolves; else reuse an
+   * EXISTING Composition-child decomposition of the same Part if one already exists
+   * under a DIFFERENT ViewMember (linkedViewName lives on the ViewMember, not the
+   * Part -- without this check, the same Part shown on two views would get two
+   * independent decompositions, one per ViewMember someone happens to double-click);
+   * else try a view matching the node's label; else create one (single-node
+   * level-down). */
   openOrCreateLinkedView(tab, vmId) {
     const vm = this.store.findViewMember(vmId);
     if (!vm) return;
@@ -400,6 +405,13 @@ class App {
       return;
     }
     const part = this.store.findPart(vm.objectId);
+    const existingChildView = part && findCompositionChildView(this.store, part.id);
+    if (existingChildView) {
+      vm.linkedViewName = existingChildView.id;
+      this.recordAndRender();
+      this.openOrSwitchView(existingChildView.id);
+      return;
+    }
     const matchingView = part && this.store.findView(part.label);
     if (matchingView) {
       vm.linkedViewName = matchingView.id;
@@ -408,6 +420,44 @@ class App {
       return;
     }
     levelDownSingle(this, tab, vmId);
+  }
+
+  /** Data Modeling > Add/Edit Entity Details: the menu-triggered equivalent of
+   * double-clicking a DataDataEntity node (openOrCreateLinkedView above) -- same
+   * guarded logic (reuses an existing decomposition if this Part already has one
+   * anywhere, even under a different ViewMember, rather than ever creating a second
+   * one), just driven by the current selection instead of a double-click target, since
+   * a menu command has no "which node was clicked" to work from. Requires exactly one
+   * DataDataEntity node selected on a canvas tab. */
+  promptAddEditEntityDetails() {
+    const tab = this.store.activeTab();
+    if (!tab || tab.type !== 'canvas') { this.toast('Open a view and select a Data Entity first.', true); return; }
+    const selIds = [...tab.selection];
+    if (selIds.length !== 1) { this.toast('Select a single Data Entity to add/edit its Entity Details.', true); return; }
+    const vm = this.store.findViewMember(selIds[0]);
+    if (!vm || vm.objectType !== 'part') { this.toast('Select a single node (not a connector) to add/edit its Entity Details.', true); return; }
+    const part = this.store.findPart(vm.objectId);
+    if (!part || !ciEq(part.type, 'DataDataEntity')) {
+      this.toast(`Add/Edit Entity Details only applies to a Data Entity node — selected node is type "${part ? part.type : '?'}".`, true);
+      return;
+    }
+    this.openOrCreateLinkedView(tab, vm.id);
+  }
+
+  /** Data Modeling > Export DDL: generates DDL text for whatever DataEntityDetails
+   * tables + 'd' connectors are placed on the CURRENT view (commands.js's exportDDL —
+   * scoped to one view, same as Insert Smart Stream, not the whole model) and shows it
+   * in the same readonly text-viewer Code Summary/Message Log already use, rather than
+   * a bespoke dialog. */
+  promptExportDDL() {
+    const tab = this.store.activeTab();
+    if (!tab || tab.type !== 'canvas') { this.toast('Open a view with Data Entity Details tables to export first.', true); return; }
+    try {
+      const text = exportDDL(this, tab.viewId);
+      this.promptTextEdit({ title: 'Export DDL', value: text, readonly: true, onSave: () => {} });
+    } catch (err) {
+      this.toast(err.message, true);
+    }
   }
 
   /** When a node's label changes and it has a linkedViewName, rename that view to match
@@ -809,10 +859,20 @@ class App {
     const toPart = toVm && this.store.findPart(toVm.objectId);
     if (!fromPart || !toPart) return;
 
+    // Data Modeling: dragging between two DataEntityDetails tables draws a crow's-foot
+    // ('d') relationship instead of a plain 'c' connector -- inferred from both
+    // endpoints' own type, the same way stream-generation code already infers 's' by
+    // context rather than needing an explicit type picker for the common case. (The
+    // connector's own Connector Type field is still editable afterward — see
+    // showFields.connector.fields.connectorType — for anyone who wants a 'd'
+    // relationship between two OTHER types, or a plain connector between two
+    // DataEntityDetails tables.)
+    const connectorType = (ciEq(fromPart.type, 'DataEntityDetails') && ciEq(toPart.type, 'DataEntityDetails')) ? 'd' : 'c';
+
     // enforce a unique (from,to,model,connectorType) combination: if a matching
     // connector already exists anywhere, offer to add THAT one to this view instead of
     // silently creating a duplicate.
-    const existing = this.store.findExistingConnector(fromPart.id, toPart.id, this.store.defaultModel, 'c');
+    const existing = this.store.findExistingConnector(fromPart.id, toPart.id, this.store.defaultModel, connectorType);
     if (existing) {
       this.confirmModal(`A connector between "${fromPart.label}" and "${toPart.label}" already exists (model "${this.store.defaultModel}"). Add the existing connector to this view instead?`).then((confirmed) => {
         if (!confirmed) return; // decline -> do nothing, never create a duplicate
@@ -838,12 +898,12 @@ class App {
     } else {
       key = 'x'; // Not Configured
     }
-    this.finishConnect(tab, fromVm, toVm, key);
+    this.finishConnect(tab, fromVm, toVm, key, connectorType);
   }
 
-  finishConnect(tab, fromVm, toVm, relationKey) {
+  finishConnect(tab, fromVm, toVm, relationKey, connectorType = 'c') {
     const rel = (this.store.settings.relations || []).find((r) => r.key === relationKey);
-    const conn = this.store.createConnector({ from: fromVm.objectId, to: toVm.objectId, model: this.store.defaultModel, connectorType: 'c', relationship: rel?.name || 'Association' });
+    const conn = this.store.createConnector({ from: fromVm.objectId, to: toVm.objectId, model: this.store.defaultModel, connectorType, relationship: rel?.name || 'Association' });
     this.store.createViewMember({ view: tab.viewId, objectType: 'connector', objectId: conn.id, fromVmId: fromVm.id, toVmId: toVm.id });
     this.recordAndRender();
   }
@@ -1151,6 +1211,7 @@ class App {
         <div class="prop-row"><label>Connector Type</label><select id="ss-connector-type">
           <option value="c">Connectors (c)</option>
           <option value="s">Streams (s)</option>
+          <option value="d">Data (d)</option>
         </select></div>
         <div class="prop-row"><label>Direction</label><select id="ss-direction">
           <option value="both">Both</option>
@@ -3729,6 +3790,17 @@ function wireGlobalEvents(app) {
       app.toast(`ArchiMate import failed: ${err.message}`, true);
     }
   });
+  document.getElementById('import-ddl-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      importDDL(app, text); // creates parts/connectors + a new view, toasts its own summary, throws with a specific message on unparseable DDL
+    } catch (err) {
+      app.toast(`DDL import failed: ${err.message}`, true);
+    }
+  });
 
   // ===== Advanced menu (external reference links, open in a new tab) =====
   const ADVANCED_LINKS = [
@@ -3829,6 +3901,29 @@ function wireGlobalEvents(app) {
     });
   });
 
+  // ===== Data Modeling menu (crow's-foot ERD: entity attributes, PK/FK, DDL
+  // import/export) — "Add/Edit Entity Details" is the menu-triggered equivalent of
+  // double-clicking a DataDataEntity node (see promptAddEditEntityDetails); Import/
+  // Export DDL are the only two commands that need a real dialog/file-picker, so they
+  // dispatch through app methods below rather than being handled inline here, matching
+  // how Advanced's own generateIndustry/scriptConsole items work. =====
+  const DATA_MODELING_LINKS = [
+    { label: 'Add/Edit Entity Details', action: 'addEditEntityDetails' },
+    { separator: true },
+    { label: 'Import DDL...', action: 'importDDL' },
+    { label: 'Export DDL', action: 'exportDDL' },
+  ];
+  const dataModelingMenu = document.getElementById('data-modeling-menu');
+  dataModelingMenu.innerHTML = DATA_MODELING_LINKS.map((l) => l.separator ? '<div class="dd-separator"></div>' : `<div class="dd-item" data-action="${l.action}">${l.label}</div>`).join('');
+  dataModelingMenu.querySelectorAll('.dd-item').forEach((item) => {
+    item.addEventListener('click', () => {
+      if (item.dataset.action === 'addEditEntityDetails') app.promptAddEditEntityDetails();
+      else if (item.dataset.action === 'importDDL') document.getElementById('import-ddl-input').click();
+      else if (item.dataset.action === 'exportDDL') app.promptExportDDL();
+      dataModelingMenu.classList.add('hidden');
+    });
+  });
+
   // ===== Shared open/close wiring for all top-row dropdown menus =====
   const MENU_PAIRS = [
     ['file-menu-btn', fileMenu],
@@ -3836,6 +3931,7 @@ function wireGlobalEvents(app) {
     ['advanced-menu-btn', advancedMenu],
     ['simulation-menu-btn', simulationMenu],
     ['explore-menu-btn', exploreMenu],
+    ['data-modeling-menu-btn', dataModelingMenu],
   ];
   MENU_PAIRS.forEach(([btnId, menu]) => {
     document.getElementById(btnId).addEventListener('click', (e) => {
@@ -4124,7 +4220,7 @@ function wireGlobalEvents(app) {
   // Replaces the old node-right-click-only quick filter (tab.connectorTypeFilter) —
   // "let's make that user selectable for the view same as the view filters already
   // existing."
-  const CONNECTOR_TYPE_ITEMS = [{ value: 'c', label: 'Connectors (c)' }, { value: 's', label: 'Streams (s)' }];
+  const CONNECTOR_TYPE_ITEMS = [{ value: 'c', label: 'Connectors (c)' }, { value: 's', label: 'Streams (s)' }, { value: 'd', label: 'Data (d)' }];
   document.getElementById('connector-type-filter-btn').addEventListener('click', (e) => {
     e.stopPropagation();
     const menu = document.getElementById('connector-type-filter-menu');

@@ -4763,7 +4763,7 @@ def check_view3d_view_scope_filter(page):
 
 def check_view3d_connector_type_toolbar_filter(page):
     """Regression guard: the 3D View's Connector Type filter (which connectorType(s) --
-    'c' Connectors, 's' Streams -- draw at all) moved from a right-click-only quick
+    'c' Connectors, 's' Streams, 'd' Data -- draw at all) moved from a right-click-only quick
     filter to its own toolbar dropdown, matching Stream/Type/Section's existing
     Select-All/Exclude-All + checkbox-list pattern. Reported directly: "let's make that
     user selectable for the view same as the view filters already existing." Uses real
@@ -4832,8 +4832,13 @@ def check_view3d_connector_type_toolbar_filter(page):
     if not result["initiallyChecked"]:
         problems.append("expected the Select All checkbox to start checked (unfiltered)")
     ac = result["afterConnectorsOnly"]
-    if ac["activeConnectorTypes"] != ["s"] or ac["connectorCount"] != 1:
-        problems.append(f"expected unchecking 'Connectors (c)' to leave only the 's' connector visible, got {ac}")
+    # activeConnectorTypes also includes 'd' (Data Modeling) here since it's a real,
+    # checked-by-default toolbar item regardless of whether this fixture has any 'd'
+    # connectors -- the actually-meaningful assertions are that 'c' got excluded and
+    # 's' stayed included, and that the SCENE's visible connector count (this fixture
+    # has none of type 'd') reflects only the real 'c' connector disappearing.
+    if "c" in ac["activeConnectorTypes"] or "s" not in ac["activeConnectorTypes"] or ac["connectorCount"] != 1:
+        problems.append(f"expected unchecking 'Connectors (c)' to exclude 'c', keep 's', and leave only the 's' connector visible, got {ac}")
     ax = result["afterExcludeAll"]
     if ax["activeConnectorTypes"] != [] or ax["connectorCount"] != 0:
         problems.append(f"expected Exclude All to set tab.activeConnectorTypes to [] and hide every connector line, got {ax}")
@@ -5506,6 +5511,562 @@ def check_level_down_creates_composition_link(page):
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
     return True, "Level Down creates an unplaced Composition connector linking the parent part to its new decomposition anchor"
+
+
+def check_level_down_reuses_existing_decomposition_across_viewmembers(page):
+    """Regression guard for openOrCreateLinkedView (main.js) — the SAME Part appearing
+    as TWO DIFFERENT ViewMembers (on two different views) must resolve to the SAME
+    decomposition, not create two independent ones. `vm.linkedViewName` (the existing
+    double-click guard) lives on the ViewMember, not the Part, so without an
+    additional Part-level check, double-clicking a second ViewMember of an
+    already-decomposed Part fell through to levelDownSingle again, creating a second
+    child Part, a second Composition connector, and a second detail view — orphaning
+    the first one. Found while designing a new feature (Data Modeling / crow's-foot
+    ERD) that decomposes a DataDataEntity into an attribute-detail child via Level
+    Down: the same DataDataEntity commonly appears on multiple Stream views, so this
+    was a real, immediate risk, not a hypothetical one. Fixed via
+    findCompositionChildView (commands.js): before falling through to
+    levelDownSingle, check whether `part` already has a Composition child ANYWHERE in
+    the doc (not just via this ViewMember's own linkedViewName) and reuse/link to its
+    existing view instead. The fixture deliberately RENAMES the first decomposition's
+    view after creation so it no longer coincidentally matches the older "view named
+    the same as the part's label" fallback (openOrCreateLinkedView's third check) --
+    proving this new guard, specifically, is what's doing the work, not that
+    pre-existing fallback."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const part = store.createPart({ type: 'DataDataEntity', label: 'RegrSharedEntity_' + Date.now(), model, streams: [] });
+
+      const viewA = store.addView('RegrLDReuseA_' + Date.now(), 'ff');
+      const tabA = app.createCanvasTab(viewA);
+      app.switchToTab(tabA.id);
+      const vmA = store.createViewMember({ view: viewA.id, objectType: 'part', objectId: part.id, x: 0, y: 0 });
+
+      const viewB = store.addView('RegrLDReuseB_' + Date.now(), 'ff');
+      const tabB = app.createCanvasTab(viewB);
+      const vmB = store.createViewMember({ view: viewB.id, objectType: 'part', objectId: part.id, x: 0, y: 0 });
+
+      app.switchToTab(tabA.id);
+      app.openOrCreateLinkedView(tabA, vmA.id);
+      store.renameView(vmA.linkedViewName, 'RegrLDReuseRenamed_' + Date.now());
+      const firstLinkedView = vmA.linkedViewName;
+
+      app.switchToTab(tabB.id);
+      app.openOrCreateLinkedView(tabB, vmB.id);
+      const secondLinkedView = vmB.linkedViewName;
+
+      const compositionConns = store.doc.connectors.filter(c => c.relationship === 'Composition' && c.from === part.id);
+      return {
+        firstLinkedView, secondLinkedView,
+        sameView: firstLinkedView === secondLinkedView,
+        compositionCount: compositionConns.length,
+      };
+    }
+    """)
+    problems = []
+    if not result["sameView"]:
+        problems.append(f"expected both ViewMembers of the same Part to resolve to the SAME decomposition view, got {result['firstLinkedView']!r} vs {result['secondLinkedView']!r}")
+    if result["compositionCount"] != 1:
+        problems.append(f"expected exactly ONE Composition connector for the Part (reused, not duplicated), got {result['compositionCount']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "double-clicking a second ViewMember of an already-decomposed Part reuses the existing decomposition instead of creating a duplicate"
+
+
+def check_data_modeling_attributes_and_data_connector(page):
+    """Regression guard for the Data Modeling (crow's-foot ERD) feature's foundational
+    data model: the new 'DataEntityDetails' element type, Part.attributes (an array of
+    {id, name, dataType, nullable, isPrimaryKey}), the new 'a' showFields widget
+    (render.js's renderShowFieldsPanel — an inline editable table with add/edit/delete),
+    the new connectorType 'd' with fromAttribute/toAttribute/fromCardinality/
+    toCardinality fields, and the dependent From/To Attribute dropdowns (options scoped
+    to whichever table is on that end, via ctx.fromPartId/toPartId). Covers: (1) the
+    '+ Add Attribute' button and per-cell inputs genuinely mutate part.attributes (not
+    just the DOM) — add two rows, edit name/dataType/nullable/PK on the first, delete
+    the second, confirm the final array; (2) isForeignKey is DERIVED, not stored — an
+    attribute referenced by a 'd' connector's fromAttribute shows the FK badge, an
+    unreferenced one doesn't, and this is computed live (no isForeignKey field is ever
+    written to the attribute object itself); (3) the From/To Attribute select options
+    are correctly scoped per end (From Attribute lists ONLY the from-table's own
+    attributes, To Attribute ONLY the to-table's, not a merged/wrong list); (4) a
+    full store.toJSON()/loadFromJSON round-trip preserves Part.attributes and the
+    connector's new fields exactly."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const view = store.addView('RegrDataModel_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const t1 = store.createPart({ type: 'DataEntityDetails', label: 'RegrOrders', model, streams: [] });
+      const t2 = store.createPart({ type: 'DataEntityDetails', label: 'RegrCustomers', model, streams: [],
+        attributes: [{ id: 'regr-b1', name: 'id', dataType: 'INTEGER', nullable: false, isPrimaryKey: true }] });
+      const vm1 = store.createViewMember({ view: view.id, objectType: 'part', objectId: t1.id, x: 0, y: 0 });
+      const vm2 = store.createViewMember({ view: view.id, objectType: 'part', objectId: t2.id, x: 300, y: 0 });
+      const conn = store.createConnector({ from: t1.id, to: t2.id, connectorType: 'd', model, relationship: 'Association' });
+      const connVm = store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn.id, fromVmId: vm1.id, toVmId: vm2.id });
+      app.recordAndRender();
+
+      // (1) UI-driven attribute add/edit/delete on t1 (starts with zero attributes).
+      const selectNode = (vmId) => { tab.selection = new Set([vmId]); app.render(); };
+      selectNode(vm1.id);
+      document.querySelector('.attr-add-btn').click();
+      await new Promise(r => setTimeout(r, 30));
+      document.querySelector('.attr-add-btn').click();
+      await new Promise(r => setTimeout(r, 30));
+      const rowsAfterAdd = document.querySelectorAll('tr[data-attr-id]').length;
+
+      const setInput = (sel, value, isCheckbox) => {
+        const el = document.querySelectorAll(sel)[0];
+        if (isCheckbox) { el.checked = value; } else { el.value = value; }
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      setInput('.attr-name', 'order_id', false);
+      await new Promise(r => setTimeout(r, 30));
+      setInput('.attr-datatype', 'INTEGER', false);
+      await new Promise(r => setTimeout(r, 30));
+      setInput('.attr-pk', true, true);
+      await new Promise(r => setTimeout(r, 30));
+      // delete the second (still-blank) row
+      const deleteBtns = document.querySelectorAll('.attr-delete-btn');
+      deleteBtns[deleteBtns.length - 1].click();
+      await new Promise(r => setTimeout(r, 30));
+
+      const t1AttrsAfterUI = store.findPart(t1.id).attributes;
+
+      // (2) FK derivation: set the connector's fromAttribute to t1's real attribute id,
+      // confirm the FK badge appears on THAT row and nowhere else, and that no
+      // isForeignKey key was ever written onto the attribute object.
+      const realAttrId = t1AttrsAfterUI[0].id;
+      conn.fromAttribute = realAttrId;
+      selectNode(vm1.id); // re-render to recompute the FK badge from the connector's new fromAttribute
+      const fkBadgeRows = [...document.querySelectorAll('tr[data-attr-id]')].filter(tr => tr.querySelector('.attr-fk-badge'));
+      const hasIsForeignKeyField = 'isForeignKey' in t1AttrsAfterUI[0];
+
+      // (3) Dependent dropdown scoping: select the 'd' connector, read its From/To
+      // Attribute select options.
+      const connVmEl = { id: connVm.id };
+      tab.selection = new Set([connVm.id]);
+      app.render();
+      const selects = [...document.querySelectorAll('select')];
+      const fromSel = selects.find(s => s.id.includes('fromAttribute'));
+      const toSel = selects.find(s => s.id.includes('toAttribute'));
+      const fromOptionLabels = fromSel ? [...fromSel.options].map(o => o.textContent) : null;
+      const toOptionLabels = toSel ? [...toSel.options].map(o => o.textContent) : null;
+
+      // (4) Save/Load JSON round-trip.
+      const savedJson = store.toJSON();
+      store.loadFromJSON(JSON.parse(JSON.stringify(savedJson)));
+      const t1AfterReload = store.doc.parts.find(p => p.id === t1.id);
+      const connAfterReload = store.doc.connectors.find(c => c.id === conn.id);
+
+      return {
+        rowsAfterAdd,
+        t1AttrsAfterUI,
+        fkBadgeCount: fkBadgeRows.length,
+        fkBadgeOnCorrectRow: fkBadgeRows.length === 1 && fkBadgeRows[0].dataset.attrId === realAttrId,
+        hasIsForeignKeyField,
+        fromOptionLabels, toOptionLabels,
+        attributesAfterReload: t1AfterReload ? t1AfterReload.attributes : null,
+        connFieldsAfterReload: connAfterReload ? {
+          connectorType: connAfterReload.connectorType, fromAttribute: connAfterReload.fromAttribute,
+          toAttribute: connAfterReload.toAttribute, fromCardinality: connAfterReload.fromCardinality, toCardinality: connAfterReload.toCardinality,
+        } : null,
+      };
+    }
+    """)
+    problems = []
+    if result["rowsAfterAdd"] != 2:
+        problems.append(f"expected 2 rows after two '+ Add Attribute' clicks, got {result['rowsAfterAdd']}")
+    attrs = result["t1AttrsAfterUI"]
+    if len(attrs) != 1 or attrs[0]["name"] != "order_id" or attrs[0]["dataType"] != "INTEGER" or attrs[0]["isPrimaryKey"] is not True:
+        problems.append(f"expected exactly one attribute {{name:'order_id', dataType:'INTEGER', isPrimaryKey:true}} after UI edits + delete, got {attrs}")
+    if not result["fkBadgeOnCorrectRow"] or result["fkBadgeCount"] != 1:
+        problems.append(f"expected exactly one FK badge, on the attribute referenced by the connector's fromAttribute, got count={result['fkBadgeCount']} correctRow={result['fkBadgeOnCorrectRow']}")
+    if result["hasIsForeignKeyField"]:
+        problems.append("expected isForeignKey to be DERIVED (never stored on the attribute object) -- found a stored isForeignKey key")
+    if result["fromOptionLabels"] != ['(none)', 'order_id']:
+        problems.append(f"expected From Attribute options scoped to t1's own attributes ['(none)', 'order_id'], got {result['fromOptionLabels']}")
+    if result["toOptionLabels"] != ['(none)', 'id']:
+        problems.append(f"expected To Attribute options scoped to t2's own attributes ['(none)', 'id'], got {result['toOptionLabels']}")
+    if result["attributesAfterReload"] != attrs:
+        problems.append(f"expected Part.attributes to survive a Save/Load JSON round-trip unchanged, got {result['attributesAfterReload']}")
+    expectedConnFields = {"connectorType": "d", "fromAttribute": result["t1AttrsAfterUI"][0]["id"], "toAttribute": "", "fromCardinality": "", "toCardinality": ""}
+    if result["connFieldsAfterReload"] != expectedConnFields:
+        problems.append(f"expected connector's connectorType/fromAttribute/toAttribute/fromCardinality/toCardinality to survive a Save/Load JSON round-trip, expected {expectedConnFields}, got {result['connFieldsAfterReload']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "DataEntityDetails' attribute list (add/edit/delete via the 'a' showFields widget), derived (not stored) FK badges, dependent From/To Attribute dropdown scoping, and Save/Load JSON round-tripping of Part.attributes + connector's data-modeling fields all work correctly"
+
+
+def check_data_modeling_crowfoot_rendering(page):
+    """Regression guard for crow's-foot marker rendering (canvas.js's drawEdge +
+    CARDINALITY_LINE_ENDS, public/custom.json's lineEnds crowOne/crowMany/
+    crowZeroOrOne/crowOneOrMany). Covers: (1) each of the four cardinality values
+    (one/many/zeroOrOne/oneOrMany) produces a DISTINCT marker-start/marker-end
+    reference on the rendered connector path -- not all collapsing to the same
+    symbol, and not falling back to a relationship-driven marker when a real
+    cardinality is set; (2) a 'd' connector with NO cardinality set (fresh, before
+    configuring) falls back gracefully to the relationship-driven lineEnds lookup
+    instead of rendering with no marker at all or throwing; (3) a REAL bug found and
+    fixed during this feature's own development: crowZeroOrOne's circle was
+    originally centered at a negative Y that fell outside the shared marker
+    viewBox (buildMarkerDefs' hardcoded "-12 -2 24 24", Y range -2..22), silently
+    CLIPPING almost the entire circle down to an unrecognizable sliver -- confirmed
+    visually via a zoomed screenshot during development, not caught by any
+    DOM-attribute-only check (the marker's fill/stroke/path attributes are all
+    "correct" even when badly positioned; only the geometry matters). This check
+    parses the actual custom.json path data for the circle arc's start point + radius
+    and asserts its computed Y-bounds stay within the marker's own viewBox, which
+    directly reproduces (and would catch a regression of) that specific bug;
+    (4) the new 'Data' toolbar/view visibility toggle (chkShowDataType,
+    view.chkShowConnectorType's new sibling) actually hides/shows 'd' connectors
+    independently of 'c'/'s' ones."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const view = store.addView('RegrCrowfoot_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const mkConn = (fromCardinality, toCardinality) => {
+        const t1 = store.createPart({ type: 'DataEntityDetails', label: 'L', model, streams: [] });
+        const t2 = store.createPart({ type: 'DataEntityDetails', label: 'R', model, streams: [] });
+        const vm1 = store.createViewMember({ view: view.id, objectType: 'part', objectId: t1.id, x: 0, y: 0 });
+        const vm2 = store.createViewMember({ view: view.id, objectType: 'part', objectId: t2.id, x: 300, y: 0 });
+        const conn = store.createConnector({ from: t1.id, to: t2.id, connectorType: 'd', model, relationship: 'Association', fromCardinality, toCardinality });
+        const connVm = store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn.id, fromVmId: vm1.id, toVmId: vm2.id });
+        return connVm.id;
+      };
+
+      const cardinalities = ['one', 'many', 'zeroOrOne', 'oneOrMany'];
+      const connVmIds = cardinalities.map((c) => mkConn(c, c));
+      const noneVmId = mkConn('', ''); // fresh 'd' connector, no cardinality configured yet
+      app.recordAndRender();
+
+      const markerRefOf = (connVmId, attr) => {
+        const pathEl = document.querySelector(`.edge-hit[data-vm-id="${connVmId}"]`)?.previousElementSibling;
+        return pathEl ? pathEl.getAttribute(attr) : null;
+      };
+      const markerEnds = cardinalities.map((c, i) => markerRefOf(connVmIds[i], 'marker-end'));
+      const noneMarkerEnd = markerRefOf(noneVmId, 'marker-end'); // should fall back, not be null
+
+      // (3) parse the ACTUAL shipped lineEnds path data for the zeroOrOne circle's arc
+      // start point + radius, compute its Y bounds, and confirm they fit the marker's
+      // own viewBox (hardcoded in buildMarkerDefs, canvas.js) -- reproduces the exact
+      // clipping bug found during development.
+      const circlePath = store.settings.lineEnds.crowZeroOrOne.path;
+      const arcMatch = circlePath.match(/M\\s*(-?[\\d.]+)\\s+(-?[\\d.]+)\\s+a\\s+([\\d.]+)/);
+      const circleStartY = arcMatch ? parseFloat(arcMatch[2]) : null;
+      const circleRadius = arcMatch ? parseFloat(arcMatch[3]) : null;
+      // the arc's start point sits on the circle's own horizontal diameter (same
+      // pattern as the pre-existing, working 'circleSmall' lineEnd), so the circle's
+      // vertical extent is [startY - r, startY + r].
+      const circleMinY = circleStartY - circleRadius, circleMaxY = circleStartY + circleRadius;
+      const viewBoxMinY = -2, viewBoxMaxY = 22; // buildMarkerDefs' hardcoded marker viewBox="-12 -2 24 24"
+
+      // (4) chkShowDataType visibility toggle
+      view.chkShowDataType = false;
+      app.recordAndRender();
+      const hiddenWhileOff = !document.querySelector(`.edge-hit[data-vm-id="${connVmIds[0]}"]`);
+      view.chkShowDataType = true;
+      app.recordAndRender();
+      const visibleWhenOn = !!document.querySelector(`.edge-hit[data-vm-id="${connVmIds[0]}"]`);
+
+      return { markerEnds, noneMarkerEnd, circleMinY, circleMaxY, viewBoxMinY, viewBoxMaxY, hiddenWhileOff, visibleWhenOn };
+    }
+    """)
+    problems = []
+    expectedMarkers = {'one': 'crowOne', 'many': 'crowMany', 'zeroOrOne': 'crowZeroOrOne', 'oneOrMany': 'crowOneOrMany'}
+    cardinalities = ['one', 'many', 'zeroOrOne', 'oneOrMany']
+    for i, card in enumerate(cardinalities):
+        ref = result["markerEnds"][i] or ''
+        if f'marker-crow' not in ref or expectedMarkers[card] not in ref:
+            problems.append(f"expected cardinality '{card}' to reference marker '{expectedMarkers[card]}', got {ref!r}")
+    if len(set(result["markerEnds"])) != 4:
+        problems.append(f"expected all 4 cardinality values to produce 4 DISTINCT markers, got {result['markerEnds']}")
+    if not result["noneMarkerEnd"]:
+        problems.append("expected a 'd' connector with no cardinality set to still fall back to a relationship-driven marker, got none at all")
+    if result["circleMinY"] < result["viewBoxMinY"] or result["circleMaxY"] > result["viewBoxMaxY"]:
+        problems.append(f"crowZeroOrOne's circle (Y range {result['circleMinY']}..{result['circleMaxY']}) falls outside the marker's own viewBox (Y range {result['viewBoxMinY']}..{result['viewBoxMaxY']}) -- this is the exact clipping bug found during development, where the circle rendered as an unrecognizable sliver")
+    if not result["hiddenWhileOff"]:
+        problems.append("expected chkShowDataType=false to hide 'd' connectors")
+    if not result["visibleWhenOn"]:
+        problems.append("expected chkShowDataType=true to show 'd' connectors again")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "crow's-foot markers (one/many/zeroOrOne/oneOrMany) render as 4 distinct markers with a graceful relationship-driven fallback when unconfigured, the zeroOrOne circle stays within the shared marker viewBox, and the Data visibility toggle independently hides/shows 'd' connectors"
+
+
+def check_data_modeling_menu_and_ddl_import_export(page):
+    """Regression guard for the "Data Modeling" menu (index.html, main.js) and its
+    three commands, driven through the REAL menu/file-input UI (not calling
+    commands.js's importDDL/exportDDL directly), covering: (1) Import DDL... (file
+    input #import-ddl-input, same DataTransfer/File/Blob synthetic-upload pattern
+    check_archimate_import_fixture already uses) creates one DataEntityDetails part
+    per CREATE TABLE with the right attributes, a 'd' connector for the FOREIGN KEY
+    with fromAttribute/toAttribute correctly resolved, and reports a specific,
+    non-generic error toast (not a silent no-op or an uncaught exception) for
+    malformed DDL; (2) Export DDL (promptExportDDL) shows the regenerated DDL text in
+    the same readonly viewer Code Summary uses, scoped to the CURRENT view only, and
+    reports a specific error toast (not a blank/empty export) when the current view
+    has no DataEntityDetails tables at all; (3) Add/Edit Entity Details
+    (promptAddEditEntityDetails) requires exactly one DataDataEntity node selected
+    (rejects zero/multiple selections and non-DataDataEntity types with a specific
+    toast each), and delegates to the SAME Part-level decomposition guard
+    openOrCreateLinkedView uses (see check_level_down_reuses_existing_decomposition_
+    across_viewmembers) -- reusing an existing decomposition rather than creating a
+    second one, proven here via the MENU entry point specifically, not just the
+    double-click one."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+
+      const uploadDDL = (text) => {
+        const blob = new Blob([text], { type: 'text/plain' });
+        const file = new File([blob], 'schema.sql', { type: 'text/plain' });
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        const input = document.getElementById('import-ddl-input');
+        input.files = dt.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      const clickMenuItem = async (action) => {
+        document.getElementById('data-modeling-menu-btn').click();
+        await new Promise(r => setTimeout(r, 40));
+        document.querySelector(`[data-action="${action}"]`).click();
+        await new Promise(r => setTimeout(r, 40));
+      };
+      // toasts stack and persist for several seconds (auto-removed after 3.5-6s), so
+      // multiple can coexist in the DOM at once -- grab the MOST RECENTLY added one
+      // (toasts are appended, so the last DOM match is the newest), not the first.
+      const lastToast = () => { const all = document.querySelectorAll('.toast'); return all.length ? all[all.length - 1].textContent : null; };
+
+      // (1) valid DDL import via the real file input
+      uploadDDL('CREATE TABLE regr_customers (id INTEGER NOT NULL, name VARCHAR(50), PRIMARY KEY (id));\\n' +
+                'CREATE TABLE regr_orders (id INTEGER NOT NULL PRIMARY KEY, customer_id INTEGER NOT NULL, FOREIGN KEY (customer_id) REFERENCES regr_customers(id));');
+      await new Promise(r => setTimeout(r, 300));
+      const importToast = lastToast();
+      const importedView = store.doc.views.find(v => v.viewName.startsWith('DDL Import'));
+      const importedParts = importedView ? store.viewMembersForView(importedView.id).filter(v => v.objectType === 'part').map(v => store.findPart(v.objectId)) : [];
+      const custTable = importedParts.find(p => p.label === 'regr_customers');
+      const orderTable = importedParts.find(p => p.label === 'regr_orders');
+      const importedConn = importedView ? store.doc.connectors.find(c => c.connectorType === 'd' && c.from === orderTable?.id && c.to === custTable?.id) : null;
+      const fkAttrsResolved = importedConn && custTable && orderTable
+        ? { fromName: orderTable.attributes.find(a => a.id === importedConn.fromAttribute)?.name, toName: custTable.attributes.find(a => a.id === importedConn.toAttribute)?.name }
+        : null;
+
+      // (1b) malformed DDL -> specific error toast, no crash, no partial table created
+      const priorPartCount = store.doc.parts.length;
+      uploadDDL('CREATE TABLE broken (@#$%);');
+      await new Promise(r => setTimeout(r, 300));
+      const malformedToast = lastToast();
+      const partCountUnchanged = store.doc.parts.length === priorPartCount;
+
+      // (2) Export DDL via the real menu, scoped to the imported view
+      app.switchToTab((store.tabs.find(t => t.viewId === importedView.id) || app.createCanvasTab(importedView)).id);
+      await clickMenuItem('exportDDL');
+      const exportedText = document.querySelector('.modal-box textarea')?.value || null;
+      document.querySelector('.modal-box .close')?.click();
+      await new Promise(r => setTimeout(r, 40));
+
+      // (2b) Export DDL on a view with no DataEntityDetails tables -> specific error toast
+      const emptyView = store.addView('RegrEmptyExport_' + Date.now(), 'ff');
+      app.switchToTab(app.createCanvasTab(emptyView).id);
+      await clickMenuItem('exportDDL');
+      const emptyExportToast = lastToast();
+      const noDialogOnEmptyExport = !document.querySelector('.modal-box.modal-box-textedit');
+
+      // (3) Add/Edit Entity Details selection guards
+      await clickMenuItem('addEditEntityDetails'); // nothing selected
+      const noSelectionToast = lastToast();
+
+      const dm1 = store.createPart({ type: 'DataDataEntity', label: 'RegrMenuEntity_' + Date.now(), model, streams: [] });
+      const vmA = store.createViewMember({ view: emptyView.id, objectType: 'part', objectId: dm1.id, x: 0, y: 0 });
+      const viewB = store.addView('RegrMenuEntityB_' + Date.now(), 'ff');
+      const tabB = app.createCanvasTab(viewB);
+      const vmB = store.createViewMember({ view: viewB.id, objectType: 'part', objectId: dm1.id, x: 0, y: 0 });
+      app.recordAndRender();
+
+      app.switchToTab(app.store.tabs.find(t => t.viewId === emptyView.id).id);
+      const tabA = app.store.activeTab();
+      tabA.selection = new Set([vmA.id]);
+      app.render();
+      await clickMenuItem('addEditEntityDetails'); // first decomposition, via the menu
+      const firstLinkedView = vmA.linkedViewName;
+
+      app.switchToTab(tabB.id);
+      tabB.selection = new Set([vmB.id]);
+      app.render();
+      await clickMenuItem('addEditEntityDetails'); // same Part, different ViewMember -- should REUSE
+      const secondLinkedView = vmB.linkedViewName;
+
+      return {
+        importToast, importedPartCount: importedParts.length,
+        custAttrCount: custTable ? custTable.attributes.length : null,
+        orderAttrCount: orderTable ? orderTable.attributes.length : null,
+        fkAttrsResolved,
+        malformedToast, partCountUnchanged,
+        exportedText,
+        emptyExportToast, noDialogOnEmptyExport,
+        noSelectionToast,
+        firstLinkedView, secondLinkedView, sameDecomposition: firstLinkedView === secondLinkedView,
+      };
+    }
+    """)
+    problems = []
+    if 'Imported 2 tables, 1 foreign key' not in (result["importToast"] or ''):
+        problems.append(f"expected a specific 'Imported 2 tables, 1 foreign key...' toast, got {result['importToast']!r}")
+    if result["importedPartCount"] != 2 or result["custAttrCount"] != 2 or result["orderAttrCount"] != 2:
+        problems.append(f"expected 2 imported DataEntityDetails parts with 2 attributes each, got count={result['importedPartCount']} custAttrs={result['custAttrCount']} orderAttrs={result['orderAttrCount']}")
+    if result["fkAttrsResolved"] != {"fromName": "customer_id", "toName": "id"}:
+        problems.append(f"expected the FK 'd' connector's fromAttribute/toAttribute to resolve to customer_id/id, got {result['fkAttrsResolved']}")
+    if not result["malformedToast"] or "failed" not in result["malformedToast"].lower():
+        problems.append(f"expected a specific 'DDL import failed: ...' toast for malformed DDL, got {result['malformedToast']!r}")
+    if not result["partCountUnchanged"]:
+        problems.append("expected malformed DDL import to create NOTHING (no partial tables), not even the tables before the bad entry")
+    if 'CREATE TABLE regr_customers' not in (result["exportedText"] or '') or 'FOREIGN KEY' not in (result["exportedText"] or ''):
+        problems.append(f"expected Export DDL to show regenerated DDL text including both tables and the FOREIGN KEY, got {result['exportedText']!r}")
+    if not result["emptyExportToast"] or "no data entity details" not in result["emptyExportToast"].lower():
+        problems.append(f"expected a specific error toast exporting a view with no DataEntityDetails tables, got {result['emptyExportToast']!r}")
+    if not result["noDialogOnEmptyExport"]:
+        problems.append("expected NO export dialog to open when the view has nothing to export")
+    if not result["noSelectionToast"] or "select" not in result["noSelectionToast"].lower():
+        problems.append(f"expected a specific 'select a...' toast when Add/Edit Entity Details is used with nothing selected, got {result['noSelectionToast']!r}")
+    if not result["sameDecomposition"]:
+        problems.append(f"expected Add/Edit Entity Details, run via the MENU on two different ViewMembers of the same Part, to reuse the same decomposition (not create two), got {result['firstLinkedView']!r} vs {result['secondLinkedView']!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "the Data Modeling menu's Import DDL/Export DDL/Add-Edit Entity Details all work through the real UI, with specific error toasts (not silent failures or crashes) for malformed DDL, empty exports, and missing selections, and Add/Edit Entity Details reuses an existing decomposition across ViewMembers via the menu entry point too"
+
+
+def check_data_modeling_node_attributes_and_manual_connector_creation(page):
+    """Regression guard for three real gaps reported directly after the Data Modeling
+    feature first shipped: "attributes on dataentitydetail are not appearing visually
+    on node. unable to enable FK. unable to create crows foot connector with another
+    dataentitydetail, or at datadataentity level." Root causes: (1) buildNodeEl
+    (canvas.js) never rendered Part.attributes at all — only the property panel did;
+    (2) drag-to-connect (main.js's beginConnect/finishConnect) hardcoded
+    connectorType:'c' unconditionally, so there was literally no way to create a 'd'
+    connector via the canvas UI (DDL import was the only path); (3) connectorType's
+    own showFields entry was `access:'r'` (readonly text) with no edit surface
+    anywhere (property panel, edge popover, or context menu) — even an existing
+    connector's type could never be changed, so there was no manual escape hatch
+    either. "unable to enable FK" was a direct downstream consequence of (2)/(3): FK
+    is derived from a 'd' connector's fromAttribute (see check_data_modeling_
+    attributes_and_data_connector), and a person could never get a 'd' connector to
+    exist at all through the UI. Fixed: (1) buildNodeEl now renders an attribute list
+    (name : dataType, PK marked, live FK lookup via the shared isAttributeForeignKey)
+    when the part is DataEntityDetails, gated by a new per-view chkShowAttributes
+    toggle (sibling to chkShowDescription/chkShowKeys) — proven here by reading the
+    real rendered node's own innerText, not just checking Part.attributes exists; (2)
+    beginConnect now infers connectorType:'d' automatically when BOTH drag endpoints
+    are DataEntityDetails (mirroring how 's' is already inferred by context
+    elsewhere), still 'c' for every other type pairing (including DataDataEntity ->
+    DataDataEntity, addressing the "or at datadataentity level" half of the report);
+    (3) connectorType is now a genuine editable `'s'` select (public/custom.json:
+    show/access both flipped) with real options, so ANY connector's type can be
+    changed after the fact regardless of how it was created — the general-purpose fix
+    that makes both problems recoverable even outside the one auto-inferred case."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const view = store.addView('RegrDMNode_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const t1 = store.createPart({ type: 'DataEntityDetails', label: 'RegrOrders', model, streams: [],
+        attributes: [
+          { id: 'ra1', name: 'id', dataType: 'INTEGER', nullable: false, isPrimaryKey: true },
+          { id: 'ra2', name: 'customer_id', dataType: 'INTEGER', nullable: false, isPrimaryKey: false },
+        ] });
+      const t2 = store.createPart({ type: 'DataEntityDetails', label: 'RegrCustomers', model, streams: [],
+        attributes: [{ id: 'rb1', name: 'id', dataType: 'INTEGER', nullable: false, isPrimaryKey: true }] });
+      const vm1 = store.createViewMember({ view: view.id, objectType: 'part', objectId: t1.id, x: 60, y: 60 });
+      const vm2 = store.createViewMember({ view: view.id, objectType: 'part', objectId: t2.id, x: 400, y: 60 });
+      app.recordAndRender();
+
+      // (1) attribute list rendered ON the node itself
+      const nodeEl = document.querySelector(`[data-vm-id="${vm1.id}"]`);
+      const nodeText = nodeEl.innerText;
+      const hasAttributesEl = !!nodeEl.querySelector('.fnode-attributes');
+
+      // toggle chkShowAttributes off -> the node's own attribute rows disappear
+      view.chkShowAttributes = false;
+      app.recordAndRender();
+      const hiddenWhenToggledOff = !document.querySelector(`[data-vm-id="${vm1.id}"] .fnode-attributes`);
+      view.chkShowAttributes = true;
+      app.recordAndRender();
+
+      // (2) drag-to-connect between two DataEntityDetails infers 'd'
+      app.beginConnect(tab, vm1.id, vm2.id, 0, 0);
+      const ddConn = store.doc.connectors.find(c => c.from === t1.id && c.to === t2.id);
+      const ddConnectorType = ddConn ? ddConn.connectorType : null;
+
+      // (2b) drag-to-connect between two DataDataEntity (NOT DataEntityDetails) stays 'c'
+      const dd1 = store.createPart({ type: 'DataDataEntity', label: 'RegrParentA', model, streams: [] });
+      const dd2 = store.createPart({ type: 'DataDataEntity', label: 'RegrParentB', model, streams: [] });
+      const vmDd1 = store.createViewMember({ view: view.id, objectType: 'part', objectId: dd1.id, x: 60, y: 300 });
+      const vmDd2 = store.createViewMember({ view: view.id, objectType: 'part', objectId: dd2.id, x: 400, y: 300 });
+      app.beginConnect(tab, vmDd1.id, vmDd2.id, 0, 0);
+      const plainConn = store.doc.connectors.find(c => c.from === dd1.id && c.to === dd2.id);
+      const plainConnectorType = plainConn ? plainConn.connectorType : null;
+
+      // (3) FK becomes settable once a 'd' connector exists -- set fromAttribute and
+      // confirm the node's own rendering picks it up live
+      ddConn.fromAttribute = 'ra2';
+      app.recordAndRender();
+      const nodeTextAfterFk = document.querySelector(`[data-vm-id="${vm1.id}"]`).innerText;
+
+      // (3b) connectorType is now a real, editable select in the property panel
+      const connVm = store.viewMembersForView(view.id).find(v => v.objectType === 'connector' && v.objectId === ddConn.id);
+      tab.selection = new Set([connVm.id]);
+      app.render();
+      const sel = [...document.querySelectorAll('select')].find(s => s.id.includes('connectorType'));
+      const selReadonly = sel ? sel.disabled : null;
+      const selOptions = sel ? [...sel.options].map(o => o.value) : null;
+      // actually change it via the real select + change event, confirm it persists
+      let changedType = null;
+      if (sel) {
+        sel.value = 's';
+        sel.dispatchEvent(new Event('change'));
+        await new Promise(r => setTimeout(r, 30));
+        changedType = store.findConnector(ddConn.id).connectorType;
+      }
+
+      return {
+        nodeText, hasAttributesEl, hiddenWhenToggledOff,
+        ddConnectorType, plainConnectorType,
+        nodeTextAfterFk,
+        selReadonly, selOptions, changedType,
+      };
+    }
+    """)
+    problems = []
+    if 'id: INTEGER' not in result["nodeText"] or 'customer_id: INTEGER' not in result["nodeText"]:
+        problems.append(f"expected the node's own rendered text to include its attributes (name: dataType), got {result['nodeText']!r}")
+    if not result["hasAttributesEl"]:
+        problems.append("expected the node to have a .fnode-attributes element")
+    if not result["hiddenWhenToggledOff"]:
+        problems.append("expected chkShowAttributes=false to hide the node's own attribute list")
+    if result["ddConnectorType"] != 'd':
+        problems.append(f"expected dragging between two DataEntityDetails nodes to create a 'd' connector, got {result['ddConnectorType']!r}")
+    if result["plainConnectorType"] != 'c':
+        problems.append(f"expected dragging between two DataDataEntity nodes to stay a plain 'c' connector, got {result['plainConnectorType']!r}")
+    if 'customer_id (FK): INTEGER' not in result["nodeTextAfterFk"]:
+        problems.append(f"expected the node's own rendering to show the FK marker once the drag-created connector's fromAttribute was set, got {result['nodeTextAfterFk']!r}")
+    if result["selReadonly"] is not False or result["selOptions"] != ['c', 's', 'd']:
+        problems.append(f"expected connectorType to be a genuine, enabled select with options ['c','s','d'], got disabled={result['selReadonly']} options={result['selOptions']}")
+    if result["changedType"] != 's':
+        problems.append(f"expected changing the connectorType select to 's' to actually persist to the connector, got {result['changedType']!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "DataEntityDetails nodes render their own attribute list on the canvas (toggleable via chkShowAttributes), drag-to-connect infers connectorType 'd' between two DataEntityDetails (staying 'c' for other type pairs like DataDataEntity), and connectorType is now a genuinely editable select so FK relationships (and any other type change) are always reachable through the UI"
 
 
 def check_smart_check_composition_top_down(page):
@@ -6732,6 +7293,11 @@ CHECKS = [
     check_level_down_single_creates_new_part,
     check_level_down_downstream_external_placed_near_anchor,
     check_level_down_creates_composition_link,
+    check_level_down_reuses_existing_decomposition_across_viewmembers,
+    check_data_modeling_attributes_and_data_connector,
+    check_data_modeling_crowfoot_rendering,
+    check_data_modeling_menu_and_ddl_import_export,
+    check_data_modeling_node_attributes_and_manual_connector_creation,
     check_smart_check_composition_top_down,
     check_smart_check_composition_bottom_up,
     check_smart_check_node_composition_redirect,
