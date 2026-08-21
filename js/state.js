@@ -3,19 +3,21 @@
 /** Store.batchScriptCode's out-of-the-box default — the Script Console's Run button
  * calls whatever top-level `main()` this text defines (see App.promptScriptConsole,
  * main.js), which can in turn call any number of other functions defined alongside it.
- * This one gives a working starting point: main() calling two starter batch scripts in
- * sequence — BatchScript_QuickStart(), which builds a basic Business Functions
+ * This one gives a working starting point: main() calling three starter batch scripts
+ * in sequence — BatchScript_QuickStart(), which builds a basic Business Functions
  * organization view from the built-in "general" industry data end to end (ending with
- * the 3D View), then BatchScript_InsertSmartStreamExample(), which traces a Smart
- * Stream from data QuickStart itself just generated. Naming convention for future
- * additions: `BatchScript_<Name>`, so main() can pick and choose which one(s) to run
- * without renaming anything. */
+ * the 3D View); BatchScript_InsertSmartStreamExample(), which traces a Smart Stream
+ * from data QuickStart itself just generated; then BatchScript_RemapExample(), which
+ * remaps that same Smart Stream view with Edge Assignment and both layout-optimization
+ * checkboxes. Naming convention for future additions: `BatchScript_<Name>`, so main()
+ * can pick and choose which one(s) to run without renaming anything. */
 const DEFAULT_BATCH_SCRIPT_CODE = `// main() is what the Script Console's Run button actually calls. Define whatever
 // batch scripts you like below, and have main() call whichever one(s) you want to run.
 async function main() {
   await BatchScript_QuickStart();
   // Runs after BatchScript_QuickStart's own 3D View step above.
-  return BatchScript_InsertSmartStreamExample();
+  await BatchScript_InsertSmartStreamExample();
+  return BatchScript_RemapExample();
 }
 
 // A starter batch script: builds a basic Business Functions organization view from the
@@ -78,6 +80,47 @@ async function BatchScript_InsertSmartStreamExample() {
   app.recordAndRender();
   messageLog('Insert Smart Stream example done');
 }
+
+// Example: Remap called directly with explicit options (same shape the dialog builds
+// from the user's picks -- see promptRemap in main.js). Called by main() above, after
+// BatchScript_InsertSmartStreamExample -- runs on the same "Smart Stream Example" view
+// that script just built, so it has the Business Function/Business Process/Data
+// Entity/General Actor content these particular options are meant to show off. Uses
+// the 'layered' pattern (rows by hierarchical graph depth, not element-group/stream)
+// with both Minimize Crossings and Minimize Connector Length enabled -- see the
+// comment inside the function for exactly what that produces here.
+async function BatchScript_RemapExample() {
+  const view = store.findView('Smart Stream Example');
+  if (!view) { log('No "Smart Stream Example" view found -- run BatchScript_InsertSmartStreamExample first.'); return; }
+  // Reuse the current tab if it's already showing this view (the common case right
+  // after BatchScript_InsertSmartStreamExample, which leaves it active) instead of
+  // opening a redundant second tab on the same view.
+  let tab = store.activeTab();
+  if (!tab || tab.viewId !== view.id) {
+    tab = app.createCanvasTab(view);
+    app.switchToTab(tab.id);
+  }
+
+  // 'layered' rows nodes by hierarchical graph depth (BFS/longest-path from whatever
+  // has no incoming edges) instead of element-group/stream membership -- Production
+  // (no incoming edges) and both General Actor "Consumer" parts (also no incoming
+  // edges, since Consumer->Capability points AWAY from them) land on row 0 together
+  // automatically, with Business Process/Application Capability/Data Entity each
+  // getting their own row below in turn -- no Edge Assignment needed at all for this
+  // one; Minimize Crossings/Minimize Connector Length still handle the horizontal
+  // alignment (each Capability centers under its own Process, Production centers
+  // between its two Processes, the shared Production Schedule centers between its two
+  // connected Capabilities).
+  remap(app, tab, {
+    templateName: 'Enterprise',
+    pattern: 'layered',
+    minimizeCrossings: true,
+    minimizeConnectorLength: true,
+    sortKeys: ['connectionOrder', 'streamOrder', 'streamName', 'entityType', 'nodeLabel', 'elementGroup'],
+  });
+
+  messageLog('Remap example done');
+}
 `;
 
 /** Store.smartStreamPresets' out-of-the-box default — named, reusable Insert Smart
@@ -105,6 +148,21 @@ const DEFAULT_SMART_STREAM_PRESETS = [
     showTypes: ['ApplicationCapability', 'BusinessFunction', 'BusinessProcess', 'BusinessCapability', 'DataDataEntity', 'GeneralActor', 'TechnologyLogicalComponent'],
   },
 ];
+
+/** Store.remapPresets' out-of-the-box default — named, reusable Remap dialog settings
+ * (main.js's promptRemap), saved/loaded via that dialog's own Preset row. Same Local
+ * Settings persistence story as DEFAULT_SMART_STREAM_PRESETS above (cached to
+ * localStorage, bundled into File > Save/Load Local Settings, both handled in main.js)
+ * — deliberately never touches this.doc. Empty by default (no seeded example, unlike
+ * smartStreamPresets — nothing analogous to "Production" was asked for here); every
+ * preset the user saves lands in this same array via the dialog's Save As button.
+ * Each entry: {name, templateName, pattern, sortKeys, limitColumnsToView, filteredOnly,
+ * forcePreferRight, forceGroupRows, edgeAssignment: {[elementType]: 'top'|'bottom'|
+ * 'left'|'right'}, minimizeCrossings, minimizeConnectorLength}. edgeAssignment/
+ * minimizeCrossings/minimizeConnectorLength only affect the 'default'/'none' patterns
+ * (see commands.js's applyRemapLayout) — force-directed and section-based views ignore
+ * them entirely, same as sortKeys already does today. */
+const DEFAULT_REMAP_PRESETS = [];
 
 function newId() {
   return (crypto.randomUUID && crypto.randomUUID()) || `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -176,7 +234,7 @@ class Store {
       currentView: 'home',
       models: [{ modelName: 'Reference' }, { modelName: 'As-is' }, { modelName: 'To-be' }, { modelName: 'Gap' }],
       views: [
-        { id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, spacingScale: 1 },
+        { id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1 },
       ],
       parts: [],
       connectors: [],
@@ -246,6 +304,9 @@ class Store {
     // through Save/Load JSON. Defaults to one ready-made preset (DEFAULT_SMART_STREAM_
     // PRESETS, above) mirroring BatchScript_InsertSmartStreamExample.
     this.smartStreamPresets = DEFAULT_SMART_STREAM_PRESETS;
+    // Named Remap dialog presets (main.js's promptRemap) — same Local Settings
+    // persistence story as smartStreamPresets just above. Never touches this.doc.
+    this.remapPresets = DEFAULT_REMAP_PRESETS;
     // Filename of the last file that fully replaced store.doc (Save/Load JSON's own
     // "Load JSON" button, File > Load, File > Load Example) — NOT set by Import Data,
     // which merges additively into whatever's already loaded rather than replacing it.
@@ -286,7 +347,7 @@ class Store {
   addView(viewName, viewType = 'ff') {
     const id = viewName;
     if (this.findView(id)) return this.findView(id);
-    const view = { id, viewName, viewType, chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(this.nodeSizeMultiplier), remapSortKeys: null, spacingScale: 1 };
+    const view = { id, viewName, viewType, chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(this.nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1 };
     this.doc.views.push(view);
     this.ensureViewSections(view);
     return view;
@@ -693,7 +754,7 @@ function migrateDoc(obj, nodeSizeMultiplier = 1.2) {
     defaultModel: obj.defaultModel || (obj.models?.[0]?.modelName ?? 'Reference'),
     currentView: obj.currentView || 'home',
     models: obj.models && obj.models.length ? obj.models : [{ modelName: 'Reference' }],
-    views: obj.views && obj.views.length ? obj.views.map((v) => ({ ...v, viewType: v.viewType || 'ff', sections: v.sections ?? [], nodeWidth: v.nodeWidth ?? defaultNodeSize(nodeSizeMultiplier).nodeWidth, nodeHeight: v.nodeHeight ?? defaultNodeSize(nodeSizeMultiplier).nodeHeight, remapSortKeys: v.remapSortKeys ?? null, chkShowConnectorType: v.chkShowConnectorType ?? (v.chkShowConnectors ?? true), chkShowStreamType: v.chkShowStreamType ?? (v.chkShowConnectors ?? true), chkShowDescription: v.chkShowDescription ?? true, chkShowSimValues: v.chkShowSimValues ?? false, chkShowScriptBadge: v.chkShowScriptBadge ?? false, routingStyle: v.routingStyle ?? 'default', routingStyleStream: v.routingStyleStream ?? 'default', spacingScale: v.spacingScale ?? 1 })) : [{ id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, spacingScale: 1 }],
+    views: obj.views && obj.views.length ? obj.views.map((v) => ({ ...v, viewType: v.viewType || 'ff', sections: v.sections ?? [], nodeWidth: v.nodeWidth ?? defaultNodeSize(nodeSizeMultiplier).nodeWidth, nodeHeight: v.nodeHeight ?? defaultNodeSize(nodeSizeMultiplier).nodeHeight, remapSortKeys: v.remapSortKeys ?? null, remapLastOptions: v.remapLastOptions ?? null, chkShowConnectorType: v.chkShowConnectorType ?? (v.chkShowConnectors ?? true), chkShowStreamType: v.chkShowStreamType ?? (v.chkShowConnectors ?? true), chkShowDescription: v.chkShowDescription ?? true, chkShowSimValues: v.chkShowSimValues ?? false, chkShowScriptBadge: v.chkShowScriptBadge ?? false, routingStyle: v.routingStyle ?? 'default', routingStyleStream: v.routingStyleStream ?? 'default', spacingScale: v.spacingScale ?? 1 })) : [{ id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1 }],
     parts: (obj.parts || []).map((p) => ({
       id: p.id, type: p.type, label: p.label ?? p.id, rawLabel: p.rawLabel ?? p.label ?? p.id,
       model: p.model ?? (obj.defaultModel || 'Reference'),

@@ -22,6 +22,7 @@ Adding a new check: write a function `check_something(page) -> (bool, str)` retu
 small, fast, and easy to tell apart in the failure output.
 """
 import json
+import math
 import os
 import subprocess
 import sys
@@ -97,7 +98,7 @@ def check_remap_patterns(page):
         modelName: store.defaultModel, viewName: view.id, silent: true,
       });
       const results = {};
-      for (const pattern of ['default', 'none', 'force']) {
+      for (const pattern of ['default', 'none', 'layered', 'force']) {
         results[pattern] = !!commands.applyRemapLayout(app, view.id, { pattern });
       }
       return results;
@@ -106,7 +107,235 @@ def check_remap_patterns(page):
     failed = [p for p, ok in result.items() if not ok]
     if failed:
         return False, f"patterns failed: {failed}"
-    return True, "default/none/force Remap patterns all completed"
+    return True, "default/none/layered/force Remap patterns all completed"
+
+
+def check_remap_layered_pattern(page):
+    """Regression guard for applyRemapLayout's pattern:'layered' option and its
+    computeLayerAssignment helper (commands.js) -- the row-assignment rule follows
+    directed graph structure (hop-distance from a root) instead of element-group/stream
+    membership. Reported directly, given the "Smart Stream Example" script data: "The
+    cleanest result ... would be (in a 4 x 4 grid): General Actor ...; Business
+    Function Production; empty; General Actor ...  Row 2: Business Capability ...;
+    Business Process ...; Business Process ...; Business Capability ... Row 3: ...
+    Application Capability ... Row 4: Data Entity ... Is there any algorithm ... that
+    could result in this layout?" -- confirmed "yes" to building it. The real data's
+    Business Capability and Business Process types are directly connected by a real
+    edge (Capability -> Process) AND each is also reachable from a topmost root via its
+    OWN direct edge (Actor -> Capability, Function -> Process) -- so the core design
+    decision this test exists to prove is SHORTEST-path layering (a node's row is the
+    FEWEST hops any real edge justifies), not longest-path/topological-sort layering:
+    the latter would obey the Capability -> Process edge as a hard constraint and push
+    Process one row below Capability, splitting a pair the user wanted on the SAME row.
+    Fixture mirrors that exact shape with generic types: two roots (X, Y) each with
+    their own direct edge to a distinct middle node (M via X, N via Y), plus a genuine
+    N -> M edge (so M is ALSO reachable the long way, via N) -- shortest-path layering
+    must still place M and N on the SAME row (both 1 hop from a root), while
+    longest-path layering would incorrectly split them. Also proves robustness against
+    DyCAD's dual-connector convention (a real, common 2-node cycle: both M -> N and N
+    -> M existing as separate connectors) -- BFS's "already visited" check makes a
+    later, longer edge back into an already-layered node a no-op, so this must complete
+    without hanging or producing a nonsensical result. Finally confirms Edge
+    Assignment, Minimize Crossings, and Minimize Connector Length -- all pre-existing
+    options -- still function normally with pattern:'layered' (unlike 'force', which
+    ignores them; see check_remap_edge_assignment_and_layout_optimization)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const mk = (type, label) => store.createPart({ type, label, model, streams: [] });
+      const conn = (from, to) => store.createConnector({ from: from.id, to: to.id, connectorType: 'c', model, relationship: 'Association' });
+      const freshView = () => {
+        const view = store.addView('RegrLayered_' + Date.now(), 'ff');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        return { view, tab };
+      };
+      const place = (view, parts, conns) => {
+        const vmByPart = new Map();
+        for (const p of parts) { const vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: p.id, x: 0, y: 0 }); vmByPart.set(p.id, vm); }
+        for (const c of conns) { store.createViewMember({ view: view.id, objectType: 'connector', objectId: c.id, fromVmId: vmByPart.get(c.from).id, toVmId: vmByPart.get(c.to).id }); }
+        return vmByPart;
+      };
+      const rowsOf = (view, vmByPart, parts) => {
+        const vms = store.viewMembersForView(view.id).filter(v => v.objectType === 'part');
+        const byId = new Map(vms.map(v => [v.id, v]));
+        return Object.fromEntries(parts.map(p => [p.label, Math.round(byId.get(vmByPart.get(p.id).id).y)]));
+      };
+
+      // --- Fixture 1: shortest-path proof, plain DAG (no cycle) ---
+      const { view: v1 } = freshView();
+      const x = mk('BusinessFunction', 'RootX'), y = mk('GeneralActor', 'RootY');
+      const m = mk('BusinessProcess', 'M'), n = mk('BusinessCapability', 'N');
+      const c1 = conn(x, m), c2 = conn(y, n), c3 = conn(n, m); // N -> M: the "long path" edge
+      const vmByPart1 = place(v1, [x, y, m, n], [c1, c2, c3]);
+      commands.applyRemapLayout(app, v1.id, { pattern: 'layered', sortKeys: ['nodeLabel'] });
+      const rows1 = rowsOf(v1, vmByPart1, [x, y, m, n]);
+
+      // --- Fixture 2: same shape, but with the reciprocal edge too (dual-connector
+      // convention: a genuine 2-node cycle between M and N) ---
+      const { view: v2 } = freshView();
+      const x2 = mk('BusinessFunction', 'RootX'), y2 = mk('GeneralActor', 'RootY');
+      const m2 = mk('BusinessProcess', 'M'), n2 = mk('BusinessCapability', 'N');
+      const d1 = conn(x2, m2), d2 = conn(y2, n2), d3 = conn(n2, m2), d4 = conn(m2, n2); // both directions
+      const vmByPart2 = place(v2, [x2, y2, m2, n2], [d1, d2, d3, d4]);
+      let cycleThrew = false, cycleErr = '';
+      try {
+        commands.applyRemapLayout(app, v2.id, { pattern: 'layered', sortKeys: ['nodeLabel'] });
+      } catch (e) { cycleThrew = true; cycleErr = e.message; }
+      const rows2 = rowsOf(v2, vmByPart2, [x2, y2, m2, n2]);
+
+      // --- Fixture 3: Edge Assignment + Minimize Crossings + Minimize Connector Length
+      // all combined with pattern:'layered' -- just needs to run without error and
+      // actually pin the assigned type to its single band. ---
+      const { view: v3 } = freshView();
+      const x3 = mk('BusinessFunction', 'RootX3'), m3 = mk('BusinessProcess', 'M3'), e3 = mk('DataDataEntity', 'E3');
+      const c31 = conn(x3, m3), c32 = conn(m3, e3);
+      const vmByPart3 = place(v3, [x3, m3, e3], [c31, c32]);
+      let optionsThrew = false, optionsErr = '';
+      try {
+        commands.applyRemapLayout(app, v3.id, {
+          pattern: 'layered', sortKeys: ['nodeLabel'],
+          edgeAssignment: { DataDataEntity: 'bottom' },
+          minimizeCrossings: true, minimizeConnectorLength: true,
+        });
+      } catch (e) { optionsThrew = true; optionsErr = e.message; }
+      const vms3 = store.viewMembersForView(v3.id).filter(v => v.objectType === 'part');
+      const eVm = vms3.find(v => store.findPart(v.objectId).id === e3.id);
+      const others3 = vms3.filter(v => v.id !== eVm.id);
+      const entityAtBottom = others3.every(v => v.y < eVm.y);
+
+      return { rows1, rows2, cycleThrew, cycleErr, optionsThrew, optionsErr, entityAtBottom };
+    }
+    """)
+    problems = []
+    r1 = result["rows1"]
+    if r1["RootX"] != r1["RootY"]:
+        problems.append(f"expected both roots on the same (topmost) row, got RootX={r1['RootX']} RootY={r1['RootY']}")
+    if r1["M"] != r1["N"]:
+        problems.append(f"shortest-path layering should place M and N on the SAME row (both 1 hop from a root) despite the real N -> M edge -- longest-path layering would incorrectly split them; got M={r1['M']} N={r1['N']}")
+    if r1["M"] <= r1["RootX"]:
+        problems.append(f"expected M/N strictly below the roots' row, got roots={r1['RootX']} M={r1['M']}")
+    if result["cycleThrew"]:
+        problems.append(f"pattern:'layered' threw on a genuine 2-node cycle (dual-connector convention): {result['cycleErr']}")
+    r2 = result["rows2"]
+    if r2["M"] != r2["N"]:
+        problems.append(f"with the reciprocal M<->N edge added, expected the same same-row result as the acyclic fixture, got M={r2['M']} N={r2['N']}")
+    if result["optionsThrew"]:
+        problems.append(f"Edge Assignment + Minimize Crossings + Minimize Connector Length threw with pattern:'layered': {result['optionsErr']}")
+    if not result["entityAtBottom"]:
+        problems.append("expected edgeAssignment: {DataDataEntity: 'bottom'} to still pin the entity to the single bottommost row with pattern:'layered'")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "pattern:'layered' uses shortest-path (not longest-path) layering, handles a genuine 2-node cycle without error, and still honors Edge Assignment/Minimize Crossings/Minimize Connector Length"
+
+
+def check_remap_crossing_minimization_finds_global_optimum(page):
+    """Regression guard for minimizeRowCrossings (commands.js) -- shared by the
+    'default'/'none'/'layered' patterns' Minimize Crossings option. Reported directly,
+    after already trying every minimizeCrossings/minimizeConnectorLength on/off
+    combination without success: "did not produce desired result. Note turning both
+    off results in connectors behind nodes ... manually editing is not desired option
+    due to volume of views." Root cause diagnosed via hand-computed crossing counts on
+    the actual reported data: the OLD algorithm (single downward-first barycenter sweep
+    + one transpose pass, scoring only INTER-row edge length) could converge to an
+    ordering that's genuinely tied on raw crossing count with a better one, then never
+    discover or prefer the better tie -- specifically Business Function (connects to
+    BOTH Business Processes below) left at one END of its row instead of centered
+    between them, and Business Capability/Business Process (a same-row pair once
+    'layered' merges them onto one row -- see computeLayerAssignment) stretched apart
+    into a "grouped" CC-PP order instead of the shorter-overall "interleaved" CPPC
+    order, because scoring only counted INTER-row length and never the real, same-row
+    Capability -> Process edge's own length. Fixed three ways: (1) minimizeRowCrossings
+    now runs the full barycenter+transpose search from TWO starting points (downward-
+    first and upward-first) and keeps whichever converges better, since a single
+    starting direction can get stuck in a local optimum reachable only from the other;
+    (2) its scoring now includes INTRA-row edge length (previously only inter-row); (3)
+    ties on raw crossing count are broken by (now-complete) total length. Fixture is
+    the EXACT real topology from the reported "Smart Stream Example" data (hand-built
+    directly via createPart/createConnector -- not the full generateIndustry/
+    insertSmartStream pipeline, so this runs in milliseconds and doesn't depend on the
+    "general" industry dataset staying the same shape), confirmed via direct diagnostic
+    testing to reproduce the bug against the OLD algorithm with these exact sortKeys
+    (BatchScript_RemapExample's own) — a synthetic 2- and 3-row generic fixture tried
+    first was NOT sufficient to reproduce it (this exact 4-row depth, with the middle
+    row pulled from both above AND below simultaneously, is what actually matters)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const mk = (type, label) => store.createPart({ type, label, model, streams: [] });
+      const conn = (from, to, relationship) => store.createConnector({ from: from.id, to: to.id, connectorType: 'c', model, relationship });
+
+      const view = store.addView('RegrCrossTiebreak_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const fn = mk('BusinessFunction', 'Production');
+      const actorMfg = mk('GeneralActor', 'Manufacturing Operations Consumer');
+      const actorProd = mk('GeneralActor', 'Production Planning Consumer');
+      const capMfg = mk('BusinessCapability', 'Manage Manufacturing Operations');
+      const capProd = mk('BusinessCapability', 'Manage Production Planning');
+      const procMfg = mk('BusinessProcess', 'Manufacturing Operations Process');
+      const procProd = mk('BusinessProcess', 'Production Planning Process');
+      const appMfg = mk('ApplicationCapability', 'Manage Manufacturing Operations');
+      const appProd = mk('ApplicationCapability', 'Manage Production Planning');
+      const entBom = mk('DataDataEntity', 'Bill of Materials');
+      const entSchedule = mk('DataDataEntity', 'Production Schedule');
+      const entDemand = mk('DataDataEntity', 'Demand Forecast');
+
+      const conns = [
+        conn(fn, procMfg, 'Realization'), conn(fn, procProd, 'Realization'),
+        conn(capMfg, procMfg, 'Realization'), conn(capProd, procProd, 'Realization'),
+        conn(procMfg, appMfg, 'Association'), conn(procProd, appProd, 'Association'),
+        conn(appMfg, entSchedule, 'Realization'), conn(appMfg, entBom, 'Realization'),
+        conn(appProd, entSchedule, 'Realization'), conn(appProd, entDemand, 'Realization'),
+        conn(actorMfg, capMfg, 'Flow'), conn(actorProd, capProd, 'Flow'),
+      ];
+      const vmByPart = new Map();
+      const allParts = [fn, actorMfg, actorProd, capMfg, capProd, procMfg, procProd, appMfg, appProd, entBom, entSchedule, entDemand];
+      for (const p of allParts) vmByPart.set(p.id, store.createViewMember({ view: view.id, objectType: 'part', objectId: p.id, x: 0, y: 0 }));
+      for (const c of conns) store.createViewMember({ view: view.id, objectType: 'connector', objectId: c.id, fromVmId: vmByPart.get(c.from).id, toVmId: vmByPart.get(c.to).id });
+
+      // Exact sortKeys BatchScript_RemapExample uses -- confirmed via direct testing
+      // to be the specific starting order that exposed the bug.
+      commands.applyRemapLayout(app, view.id, {
+        pattern: 'layered', minimizeCrossings: true,
+        sortKeys: ['connectionOrder', 'streamOrder', 'streamName', 'entityType', 'nodeLabel', 'elementGroup'],
+      });
+
+      const vms = store.viewMembersForView(view.id).filter(v => v.objectType === 'part');
+      const byLabel = {};
+      for (const vm of vms) {
+        const part = store.findPart(vm.objectId);
+        byLabel[part.type + ':' + part.label] = { x: vm.x, y: Math.round(vm.y) };
+      }
+      const row0 = ['GeneralActor:Manufacturing Operations Consumer', 'BusinessFunction:Production', 'GeneralActor:Production Planning Consumer']
+        .sort((a, b) => byLabel[a].x - byLabel[b].x);
+      const row1 = ['BusinessCapability:Manage Manufacturing Operations', 'BusinessProcess:Manufacturing Operations Process', 'BusinessProcess:Production Planning Process', 'BusinessCapability:Manage Production Planning']
+        .sort((a, b) => byLabel[a].x - byLabel[b].x);
+      const rowCount = new Set(Object.values(byLabel).map(p => p.y)).size;
+      return { row0, row1, rowCount };
+    }
+    """)
+    fn_key = 'BusinessFunction:Production'
+    problems = []
+    if result["rowCount"] != 4:
+        problems.append(f"expected exactly 4 rows, got {result['rowCount']}")
+    if result["row0"][1] != fn_key:
+        problems.append(f"expected Business Function centered in row 0 (between the two General Actors), got {result['row0']}")
+    mfg_cap, mfg_proc = 'BusinessCapability:Manage Manufacturing Operations', 'BusinessProcess:Manufacturing Operations Process'
+    prod_cap, prod_proc = 'BusinessCapability:Manage Production Planning', 'BusinessProcess:Production Planning Process'
+    interleaved_options = [
+        [mfg_cap, mfg_proc, prod_proc, prod_cap], [prod_cap, prod_proc, mfg_proc, mfg_cap],
+    ]
+    if result["row1"] not in interleaved_options:
+        problems.append(f"expected row 1 interleaved as Capability/Process/Process/Capability (mirror-symmetric), got {result['row1']} -- a 'grouped' Capability/Capability/Process/Process order means the intra-row-length tie-break regressed")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "minimizeRowCrossings' two-start search + intra-row-length tie-break correctly centers Business Function between its two Processes and interleaves Business Capability/Process instead of grouping them, on the exact real 'Smart Stream Example' topology and sortKeys"
 
 
 def check_force_directed_no_runaway_drift(page):
@@ -591,10 +820,27 @@ def check_batch_script_quickstart(page):
     BatchScript_InsertSmartStreamExample runs next (main() awaits QuickStart first, so
     this genuinely happens after the 3D View step, not concurrently), tracing from the
     "Production" Business Function QuickStart's own "general" industry data creates into
-    a new "Smart Stream Example" freeform view/tab, which ends up the ACTIVE tab once
-    main() finishes (not the 3D tab — proving the second script really did run
-    afterward, switching tabs again, rather than main() silently stopping after
-    QuickStart)."""
+    a new "Smart Stream Example" freeform view/tab. Then, reported directly (this
+    session's own layout report): "The cleanest result of drawing the script resulting
+    data 'Smart Stream Example' ... would be (in a 4 x 4 grid): General Actor
+    Manufacturing Operation Consumer; Business Function Production; empty; General
+    Actor Production Planning. Row 2: Business Capability Manage Manufacturing
+    Operations; Business Process Manufacturing Operation Process; Business Process
+    Production Planning Process; Business Capability Manage Production Planning. Row
+    3: ... Application Capability ... Row 4: Data Entity ..." — BatchScript_RemapExample
+    now uses pattern:'layered' (hierarchical rows by graph hop-distance, computed via
+    computeLayerAssignment in commands.js — see its own doc comment) instead of
+    'default' with edgeAssignment: BusinessFunction/GeneralActor land on layer 0 as
+    true graph roots (no pinning needed — "turning off the requirement of general
+    actor" from the original report is satisfied for free), and — the whole reason
+    'layered' uses shortest-path rather than longest-path layering — Business
+    Capability and Business Process end up on the SAME row (both are exactly 1 hop
+    from a layer-0 root: Capability from its General Actor, Process from Production
+    directly) even though a real Capability -> Process edge also exists, matching the
+    requested layout exactly. Reuses the same "Smart Stream Example" tab (not opening
+    a redundant second one), which ends up the ACTIVE tab once main() finishes (not
+    the 3D tab — proving the later scripts really did run afterward, rather than
+    main() silently stopping early)."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -616,7 +862,21 @@ def check_batch_script_quickstart(page):
       const genActor = store.doc.parts.find(p => p.type === 'BusinessCapability');
       const view3dTab = store.tabs.find(t => t.type === '3d');
       const streamView = store.findView('Smart Stream Example');
-      const streamTab = streamView ? store.tabs.find(t => t.viewId === streamView.id) : null;
+      const streamTabsForView = streamView ? store.tabs.filter(t => t.viewId === streamView.id) : [];
+
+      const streamVms = streamView ? store.viewMembersForView(streamView.id).filter(v => v.objectType === 'part') : [];
+      // Group by row (y) so the 'layered' pattern's hierarchical structure can be
+      // checked directly -- which TYPES share a row matters here, not just which type
+      // sits at an extreme edge (that was the old edgeAssignment-based check).
+      const typesByRow = {};
+      for (const vm of streamVms) {
+        const part = store.findPart(vm.objectId);
+        const y = Math.round(vm.y);
+        if (!typesByRow[y]) typesByRow[y] = new Set();
+        typesByRow[y].add(part.type);
+      }
+      const rowYs = Object.keys(typesByRow).map(Number).sort((a, b) => a - b);
+      const rowTypeSets = rowYs.map(y => [...typesByRow[y]].sort());
 
       return {
         viewCreated: !!view,
@@ -626,11 +886,15 @@ def check_batch_script_quickstart(page):
         zoom: tab ? tab.viewport.zoom : null,
         industryGenerated: !!genActor,
         messageLogHasDone: store.messageLog.some(e => JSON.stringify(e).includes('Done')),
+        messageLogHasRemapDone: store.messageLog.some(e => JSON.stringify(e).includes('Remap example done')),
         consoleOutput,
         view3dOpened: !!view3dTab,
         streamExampleViewCreated: !!streamView,
-        streamExamplePartLabels: streamView ? store.viewMembersForView(streamView.id).filter(v => v.objectType === 'part').map(v => store.findPart(v.objectId).label) : [],
-        streamExampleTabIsActive: streamTab ? store.activeTabId === streamTab.id : false,
+        streamExamplePartLabels: streamVms.map(vm => store.findPart(vm.objectId).label),
+        streamExampleTabIsActive: streamTabsForView.length ? store.activeTabId === streamTabsForView[0].id : false,
+        streamExampleSingleTab: streamTabsForView.length === 1,
+        rowCount: rowYs.length,
+        rowTypeSets,
       };
     }
     """)
@@ -657,10 +921,29 @@ def check_batch_script_quickstart(page):
     if sorted(result["streamExamplePartLabels"]) != expected_stream_labels:
         problems.append(f"expected BatchScript_InsertSmartStreamExample to trace the full chain from 'Production', got {sorted(result['streamExamplePartLabels'])}")
     if not result["streamExampleTabIsActive"]:
-        problems.append("expected the 'Smart Stream Example' tab (not the 3D tab) to be the ACTIVE tab once main() finishes -- proving InsertSmartStreamExample genuinely ran AFTER QuickStart's own 3D View step, not that main() stopped early")
+        problems.append("expected the 'Smart Stream Example' tab to be the ACTIVE tab once main() finishes -- proving the later scripts genuinely ran afterward, not that main() stopped early")
+    if not result["streamExampleSingleTab"]:
+        problems.append("expected exactly ONE tab open on the 'Smart Stream Example' view -- BatchScript_RemapExample should reuse InsertSmartStreamExample's own tab, not open a redundant second one")
+    if not result["messageLogHasRemapDone"]:
+        problems.append("expected 'Remap example done' written to the persistent Message Log -- BatchScript_RemapExample should have run")
+    # pattern:'layered' row structure: Function+Actors (roots, layer 0), then Capability
+    # and Process TOGETHER on one row (both exactly 1 hop from a layer-0 root, even
+    # though a real Capability -> Process edge also exists -- shortest-path layering,
+    # not longest-path, is what merges them; see computeLayerAssignment's doc comment
+    # in commands.js), then Application Capability, then Data Entity.
+    expected_row_type_sets = [
+        sorted(['BusinessFunction', 'GeneralActor']),
+        sorted(['BusinessCapability', 'BusinessProcess']),
+        sorted(['ApplicationCapability']),
+        sorted(['DataDataEntity']),
+    ]
+    if result["rowCount"] != 4:
+        problems.append(f"expected BatchScript_RemapExample's pattern:'layered' to produce exactly 4 rows, got {result['rowCount']} ({result['rowTypeSets']})")
+    elif result["rowTypeSets"] != expected_row_type_sets:
+        problems.append(f"expected row type groupings {expected_row_type_sets} (Business Capability and Business Process sharing row 2), got {result['rowTypeSets']}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "main() (run via the real Script Console UI) runs BatchScript_QuickStart (generates the default industry, builds a Business Functions org view, adjusts the mof section's row count, zooms to 60%, opens the 3D View, logs 'Done') then BatchScript_InsertSmartStreamExample afterward, ending with the Smart Stream Example tab active"
+    return True, "main() (run via the real Script Console UI) runs BatchScript_QuickStart, BatchScript_InsertSmartStreamExample, then BatchScript_RemapExample in sequence, ending with the Smart Stream Example tab (reused, not duplicated) active and pattern:'layered' correctly grouping Business Capability with Business Process on one shared row"
 
 
 def check_script_console_remap_and_smart_check_bindings(page):
@@ -2619,13 +2902,15 @@ def check_stream_template_shared_default(page):
 
 
 def check_remap_options_persist_across_views(page):
-    """Regression guard: Remap's own options (pattern, limit-columns, filtered-only, the
-    two force-directed sub-options, and sort priority order) should be remembered as
-    user-level defaults across ALL views, not just the specific view they were set on —
-    so even a brand-new view's Remap dialog starts from them, surviving a page reload.
-    Distinct from (and lower-priority than) view.remapSortKeys, which remembers a
-    specific view's own last-used order and still wins once that view has its own
-    history — this only checks the fallback a fresh view gets."""
+    """Regression guard: Remap's own options (pattern, limit-columns, filtered-only,
+    minimize connector crossings, minimize connector length, the two force-directed
+    sub-options, and sort priority order) should be remembered as user-level defaults
+    across ALL views, not just the
+    specific view they were set on — so even a brand-new view's Remap dialog starts
+    from them, surviving a page reload. Distinct from (and lower-priority than)
+    view.remapSortKeys, which remembers a specific view's own last-used order and still
+    wins once that view has its own history — this only checks the fallback a fresh
+    view gets."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -2646,6 +2931,8 @@ def check_remap_options_persist_across_views(page):
       document.getElementById('rm-pattern').dispatchEvent(new Event('change', { bubbles: true }));
       document.getElementById('rm-limit').checked = true;
       document.getElementById('rm-filtered-only').checked = true;
+      document.getElementById('rm-minimize-crossings').checked = true;
+      document.getElementById('rm-minimize-length').checked = true;
       document.getElementById('rm-force-prefer-right').checked = true;
       document.getElementById('rm-force-group-rows').checked = true;
       // move the first sort-priority item down one slot, so the new first item is
@@ -2677,6 +2964,8 @@ def check_remap_options_persist_across_views(page):
         pattern: document.getElementById('rm-pattern').value,
         limit: document.getElementById('rm-limit').checked,
         filteredOnly: document.getElementById('rm-filtered-only').checked,
+        minimizeCrossings: document.getElementById('rm-minimize-crossings').checked,
+        minimizeConnectorLength: document.getElementById('rm-minimize-length').checked,
         forcePreferRight: document.getElementById('rm-force-prefer-right').checked,
         forceGroupRows: document.getElementById('rm-force-group-rows').checked,
         firstKey: document.querySelector('#rm-priority-list li')?.dataset.key,
@@ -2689,12 +2978,589 @@ def check_remap_options_persist_across_views(page):
     if result2["pattern"] != "force": problems.append(f"pattern default should be 'force', got {result2['pattern']!r}")
     if not result2["limit"]: problems.append("'Limit columns to view' should default checked")
     if not result2["filteredOnly"]: problems.append("'Only remap filtered nodes' should default checked")
+    if not result2["minimizeCrossings"]: problems.append("'Minimize connector crossings' should default checked")
+    if not result2["minimizeConnectorLength"]: problems.append("'Minimize connector length' should default checked")
     if not result2["forcePreferRight"]: problems.append("'Prefer placing connected nodes to the right' should default checked")
     if not result2["forceGroupRows"]: problems.append("'Only start a new row when a node is a new hop away' should default checked")
     if result2["firstKey"] != result["reorderedFirstKey"]: problems.append(f"sort priority order should default to the previously-reordered order (first key {result['reorderedFirstKey']!r}), got {result2['firstKey']!r}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result2})"
-    return True, "Remap's options (pattern, checkboxes, sort order) persisted as user-level defaults onto a brand-new view, surviving a reload"
+    return True, "Remap's options (pattern, checkboxes including minimize crossings and minimize connector length, sort order) persisted as user-level defaults onto a brand-new view, surviving a reload"
+
+
+def check_remap_edge_assignment_and_layout_optimization(page):
+    """Regression guard for commands.js's applyRemapLayout Edge Assignment, Minimize
+    Crossings, and Minimize Connector Length options ('default'/'none' patterns only).
+    Reported directly: "let's add similar load/save settings for remap, with
+    additional options for laying out the nodes. Specifically the ability to specify
+    what goes on top of view, bottom, etc" and (on scope) "business actors on left,
+    business functions on top, data entities on bottom, ordered by connector
+    order/natural flow... Cleanly separate streams or clusters/groups with minimal
+    connectors crossing", then later: "add 'minimize connector length' and move nodes
+    to similar positions but closer." Calls applyRemapLayout directly, covering: (1)
+    edgeAssignment pulls BusinessActor to the single leftmost column, BusinessFunction
+    to the single topmost row, and DataDataEntity to the single bottommost row, with
+    the remaining (unassigned) BusinessProcess type left in its normal middle grid,
+    strictly between the top and bottom bands vertically; (2) edge-band members are
+    ordered by the chosen sortKeys (nodeLabel here, with labels deliberately reversed
+    from creation order so the assertion distinguishes "ordered by sortKeys" from
+    "ordered by creation/insertion order") rather than arbitrarily; (3)
+    minimizeCrossings, run on a deliberately crossing pattern (two middle-grid rows
+    connected so the naive nodeLabel-sorted column order crosses), actually reorders
+    columns in the second row to eliminate the crossing -- verified by literal
+    crossing-count comparison with vs. without the option, not just "some position
+    changed"; (4) minimizeConnectorLength, run on a single unconstrained node (a
+    lone occupant of its own row, so no same-row neighbor blocks it from moving) whose
+    only connection sits at the far side of a 3-node row below, actually slides it to
+    align directly with that connection -- verified by literal Euclidean distance
+    reduction, not just "some position changed" -- while leaving every OTHER node's
+    position completely untouched; (4b) a REAL bug found via user testing:
+    minimizeConnectorLength originally only touched the middle grid, so a part pinned
+    via Edge Assignment (e.g. Business Function on Top) never moved even when
+    connected to an off-center middle-grid node, defeating the "shorter connector"
+    promise for anything pinned to an edge -- verified an edge-band member's cross
+    axis now aligns with its middle-grid connection too; (6) a SECOND real bug found
+    via user testing, in the shipped BatchScript_RemapExample's own output: an edge
+    band's ORDER came only from sortKeys, never from crossing minimization, so
+    alphabetical order could still disagree with what the middle grid needs and
+    produce a genuine visible crossing even with Minimize Crossings checked -- two
+    middle-grid capabilities each connected to one exclusive Data Entity plus a THIRD,
+    shared entity, with entity labels chosen so alphabetical order crosses; verified
+    minimizeCrossings:true now reorders the band (not just the middle grid) so the
+    shared entity lands between its two exclusive siblings, eliminating the crossing --
+    exactly the "Bill of Materials / Demand Forecast / Production Schedule" case
+    reported; (5) sectioned/force patterns ignore all three options entirely without
+    erroring."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const mk = (type, label) => store.createPart({ type, label, model, streams: [] });
+      const conn = (from, to) => store.createConnector({ from: from.id, to: to.id, connectorType: 'c', model, relationship: 'Association' });
+      const freshView = (name, viewType) => {
+        const view = store.addView(name + '_' + Date.now(), viewType || 'ff');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        return { view, tab };
+      };
+      const placeAll = (view, parts, conns) => {
+        const vmByPart = new Map();
+        for (const p of parts) { const vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: p.id, x: 0, y: 0 }); vmByPart.set(p.id, vm); }
+        for (const c of conns) {
+          const fromVm = vmByPart.get(c.from), toVm = vmByPart.get(c.to);
+          if (fromVm && toVm) store.createViewMember({ view: view.id, objectType: 'connector', objectId: c.id, fromVmId: fromVm.id, toVmId: toVm.id });
+        }
+      };
+
+      const out = {};
+
+      // 1+2) Edge assignment placement + ordering within a band. Labels chosen so
+      // alphabetical (nodeLabel) order is the OPPOSITE of creation order below, so the
+      // ordering assertion actually distinguishes "ordered by sortKeys" from "ordered
+      // by creation/insertion order".
+      const actorZ = mk('BusinessActor', 'ActorZ'), actorA = mk('BusinessActor', 'ActorA');
+      const fn1 = mk('BusinessFunction', 'Fn1'), fn2 = mk('BusinessFunction', 'Fn2');
+      const proc1 = mk('BusinessProcess', 'Proc1'), proc2 = mk('BusinessProcess', 'Proc2');
+      const de1 = mk('DataDataEntity', 'De1'), de2 = mk('DataDataEntity', 'De2');
+      conn(actorZ, fn2); conn(actorA, fn1);
+      conn(fn1, proc1); conn(fn2, proc2);
+      conn(proc1, de1); conn(proc2, de2);
+      const { view: v1 } = freshView('RegrRemapEdge');
+      placeAll(v1, [actorZ, actorA, fn1, fn2, proc1, proc2, de1, de2], store.doc.connectors);
+      commands.applyRemapLayout(app, v1.id, {
+        pattern: 'default', sortKeys: ['nodeLabel'],
+        edgeAssignment: { BusinessActor: 'left', BusinessFunction: 'top', DataDataEntity: 'bottom' },
+      });
+      const posOf = (view, label) => {
+        const vm = store.viewMembersForView(view.id).find(v => v.objectType === 'part' && store.findPart(v.objectId)?.label === label);
+        return vm ? { x: vm.x, y: vm.y } : null;
+      };
+      const pActorZ = posOf(v1, 'ActorZ'), pActorA = posOf(v1, 'ActorA');
+      const pFn1 = posOf(v1, 'Fn1'), pFn2 = posOf(v1, 'Fn2');
+      const pProc1 = posOf(v1, 'Proc1'), pProc2 = posOf(v1, 'Proc2');
+      const pDe1 = posOf(v1, 'De1'), pDe2 = posOf(v1, 'De2');
+      const allY = [pActorZ, pActorA, pFn1, pFn2, pProc1, pProc2, pDe1, pDe2].map(p => p.y);
+      const allX = [pActorZ, pActorA, pFn1, pFn2, pProc1, pProc2, pDe1, pDe2].map(p => p.x);
+      out.actorsShareMinX = pActorZ.x === pActorA.x && pActorZ.x === Math.min(...allX);
+      out.fnsShareMinY = pFn1.y === pFn2.y && pFn1.y === Math.min(...allY);
+      out.desShareMaxY = pDe1.y === pDe2.y && pDe1.y === Math.max(...allY);
+      out.procsBetween = pProc1.y > Math.min(...allY) && pProc1.y < Math.max(...allY) && pProc2.y === pProc1.y;
+      // nodeLabel-driven band ordering: 'ActorA' (created SECOND) should still sort
+      // before 'ActorZ' (created FIRST) in the left band's column position, since the
+      // band is ordered by the sortKeys (here just nodeLabel), not creation order.
+      out.actorBandOrderMatchesSortKeys = pActorA.y < pActorZ.y;
+
+      // 3) crossing minimization: two middle rows with a deliberate crossing pattern.
+      const procX = mk('BusinessProcess', 'ProcX'), procY = mk('BusinessProcess', 'ProcY');
+      const capA = mk('ApplicationCapability', 'CapA'), capB = mk('ApplicationCapability', 'CapB');
+      const crossConns = [
+        store.createConnector({ from: procX.id, to: capB.id, connectorType: 'c', model, relationship: 'Association' }),
+        store.createConnector({ from: procY.id, to: capA.id, connectorType: 'c', model, relationship: 'Association' }),
+      ];
+      const { view: v2 } = freshView('RegrRemapCrossOff');
+      placeAll(v2, [procX, procY, capA, capB], crossConns);
+      commands.applyRemapLayout(app, v2.id, { pattern: 'default', sortKeys: ['nodeLabel'], minimizeCrossings: false });
+      out.withoutMin = { procX: posOf(v2, 'ProcX'), procY: posOf(v2, 'ProcY'), capA: posOf(v2, 'CapA'), capB: posOf(v2, 'CapB') };
+
+      const { view: v3 } = freshView('RegrRemapCrossOn');
+      placeAll(v3, [procX, procY, capA, capB], crossConns);
+      commands.applyRemapLayout(app, v3.id, { pattern: 'default', sortKeys: ['nodeLabel'], minimizeCrossings: true });
+      out.withMin = { procX: posOf(v3, 'ProcX'), procY: posOf(v3, 'ProcY'), capA: posOf(v3, 'CapA'), capB: posOf(v3, 'CapB') };
+
+      // 4) connector-length minimization: a single unconstrained node (Row1, alone --
+      // no same-row neighbor to block it) whose only connection is to the RIGHTMOST of
+      // three Row2 nodes.
+      const lone = mk('BusinessProcess', 'Lone');
+      const capL1 = mk('ApplicationCapability', 'CapL1'), capL2 = mk('ApplicationCapability', 'CapL2'), capL3 = mk('ApplicationCapability', 'CapL3');
+      const lenConns = [store.createConnector({ from: lone.id, to: capL3.id, connectorType: 'c', model, relationship: 'Association' })];
+      const { view: v6 } = freshView('RegrRemapLenOff');
+      placeAll(v6, [lone, capL1, capL2, capL3], lenConns);
+      commands.applyRemapLayout(app, v6.id, { pattern: 'default', sortKeys: ['nodeLabel'], minimizeConnectorLength: false });
+      out.lenOff = { lone: posOf(v6, 'Lone'), capL1: posOf(v6, 'CapL1'), capL2: posOf(v6, 'CapL2'), capL3: posOf(v6, 'CapL3') };
+
+      const { view: v7 } = freshView('RegrRemapLenOn');
+      placeAll(v7, [lone, capL1, capL2, capL3], lenConns);
+      commands.applyRemapLayout(app, v7.id, { pattern: 'default', sortKeys: ['nodeLabel'], minimizeConnectorLength: true });
+      out.lenOn = { lone: posOf(v7, 'Lone'), capL1: posOf(v7, 'CapL1'), capL2: posOf(v7, 'CapL2'), capL3: posOf(v7, 'CapL3') };
+
+      // 4b) real bug found via user testing: minimizeConnectorLength only aligned the
+      // MIDDLE grid -- an edge-band member (e.g. a Business Function pinned to Top)
+      // never budged from its fixed, evenly-spaced band slot even when connected to a
+      // middle-grid node far off to one side, so the "shorter connector" promise never
+      // applied to anything pinned via Edge Assignment. Business Function (top),
+      // General Actor (left), Data Entity (bottom) around a small BusinessProcess
+      // middle row -- Fn connects only to the RIGHTMOST BusinessProcess, so it should
+      // slide right to align with it.
+      const bandFn = mk('BusinessFunction', 'BandFn');
+      const bandProcA = mk('BusinessProcess', 'BandProcA'), bandProcB = mk('BusinessProcess', 'BandProcB'), bandProcC = mk('BusinessProcess', 'BandProcC');
+      const bandConns = [store.createConnector({ from: bandFn.id, to: bandProcC.id, connectorType: 'c', model, relationship: 'Association' })];
+      const { view: v8 } = freshView('RegrRemapBandAlign');
+      placeAll(v8, [bandFn, bandProcA, bandProcB, bandProcC], bandConns);
+      commands.applyRemapLayout(app, v8.id, {
+        pattern: 'default', sortKeys: ['nodeLabel'],
+        edgeAssignment: { BusinessFunction: 'top' },
+        minimizeConnectorLength: true,
+      });
+      out.bandFnPos = posOf(v8, 'BandFn');
+      out.bandProcCPos = posOf(v8, 'BandProcC');
+
+      // 6) real bug found via user testing (from the shipped BatchScript_RemapExample):
+      // an edge band's ORDER came only from sortKeys, never from crossing minimization
+      // -- so alphabetical order could disagree with what the middle grid actually
+      // needs, producing a genuine visible crossing Minimize Crossings was supposed to
+      // prevent. Two middle-grid capabilities, CapLeft and CapRight; three bottom-band
+      // entities named so ALPHABETICAL order ('EntBillOfMaterials' < 'EntDemand' <
+      // 'EntSchedule') disagrees with the correct order -- EntSchedule connects to
+      // BOTH capabilities and belongs BETWEEN EntBillOfMaterials (CapLeft-only) and
+      // EntDemand (CapRight-only), exactly the reported "Bill of Materials, Demand
+      // Forecast, Production Schedule" crossing.
+      const capLeft = mk('ApplicationCapability', 'CapLeft'), capRight = mk('ApplicationCapability', 'CapRight');
+      const entBom = mk('DataDataEntity', 'EntBillOfMaterials'), entDemand = mk('DataDataEntity', 'EntDemand'), entSchedule = mk('DataDataEntity', 'EntSchedule');
+      const bandCrossConns = [
+        store.createConnector({ from: capLeft.id, to: entBom.id, connectorType: 'c', model, relationship: 'Association' }),
+        store.createConnector({ from: capLeft.id, to: entSchedule.id, connectorType: 'c', model, relationship: 'Association' }),
+        store.createConnector({ from: capRight.id, to: entSchedule.id, connectorType: 'c', model, relationship: 'Association' }),
+        store.createConnector({ from: capRight.id, to: entDemand.id, connectorType: 'c', model, relationship: 'Association' }),
+      ];
+      const { view: v9 } = freshView('RegrRemapBandCrossOff');
+      placeAll(v9, [capLeft, capRight, entBom, entDemand, entSchedule], bandCrossConns);
+      commands.applyRemapLayout(app, v9.id, {
+        pattern: 'default', sortKeys: ['nodeLabel'],
+        edgeAssignment: { DataDataEntity: 'bottom' },
+        minimizeCrossings: false,
+      });
+      out.bandCrossOff = { capLeft: posOf(v9, 'CapLeft'), capRight: posOf(v9, 'CapRight'), entBom: posOf(v9, 'EntBillOfMaterials'), entDemand: posOf(v9, 'EntDemand'), entSchedule: posOf(v9, 'EntSchedule') };
+
+      const { view: v10 } = freshView('RegrRemapBandCrossOn');
+      placeAll(v10, [capLeft, capRight, entBom, entDemand, entSchedule], bandCrossConns);
+      commands.applyRemapLayout(app, v10.id, {
+        pattern: 'default', sortKeys: ['nodeLabel'],
+        edgeAssignment: { DataDataEntity: 'bottom' },
+        minimizeCrossings: true,
+      });
+      out.bandCrossOn = { capLeft: posOf(v10, 'CapLeft'), capRight: posOf(v10, 'CapRight'), entBom: posOf(v10, 'EntBillOfMaterials'), entDemand: posOf(v10, 'EntDemand'), entSchedule: posOf(v10, 'EntSchedule') };
+
+      // 5) force pattern + sectioned view all ignore the three options without erroring.
+      const { view: v4, tab: t4 } = freshView('RegrRemapForceIgnore');
+      const fPart = mk('BusinessActor', 'ForceActor');
+      store.createViewMember({ view: v4.id, objectType: 'part', objectId: fPart.id, x: 0, y: 0 });
+      let forceThrew = false;
+      try {
+        commands.applyRemapLayout(app, v4.id, { pattern: 'force', edgeAssignment: { BusinessActor: 'left' }, minimizeCrossings: true, minimizeConnectorLength: true });
+      } catch (e) { forceThrew = true; }
+      out.forceDidNotThrow = !forceThrew;
+
+      const { view: v5 } = freshView('RegrRemapSectionIgnore', 'org');
+      const sPart = mk('BusinessActor', 'SectionActor');
+      store.createViewMember({ view: v5.id, objectType: 'part', objectId: sPart.id, x: 0, y: 0, sectionId: '' });
+      let sectionThrew = false;
+      try {
+        commands.applyRemapLayout(app, v5.id, { pattern: 'default', edgeAssignment: { BusinessActor: 'left' }, minimizeCrossings: true, minimizeConnectorLength: true });
+      } catch (e) { sectionThrew = true; }
+      out.sectionDidNotThrow = !sectionThrew;
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["actorsShareMinX"]:
+        problems.append(f"edgeAssignment:left should place both BusinessActor parts at the single leftmost column, got Actor1/2 positions imply otherwise (full: {result})")
+    if not result["fnsShareMinY"]:
+        problems.append("edgeAssignment:top should place both BusinessFunction parts on the single topmost row")
+    if not result["desShareMaxY"]:
+        problems.append("edgeAssignment:bottom should place both DataDataEntity parts on the single bottommost row")
+    if not result["procsBetween"]:
+        problems.append("unassigned BusinessProcess parts should stay in the normal middle grid, strictly between the top and bottom edge bands")
+    if not result["actorBandOrderMatchesSortKeys"]:
+        problems.append("edge band members should be ordered by the chosen sortKeys (nodeLabel here), not creation/insertion order")
+    wm, wom = result["withMin"], result["withoutMin"]
+    def crossing_count(pos):
+        proc_order = sorted(["procX", "procY"], key=lambda k: pos[k]["x"])
+        edges = {"procX": "capB", "procY": "capA"}
+        expected_cap_order = [edges[p] for p in proc_order]
+        actual_cap_order = sorted(["capA", "capB"], key=lambda k: pos[k]["x"])
+        return 0 if expected_cap_order == actual_cap_order else 1
+    if crossing_count(wom) != 1:
+        problems.append(f"test setup itself is wrong -- expected a real crossing with minimizeCrossings:false (base nodeLabel-sorted order), got {wom}")
+    if crossing_count(wm) != 0:
+        problems.append(f"minimizeCrossings:true should reorder the second row's columns to eliminate the crossing, got {wm}")
+    def dist(a, b):
+        return math.hypot(a["x"] - b["x"], a["y"] - b["y"])
+    lenOff, lenOn = result["lenOff"], result["lenOn"]
+    distOff = dist(lenOff["lone"], lenOff["capL3"])
+    distOn = dist(lenOn["lone"], lenOn["capL3"])
+    if lenOff["lone"]["x"] != lenOff["capL1"]["x"]:
+        problems.append(f"test setup itself is wrong -- expected the unconstrained node to default to the leftmost slot without minimizeConnectorLength, got {lenOff}")
+    if not (distOn < distOff):
+        problems.append(f"minimizeConnectorLength:true should slide the unconstrained node toward its only connection, shortening the connector, got distance {distOn} (was {distOff}) -- full: {lenOn} vs {lenOff}")
+    if lenOn["capL1"] != lenOff["capL1"] or lenOn["capL2"] != lenOff["capL2"] or lenOn["capL3"] != lenOff["capL3"]:
+        problems.append(f"minimizeConnectorLength should only move the unconstrained node itself, not any of the fixed row it's aligning to, got on={lenOn} off={lenOff}")
+    if result["bandFnPos"]["x"] != result["bandProcCPos"]["x"]:
+        problems.append(f"real bug: an Edge Assignment band member (Business Function pinned to Top) should also be aligned by minimizeConnectorLength toward its middle-grid connection, not just sit at its fixed evenly-spaced band slot -- expected BandFn's x to match BandProcC's x, got {result['bandFnPos']} vs {result['bandProcCPos']}")
+    def band_crossing_count(pos):
+        cap_order = sorted(["capLeft", "capRight"], key=lambda k: pos[k]["x"])
+        # entSchedule connects to BOTH capabilities -- its correct position is BETWEEN
+        # entBom (capLeft-only) and entDemand (capRight-only), regardless of which
+        # capability is physically on the left; a crossing exists whenever entSchedule
+        # does NOT sit strictly between the other two on x.
+        lo, hi = sorted([pos["entBom"]["x"], pos["entDemand"]["x"]])
+        return 0 if lo < pos["entSchedule"]["x"] < hi else 1
+    if band_crossing_count(result["bandCrossOff"]) != 1:
+        problems.append(f"test setup itself is wrong -- expected alphabetical sortKeys order (EntBillOfMaterials, EntDemand, EntSchedule) to produce a real crossing without minimizeCrossings, got {result['bandCrossOff']}")
+    if band_crossing_count(result["bandCrossOn"]) != 0:
+        problems.append(f"real bug (from the shipped BatchScript_RemapExample): minimizeCrossings:true should also reorder Edge Assignment bands against the middle grid (not just sortKeys), eliminating this crossing by placing EntSchedule between EntBillOfMaterials and EntDemand, got {result['bandCrossOn']}")
+    if not result["forceDidNotThrow"]:
+        problems.append("pattern:'force' with edgeAssignment/minimizeCrossings/minimizeConnectorLength set should ignore them silently, not throw")
+    if not result["sectionDidNotThrow"]:
+        problems.append("a section-based view with edgeAssignment/minimizeCrossings/minimizeConnectorLength set should ignore them silently, not throw")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "applyRemapLayout's Edge Assignment places pinned element types on a single top/bottom/left/right band, reordering band members against the middle grid (not just sortKeys) when Minimize Crossings is on so a shared connection lands between its two exclusive ones, Minimize Connector Length genuinely shortens real connectors (middle grid and edge bands alike), and all three options are safely ignored by the force pattern and section-based views"
+
+
+def check_remap_preset_dialog_and_local_persistence(page):
+    """Regression guard for Remap's named presets (store.remapPresets, main.js's
+    promptRemap Preset row) — reported directly: "let's add similar load/save settings
+    for remap" (mirroring Insert Smart Stream's own smartStreamPreset system). Covers:
+    the dialog renders as the wider modal-box-wide variant with an Edge Assignment
+    section listing exactly the element types actually placed on the current view; Save
+    As captures every current field (including edge assignment selects and the Minimize
+    Crossings/Minimize Connector Length checkboxes) into a named preset, offered
+    immediately in the dropdown; Load repopulates every field from a chosen preset; the
+    Edge Assignment/Minimize Crossings/Minimize Connector Length controls all hide when
+    Pattern is switched to 'force' (none apply there), while switching to 'layered'
+    hides only "Limit columns to view" (meaningless there) and leaves Edge
+    Assignment/Minimize Crossings/Minimize Connector Length visible (they still apply);
+    remapPresets is excluded from
+    store.toJSON() (the Save JSON document,
+    since these are Local Settings, not model data); and it loads from a Local Settings
+    file, caches to localStorage, and survives a page reload with no file
+    re-selection."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const actor = store.createPart({ type: 'BusinessActor', label: 'RegrRPActor', model, streams: [] });
+      const fn = store.createPart({ type: 'BusinessFunction', label: 'RegrRPFn', model, streams: [] });
+      store.createConnector({ from: actor.id, to: fn.id, connectorType: 'c', model, relationship: 'Association' });
+
+      const view = store.addView('RegrRemapPresetDialog_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const vmA = store.createViewMember({ view: view.id, objectType: 'part', objectId: actor.id, x: 0, y: 0 });
+      const vmF = store.createViewMember({ view: view.id, objectType: 'part', objectId: fn.id, x: 0, y: 0 });
+
+      const out = {};
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 30));
+      let box = document.querySelector('.modal-box.modal-box-wide');
+      out.isWide = !!box;
+      out.edgeTypes = [...document.querySelectorAll('.rm-edge-select')].map(s => s.dataset.type).sort();
+
+      document.querySelector('.rm-edge-select[data-type=\"BusinessActor\"]').value = 'left';
+      document.querySelector('.rm-edge-select[data-type=\"BusinessFunction\"]').value = 'top';
+      document.getElementById('rm-minimize-crossings').checked = true;
+      document.getElementById('rm-minimize-length').checked = true;
+      document.getElementById('rm-pattern').value = 'none';
+
+      document.getElementById('rm-preset-save').click();
+      await new Promise(r => setTimeout(r, 30));
+      const nameInput = [...document.querySelectorAll('.modal-box')].find(b => b.querySelector('h3')?.textContent === 'Save Remap Preset').querySelector('input[data-key=\"name\"]');
+      nameInput.value = 'RegrDialogRemapPreset';
+      [...document.querySelectorAll('.modal-box')].find(b => b.querySelector('h3')?.textContent === 'Save Remap Preset').querySelector('.submit').click();
+      await new Promise(r => setTimeout(r, 30));
+
+      out.savedPreset = (store.remapPresets || []).find(p => p.name === 'RegrDialogRemapPreset');
+      out.dropdownOffersNew = [...box.querySelectorAll('#rm-preset-select option')].some(o => o.value === 'RegrDialogRemapPreset');
+
+      // force pattern hides Edge Assignment/Minimize Crossings/Minimize Connector Length
+      document.getElementById('rm-pattern').value = 'force';
+      document.getElementById('rm-pattern').dispatchEvent(new Event('change'));
+      out.edgeHiddenOnForce = document.getElementById('rm-edge-section').classList.contains('hidden');
+      out.minCrossHiddenOnForce = document.getElementById('rm-minimize-crossings-row').classList.contains('hidden');
+      out.minLengthHiddenOnForce = document.getElementById('rm-minimize-length-row').classList.contains('hidden');
+
+      // 'layered' pattern: "Limit columns to view" has no meaning (every row is
+      // exactly one graph layer, however wide) so it hides same as 'force', but Edge
+      // Assignment/Minimize Crossings/Minimize Connector Length all still apply --
+      // unlike 'force', which hides all of them.
+      document.getElementById('rm-pattern').value = 'layered';
+      document.getElementById('rm-pattern').dispatchEvent(new Event('change'));
+      out.limitColumnsHiddenOnLayered = document.getElementById('rm-limit-row').classList.contains('hidden');
+      out.edgeHiddenOnLayered = document.getElementById('rm-edge-section').classList.contains('hidden');
+      out.minCrossHiddenOnLayered = document.getElementById('rm-minimize-crossings-row').classList.contains('hidden');
+      out.minLengthHiddenOnLayered = document.getElementById('rm-minimize-length-row').classList.contains('hidden');
+
+      box.querySelector('.cancel').click();
+      await new Promise(r => setTimeout(r, 30));
+
+      // Load into a fresh dialog instance.
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 30));
+      box = document.querySelector('.modal-box.modal-box-wide');
+      document.getElementById('rm-preset-select').value = 'RegrDialogRemapPreset';
+      document.getElementById('rm-preset-load').click();
+      await new Promise(r => setTimeout(r, 30));
+      out.loadedPattern = document.getElementById('rm-pattern').value;
+      out.loadedMinCross = document.getElementById('rm-minimize-crossings').checked;
+      out.loadedMinLength = document.getElementById('rm-minimize-length').checked;
+      out.loadedActorEdge = document.querySelector('.rm-edge-select[data-type=\"BusinessActor\"]').value;
+      out.loadedFnEdge = document.querySelector('.rm-edge-select[data-type=\"BusinessFunction\"]').value;
+      box.querySelector('.cancel').click();
+
+      out.docJsonExcludes = !JSON.stringify(store.toJSON()).includes('RegrDialogRemapPreset');
+      return out;
+    }
+    """)
+    problems = []
+    if not result["isWide"]:
+        problems.append("Remap dialog should render with the wider modal-box-wide variant")
+    if "BusinessActor" not in result["edgeTypes"] or "BusinessFunction" not in result["edgeTypes"]:
+        problems.append(f"Edge Assignment should list the element types actually placed on this view, got {result['edgeTypes']}")
+    saved = result["savedPreset"] or {}
+    if saved.get("pattern") != "none" or saved.get("edgeAssignment") != {"BusinessActor": "left", "BusinessFunction": "top"} or saved.get("minimizeCrossings") is not True or saved.get("minimizeConnectorLength") is not True:
+        problems.append(f"Save As should capture the current pattern/edgeAssignment/minimizeCrossings/minimizeConnectorLength, expected pattern='none' edgeAssignment={{BusinessActor:left,BusinessFunction:top}} minimizeCrossings=True minimizeConnectorLength=True, got {saved}")
+    if not result["dropdownOffersNew"]:
+        problems.append("the Preset dropdown should immediately offer the newly saved preset's name")
+    if not result["edgeHiddenOnForce"] or not result["minCrossHiddenOnForce"] or not result["minLengthHiddenOnForce"]:
+        problems.append("Edge Assignment, Minimize Crossings, and Minimize Connector Length should all hide when Pattern is switched to 'force'")
+    if not result["limitColumnsHiddenOnLayered"]:
+        problems.append("'Limit columns to view' should hide when Pattern is switched to 'layered' (no meaning there -- every row is exactly one graph layer)")
+    if result["edgeHiddenOnLayered"] or result["minCrossHiddenOnLayered"] or result["minLengthHiddenOnLayered"]:
+        problems.append("Edge Assignment, Minimize Crossings, and Minimize Connector Length should all stay VISIBLE for pattern:'layered' (unlike 'force')")
+    if result["loadedPattern"] != "none" or not result["loadedMinCross"] or not result["loadedMinLength"] or result["loadedActorEdge"] != "left" or result["loadedFnEdge"] != "top":
+        problems.append(f"Load should repopulate pattern/minimizeCrossings/minimizeConnectorLength/edge assignment selects from the preset, got pattern={result['loadedPattern']} minCross={result['loadedMinCross']} minLength={result['loadedMinLength']} actorEdge={result['loadedActorEdge']} fnEdge={result['loadedFnEdge']}")
+    if not result["docJsonExcludes"]:
+        problems.append("remapPresets must never appear in store.toJSON() (the actual Save JSON document) -- these are Local Settings, not document data")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+
+    # Local Settings file round-trip + localStorage cache + reload survives.
+    custom_presets = [{"name": "RegrRemapFilePreset", "templateName": "Enterprise", "pattern": "default", "sortKeys": ["nodeLabel"], "limitColumnsToView": False, "filteredOnly": False, "forcePreferRight": False, "forceGroupRows": False, "edgeAssignment": {"BusinessActor": "right"}, "minimizeCrossings": False, "minimizeConnectorLength": True}]
+    js(page, f"""
+    async () => {{
+      const text = {json.dumps(json.dumps({"remapPresets": custom_presets}))};
+      const blob = new Blob([text], {{ type: 'application/json' }});
+      const file = new File([blob], 'test.json', {{ type: 'application/json' }});
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const input = document.getElementById('load-local-settings-input');
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+      await new Promise(r => setTimeout(r, 150));
+    }}
+    """)
+    before = js(page, """
+    async () => ({
+      presets: window.dycadApp.store.remapPresets,
+      cached: localStorage.getItem('dycad-local-settings-cache'),
+    })
+    """)
+    if before["presets"] != custom_presets:
+        return False, f"remapPresets didn't load correctly from the Local Settings file: {before}"
+    if not before["cached"] or json.loads(before["cached"]).get("remapPresets") != custom_presets:
+        return False, f"remapPresets wasn't cached to localStorage on load: {before}"
+
+    page.reload()
+    page.wait_for_timeout(1200)
+    after = js(page, "async () => ({ presets: window.dycadApp.store.remapPresets })")
+    if after["presets"] != custom_presets:
+        return False, f"remapPresets did not auto-apply from its localStorage cache after reload: {after}"
+
+    return True, "Remap's Preset row saves the current dialog state (including Edge Assignment, Minimize Crossings, and Minimize Connector Length) as a named, persisted preset and loads it back field-for-field, hides all three new controls under the force pattern, keeps remapPresets out of the Save JSON document, and loads/caches/survives a reload via Local Settings same as smartStreamPresets"
+
+
+def check_remap_view_remembers_own_settings(page):
+    """Regression guard for view.remapLastOptions (commands.js's remap, main.js's
+    promptRemap) — reported directly: "Is it possible to retain the prior Remap
+    settings on the same view if the user reopens it to adjust?" Every dialog field
+    (pattern, both minimize checkboxes, edge assignment, template) should default from
+    THIS SPECIFIC view's own last successful Remap run, ahead of the cross-view
+    getCachedRemapOptions default — same "this view's own history wins" precedent
+    view.remapSortKeys already established for sort order alone. Covers: (1) after
+    running Remap once with a distinctive set of options, reopening the dialog on the
+    SAME view pre-fills every one of those fields, not just sort order; (2) a
+    brand-new, never-remapped view still falls back to the cross-view cache (proving
+    view-level memory doesn't leak across views); (3) view.remapLastOptions is
+    recorded on this.doc's view object, so it DOES round-trip through store.toJSON()
+    (the Save JSON document) — deliberately the opposite of smartStreamPresets/
+    remapPresets, since this is genuinely per-view document state, not a personal
+    Local Settings preference."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const fn = store.createPart({ type: 'BusinessFunction', label: 'RegrRLOFn', model, streams: [] });
+      const proc = store.createPart({ type: 'BusinessProcess', label: 'RegrRLOProc', model, streams: [] });
+      store.createConnector({ from: fn.id, to: proc.id, connectorType: 'c', model, relationship: 'Association' });
+
+      const view = store.addView('RegrRememberLastOptions_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const vmFn = store.createViewMember({ view: view.id, objectType: 'part', objectId: fn.id, x: 0, y: 0 });
+      const vmProc = store.createViewMember({ view: view.id, objectType: 'part', objectId: proc.id, x: 0, y: 0 });
+
+      const out = {};
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 30));
+      let box = document.querySelector('.modal-box.modal-box-wide');
+      document.getElementById('rm-pattern').value = 'none';
+      document.getElementById('rm-minimize-crossings').checked = true;
+      document.getElementById('rm-minimize-length').checked = true;
+      document.querySelector('.rm-edge-select[data-type=\"BusinessFunction\"]').value = 'top';
+      box.querySelector('.submit').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      out.recordedInDoc = !!view.remapLastOptions;
+      out.docJsonIncludesIt = JSON.stringify(store.toJSON()).includes('RegrRLOFn') && JSON.stringify(store.toJSON().views.find(v => v.id === view.id)).includes('minimizeConnectorLength');
+
+      // Reopen on the SAME view -- every field should come back pre-filled.
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 30));
+      box = document.querySelector('.modal-box.modal-box-wide');
+      out.reopenedPattern = document.getElementById('rm-pattern').value;
+      out.reopenedMinCross = document.getElementById('rm-minimize-crossings').checked;
+      out.reopenedMinLength = document.getElementById('rm-minimize-length').checked;
+      out.reopenedFnEdge = document.querySelector('.rm-edge-select[data-type=\"BusinessFunction\"]').value;
+      box.querySelector('.cancel').click();
+      await new Promise(r => setTimeout(r, 30));
+
+      // A brand-new, never-remapped view should NOT inherit this view's own settings
+      // -- it falls back to the cross-view cache (which is now 'none'/checked/checked
+      // from the run above, proving the CACHE still works, just that the fresh view's
+      // own remapLastOptions is genuinely empty, not leaking from view A).
+      const view2 = store.addView('RegrRememberLastOptionsFresh_' + Date.now(), 'ff');
+      const tab2 = app.createCanvasTab(view2);
+      app.switchToTab(tab2.id);
+      out.freshViewHasNoOwnOptions = !view2.remapLastOptions;
+      app.promptRemap(tab2);
+      await new Promise(r => setTimeout(r, 30));
+      box = document.querySelector('.modal-box.modal-box-wide');
+      out.freshViewPatternFromCache = document.getElementById('rm-pattern').value;
+      box.querySelector('.cancel').click();
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["recordedInDoc"]:
+        problems.append("running Remap should record view.remapLastOptions on the view itself")
+    if not result["docJsonIncludesIt"]:
+        problems.append("view.remapLastOptions should round-trip through store.toJSON() (the Save JSON document) -- it's per-view document state, not a Local Settings preference")
+    if result["reopenedPattern"] != "none" or not result["reopenedMinCross"] or not result["reopenedMinLength"] or result["reopenedFnEdge"] != "top":
+        problems.append(f"reopening Remap on the SAME view should pre-fill every field from its own last run, got pattern={result['reopenedPattern']} minCross={result['reopenedMinCross']} minLength={result['reopenedMinLength']} fnEdge={result['reopenedFnEdge']}")
+    if not result["freshViewHasNoOwnOptions"]:
+        problems.append("a brand-new view should have no remapLastOptions of its own")
+    if result["freshViewPatternFromCache"] != "none":
+        problems.append(f"a brand-new view's dialog should still fall back to the cross-view cache (expected 'none' from the run above), got {result['freshViewPatternFromCache']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Remap remembers every dialog field (not just sort order) per-view via view.remapLastOptions, pre-filling them on reopen while a fresh view still falls back to the cross-view cache, and this state correctly round-trips through the Save JSON document as genuine per-view data"
+
+
+def check_remap_copy_call_on_right_click(page):
+    """Regression guard for main.js's wireCopyCallOnRightClick, wired onto the Remap
+    dialog's submit button — reported directly: "Can right click be added to the remap
+    submit button, to put into copy the function call and parameters that match what
+    user has filled out. This would be very handy for any dialog form with multiple
+    settings" (a generic helper, in case other dialogs adopt it later — today only
+    Remap's submit button does). Covers: right-clicking the submit button copies a
+    `remap(app, tab, {...})` snippet to the clipboard reflecting the CURRENT form
+    values (not stale ones from when the dialog opened); the copied snippet is valid,
+    parseable JS containing every option key; and — critically — right-clicking must
+    NOT actually submit the form (the dialog stays open, nothing gets remapped),
+    distinguishing it from a real click."""
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const view = store.addView('RegrCopyCall_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 30));
+      const box = document.querySelector('.modal-box.modal-box-wide');
+      document.getElementById('rm-pattern').value = 'none';
+      document.getElementById('rm-minimize-length').checked = true;
+
+      const submitBtn = box.querySelector('.submit');
+      submitBtn.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      await new Promise(r => setTimeout(r, 60));
+
+      const out = {};
+      out.dialogStillOpen = !!document.querySelector('.modal-box.modal-box-wide');
+      out.nothingRemapped = store.viewMembersForView(view.id).length === 0;
+      try {
+        out.clipboardText = await navigator.clipboard.readText();
+      } catch (e) {
+        out.clipboardReadFailed = e.message;
+      }
+      box.querySelector('.cancel').click();
+      return out;
+    }
+    """)
+    problems = []
+    if not result.get("dialogStillOpen"):
+        problems.append("right-clicking the submit button should NOT close the dialog (that's what a real left-click/submit does)")
+    if not result.get("nothingRemapped"):
+        problems.append("right-clicking the submit button should NOT actually run Remap")
+    clip = result.get("clipboardText")
+    if not clip:
+        problems.append(f"right-click should copy a snippet to the clipboard, got clipboardText={clip!r} (read error: {result.get('clipboardReadFailed')})")
+    else:
+        if not clip.startswith("remap(app, tab,"):
+            problems.append(f"copied snippet should be a remap(app, tab, {{...}}) call, got: {clip[:120]!r}")
+        for key in ["pattern", "minimizeConnectorLength", "edgeAssignment", "sortKeys"]:
+            if key not in clip:
+                problems.append(f"copied snippet should include '{key}', got: {clip[:400]!r}")
+        if '"pattern": "none"' not in clip or '"minimizeConnectorLength": true' not in clip:
+            problems.append(f"copied snippet should reflect the CURRENT form values (pattern='none', minimizeConnectorLength=true), got: {clip[:400]!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full result: {result})"
+    return True, "right-clicking Remap's submit button copies a valid remap(app, tab, {...}) call reflecting the current form to the clipboard, without actually submitting"
 
 
 def check_generate_stream_prepopulates_from_existing(page):
@@ -5781,6 +6647,8 @@ CHECKS = [
     check_boots_clean,
     check_example_simulates,
     check_remap_patterns,
+    check_remap_layered_pattern,
+    check_remap_crossing_minimization_finds_global_optimum,
     check_force_directed_no_runaway_drift,
     check_force_directed_adjacent_cells,
     check_smart_check_view,
@@ -5833,6 +6701,10 @@ CHECKS = [
     check_load_sfcce,
     check_stream_template_shared_default,
     check_remap_options_persist_across_views,
+    check_remap_edge_assignment_and_layout_optimization,
+    check_remap_preset_dialog_and_local_persistence,
+    check_remap_view_remembers_own_settings,
+    check_remap_copy_call_on_right_click,
     check_generate_stream_prepopulates_from_existing,
     check_node_size_multiplier,
     check_smart_check_node,

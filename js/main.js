@@ -162,6 +162,42 @@ function getCachedSmartStreamPresets() {
  * setCachedBatchScriptCode above). */
 function setCachedSmartStreamPresets(list) { setLocalSettingsCache({ smartStreamPresets: list }); }
 
+/** Reads the cached Remap presets list (if any). Returns null if nothing valid is
+ * cached — bootstrapApp then leaves the Store constructor's own DEFAULT_REMAP_PRESETS
+ * (an empty array) in place. */
+function getCachedRemapPresets() {
+  const v = getLocalSettingsCache().remapPresets;
+  return Array.isArray(v) ? v : null;
+}
+/** Writes the full Remap presets list to the localStorage cache so it survives a page
+ * refresh — called on every Save As from the dialog, not just from the Load Local
+ * Settings file handler (same "meant to be edited freely" reasoning as
+ * setCachedSmartStreamPresets above). */
+function setCachedRemapPresets(list) { setLocalSettingsCache({ remapPresets: list }); }
+
+/** Right-click on `button` copies a ready-to-paste JS function call (built by
+ * `buildSnippet()`, called fresh on each right-click so it reflects whatever the form
+ * currently holds) to the clipboard, instead of opening the browser's own context
+ * menu — handy for pasting into the Script Console (Advanced menu) to replay the exact
+ * same settings later, without re-clicking through every field by hand. Reported
+ * directly: "Can right click be added to the remap submit button, to put into copy
+ * the function call and parameters that match what user has filled out. This would be
+ * very handy for any dialog form with multiple settings" — generic on purpose (any
+ * dialog's submit button can wire this up the same way; today only Remap's does, see
+ * promptRemap below). */
+function wireCopyCallOnRightClick(app, button, buildSnippet) {
+  button.addEventListener('contextmenu', async (e) => {
+    e.preventDefault();
+    const snippet = buildSnippet();
+    try {
+      await navigator.clipboard.writeText(snippet);
+      app.toast('Copied function call to clipboard.');
+    } catch (err) {
+      app.toast(`Couldn't copy to clipboard: ${err.message}`, true);
+    }
+  });
+}
+
 /** Reads the cached nodeSizeMultiplier value (if any). Returns null if nothing valid is
  * cached (fresh browser, cache cleared, or never loaded) — bootstrapApp then falls back
  * to the Store constructor's own 1.2 default. Clamped to a sane 0.5-3 range so a bad or
@@ -491,8 +527,11 @@ class App {
         <code>generateIndustry(app, industryKey, onProgress, placeInView)</code>,
         <code>populateFromTemplate(app, tab, templateName)</code>,
         <code>remap(app, tab, options)</code> (options: <code>sortKeys, templateName, pattern
-        ('default'|'none'|'force'), limitColumnsToView, visiblePartVmIds, forcePreferRight,
-        forceGroupRows</code> — all optional, same defaults as the Remap dialog),
+        ('default'|'none'|'layered'|'force'), limitColumnsToView, visiblePartVmIds, forcePreferRight,
+        forceGroupRows, edgeAssignment</code> ({elementType: 'top'|'bottom'|'left'|'right'},
+        'default'/'none' patterns only) <code>, minimizeCrossings, minimizeConnectorLength</code>
+        (both boolean, 'default'/'none' patterns only) — all optional, same defaults as the
+        Remap dialog),
         <code>smartCheckView(app, tab, options)</code> (options: <code>missingConnectors,
         missingConnectorsAndNodes, levels, syncWithInventory</code>),
         <code>smartCheckNode(app, tab, partId, options)</code> (options: same as
@@ -1586,6 +1625,47 @@ class App {
     });
   }
 
+  /** Bespoke, wide 2-column layout (matches promptInsertSmartStream's own reorg) — a
+   * Preset row (Save As.../Load, store.remapPresets — Local Settings, never in the
+   * save JSON, same story as smartStreamPresets) sits above Template/Pattern/checkboxes
+   * on the left and the Sort priority list on the right, with a full-width Edge
+   * Assignment section below. Reported directly: "let's add similar load/save settings
+   * for remap, with additional options for laying out the nodes. Specifically the
+   * ability to specify what goes on top of view, bottom, etc." — Edge Assignment pins
+   * an element type (scoped to types actually placed on this view) to a single row/
+   * column along the Top/Bottom/Left/Right edge of the layout instead of its normal
+   * stream/element-group grid position, ordered within that edge by the same Sort
+   * priority keys as the main grid (so 'connectionOrder' gives "natural flow" there
+   * too). Two further checkboxes run additional passes over the remaining middle grid
+   * afterward: Minimize connector crossings (barycenter-heuristic column reordering,
+   * commands.js's minimizeRowCrossings) and Minimize connector length ("move nodes to
+   * similar positions but closer" — a continuous barycenter-based x-position
+   * refinement that keeps each row's order but pulls connected nodes toward each
+   * other, commands.js's minimizeConnectorLengthPass; runs after crossing minimization
+   * if both are checked, the classic Sugiyama ordering-then-coordinates pipeline). All
+   * three (Edge Assignment + both minimize checkboxes) are 'default'/'none' pattern
+   * only — force-directed placement doesn't use rows/columns or sort keys at all, so
+   * they're hidden (like the priority list already is) whenever 'force' is selected.
+   * Every field defaults from view.remapLastOptions (this SPECIFIC view's own settings
+   * the last time Remap actually ran on it) ahead of the cross-view getCachedRemapOptions
+   * default, same "this view's own history wins" precedent view.remapSortKeys already
+   * set for sort order — reported directly: "Is it possible to retain the prior Remap
+   * settings on the same view if the user reopens it to adjust?" Right-clicking the
+   * Remap button (instead of left-clicking to actually run it) copies a ready-to-paste
+   * `remap(app, tab, {...})` Script Console call matching the form's current values —
+   * see wireCopyCallOnRightClick above, a generic helper any dialog's submit button
+   * could reuse the same way. A fourth Pattern option, 'layered' (commands.js's
+   * computeLayerAssignment), rows nodes by hierarchical graph depth (BFS/longest-path
+   * from whatever has no incoming edges) instead of element-group/stream membership —
+   * reported directly, describing a specific desired grid: "Is there any algorithm or
+   * combination of options that could result in this layout?" for a case where the
+   * DESIRED row-per-architectural-layer arrangement didn't match what 'default's
+   * group-based row-breaking naturally produces (a Function and its own Processes
+   * share an elementGroup, so 'default' merges them into one row instead of two).
+   * 'layered' still supports Edge Assignment/Minimize Crossings/Minimize Connector
+   * Length exactly like 'default'/'none' (only "Limit columns to view" is hidden for
+   * it too, alongside 'force' — column-wrapping has no meaning when every row is
+   * already exactly one hierarchy layer). */
   promptRemap(tab) {
     const view = this.store.findView(tab.viewId);
     if (view && isSectionViewType(view.viewType)) {
@@ -1597,6 +1677,14 @@ class App {
     }
     const labels = REMAP_SORT_LABELS;
     const cachedRemap = getCachedRemapOptions();
+    // view.remapLastOptions: every dialog field (except sortKeys, its own separate
+    // field below) from the last time Remap actually ran successfully ON THIS
+    // SPECIFIC view — wins over the cross-view "last used anywhere" cache, same
+    // precedent remapSortKeys already established. Reported directly: "Is it possible
+    // to retain the prior Remap settings on the same view if the user reopens it to
+    // adjust?"
+    const viewLast = view?.remapLastOptions || {};
+    const rOpt = (key) => (viewLast[key] !== undefined ? viewLast[key] : cachedRemap[key]);
     const cachedSortKeys = Array.isArray(cachedRemap.sortKeys) ? cachedRemap.sortKeys.filter((k) => REMAP_SORT_KEYS.includes(k)) : null;
     // view.remapSortKeys (this specific view's own remembered order) wins if present;
     // otherwise fall back to the cross-view user default; otherwise the built-in default.
@@ -1609,27 +1697,57 @@ class App {
     const orderedKeys = [...remembered, ...REMAP_SORT_KEYS.filter((k) => !remembered.includes(k))];
     const templateNames = (this.store.settings.streamTemplates || []).map((t) => t.name);
     const cachedTemplate = getCachedStreamTemplate();
-    const defaultTemplate = (cachedTemplate && templateNames.includes(cachedTemplate)) ? cachedTemplate : (templateNames.includes('Enterprise') ? 'Enterprise' : templateNames[0]);
-    const defaultPattern = ['default', 'none', 'force'].includes(cachedRemap.pattern) ? cachedRemap.pattern : 'default';
+    const defaultTemplate = (viewLast.templateName && templateNames.includes(viewLast.templateName)) ? viewLast.templateName
+      : (cachedTemplate && templateNames.includes(cachedTemplate)) ? cachedTemplate
+      : (templateNames.includes('Enterprise') ? 'Enterprise' : templateNames[0]);
+    const defaultPattern = ['default', 'none', 'layered', 'force'].includes(viewLast.pattern) ? viewLast.pattern
+      : ['default', 'none', 'layered', 'force'].includes(cachedRemap.pattern) ? cachedRemap.pattern : 'default';
+
+    const store = this.store;
+    const typesInView = [...new Set(store.viewMembersForView(tab.viewId).filter((vm) => vm.objectType === 'part').map((vm) => store.findPart(vm.objectId)?.type).filter(Boolean))]
+      .map((type) => { const el = elementByType(store, type); return { type, title: el?.title || type }; })
+      .sort((a, b) => a.title.localeCompare(b.title));
 
     const root = document.getElementById('modal-root');
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const box = document.createElement('div');
-    box.className = 'modal-box';
+    box.className = 'modal-box modal-box-wide';
     box.innerHTML = `
       <h3>Remap</h3>
-      <div class="prop-row"><label>Stream Template</label><select id="rm-template">${templateNames.map((n) => `<option value="${escapeHtml(n)}" ${n === defaultTemplate ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></div>
-      <div class="prop-row"><label>Pattern</label><select id="rm-pattern"><option value="default" ${defaultPattern === 'default' ? 'selected' : ''}>default</option><option value="none" ${defaultPattern === 'none' ? 'selected' : ''}>none</option><option value="force" ${defaultPattern === 'force' ? 'selected' : ''}>force-directed</option></select></div>
-      <div class="prop-row checkbox" id="rm-limit-row"><input type="checkbox" id="rm-limit" ${cachedRemap.limitColumnsToView ? 'checked' : ''} /><label for="rm-limit">Limit columns to view</label></div>
-      <div class="prop-row checkbox"><input type="checkbox" id="rm-filtered-only" ${cachedRemap.filteredOnly ? 'checked' : ''} /><label for="rm-filtered-only">Only remap filtered nodes (others stay put, hidden by the current filter)</label></div>
-      <div id="rm-priority-section">
-        <div style="margin-top:10px; font-size:12px; color:var(--text-muted);">Sort priority (top = highest priority)</div>
-        <ul id="rm-priority-list" style="list-style:none; margin:6px 0 0 0; padding:0; display:flex; flex-direction:column; gap:3px;"></ul>
+      <div class="prop-row"><label>Preset</label><select id="rm-preset-select">
+        <option value="">(none)</option>
+        ${(store.remapPresets || []).map((p) => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('')}
+      </select><button type="button" id="rm-preset-load">Load</button><button type="button" id="rm-preset-save">Save As…</button></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;">
+        <div>
+          <div class="prop-row"><label>Stream Template</label><select id="rm-template">${templateNames.map((n) => `<option value="${escapeHtml(n)}" ${n === defaultTemplate ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></div>
+          <div class="prop-row"><label>Pattern</label><select id="rm-pattern"><option value="default" ${defaultPattern === 'default' ? 'selected' : ''}>default</option><option value="none" ${defaultPattern === 'none' ? 'selected' : ''}>none</option><option value="layered" ${defaultPattern === 'layered' ? 'selected' : ''}>layered</option><option value="force" ${defaultPattern === 'force' ? 'selected' : ''}>force-directed</option></select></div>
+          <div class="prop-row checkbox" id="rm-limit-row"><input type="checkbox" id="rm-limit" ${rOpt('limitColumnsToView') ? 'checked' : ''} /><label for="rm-limit">Limit columns to view</label></div>
+          <div class="prop-row checkbox"><input type="checkbox" id="rm-filtered-only" ${rOpt('filteredOnly') ? 'checked' : ''} /><label for="rm-filtered-only">Only remap filtered nodes</label></div>
+          <div class="prop-row checkbox" id="rm-minimize-crossings-row"><input type="checkbox" id="rm-minimize-crossings" ${rOpt('minimizeCrossings') ? 'checked' : ''} /><label for="rm-minimize-crossings">Minimize connector crossings</label></div>
+          <div class="prop-row checkbox" id="rm-minimize-length-row"><input type="checkbox" id="rm-minimize-length" ${rOpt('minimizeConnectorLength') ? 'checked' : ''} /><label for="rm-minimize-length">Minimize connector length</label></div>
+          <div id="rm-force-note" class="hidden" style="margin-top:10px; font-size:12px; color:var(--text-muted);">Force-directed placement clusters connected nodes together and reduces total edge length — it doesn't use sort order, column limits, Edge Assignment, or crossing/length minimization, so those are hidden while this pattern is selected.</div>
+          <div class="prop-row checkbox hidden" id="rm-force-prefer-right-row"><input type="checkbox" id="rm-force-prefer-right" ${rOpt('forcePreferRight') ? 'checked' : ''} /><label for="rm-force-prefer-right">Prefer placing connected nodes to the right when a cell is available</label></div>
+          <div class="prop-row checkbox hidden" id="rm-force-group-rows-row"><input type="checkbox" id="rm-force-group-rows" ${rOpt('forceGroupRows') ? 'checked' : ''} /><label for="rm-force-group-rows">Only start a new row when a node is a new hop away (keep same-hop nodes on one row)</label></div>
+        </div>
+        <div id="rm-priority-section">
+          <div style="font-size:12px; color:var(--text-muted);">Sort priority (top = highest priority)</div>
+          <ul id="rm-priority-list" style="list-style:none; margin:6px 0 0 0; padding:0; display:flex; flex-direction:column; gap:3px; max-height:220px; overflow-y:auto;"></ul>
+        </div>
       </div>
-      <div id="rm-force-note" class="hidden" style="margin-top:10px; font-size:12px; color:var(--text-muted);">Force-directed placement clusters connected nodes together and reduces total edge length — it doesn't use sort order or column limits, so those are hidden while this pattern is selected.</div>
-      <div class="prop-row checkbox hidden" id="rm-force-prefer-right-row"><input type="checkbox" id="rm-force-prefer-right" ${cachedRemap.forcePreferRight ? 'checked' : ''} /><label for="rm-force-prefer-right">Prefer placing connected nodes to the right when a cell is available</label></div>
-      <div class="prop-row checkbox hidden" id="rm-force-group-rows-row"><input type="checkbox" id="rm-force-group-rows" ${cachedRemap.forceGroupRows ? 'checked' : ''} /><label for="rm-force-group-rows">Only start a new row when a node is a new hop away (keep same-hop nodes on one row)</label></div>
+      <div id="rm-edge-section" style="margin-top:10px;">
+        <div style="font-size:12px; color:var(--text-muted);">Edge Assignment — pin an element type to an edge of the layout instead of its normal row/column, ordered within that edge by Sort priority above</div>
+        <div id="rm-edge-list" style="max-height:160px; overflow-y:auto; border:1px solid var(--border); border-radius:5px; padding:6px 8px; margin-top:4px;">
+          ${typesInView.length ? typesInView.map((t) => `<div class="prop-row"><label style="flex:0 0 160px;">${escapeHtml(t.title)}</label><select class="rm-edge-select" data-type="${escapeHtml(t.type)}">
+            <option value="">— (normal grid)</option>
+            <option value="top">Top</option>
+            <option value="bottom">Bottom</option>
+            <option value="left">Left</option>
+            <option value="right">Right</option>
+          </select></div>`).join('') : '<div class="empty-hint">No parts placed on this view yet.</div>'}
+        </div>
+      </div>
       <div class="modal-actions"><button class="reset" style="margin-right:auto;">Reset</button><button class="cancel">Cancel</button><button class="primary submit">Remap</button></div>
     `;
     overlay.appendChild(box);
@@ -1657,14 +1775,36 @@ class App {
     const patternSelect = box.querySelector('#rm-pattern');
     const updatePatternVisibility = () => {
       const isForce = patternSelect.value === 'force';
+      const isLayered = patternSelect.value === 'layered';
       box.querySelector('#rm-priority-section').classList.toggle('hidden', isForce);
-      box.querySelector('#rm-limit-row').classList.toggle('hidden', isForce);
+      // Column-wrapping (maxCols) has no meaning for 'layered' -- every row is exactly
+      // one hierarchy layer, however wide -- so it's hidden for both 'force' and
+      // 'layered', but Edge Assignment/Minimize Crossings/Minimize Connector Length
+      // all still apply to 'layered' same as 'default'/'none'.
+      box.querySelector('#rm-limit-row').classList.toggle('hidden', isForce || isLayered);
+      box.querySelector('#rm-edge-section').classList.toggle('hidden', isForce);
+      box.querySelector('#rm-minimize-crossings-row').classList.toggle('hidden', isForce);
+      box.querySelector('#rm-minimize-length-row').classList.toggle('hidden', isForce);
       box.querySelector('#rm-force-note').classList.toggle('hidden', !isForce);
       box.querySelector('#rm-force-prefer-right-row').classList.toggle('hidden', !isForce);
       box.querySelector('#rm-force-group-rows-row').classList.toggle('hidden', !isForce);
     };
     patternSelect.addEventListener('change', updatePatternVisibility);
     updatePatternVisibility();
+
+    const collectEdgeAssignment = () => {
+      const out = {};
+      box.querySelectorAll('.rm-edge-select').forEach((sel) => { if (sel.value) out[sel.dataset.type] = sel.value; });
+      return out;
+    };
+    const applyEdgeAssignment = (edgeAssignment) => {
+      box.querySelectorAll('.rm-edge-select').forEach((sel) => { sel.value = (edgeAssignment && edgeAssignment[sel.dataset.type]) || ''; });
+    };
+    // Pre-fill Edge Assignment from this view's own last-used settings (viewLast, see
+    // above) — the same "this view wins" precedent as every other field in this
+    // dialog, just applied one render-cycle later since the selects don't exist until
+    // the innerHTML above runs.
+    if (viewLast.edgeAssignment) applyEdgeAssignment(viewLast.edgeAssignment);
 
     box.querySelector('.reset').addEventListener('click', () => {
       // restores the app's built-in defaults, not this view's previously-remembered
@@ -1673,25 +1813,94 @@ class App {
       box.querySelector('#rm-pattern').value = 'default';
       box.querySelector('#rm-limit').checked = false;
       box.querySelector('#rm-filtered-only').checked = false;
+      box.querySelector('#rm-minimize-crossings').checked = false;
+      box.querySelector('#rm-minimize-length').checked = false;
       box.querySelector('#rm-force-prefer-right').checked = false;
       box.querySelector('#rm-force-group-rows').checked = false;
+      applyEdgeAssignment({});
       orderedKeys.splice(0, orderedKeys.length, ...DEFAULT_REMAP_SORT_KEYS, ...REMAP_SORT_KEYS.filter((k) => !DEFAULT_REMAP_SORT_KEYS.includes(k)));
       renderPriorityList();
       updatePatternVisibility();
     });
+
+    box.querySelector('#rm-preset-load').addEventListener('click', () => {
+      const name = box.querySelector('#rm-preset-select').value;
+      if (!name) { this.toast('Select a preset to load.', true); return; }
+      const preset = (store.remapPresets || []).find((p) => p.name === name);
+      if (!preset) { this.toast(`Preset "${name}" not found.`, true); return; }
+
+      if (templateNames.includes(preset.templateName)) box.querySelector('#rm-template').value = preset.templateName;
+      box.querySelector('#rm-pattern').value = ['default', 'none', 'layered', 'force'].includes(preset.pattern) ? preset.pattern : 'default';
+      box.querySelector('#rm-limit').checked = !!preset.limitColumnsToView;
+      box.querySelector('#rm-filtered-only').checked = !!preset.filteredOnly;
+      box.querySelector('#rm-minimize-crossings').checked = !!preset.minimizeCrossings;
+      box.querySelector('#rm-minimize-length').checked = !!preset.minimizeConnectorLength;
+      box.querySelector('#rm-force-prefer-right').checked = !!preset.forcePreferRight;
+      box.querySelector('#rm-force-group-rows').checked = !!preset.forceGroupRows;
+      const presetKeys = Array.isArray(preset.sortKeys) ? preset.sortKeys.filter((k) => REMAP_SORT_KEYS.includes(k)) : [];
+      orderedKeys.splice(0, orderedKeys.length, ...presetKeys, ...REMAP_SORT_KEYS.filter((k) => !presetKeys.includes(k)));
+      renderPriorityList();
+      applyEdgeAssignment(preset.edgeAssignment || {});
+      updatePatternVisibility();
+      this.toast(`Preset "${name}" loaded.`);
+    });
+
+    box.querySelector('#rm-preset-save').addEventListener('click', () => {
+      this.promptModal({
+        title: 'Save Remap Preset',
+        fields: [{ key: 'name', label: 'Preset Name', value: box.querySelector('#rm-preset-select').value || '' }],
+        onSubmit: (vals) => {
+          const name = (vals.name || '').trim();
+          if (!name) { this.toast('Preset name is required.', true); return; }
+          const preset = {
+            name,
+            templateName: box.querySelector('#rm-template').value,
+            pattern: box.querySelector('#rm-pattern').value,
+            sortKeys: [...orderedKeys],
+            limitColumnsToView: box.querySelector('#rm-limit').checked,
+            filteredOnly: box.querySelector('#rm-filtered-only').checked,
+            forcePreferRight: box.querySelector('#rm-force-prefer-right').checked,
+            forceGroupRows: box.querySelector('#rm-force-group-rows').checked,
+            edgeAssignment: collectEdgeAssignment(),
+            minimizeCrossings: box.querySelector('#rm-minimize-crossings').checked,
+            minimizeConnectorLength: box.querySelector('#rm-minimize-length').checked,
+          };
+          const list = [...(store.remapPresets || [])];
+          const idx = list.findIndex((p) => p.name === name);
+          if (idx >= 0) list[idx] = preset; else list.push(preset);
+          store.remapPresets = list;
+          setCachedRemapPresets(list);
+          const sel = box.querySelector('#rm-preset-select');
+          sel.innerHTML = `<option value="">(none)</option>${list.map((p) => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('')}`;
+          sel.value = name;
+          this.toast(`Saved preset "${name}".`);
+        },
+      });
+    });
+
+    // Shared by the submit handler and the right-click "copy call" handler below, so
+    // both read the form the same way and can never drift out of sync with each other.
+    const collectRemapOptions = () => ({
+      templateName: box.querySelector('#rm-template').value,
+      pattern: box.querySelector('#rm-pattern').value,
+      limitColumnsToView: box.querySelector('#rm-limit').checked,
+      filteredOnly: box.querySelector('#rm-filtered-only').checked,
+      minimizeCrossings: box.querySelector('#rm-minimize-crossings').checked,
+      minimizeConnectorLength: box.querySelector('#rm-minimize-length').checked,
+      forcePreferRight: box.querySelector('#rm-force-prefer-right').checked,
+      forceGroupRows: box.querySelector('#rm-force-group-rows').checked,
+      edgeAssignment: collectEdgeAssignment(),
+      sortKeys: [...orderedKeys],
+    });
+
     box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+    wireCopyCallOnRightClick(this, box.querySelector('.submit'), () => `remap(app, tab, ${JSON.stringify(collectRemapOptions(), null, 2)});`);
     box.querySelector('.submit').addEventListener('click', () => {
-      const templateName = box.querySelector('#rm-template').value;
-      const pattern = box.querySelector('#rm-pattern').value;
-      const limitColumnsToView = box.querySelector('#rm-limit').checked;
-      const filteredOnly = box.querySelector('#rm-filtered-only').checked;
-      const forcePreferRight = box.querySelector('#rm-force-prefer-right').checked;
-      const forceGroupRows = box.querySelector('#rm-force-group-rows').checked;
-      const sortKeys = [...orderedKeys];
+      const { templateName, pattern, limitColumnsToView, filteredOnly, minimizeCrossings, minimizeConnectorLength, forcePreferRight, forceGroupRows, edgeAssignment, sortKeys } = collectRemapOptions();
       overlay.remove();
 
       setCachedStreamTemplate(templateName);
-      setCachedRemapOptions({ pattern, limitColumnsToView, filteredOnly, forcePreferRight, forceGroupRows, sortKeys });
+      setCachedRemapOptions({ pattern, limitColumnsToView, filteredOnly, forcePreferRight, forceGroupRows, sortKeys, minimizeCrossings, minimizeConnectorLength });
 
       let visiblePartVmIds = null;
       if (filteredOnly && isAnyVisibilityFilterActive(tab)) {
@@ -1704,7 +1913,7 @@ class App {
         }
         visiblePartVmIds = expandVisiblePartVmIdsByLevel(seedVmIds, allConnVms, tab.connectorLevels);
       }
-      remap(this, tab, { sortKeys, templateName, pattern, limitColumnsToView, visiblePartVmIds, forcePreferRight, forceGroupRows });
+      remap(this, tab, { sortKeys, templateName, pattern, limitColumnsToView, filteredOnly, visiblePartVmIds, forcePreferRight, forceGroupRows, edgeAssignment, minimizeCrossings, minimizeConnectorLength });
     });
   }
 
@@ -2119,16 +2328,17 @@ class App {
    * ctx.createPart/ctx.createConnector safety cap, see simulation.js),
    * nodeSizeMultiplier (the default node box size new views are created with, see
    * state.js's defaultNodeSize), batchScriptCode (the Script Console's persistent
-   * text, Advanced menu), and smartStreamPresets (Insert Smart Stream's named dialog
-   * presets) — into a single downloadable file, so they travel together between
-   * browsers/machines. Deliberately excludes secrets (see saveLocalSecrets above) —
-   * these two were bundled together in an earlier version of this feature; split apart
-   * because secrets must never be cached to localStorage while these settings now
-   * deliberately ARE (see loadLocalSettings's handler), so bundling them would have
-   * meant either caching secrets too (unacceptable) or a settings load leaving secrets
-   * in some ambiguous state. */
+   * text, Advanced menu), smartStreamPresets (Insert Smart Stream's named dialog
+   * presets), and remapPresets (Remap's named dialog presets) — into a single
+   * downloadable file, so they travel together between browsers/machines. Deliberately
+   * excludes secrets (see saveLocalSecrets above) — these two were bundled together in
+   * an earlier version of this feature; split apart because secrets must never be
+   * cached to localStorage while these settings now deliberately ARE (see
+   * loadLocalSettings's handler), so bundling them would have meant either caching
+   * secrets too (unacceptable) or a settings load leaving secrets in some ambiguous
+   * state. */
   saveLocalSettings() {
-    const data = { pinnedFields: getAllPinnedFields(), maxScriptEntities: this.store.maxScriptEntities, nodeSizeMultiplier: this.store.nodeSizeMultiplier, batchScriptCode: this.store.batchScriptCode, smartStreamPresets: this.store.smartStreamPresets };
+    const data = { pinnedFields: getAllPinnedFields(), maxScriptEntities: this.store.maxScriptEntities, nodeSizeMultiplier: this.store.nodeSizeMultiplier, batchScriptCode: this.store.batchScriptCode, smartStreamPresets: this.store.smartStreamPresets, remapPresets: this.store.remapPresets };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3144,6 +3354,8 @@ async function bootstrapApp() {
   if (cachedBatchScript !== null) store.batchScriptCode = cachedBatchScript;
   const cachedPresets = getCachedSmartStreamPresets();
   if (cachedPresets !== null) store.smartStreamPresets = cachedPresets;
+  const cachedRemapPresets = getCachedRemapPresets();
+  if (cachedRemapPresets !== null) store.remapPresets = cachedRemapPresets;
 
   document.body.appendChild(buildMarkerDefs(store));
 
@@ -3408,13 +3620,13 @@ function wireGlobalEvents(app) {
     }
   });
   // File > Load Local Settings: user PREFERENCES only (pinnedFields, maxScriptEntities,
-  // nodeSizeMultiplier, batchScriptCode, smartStreamPresets) — separate from secrets
-  // above. Caches maxScriptEntities/nodeSizeMultiplier/batchScriptCode/
-  // smartStreamPresets to localStorage (see setCachedMaxScriptEntities/
-  // setCachedNodeSizeMultiplier/setCachedBatchScriptCode/setCachedSmartStreamPresets) so
-  // they survive a page refresh without re-loading this file; pinnedFields already
-  // caches itself the moment setAllPinnedFields runs. Same dual-shape acceptance as
-  // Load Local Secrets, for the same pre-split-file reason.
+  // nodeSizeMultiplier, batchScriptCode, smartStreamPresets, remapPresets) — separate
+  // from secrets above. Caches maxScriptEntities/nodeSizeMultiplier/batchScriptCode/
+  // smartStreamPresets/remapPresets to localStorage (see setCachedMaxScriptEntities/
+  // setCachedNodeSizeMultiplier/setCachedBatchScriptCode/setCachedSmartStreamPresets/
+  // setCachedRemapPresets) so they survive a page refresh without re-loading this file;
+  // pinnedFields already caches itself the moment setAllPinnedFields runs. Same
+  // dual-shape acceptance as Load Local Secrets, for the same pre-split-file reason.
   document.getElementById('load-local-settings-input').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     e.target.value = '';
@@ -3447,6 +3659,11 @@ function wireGlobalEvents(app) {
         app.store.smartStreamPresets = obj.smartStreamPresets;
         setCachedSmartStreamPresets(obj.smartStreamPresets);
       }
+      const hasRemapPresets = Array.isArray(obj.remapPresets);
+      if (hasRemapPresets) {
+        app.store.remapPresets = obj.remapPresets;
+        setCachedRemapPresets(obj.remapPresets);
+      }
       app.render(); // picks up the new pin config immediately if a property panel is open
       const parts = [];
       if (obj.pinnedFields) parts.push('pinned fields');
@@ -3454,6 +3671,7 @@ function wireGlobalEvents(app) {
       if (hasMult) parts.push(`node size multiplier: ${app.store.nodeSizeMultiplier}`);
       if (hasBatchScript) parts.push('script console text');
       if (hasPresets) parts.push('smart stream presets');
+      if (hasRemapPresets) parts.push('remap presets');
       app.toast(parts.length ? `Local settings loaded (${parts.join(', ')}).` : 'Local settings file had nothing recognized to load.');
     } catch (err) {
       app.toast(`Local settings load failed: ${err.message}`, true);

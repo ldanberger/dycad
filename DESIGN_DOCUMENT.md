@@ -161,6 +161,147 @@ shelf packer. Two orthogonal options: `preferRightPlacement` (bias the 8-neighbo
 search order toward East) and `onlyNewRowForNewGroup` (row = BFS depth, not free-form
 neighbor search, so same-depth siblings share a row).
 
+### 6.1a Edge Assignment & layout optimization (`commands.js`'s `applyRemapLayout`)
+
+Three options layered onto the `'default'`/`'none'` Remap patterns only (force-directed
+above and section-based views' fixed grid have no free row/column axis to bias, so all
+three are silently ignored there — the Remap dialog hides their controls whenever
+`pattern:'force'` is selected). `edgeAssignment: {elementType: 'top'|'bottom'|'left'|
+'right'}` pulls every part of a given type OUT of the normal stream/element-group grid
+before that grid is built, and instead lays each edge's members out as a single row
+(top/bottom) or column (left/right) along that side of the whole layout — ordered by
+the same sort-priority keys as the main grid, so `connectionOrder` gives "natural flow"
+within an edge too. The middle grid is computed first (completely unmodified, existing
+code), then shifted right/down by one step to make room for any left/top band, then
+each band is placed relative to the middle grid's own resulting bounding box.
+
+`minimizeCrossings`/`minimizeConnectorLength` (both `boolean`) are the two phases of
+the classic Sugiyama layered-graph-drawing pipeline, run in that order (ordering, then
+coordinates) over the *middle* grid only, both immediately after it's built and before
+edge bands are placed — both are bounded, iterative heuristics, not exact solvers, and
+neither ever moves a node OUT of its already-assigned row (which stream/element-group
+row a node landed on is always untouched, so neither can undo the existing grid's own
+stream separation). `minimizeConnectorLength` (`minimizeConnectorLengthPass`) is the
+*coordinate* phase: each row's nodes keep whatever left-to-right ORDER is now in place
+(crossing-minimized if that ran, the existing sort-key order otherwise) but their exact
+x shifts toward the average x of their connected neighbors (any row, not just
+adjacent), shortening/straightening connectors — a node with no neighbors, or already
+aligned with them, doesn't move. Each pass resolves a row two ways (a left-to-right
+minimum-spacing sweep and a right-to-left one) and averages them, so the row doesn't
+just drift in whichever sweep ran last. `resolveSpacedPositions` (the sweep-and-average
+math) and `buildNeighborMap` (the connVms adjacency map) are shared between
+`minimizeRowCrossings`, `minimizeConnectorLengthPass`, and the Edge Assignment
+alignment pass below.
+
+`minimizeCrossings` (`minimizeRowCrossings`) is the *ordering* phase — barycenter
+averaging (sort each row by the average column position of its neighbors in the row
+above/below, alternating direction) PLUS a **transpose** refinement pass (Gansner et
+al., "A Technique for Drawing Directed Graphs", 1993 — the same two-phase structure
+Graphviz's `dot` uses): after barycenter converges, repeatedly swap adjacent same-row
+pairs whenever doing so strictly helps, until a full sweep finds no more improvements.
+A swap's effect on the two adjacent items' own edges is fully local (swapping doesn't
+change either one's left/right relation to any THIRD row member), so it's cheap to
+evaluate directly per pair rather than recomputing the whole row. Reported directly,
+after already trying every minimizeCrossings/minimizeConnectorLength on/off
+combination: "did not produce desired result ... manually editing is not desired
+option due to volume of views" — barycenter+a single transpose pass, scored only on
+raw crossing count, reliably left two GENUINELY TIED orderings (identical crossing
+count, different overall length) on the wrong one: a high-fan-out node at one END of
+its row instead of centered between its own two targets, and a same-row-connected pair
+(routine for the `'layered'` pattern, whose whole point is putting two directly
+connected types on one row) "grouped" apart from each other instead of adjacent. Fixed
+three ways, all found necessary via testing against the real reported data (a small
+synthetic 2-/3-row fixture was NOT sufficient to reproduce the bug — it only shows up
+once a row is pulled from BOTH above and below at once): (1) the full barycenter+
+transpose search now runs from TWO starting points (downward-first and upward-first),
+keeping whichever converges better — a single starting direction can get stuck in a
+local optimum only reachable from the other; (2) the transpose step's per-swap
+decision now also weighs LENGTH (inter-row AND intra-row, i.e. same-row-connected
+pairs) as a secondary criterion, swapping a crossing-neutral pair when it strictly
+shortens their own edges — without this, two orderings tied on raw crossing count can
+never be locally improved upon; (3) the overall best-of-all-iterations result is
+tracked by the SAME (crossings, then length) comparison, not crossings alone.
+
+Neither optimization option stops at the middle grid — both extend to edge bands too,
+each a real gap found via user testing after the first version of this feature shipped.
+A band's ORDER, by default, comes from sortKeys (as described above); when
+`minimizeCrossings` is also on, `orderBand` instead barycenter-sorts the band against
+the middle grid's own FINAL positions on the band's along-axis (x for top/bottom, y for
+left/right) — a member with no middle-grid connection at all falls back to (and ties
+break by) the plain sortKeys position, so it's never reordered relative to other such
+members. This is what resolves e.g. three Data Entities on a bottom band where one
+entity is shared by two different middle-grid Capabilities and the other two are each
+exclusive to one — alphabetical sortKeys order can easily disagree with the crossing-free
+order (the shared entity needs to sit BETWEEN its two exclusive siblings), which
+`minimizeCrossings` now fixes the same way it already fixes crossings within the middle
+grid itself. Once each band's order is settled (by whichever of the two rules applied),
+edge bands are placed at fixed, evenly-spaced positions along that order; THEN, if
+`minimizeConnectorLength` is on, a further alignment pass runs per band: same
+`resolveSpacedPositions` math as the middle grid, but solving for the band's *cross*
+axis using the now-final middle-grid positions as neighbor lookups — the band's own
+order and minimum spacing stay fixed, only where along that order each member sits
+shifts. This is what makes e.g. a Business Function pinned to Top actually slide to sit
+above (shorter connector to) whichever Process it's connected to, instead of just
+occupying a static, evenly-spaced band slot regardless of connectivity. Both band
+passes are one-directional (bands align to the middle grid, never the reverse), so
+neither risks perturbing the middle grid's own already-finalized layout.
+
+Two further pieces of state, separate from the layout algorithm itself:
+`view.remapLastOptions` (set by `remap()` on every successful run, alongside the
+pre-existing `view.remapSortKeys`) records every OTHER dialog field — pattern,
+edgeAssignment, both minimize checkboxes, template, etc. — as genuine per-view document
+state (round-trips through `store.toJSON()`, same as `remapSortKeys` already did), so
+reopening the Remap dialog on a SPECIFIC view starts from what was last used there, not
+just the cross-view `getCachedRemapOptions` default. `wireCopyCallOnRightClick`
+(main.js) is a small, deliberately generic helper wired onto the Remap dialog's submit
+button: right-clicking copies a ready-to-paste `remap(app, tab, {...})` Script Console
+call reflecting the form's current values, instead of opening the browser's own context
+menu — any other dialog's submit button could adopt the same helper the same way.
+
+### 6.1b The `'layered'` Remap pattern (`computeLayerAssignment`, `commands.js`)
+
+A fourth row-assignment rule alongside `'default'`/`'none'`/`'force'`, reported
+directly against a specific script's output: "The cleanest result of drawing the
+script resulting data 'Smart Stream Example' ... would be (in a 4 x 4 grid): General
+Actor ...; Business Function Production; empty; General Actor ... Row 2: Business
+Capability ...; Business Process ...; Business Process ...; Business Capability ...
+Row 3: ... Application Capability ... Row 4: Data Entity ... Is there any algorithm ...
+that could result in this layout?" — confirmed "yes" to building it as a new pattern.
+Where `'default'`/`'none'` group rows by stream/element-group membership (`custom.json`
+data, which puts a Business Function and its own Processes in the SAME group — wrong
+for this request, since the target layout splits them across rows), `'layered'` instead
+derives each row purely from directed connector-graph structure: a node's row is the
+FEWEST hops any real edge justifies from a root (a node with no incoming edges),
+computed via a standard multi-source BFS over `connVms`. This is deliberately
+shortest-path, not longest-path/topological-sort (Kahn's-algorithm) layering, which was
+the first approach tried and rejected after real-data testing: the actual traced data
+has a genuine `Capability -> Process` edge (so longest-path layering would obey it as a
+hard constraint and push Process one row below Capability), but ALSO has Production
+directly connected to Process and each Consumer directly connected to its Capability —
+both exactly 1 hop from a layer-0 root. Shortest-path layering lets each node settle at
+the row its NEAREST real dependency justifies, landing Capability and Process on the
+same row as requested, without hardcoding either type's position. It's also naturally
+robust to the dual-connector convention's genuine 2-node cycles (see §7 or the
+`relationshipPairs.default` discussion elsewhere in this doc): once BFS visits a node at
+its shortest distance, a later, longer edge back into it is simply a no-op — no
+feedback-arc-set removal or cycle-breaking pass is needed at all (an earlier
+implementation used DFS-based back-edge removal plus longest-path Kahn's-algorithm
+layering specifically to handle these cycles; it was replaced by the simpler BFS once
+testing against real "Smart Stream Example" data showed longest-path layering itself,
+not cycle-handling, was the actual mismatch with the requested layout).
+
+Column position within a row, and Edge Assignment/`minimizeCrossings`/
+`minimizeConnectorLength`, are unchanged from §6.1a — `'layered'` only decides which row
+a node belongs on, then feeds the same `remainingVms`/`passiveVms`-derived middle grid
+into the identical downstream machinery every other pattern shares. No column-wrapping
+(`limitColumnsToView`/"Limit columns to view" is hidden in the dialog for this pattern —
+every row is exactly one graph layer, however wide) and no passive-row special-casing
+(that convention is specific to `'default'`'s stream/group semantics; every part in the
+middle set, passive or not, is placed purely by its own layer). `BatchScript_RemapExample`
+(state.js) uses `pattern:'layered'` with no `edgeAssignment` at all — Business
+Function/Consumer parts land on row 0 as true graph roots for free, directly satisfying
+the original report's own "turning off the requirement of general actor" phrasing.
+
 ### 6.2 Connector routing (`routing.js`, dispatched from `canvas.js`)
 
 `view.routingStyle` governs `'c'`-type connectors, `view.routingStyleStream` governs

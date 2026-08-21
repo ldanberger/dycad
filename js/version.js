@@ -2469,4 +2469,267 @@
 // temporary revert -- including one revert (main() no longer awaiting+chaining the
 // second script) that failed three separate assertions in the same check at once.
 // tests/README.md and public/instructions.html updated. Full suite 93/93.
-export const APP_VERSION = '0.849';
+// 0.850: Remap presets + layout controls. Reported directly: "let's add similar
+// load/save settings for remap, with additional options for laying out the nodes.
+// Specifically the ability to specify what goes on top of view, bottom, etc." then,
+// on scope: "business actors on left, business functions on top, data entities on
+// bottom, ordered by connector order/natural flow, allow for smart stream
+// representation and connectors. Cleanly separate streams or clusters/groups with
+// minimal connectors crossing" -- confirmed as two features, both in scope, both
+// 'default'/'none' pattern only (force-directed and section-based views have no free
+// row/column axis to bias). (1) Edge Assignment: applyRemapLayout's new
+// `edgeAssignment: {elementType: 'top'|'bottom'|'left'|'right'}` option pulls every
+// part of a given type out of the normal stream/element-group grid and places it
+// instead in a single row/column band along that edge -- the existing grid logic runs
+// completely unmodified on whatever's left (the "middle" set), then gets shifted right/
+// down by one step to make room for a left/top band, then each band is placed off the
+// middle grid's own resulting bounding box, ordered by the same sort-priority keys as
+// everything else (so `connectionOrder` gives "natural flow" along an edge too). (2)
+// Minimize connector crossings: a new `minimizeRowCrossings` helper runs a bounded,
+// iterative barycenter heuristic (Sugiyama-style layered graph drawing, not an exact
+// solver) over the middle grid, re-sorting each row by the average column position of
+// its neighbors in the row above/below, alternating direction a few passes -- verified
+// with a real crossing (two connected middle rows) that it eliminates, not just "some
+// position changed". (3) store.remapPresets: named, reusable Remap dialog snapshots
+// (templateName, pattern, sortKeys, the checkboxes, edgeAssignment, minimizeCrossings)
+// -- exact same Local Settings pattern smartStreamPresets already established (a Store
+// field outside this.doc, cached to localStorage via new getCachedRemapPresets/
+// setCachedRemapPresets, bundled into File > Save/Load Local Settings, auto-applied at
+// boot). Empty by default -- no seeded example this time, unlike StreamSet1. (4)
+// promptRemap reorganized into the same modal-box-wide 2-column layout Insert Smart
+// Stream uses (Preset row on top; Template/Pattern/checkboxes left, Sort priority
+// right; a new Edge Assignment section below, scoped to element types actually placed
+// on the current view) -- both new sections hide whenever Pattern is 'force', same as
+// the sort-priority list already did. remap's Script Console binding and inline docs
+// updated for the two new options. Two new checks:
+// check_remap_edge_assignment_and_crossing_minimization (band placement + band
+// ordering by sortKeys + genuine crossing reduction + force/sectioned silently
+// ignoring both) and check_remap_preset_dialog_and_local_persistence (Save As/Load
+// field-for-field, force-pattern hiding, exclusion from store.toJSON(), and the full
+// Local Settings file/localStorage/reload-survives story); check_remap_options_
+// persist_across_views extended for the new minimizeCrossings checkbox. All three
+// confirmed to catch their own regression via a temporary revert (four separate
+// reverts: edge-band placement, crossing minimization, preset Save As, and the
+// existing options cache -- each caught by exactly the check meant to guard it).
+// DESIGN_DOCUMENT.md (new SS6.1a), tests/README.md, and public/instructions.html
+// updated. Full suite 95/95.
+// 0.851: Remap's "Minimize connector length" checkbox. Reported directly: "for remap,
+// in addition to checkbox 'minimize connector crossings' can you add 'minimize
+// connector length' and move nodes to similar positions but closer." A second phase
+// of the same Sugiyama layered-graph-drawing pipeline Minimize Crossings already
+// implements: crossings is the *ordering* phase (which column a node lands in within
+// its row); this new option is the *coordinate* phase (exactly where within that
+// order), run afterward if both are checked. commands.js's new
+// minimizeConnectorLengthPass keeps each row's left-to-right order completely fixed --
+// only x shifts, toward the average x of a node's connected neighbors (any row, not
+// just the one above/below) -- so connected chains straighten and pull closer together
+// instead of sitting at fixed, evenly-spaced grid slots; a node with no neighbors, or
+// already aligned with them, doesn't move at all. Each pass resolves a row two ways (a
+// left-to-right minimum-spacing sweep, and the same in reverse) and averages them, so
+// repeated passes don't just drift the block in whichever direction ran last -- plus a
+// final cleanup sweep and a whole-block re-anchor to the original left edge. Same
+// scope as Minimize Crossings: 'default'/'none' patterns only (force-directed and
+// section-based views have no free row/column axis to bias, and hide the checkbox
+// same as the other two). Wired through the full existing stack: applyRemapLayout's
+// options, the Remap dialog (new checkbox next to Minimize Crossings, hidden under
+// 'force'), remapPresets (new field, Save As/Load), the cross-view "last used"
+// defaults cache, and the Script Console's remap() binding docs.
+// check_remap_edge_assignment_and_layout_optimization (renamed from
+// ..._and_crossing_minimization) extended with a clean, unambiguous fixture: a single
+// unconstrained node (sole occupant of its row, so no same-row neighbor blocks it)
+// whose only connection sits at the far side of a 3-node row below -- verified it
+// slides to align with that connection (literal Euclidean distance reduction), while
+// every other node's position stays byte-for-byte untouched.
+// check_remap_preset_dialog_and_local_persistence and
+// check_remap_options_persist_across_views both extended for the new checkbox. All
+// three confirmed to catch their own regression via a temporary revert (three separate
+// reverts: the algorithm pass itself, the dialog's Save-As capture, and the options
+// cache -- each caught by exactly the check meant to guard it). DESIGN_DOCUMENT.md
+// (SS6.1a retitled/expanded), tests/README.md, and public/instructions.html updated.
+// Full suite 95/95.
+// 0.852: a real bug fix plus three more Remap improvements. Reported directly: "Is it
+// possible to retain the prior Remap settings on the same view if the user reopens it
+// to adjust? Can right click be added to the remap submit button, to put into copy the
+// function call and parameters that match what user has filled out... The 'minimize
+// connector length' didn't result in the business function moving to the right,
+// above (and shorter connector) the process... Please add to the main script a call
+// to remap with these parameters."
+// (1) BUG FIX: minimizeConnectorLength only ever aligned the middle grid -- an Edge
+// Assignment band member (e.g. Business Function pinned to Top) stayed at its fixed,
+// evenly-spaced band slot even when connected to an off-center middle-grid node,
+// silently defeating the "shorter connector" promise for anything pinned to an edge.
+// applyRemapLayout's Edge Assignment placement now runs a second alignment pass per
+// band after the middle grid is finalized: same forward/backward-sweep-and-average
+// math as minimizeConnectorLengthPass (extracted into two new shared helpers,
+// resolveSpacedPositions and buildNeighborMap, used by all three passes now), but
+// solving for the band's CROSS axis (x for top/bottom, y for left/right) against the
+// middle grid's now-final positions -- the band's own order and minimum spacing stay
+// fixed, only where along that order each member sits shifts. One-directional (bands
+// align to the middle grid, never the reverse), so the middle grid is never perturbed.
+// (2) view.remapLastOptions: every OTHER dialog field (pattern, both minimize
+// checkboxes, edgeAssignment, template) now gets remembered PER VIEW too, not just
+// sort order (view.remapSortKeys, pre-existing) -- recorded by remap() on every
+// successful run, read by promptRemap ahead of the cross-view getCachedRemapOptions
+// default, same "this view's own history wins" precedent remapSortKeys already set.
+// Genuine per-view document state (round-trips through store.toJSON(), migrateDoc
+// default added), deliberately the opposite of smartStreamPresets/remapPresets, which
+// are Local Settings on purpose. (3) wireCopyCallOnRightClick (main.js): a small,
+// deliberately generic helper -- right-clicking Remap's submit button copies a
+// ready-to-paste remap(app, tab, {...}) Script Console call reflecting the form's
+// CURRENT values to the clipboard, instead of opening the browser's own context menu,
+// without actually submitting. Any other dialog's submit button could adopt the same
+// helper the same way, per the user's own note ("This would be very handy for any
+// dialog form with multiple settings") -- only Remap's uses it today. (4)
+// BatchScript_RemapExample: a third starter script, appended to main()'s sequence
+// after BatchScript_InsertSmartStreamExample, calling remap() on the same "Smart
+// Stream Example" view with the exact parameters reported (Enterprise template,
+// pattern default, both minimize checkboxes, a specific sort-priority order, Business
+// Function/Data Entity/General Actor pinned to top/bottom/left) -- reuses the existing
+// tab (not a redundant new one) when the active tab already shows that view.
+// check_remap_edge_assignment_and_layout_optimization extended with a fixture
+// reproducing the exact reported bug (a Business Function pinned to Top, connected
+// only to the rightmost of three middle-grid Business Processes, now correctly slides
+// to align with it). Two new checks: check_remap_view_remembers_own_settings (records
+// on success, round-trips through the Save JSON document, pre-fills on reopen, doesn't
+// leak to a fresh view) and check_remap_copy_call_on_right_click (copies a valid,
+// current-values snippet; never actually submits). check_batch_script_quickstart
+// extended for the third script (reused tab, correct edge placements, message log).
+// All four confirmed to catch their own regression via a temporary revert. commands.js
+// SS6.1a (DESIGN_DOCUMENT.md) expanded, tests/README.md and public/instructions.html
+// updated. Full suite 97/97.
+// 0.853: Remap's Minimize Crossings now also reorders Edge Assignment bands, not just
+// the middle grid. Reported directly (against the shipped BatchScript_RemapExample's
+// own output): "remap puts the last row of data entities as Bill of Materials, Demand
+// Forecast, and Production Schedule. This results in connectors for Demand Forecast
+// and Production Schedule crossing over. If Demand Forecast and Production Schedule
+// positions are swapped, there is no cross over. Is this too complicated to do
+// automatically, without hardcoding specific positions?" -- confirmed it's a natural
+// extension of the crossing-minimization pass already built, not a hardcoding problem.
+// applyRemapLayout's edge-band ordering (previously ALWAYS plain sortKeys) now runs a
+// barycenter reordering (orderBand) against the middle grid's own FINAL positions
+// whenever minimizeCrossings is checked -- a band member with no middle-grid
+// connection at all has no preference and falls back to (and ties break by) the plain
+// sortKeys position, never reordered relative to other such members. This resolves
+// exactly the reported case: a Data Entity shared by two Capabilities now correctly
+// lands BETWEEN the two Entities that connect to only one Capability each, instead of
+// wherever alphabetical order happened to put it. Ordering runs before placement/
+// spacing (unchanged) and before the existing Minimize Connector Length alignment
+// pass, which now refines positions within whichever order this settled on -- the
+// classic Sugiyama pipeline (layer assignment, then ordering, then coordinates) now
+// applies fully to edge bands too, not just the middle grid. buildNeighborMap is built
+// once per applyRemapLayout call and shared between ordering and the length-alignment
+// pass (previously rebuilt separately). check_remap_edge_assignment_and_layout_
+// optimization extended with a direct reproduction of the reported scenario (two
+// Capabilities, one shared Entity plus two exclusive ones, entity labels chosen so
+// alphabetical order crosses) -- confirmed to catch its own regression via a temporary
+// revert. DESIGN_DOCUMENT.md SS6.1a, tests/README.md, and public/instructions.html
+// updated. Full suite 97/97.
+//
+// 0.854: New Remap pattern, 'layered' -- rows come from directed connector-graph
+// structure (hop-distance from a root) instead of stream/element-group membership.
+// Reported directly, against the "Smart Stream Example" script's own output: "The
+// cleanest result of drawing the script resulting data 'Smart Stream Example',
+// turning off the requirement of general actor, would be (in a 4 x 4 grid): General
+// Actor Manufacturing Operation Consumer; Business Function Production; empty;
+// General Actor Production Planning. Row 2: Business Capability Manage Manufacturing
+// Operations; Business Process Manufacturing Operation Process; Business Process
+// Production Planning Process; Business Capability Manage Production Planning. Row
+// 3: empty; Application Capability Manage Manufacturing Operations; Application
+// Capability Manage Production Planning; empty. Row 4: Data Entity Bill of
+// Materials; Data Entity Production Schedule; Data Entity Demand Forecast. Is there
+// any algorithm or combination of options that could result in this layout?" --
+// confirmed "yes" to building it. Verified the existing 'default' pattern genuinely
+// can't produce this (BusinessFunction and BusinessProcess share custom.json's same
+// "Business" elementGroup, so 'default' merges them into one row). New
+// computeLayerAssignment (commands.js) computes each node's row via multi-source
+// BFS -- a node's layer is the FEWEST hops any real connector justifies from a root
+// (no incoming edges), NOT longest-path/topological-sort (Kahn's-algorithm)
+// layering, which was the first approach tried. Real-data testing (a Playwright
+// script running the actual shipped default batch script end to end, not just a
+// hand-built fixture) showed WHY: the traced data has a genuine Capability ->
+// Process edge, so longest-path layering obeys it as a hard constraint and pushes
+// Process one row below Capability -- but Production also connects directly to
+// Process, and each Consumer connects directly to its own Capability, both exactly
+// 1 hop from a layer-0 root. Shortest-path layering lets each node settle at the
+// row its NEAREST dependency justifies, correctly merging Capability and Process
+// onto one row without hardcoding either type's position. Also naturally robust to
+// the dual-connector convention's genuine 2-node cycles (e.g. Process <-> its own
+// Application Capability, both directions real) -- once BFS visits a node at its
+// shortest distance, a later, longer edge back into it is simply a no-op; no
+// feedback-arc-set removal or DFS cycle-breaking pass is needed at all. (An earlier
+// implementation DID use DFS-based back-edge removal plus longest-path Kahn's-
+// algorithm layering specifically to handle these cycles, including a root-
+// visitation-order heuristic to fix a real scrambled-layering bug it introduced --
+// all of that was removed once testing against the real default-script data showed
+// longest-path layering ITSELF, not cycle-handling, was the actual mismatch with
+// the requested layout; the BFS replacement handles the same cycles for free, with
+// far less code.) Column position within a row and Edge Assignment/Minimize
+// Crossings/Minimize Connector Length are unchanged -- 'layered' only decides which
+// row a node belongs on, then feeds the same downstream machinery every other
+// pattern already shares. No column-wrapping (hidden in the dialog for this
+// pattern -- every row is exactly one graph layer, however wide) and no passive-row
+// special-casing (that's specific to 'default's stream/group semantics).
+// BatchScript_RemapExample (state.js) now uses pattern:'layered' with NO
+// edgeAssignment at all -- Business Function/Consumer parts land on row 0 as true
+// graph roots for free, directly satisfying the original report's own "turning off
+// the requirement of general actor" phrasing. New check_remap_layered_pattern
+// (tests/run_all.py): a synthetic fixture proving the shortest-vs-longest-path
+// distinction specifically (two roots, a middle node reachable from each root both
+// directly AND via a longer path through the other root's own middle node -- the
+// same edge shape as Capability/Process), a second fixture adding the reciprocal
+// edge back (dual-connector cycle) to prove no hang/error, and a third proving Edge
+// Assignment/Minimize Crossings/Minimize Connector Length all still work with
+// pattern:'layered'. check_batch_script_quickstart updated for the new row
+// structure (previously asserted Business Function/General Actor/Data Entity
+// pinned to edge-assignment bands; now asserts the 4-row layered structure with
+// Business Capability and Business Process correctly sharing one row).
+// check_remap_preset_dialog_and_local_persistence extended: switching Pattern to
+// 'layered' hides "Limit columns to view" only, leaving Edge Assignment/Minimize
+// Crossings/Minimize Connector Length visible (unlike 'force', which hides all
+// three). Every new/changed assertion proven against its own regression via a
+// temporary revert (reinstating the old longest-path algorithm, and separately the
+// old dialog-visibility logic) confirmed to fail with an informative message, then
+// restored. DESIGN_DOCUMENT.md SS6.1b, tests/README.md, and public/instructions.html
+// updated. Full suite 98/98.
+//
+// 0.855: Fixed minimizeRowCrossings (commands.js) getting stuck on a genuinely tied
+// (not just suboptimal) ordering. Reported directly, after already trying every
+// minimizeCrossings/minimizeConnectorLength on/off combination against the 'layered'
+// pattern's own output: "did not produce desired result. Note turning both off
+// results in connectors behind nodes, which would be very confusing for users.
+// manually editing is not desired option due to volume of views this would need to be
+// done to, repeated. (value of this tool is no manual editing needed...)" -- the
+// reported layout wanted Business Function centered between its two Processes (not at
+// one end of its row) and Business Capability/Business Process interleaved (not
+// grouped apart). Hand-computed crossing counts on the actual reported data confirmed
+// BOTH the algorithm's actual output AND the requested layout were genuinely tied at
+// ZERO row-to-row crossings -- the old algorithm (one downward-first barycenter sweep
+// + a single trailing transpose pass, scored only by raw crossing count) had no way
+// to prefer between them. Root-caused and fixed in three parts, each confirmed
+// necessary by testing against the real reported topology (NOT just a hand-built
+// synthetic fixture -- a smaller synthetic 2-/3-row case tried first did not
+// reproduce the bug; it only shows up once a row is pulled from both above AND below
+// simultaneously, same as the real Capability/Process row sitting between Actor/
+// Function above and Application Capability below): (1) the full barycenter+
+// transpose search now runs from TWO starting points (downward-first and
+// upward-first) and keeps whichever converges better -- a single starting direction
+// can get stuck in a local optimum only reachable from the other; (2) the transpose
+// step's per-swap decision now ALSO weighs total edge LENGTH (inter-row AND, newly,
+// intra-row -- a same-row-connected pair, routine for pattern:'layered') as a
+// secondary criterion once crossings are tied, swapping a crossing-neutral adjacent
+// pair when it strictly shortens their own edges; (3) the overall best-of-all-
+// iterations result is now tracked by that same (crossings, then length) comparison,
+// not crossings alone. Part (2) turned out to be the one that actually mattered for
+// the real data -- two starting points alone still wasn't enough, since without a
+// length-aware transpose the search could still land in (and never locally escape) a
+// crossing-tied "grouped" ordering. New check_remap_crossing_minimization_finds_
+// global_optimum (tests/run_all.py): hand-builds the exact real "Smart Stream
+// Example" topology directly via createPart/createConnector (fast, no
+// generateIndustry/insertSmartStream dependency) with BatchScript_RemapExample's own
+// sortKeys, and asserts Business Function centered + Business Capability/Process
+// interleaved. Proven against TWO prior buggy states via temporary revert: the
+// fully-original single-start algorithm, and the intermediate two-start-plus-global-
+// length-only version (part 1+3 without part 2) -- both fail with an informative
+// message; the final fix passes. DESIGN_DOCUMENT.md SS6.1a and tests/README.md
+// updated. Full suite 99/99.
+export const APP_VERSION = '0.855';

@@ -91,11 +91,19 @@ capability flow, you generate the whole pattern from a template and a few names.
 section boxes and their header labels for a section-based view — not just the nodes and connectors inside them.</p>
 
 <h3>Remap</h3>
-<p>Reorganizes a view's layout. Three patterns:</p>
+<p>Reorganizes a view's layout. Four patterns:</p>
 <ul>
   <li><strong>Default</strong> — groups nodes by stream into rows, following the stream template's own
   ordering.</li>
   <li><strong>None</strong> — a plain sorted grid, no stream grouping.</li>
+  <li><strong>Layered</strong> — rows come from directed connector-graph structure instead of stream/
+  element-group membership: a node's row is the fewest hops any real connector justifies from a root (a node
+  nothing points into). Useful when the grouping you want doesn't match custom.json's element groups — e.g. a
+  Business Function and its own Processes normally land in the SAME row under Default (same group), but
+  Layered puts the Function a row above its Processes instead, following the actual connector chain. Two
+  types can still end up sharing a row under Layered if each is reachable from a root in the same number of
+  hops, even when a direct connector also links them to each other. No column-limit option (every row is
+  exactly one graph layer, however wide it ends up).</li>
   <li><strong>Force-directed</strong> — an entirely different approach: connected nodes are pulled together
   and placed in directly adjacent grid cells; unconnected clusters are packed into their own separate regions.
   Good for "just show me how this is actually connected" rather than a prescribed row order. Doesn't use sort
@@ -103,10 +111,42 @@ section boxes and their header labels for a section-based view — not just the 
 </ul>
 <p>Remap also has an "only remap filtered nodes" option — combine it with the Stream, Type, or Section filter
 to reorganize just a subset of a busy view without disturbing everything else.</p>
+<p><strong>Edge Assignment</strong> (Default/None/Layered patterns only) pins an element type — scoped to the types
+actually placed on the current view — to a single row or column along the Top, Bottom, Left, or Right edge
+of the whole layout instead of its normal stream/element-group position, e.g. Business Actors on the left,
+Business Functions on top, Data Entities on the bottom. Members within an edge are ordered by the same Sort
+priority keys as the main grid by default, so picking Connection Order there gives "natural flow" along the
+edge too — unless Minimize Crossings (below) is also checked, in which case an edge's order comes from that
+instead, so e.g. a Data Entity connected to two different Capabilities correctly lands between the two
+Entities that only connect to one of them each, rather than wherever alphabetical order happens to put it.
+<strong>Minimize connector crossings</strong> and <strong>Minimize connector length</strong> (also Default/None/
+Layered only) run two further passes, in that order. Minimize connector crossings reorders nodes sideways within
+their own row (or, per the above, an Edge Assignment band) to reduce how often connector lines cross. Minimize
+connector length then nudges nodes toward similar positions but closer — sliding each node toward the
+average position of whatever it's connected to (without changing which row it's on, or the left-to-right
+order crossing minimization just settled on), so connected nodes end up nearer each other and connector
+lines straighten and shorten. Both passes apply to the middle grid AND to Edge Assignment bands — a part
+pinned to Top/Bottom/Left/Right can get reordered within its band and slides along its own edge to align
+with whatever it's connected to in the middle grid, not just the plain, evenly-spaced band position it'd
+otherwise get. Both are heuristics, not guaranteed-optimal, but they noticeably clean up busy
+views — and combine well, since crossing reduction decides ordering first and length minimization then
+tightens the actual spacing. None of the three options do anything on the Force-directed pattern or a
+section-based view, since both lack a free row/column to bias.</p>
 <p>Remap's own choices (pattern, options, sort priority order) are remembered as your defaults the next
-time you open it on any view. The Stream Template you pick is remembered too, and shared as the default
-across every dialog that offers one (Remap, Generate Stream, Smart Check View's Auto-Complete Streams) —
-so you only have to pick it once.</p>
+time you open it on any view — and reopening it on the SAME view you last ran it on brings back that view's
+own settings specifically (pattern, both minimize checkboxes, Edge Assignment, template — not just sort
+order), ahead of the general cross-view default a brand-new view still falls back to. The Stream Template
+you pick is remembered too, and shared as the default across every dialog that offers one (Remap, Generate
+Stream, Smart Check View's Auto-Complete Streams) — so you only have to pick it once. A Preset row at the
+top of the dialog can also save the current field values — including Edge Assignment, Minimize Crossings,
+and Minimize Connector Length — as a named, reusable preset (<strong>Save As…</strong>) or load one back in
+(<strong>Load</strong>). Presets are Local Settings, not part of the model — like Insert Smart Stream's own
+presets, they never end up in a saved JSON file, but do travel with File &gt; Save/Load Local Settings and
+auto-apply from this browser's cache on reload. Also callable directly from a batch script — see
+<a href="#simulation">Script Console</a> below. <strong>Right-clicking</strong> the Remap button (instead of
+left-clicking to run it) copies a ready-to-paste <code>remap(app, tab, {...})</code> call, matching whatever
+the form currently holds, to your clipboard — handy for pasting into the Script Console to replay the exact
+same settings later without re-filling every field by hand.</p>
 
 <h3>Connector routing</h3>
 <p>A per-view setting (Root Properties on the view, or the view's own property panel) with three styles:</p>
@@ -475,7 +515,8 @@ Enabled" in Root Properties, then write the script body in the Script field.</p>
     Secrets — e.g. an API key) that should never end up saved into a shared model file. Deliberately
     memory-only — never cached to localStorage either, so it must be re-loaded each browser session, unlike
     File &gt; Load/Save Local Settings (pinned fields, Max Script Entities, node size, the Script Console's own
-    text, and Insert Smart Stream's saved presets) which IS cached and auto-applies on startup.</td></tr>
+    text, and Insert Smart Stream's and Remap's saved presets) which IS cached and auto-applies on
+    startup.</td></tr>
     <tr><td><code>ctx.setState(patch)</code></td><td>For asynchronous work (e.g. a fetch whose result arrives
     later) — merges into this part's state at the start of the <em>next</em> tick rather than immediately.</td></tr>
     <tr><td><code>ctx.loadedFileName</code></td><td>The filename of the last file that fully replaced the model
@@ -538,9 +579,12 @@ simulation model), <code>findParts</code>, <code>log(...)</code> (prints to the 
 <code>generateIndustry(app, industryKey, onProgress, placeInView)</code>,
 <code>populateFromTemplate(app, tab, templateName)</code>,
 <code>remap(app, tab, options)</code> (options: <code>sortKeys</code>, <code>templateName</code>,
-<code>pattern</code> — <code>'default'</code>/<code>'none'</code>/<code>'force'</code> —
+<code>pattern</code> — <code>'default'</code>/<code>'none'</code>/<code>'layered'</code>/<code>'force'</code> —
 <code>limitColumnsToView</code>, <code>visiblePartVmIds</code>, <code>forcePreferRight</code>,
-<code>forceGroupRows</code>; all optional, same defaults as the Remap dialog),
+<code>forceGroupRows</code>, <code>edgeAssignment</code> (<code>{elementType: 'top'|'bottom'|'left'|
+'right'}</code>, Default/None/Layered patterns only), <code>minimizeCrossings</code>,
+<code>minimizeConnectorLength</code> (both boolean, Default/None/Layered only); all optional, same defaults
+as the Remap dialog),
 <code>smartCheckView(app, tab, options)</code> (options: <code>missingConnectors</code>,
 <code>missingConnectorsAndNodes</code>, <code>levels</code>, <code>syncWithInventory</code>), and
 <code>smartCheckNode(app, tab, partId, options)</code> (same options as smartCheckView, plus
@@ -559,15 +603,19 @@ localStorage and, if you edit it, alongside File &gt; Save Local Settings — se
 afterward. Run (or Ctrl+Enter) defines everything currently in the box — so any <code>function foo() {...}</code>
 you write becomes callable — then calls exactly one predetermined entry point, a top-level <code>main()</code>,
 which is free to call whatever other functions you've defined alongside it (they all share the same bindings
-automatically, without needing them passed in). The default script's <code>main()</code> runs two starter batch
-scripts in sequence — the convention for adding your own is <code>BatchScript_&lt;Name&gt;</code>, with
+automatically, without needing them passed in). The default script's <code>main()</code> runs three starter
+batch scripts in sequence — the convention for adding your own is <code>BatchScript_&lt;Name&gt;</code>, with
 <code>main()</code> picking which one(s) to run, in whatever order. First,
 <code>BatchScript_QuickStart()</code> builds the "Business Functions" view end to end, ending with the 3D View.
 Then <code>BatchScript_InsertSmartStreamExample()</code> runs — a full <code>insertSmartStream</code> call
 (Connectors, both directions, starting from a Business Function named "Production" out to Data Entity, several
 element types shown) against the very data <code>BatchScript_QuickStart</code> just generated, landing on a new
 "Smart Stream Example" view. It's the same trace as the "StreamSet1" preset that ships with the Insert Smart
-Stream dialog (see Commands above) — one usable both as a script and as a ready-made dialog preset.</p>
+Stream dialog (see Commands above) — one usable both as a script and as a ready-made dialog preset. Finally
+<code>BatchScript_RemapExample()</code> remaps that same "Smart Stream Example" view using the
+<strong>Layered</strong> pattern (both Minimize Crossings and Minimize Connector Length enabled, no Edge
+Assignment needed — Business Function and General Actor land on the top row for free, as true graph roots)
+— reusing the existing tab rather than opening a new one.</p>
 
 <h3>Code Summary</h3>
 <p>Advanced &gt; Code Summary opens a read-only listing of the Script Console's own text plus every part's own

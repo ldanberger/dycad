@@ -2648,8 +2648,357 @@ function applyRemapLayoutSectioned(store, view, template, keys, connectionOrderM
   return { view, template, maxCols };
 }
 
+/** Builds a bidirectional vmId -> [neighbor vmIds] adjacency map from a view's
+ * connector viewMembers — shared by minimizeRowCrossings, minimizeConnectorLengthPass,
+ * and the Edge Assignment length-alignment pass in applyRemapLayout below, so the same
+ * map-building logic isn't repeated three times. */
+function buildNeighborMap(connVms) {
+  const neighborsOf = new Map();
+  for (const cv of connVms) {
+    if (!neighborsOf.has(cv.fromVmId)) neighborsOf.set(cv.fromVmId, []);
+    neighborsOf.get(cv.fromVmId).push(cv.toVmId);
+    if (!neighborsOf.has(cv.toVmId)) neighborsOf.set(cv.toVmId, []);
+    neighborsOf.get(cv.toVmId).push(cv.fromVmId);
+  }
+  return neighborsOf;
+}
+
+/** Given DESIRED (barycenter) target positions for an ORDERED sequence of items,
+ * returns resolved positions that preserve that order with at least `step` between
+ * consecutive items — a forward minimum-spacing sweep and a backward one, averaged (so
+ * the sequence doesn't just drift toward whichever swept last), then one more forward
+ * cleanup pass since averaging can reintroduce a tiny violation. Shared by
+ * minimizeConnectorLengthPass (a grid row) and the Edge Assignment length-alignment
+ * pass in applyRemapLayout below (a single edge band) — same 1D constraint problem
+ * either way, just along a different axis. */
+function resolveSpacedPositions(desired, step) {
+  const forward = [...desired];
+  for (let i = 1; i < forward.length; i++) forward[i] = Math.max(forward[i], forward[i - 1] + step);
+  const backward = [...desired];
+  for (let i = backward.length - 2; i >= 0; i--) backward[i] = Math.min(backward[i], backward[i + 1] - step);
+  const resolved = forward.map((f, i) => (f + backward[i]) / 2);
+  for (let i = 1; i < resolved.length; i++) resolved[i] = Math.max(resolved[i], resolved[i - 1] + step);
+  return resolved;
+}
+
+/** Barycenter-heuristic edge-crossing reduction (Sugiyama-style layered graph
+ * drawing), used by applyRemapLayout's 'default'/'none'/'layered' patterns when
+ * options.minimizeCrossings is set. Reorders nodes WITHIN each already-assigned row —
+ * their row/y position, hence which stream/element-group row they landed on, is left
+ * completely untouched — by repeatedly sorting each row by the average column position
+ * of its neighbors in the row above (a downward pass) or below (an upward pass),
+ * alternating a few times to let the ordering converge. A standard, bounded
+ * approximation to the NP-hard general crossing-minimization problem, not an exact
+ * solver.
+ *
+ * Barycenter averaging alone reliably found via real-data testing: it can converge to
+ * an order that's close but not locally optimal, and gets stuck there — reported
+ * directly: a row with one high-fan-out node (connects to BOTH halves of the row
+ * below) next to two low-fan-out siblings (each connects to only one half) settled
+ * with the high-fan-out node at an END of the row instead of centered between its two
+ * targets, even with Minimize Crossings on, because simple positional averaging
+ * doesn't force it there — swapping it one position over would strictly reduce
+ * crossings, but averaging-then-sort never considers that specific swap in isolation.
+ * `transposeRow` below is the standard second half of this algorithm (Gansner et al.,
+ * "A Technique for Drawing Directed Graphs", 1993 — the same two-phase structure
+ * Graphviz's `dot` uses): after barycenter converges, repeatedly scan each row for an
+ * ADJACENT pair whose swap would strictly reduce crossings against the row(s)
+ * immediately above/below, and perform it, until a full sweep finds no more
+ * improvements. Swapping two strictly adjacent items never changes either one's
+ * left/right relation to any THIRD item in the row, so the crossing-count delta from a
+ * candidate swap depends only on that pair's own edges — cheap to evaluate directly
+ * (no need to recompute the whole row's crossing count) and, unlike barycenter
+ * averaging, it only ever acts on a swap already proven to help, so it can't undo
+ * barycenter's progress or oscillate.
+ *
+ * Transpose alone, run once after barycenter fully converges, still wasn't enough on
+ * further real-data testing: two ADJACENT rows can each look locally fine against the
+ * OTHER row's current (not-yet-ideal) order, while the pair jointly sits in a
+ * non-global optimum neither row's own local swap-check can see its way out of —
+ * exactly dot's own documented rationale for interleaving the two phases repeatedly
+ * rather than running each once. Each iteration below now does a full barycenter
+ * sweep AND a full transpose sweep together, and the actual total crossing count
+ * (summed over every adjacent row pair, real pairwise edge-crossing count — not a
+ * proxy) is checked after every iteration; the best-scoring full layout seen across
+ * ALL iterations is what's kept at the end, not just whatever the last iteration
+ * happened to land on, since neither phase is monotonic once more than two rows are
+ * involved (an iteration can genuinely score worse than an earlier one before a later
+ * one recovers).
+ *
+ * rowGroups: array of vm[] arrays, outer array already in top-to-bottom row order,
+ * each inner array in some starting left-to-right column order — mutated in place, and
+ * vm.x is rewritten to match the final column order. */
+function minimizeRowCrossings(rowGroups, connVms, stepX, baseX, iterations = 8) {
+  if (rowGroups.length < 2) return;
+  const neighborsOf = buildNeighborMap(connVms);
+  const rowMembership = rowGroups.map((row) => new Set(row.map((vm) => vm.id)));
+  const rowIndexOf = new Map();
+  rowGroups.forEach((row, i) => row.forEach((vm) => rowIndexOf.set(vm.id, i)));
+  const intraRowConns = connVms.filter((cv) => cv.fromVmId !== cv.toVmId && rowIndexOf.get(cv.fromVmId) === rowIndexOf.get(cv.toVmId));
+  const targetsIn = (colOf, vmId, neighborRowIds) =>
+    (neighborsOf.get(vmId) || []).filter((nid) => neighborRowIds.has(nid)).map((nid) => colOf.get(nid));
+
+  // A swap's LENGTH delta (positive = swapping a/b shortens their own edges): for
+  // every edge of a or b (inter-row via aboveIds/belowIds, OR same-row via this row's
+  // own membership, excluding a's edge to b itself -- their mutual distance is 1
+  // either way), compare |old position - target| to |new position - target|.
+  const lengthDeltaOf = (colOf, a, b, idx, aboveIds, belowIds, ownRowIds) => {
+    let delta = 0;
+    for (const neighborRowIds of [aboveIds, belowIds]) {
+      if (!neighborRowIds) continue;
+      for (const p of targetsIn(colOf, a.id, neighborRowIds)) delta += Math.abs(idx - p) - Math.abs(idx + 1 - p);
+      for (const p of targetsIn(colOf, b.id, neighborRowIds)) delta += Math.abs(idx + 1 - p) - Math.abs(idx - p);
+    }
+    for (const p of targetsIn(colOf, a.id, ownRowIds)) { if (p !== idx && p !== idx + 1) delta += Math.abs(idx - p) - Math.abs(idx + 1 - p); }
+    for (const p of targetsIn(colOf, b.id, ownRowIds)) { if (p !== idx && p !== idx + 1) delta += Math.abs(idx + 1 - p) - Math.abs(idx - p); }
+    return delta;
+  };
+
+  const transposeAll = (rows, colOf) => {
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const aboveIds = i > 0 ? rowMembership[i - 1] : null;
+      const belowIds = i < rows.length - 1 ? rowMembership[i + 1] : null;
+      const ownRowIds = rowMembership[i];
+      let improved = true, guard = 0;
+      while (improved && guard < row.length * 4) {
+        improved = false;
+        guard += 1;
+        for (let idx = 0; idx < row.length - 1; idx++) {
+          const a = row[idx], b = row[idx + 1];
+          let crossDelta = 0; // positive = swapping a/b strictly reduces crossings
+          for (const neighborRowIds of [aboveIds, belowIds]) {
+            if (!neighborRowIds) continue;
+            const ta = targetsIn(colOf, a.id, neighborRowIds), tb = targetsIn(colOf, b.id, neighborRowIds);
+            for (const pa of ta) for (const pb of tb) {
+              if (pa > pb) crossDelta += 1; // currently crossing (a left of b, but a's target right of b's) -- swap removes it
+              else if (pa < pb) crossDelta -= 1; // currently non-crossing -- swap would introduce it
+            }
+          }
+          // Swap on a strict crossing improvement, same as before -- but ALSO on a
+          // crossing-NEUTRAL swap that strictly shortens a/b's own edges (inter-row OR
+          // same-row). Without this second case, two orderings that tie on crossings
+          // (0 crossings either way) but differ in length can never be locally
+          // improved upon: the transpose only ever accepted a strict crossing
+          // reduction, so a same-row-connected pair could stay needlessly stretched
+          // apart even though moving them adjacent is free (crossing-wise) and
+          // strictly shorter -- reported directly, this is exactly what left Business
+          // Capability/Business Process "grouped" instead of interleaved.
+          const shouldSwap = crossDelta > 0 || (crossDelta === 0 && lengthDeltaOf(colOf, a, b, idx, aboveIds, belowIds, ownRowIds) > 0);
+          if (shouldSwap) {
+            row[idx] = b; row[idx + 1] = a;
+            colOf.set(a.id, idx + 1); colOf.set(b.id, idx);
+            improved = true;
+          }
+        }
+      }
+    }
+  };
+
+  // Real total crossing count (every adjacent row pair, every pair of edges between
+  // them), PLUS total column-distance (a straightness proxy, INTER-row AND intra-row
+  // both) as a tie-break -- used only to pick the best iteration, not as a per-swap
+  // heuristic (that's transposeAll's cheaper local delta above). Multiple orderings
+  // can tie on raw crossing count (0 crossings is 0 crossings, however the nodes are
+  // otherwise arranged) — reported directly: a high-fan-out node (connects to BOTH
+  // halves of the row below) ending up at one END of its row instead of centered
+  // between its own two targets, even though BOTH arrangements are equally
+  // crossing-free. Straightness/length is what actually distinguishes them (centering
+  // the node makes its own two edges shorter and more symmetric), so it's the natural
+  // tie-break — the same principle minimizeConnectorLengthPass already applies, just
+  // used here to choose BETWEEN equally-valid orderings instead of refining
+  // coordinates within a fixed one. Intra-row length (both ends of an edge in the SAME
+  // row — routine for the 'layered' pattern, whose whole point is putting two directly
+  // connected types on one row when they're equidistant from a root) matters just as
+  // much as inter-row length: an ordering that shortens every inter-row edge to zero by
+  // grouping same-type nodes together can still be the WRONG choice if it makes those
+  // same nodes' real same-row connector stretch across unrelated nodes in between —
+  // found via real-data testing, where scoring inter-row length alone picked exactly
+  // that "grouped" ordering over the shorter-OVERALL "interleaved" one.
+  const scoreOf = (rows, colOf) => {
+    let crossings = 0, length = 0;
+    for (let i = 0; i < rows.length - 1; i++) {
+      const topIds = rowMembership[i], botIds = rowMembership[i + 1];
+      const pairs = [];
+      for (const cv of connVms) {
+        if (topIds.has(cv.fromVmId) && botIds.has(cv.toVmId)) pairs.push([colOf.get(cv.fromVmId), colOf.get(cv.toVmId)]);
+        else if (topIds.has(cv.toVmId) && botIds.has(cv.fromVmId)) pairs.push([colOf.get(cv.toVmId), colOf.get(cv.fromVmId)]);
+      }
+      for (const [t, b] of pairs) length += Math.abs(t - b);
+      for (let a = 0; a < pairs.length; a++) {
+        for (let b = a + 1; b < pairs.length; b++) {
+          const [t1, b1] = pairs[a], [t2, b2] = pairs[b];
+          if ((t1 - t2) * (b1 - b2) < 0) crossings += 1;
+        }
+      }
+    }
+    for (const cv of intraRowConns) length += Math.abs(colOf.get(cv.fromVmId) - colOf.get(cv.toVmId));
+    return { crossings, length };
+  };
+  const isBetter = (a, b) => a.crossings < b.crossings || (a.crossings === b.crossings && a.length < b.length);
+
+  // Runs the full barycenter+transpose search from a given starting row order,
+  // alternating sweep direction each pass -- `startDownward` picks which direction
+  // goes FIRST, since that decides which row gets pulled toward its neighbor before
+  // the reverse pass pulls back, changing which local optimum the search converges to
+  // (barycenter+transpose is not guaranteed to find the global optimum, only to
+  // improve on its starting point). Returns the best-scoring {rows, score} seen
+  // across every iteration of this particular run, not just its last one.
+  const runSearch = (initialRows, startDownward) => {
+    const rows = initialRows.map((row) => row.slice());
+    const colOf = new Map();
+    rows.forEach((row) => row.forEach((vm, idx) => colOf.set(vm.id, idx)));
+    let best = rows.map((row) => row.slice());
+    let bestScore = scoreOf(rows, colOf);
+    for (let pass = 0; pass < iterations; pass++) {
+      const downward = startDownward ? pass % 2 === 0 : pass % 2 === 1;
+      const rowOrder = downward ? rows.map((_, i) => i) : rows.map((_, i) => i).reverse();
+      for (const i of rowOrder) {
+        const neighborRowIdx = downward ? i - 1 : i + 1;
+        if (neighborRowIdx < 0 || neighborRowIdx >= rows.length) continue;
+        const neighborRowIds = rowMembership[neighborRowIdx];
+        const barycenterOf = (vm) => {
+          const cols = targetsIn(colOf, vm.id, neighborRowIds);
+          return cols.length ? cols.reduce((s, c) => s + c, 0) / cols.length : colOf.get(vm.id);
+        };
+        rows[i] = rows[i]
+          .map((vm) => ({ vm, b: barycenterOf(vm) }))
+          .sort((a, b) => a.b - b.b)
+          .map((e) => e.vm);
+        rows[i].forEach((vm, idx) => colOf.set(vm.id, idx));
+      }
+      transposeAll(rows, colOf);
+      const score = scoreOf(rows, colOf);
+      if (isBetter(score, bestScore)) {
+        bestScore = score;
+        best = rows.map((row) => row.slice());
+      }
+    }
+    return { rows: best, score: bestScore };
+  };
+
+  // Two starts (downward-first and upward-first) from the SAME given initial order --
+  // a cheap, deterministic diversification, not a random restart. Real-data testing
+  // found this genuinely necessary: with one specific real sort-key order, the
+  // downward-first search always converged to a different, equally crossing-free but
+  // longer/less-straight arrangement (a high-fan-out node left at one end of its row
+  // instead of centered between its own two targets) -- more iterations of the SAME
+  // starting direction never escaped it, since transpose only ever accepts a strictly
+  // crossing-reducing swap, and this specific improvement was length-only, not
+  // crossing-only. Starting upward instead changes which row gets pulled toward its
+  // neighbor first, reaching the better arrangement directly.
+  let result = runSearch(rowGroups, true);
+  const upResult = runSearch(rowGroups, false);
+  if (isBetter(upResult.score, result.score)) result = upResult;
+
+  for (let i = 0; i < rowGroups.length; i++) rowGroups[i] = result.rows[i];
+  rowGroups.forEach((row) => row.forEach((vm, idx) => { vm.x = baseX + idx * stepX; }));
+}
+
+/** Continuous horizontal-position refinement — the classic Sugiyama "coordinate
+ * assignment" phase, complementing minimizeRowCrossings' "ordering" phase above (runs
+ * after it, if both are enabled, so it refines coordinates within whatever column
+ * order crossing minimization already settled on). Used by applyRemapLayout's
+ * 'default'/'none' patterns when options.minimizeConnectorLength is set. Each row's
+ * nodes stay on their already-assigned row (y untouched) and keep their existing
+ * left-to-right ORDER — only x shifts, toward the average x of each node's connected
+ * neighbors (any row, not just the one above/below), so connected chains straighten
+ * and pull closer together instead of sitting at fixed, evenly-spaced grid slots; a
+ * node with no neighbors, or whose neighbors are already directly above/below it,
+ * doesn't move. Each pass resolves a row's desired (barycenter) positions two ways —
+ * a left-to-right sweep enforcing a minimum stepX gap, and a right-to-left sweep doing
+ * the same in reverse — then averages the two so the row doesn't just drift in
+ * whichever sweep direction ran last; a final left-to-right cleanup pass guarantees no
+ * overlap even after averaging. A bounded, iterative heuristic (not an exact solver),
+ * same spirit as minimizeRowCrossings. rowGroups: array of vm[] arrays already in
+ * top-to-bottom row order, each inner array in the LEFT-TO-RIGHT order to preserve —
+ * mutated in place, vm.x rewritten to the final compacted position. */
+function minimizeConnectorLengthPass(rowGroups, connVms, stepX, baseX, iterations = 4) {
+  if (rowGroups.length === 0) return;
+  const neighborsOf = buildNeighborMap(connVms);
+  const xOf = new Map();
+  rowGroups.forEach((row) => row.forEach((vm, idx) => xOf.set(vm.id, baseX + idx * stepX)));
+
+  const resolveRow = (row) => {
+    const desired = row.map((vm) => {
+      const xs = (neighborsOf.get(vm.id) || []).map((nid) => xOf.get(nid)).filter((x) => x !== undefined);
+      return xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : xOf.get(vm.id);
+    });
+    const resolved = resolveSpacedPositions(desired, stepX);
+    row.forEach((vm, i) => xOf.set(vm.id, resolved[i]));
+  };
+
+  for (let pass = 0; pass < iterations; pass++) {
+    const order = pass % 2 === 0 ? rowGroups : [...rowGroups].reverse();
+    order.forEach((row) => resolveRow(row));
+  }
+
+  // Normalize so the leftmost node sits at baseX — repeated barycenter passes can
+  // otherwise drift the whole block rightward (or leftward) with nothing to anchor it.
+  const allX = [...xOf.values()];
+  if (allX.length) {
+    const shift = baseX - Math.min(...allX);
+    rowGroups.forEach((row) => row.forEach((vm) => { vm.x = xOf.get(vm.id) + shift; }));
+  }
+}
+
+/** Computes a hierarchical "layer" (row) for every node from directed graph structure
+ * alone — the layer-assignment phase of Sugiyama-style layered graph drawing, used by
+ * applyRemapLayout's 'layered' pattern. Column position within a layer, and any
+ * crossing/length optimization, are left entirely to the SAME existing machinery every
+ * other pattern already shares (minimizeRowCrossings/minimizeConnectorLengthPass) —
+ * this only decides which row a node belongs on.
+ *
+ * Multi-source BFS, shortest-hop-distance-from-any-root — NOT longest-path/topological
+ * layering. A node's layer is the FEWEST hops from any root (a node with no incoming
+ * edges) that a real edge justifies, computed by expanding every root's frontier one
+ * hop at a time and recording each node's layer the first (shortest) time it's reached.
+ * This was deliberately chosen over longest-path layering after testing against a real
+ * report: given Function -> Process directly (1 hop) AND Function -> [Actor ->]
+ * Capability -> Process (a longer indirect route through a sibling type), longest-path
+ * layering would push Process one row below Capability (obeying the longer chain as a
+ * hard constraint), splitting two types the user wanted on the SAME row. Shortest-path
+ * layering instead lets Process sit at the row its nearest real dependency (Function)
+ * justifies, landing it alongside Capability — matching the requested layout without
+ * hardcoding either type's row.
+ * Also naturally robust to DyCAD's dual-connector convention (relationshipPairs.default
+ * creates BOTH directions between certain adjacent stream elements, a genuine 2-node
+ * cycle): once a node is reached at its shortest distance, BFS never revisits it, so a
+ * later, longer edge back into it is simply a no-op — no separate cycle-breaking pass
+ * (feedback-arc-set removal, DFS ordering, etc.) is needed at all. */
+function computeLayerAssignment(vms, connVms) {
+  const idSet = new Set(vms.map((vm) => vm.id));
+  const outAdj = new Map(), inDegree = new Map();
+  for (const vm of vms) { outAdj.set(vm.id, []); inDegree.set(vm.id, 0); }
+  for (const cv of connVms) {
+    if (!idSet.has(cv.fromVmId) || !idSet.has(cv.toVmId) || cv.fromVmId === cv.toVmId) continue;
+    outAdj.get(cv.fromVmId).push(cv.toVmId);
+    inDegree.set(cv.toVmId, inDegree.get(cv.toVmId) + 1);
+  }
+
+  const layer = new Map();
+  let frontier = vms.filter((vm) => inDegree.get(vm.id) === 0).map((vm) => vm.id);
+  for (const id of frontier) layer.set(id, 0);
+  let depth = 0;
+  while (frontier.length) {
+    const next = [];
+    for (const id of frontier) {
+      for (const to of outAdj.get(id)) {
+        if (!layer.has(to)) { layer.set(to, depth + 1); next.push(to); }
+      }
+    }
+    frontier = next;
+    depth += 1;
+  }
+  // A node no root can reach at all (every inbound edge comes from within an isolated
+  // cycle with no outside entry point) never enters the BFS above — same defensive
+  // fallback as before, just for a different edge case.
+  for (const vm of vms) if (!layer.has(vm.id)) layer.set(vm.id, 0);
+  return layer;
+}
+
 function applyRemapLayout(app, viewId, options = {}) {
-  const { sortKeys, templateName, pattern = 'default', limitColumnsToView = false, visiblePartVmIds = null, forcePreferRight = false, forceGroupRows = false } = options;
+  const { sortKeys, templateName, pattern = 'default', limitColumnsToView = false, visiblePartVmIds = null, forcePreferRight = false, forceGroupRows = false, edgeAssignment = null, minimizeCrossings = false, minimizeConnectorLength = false } = options;
   const { store } = app;
   const view = store.findView(viewId);
   if (!view) return null;
@@ -2723,6 +3072,25 @@ function applyRemapLayout(app, viewId, options = {}) {
     return { view, template, maxCols: partVms.length };
   }
 
+  // Edge Assignment (default/none patterns only — force above already returned, and
+  // section-based views returned even earlier via applyRemapLayoutSectioned): a part
+  // whose TYPE has an entry in edgeAssignment is pulled OUT of the normal stream/
+  // element-group grid entirely and placed instead in a single row/column band along
+  // that edge of the layout (see the post-processing below), ordered by the same
+  // sort-priority keys as everything else. Everything else (no entry, or edgeAssignment
+  // not passed at all) goes through the existing grid logic completely unchanged.
+  const edgeBuckets = { top: [], bottom: [], left: [], right: [] };
+  let middlePartVms = partVms;
+  if (edgeAssignment) {
+    middlePartVms = [];
+    for (const vm of partVms) {
+      const part = store.findPart(vm.objectId);
+      const dir = part && edgeAssignment[part.type];
+      if (dir && edgeBuckets[dir]) edgeBuckets[dir].push(vm);
+      else middlePartVms.push(vm);
+    }
+  }
+
   const passivePartIds = new Set();
   for (const cv of connVms) {
     const conn = store.findConnector(cv.objectId);
@@ -2738,7 +3106,7 @@ function applyRemapLayout(app, viewId, options = {}) {
   const isSpecialPassiveType = (type) => !templateValueTypes.has(String(type).toLowerCase());
 
   const passiveVms = [], remainingVms = [];
-  for (const vm of partVms) {
+  for (const vm of middlePartVms) {
     const part = store.findPart(vm.objectId);
     if (!part) continue;
     if (passivePartIds.has(part.id) && isSpecialPassiveType(part.type)) passiveVms.push(vm);
@@ -2752,6 +3120,7 @@ function applyRemapLayout(app, viewId, options = {}) {
   const zoom = app.store.activeTab()?.viewport?.zoom || 1;
   const maxCols = limitColumnsToView ? estimateMaxCols(stepX, baseX, zoom) : Infinity;
 
+  let resultMaxCols;
   if (pattern === 'none') {
     // simple flat placement: sorted order (per the chosen keys), wrapping only at
     // maxCols (or one continuous row if unlimited) — no stream-boundary row breaks.
@@ -2770,9 +3139,47 @@ function applyRemapLayout(app, viewId, options = {}) {
       vm.x = baseX + (i % wrapCols) * stepX;
       vm.y = rowBaseY + Math.floor(i / wrapCols) * stepY;
     });
-    return { view, template, maxCols: Number.isFinite(maxCols) ? maxCols : allSorted.length };
-  }
-
+    resultMaxCols = Number.isFinite(maxCols) ? maxCols : allSorted.length;
+  } else if (pattern === 'layered') {
+    // Hierarchical layering by graph structure (BFS/longest-path depth from whatever
+    // has no incoming edges — see computeLayerAssignment above), NOT element-group or
+    // stream membership: a genuinely different row-assignment rule than 'default'/
+    // 'none', for cases where the architectural layer you want (e.g. a Business
+    // Function above its own Processes, above their own Application Capabilities,
+    // above their own Data Entities) actually follows the connector graph rather than
+    // custom.json's elementGroup — which often puts a Function and its Processes in
+    // the SAME group, merging them into one row under 'default'. No column-wrapping
+    // (maxCols/"Limit columns to view" doesn't apply here — the dialog hides it for
+    // this pattern) and no passive-row special-casing (that convention is specific to
+    // 'default's stream/group semantics); every part in the middle set, passive or
+    // not, is placed purely by its own layer.
+    const layeredVms = [...remainingVms, ...passiveVms];
+    const layeredIdSet = new Set(layeredVms.map((vm) => vm.id));
+    const layerEdges = connVms.filter((cv) => layeredIdSet.has(cv.fromVmId) && layeredIdSet.has(cv.toVmId));
+    const layerOf = computeLayerAssignment(layeredVms, layerEdges);
+    const byLayer = new Map();
+    for (const vm of layeredVms) {
+      const l = layerOf.get(vm.id) ?? 0;
+      if (!byLayer.has(l)) byLayer.set(l, []);
+      byLayer.get(l).push(vm);
+    }
+    let maxColsSeen = 0;
+    for (const l of [...byLayer.keys()].sort((a, b) => a - b)) {
+      const rowVms = byLayer.get(l).sort((a, b) => {
+        const partA = store.findPart(a.objectId), partB = store.findPart(b.objectId);
+        for (const key of keys) {
+          const va = remapSortValue(store, template, partA, key, connectionOrderMap, viewRelevantStreams);
+          const vb = remapSortValue(store, template, partB, key, connectionOrderMap, viewRelevantStreams);
+          if (va < vb) return -1;
+          if (va > vb) return 1;
+        }
+        return 0;
+      });
+      rowVms.forEach((vm, col) => { vm.x = baseX + col * stepX; vm.y = rowBaseY + l * stepY; });
+      maxColsSeen = Math.max(maxColsSeen, rowVms.length);
+    }
+    resultMaxCols = maxColsSeen;
+  } else {
   // 'default' pattern: group by stream name (row-per-group), and within a group start a
   // new row on every element.group change too (Step 18); ordered by streamTemplate.value
   // position, then any remaining unresolved types, then the user's chosen sort-priority
@@ -2829,13 +3236,152 @@ function applyRemapLayout(app, viewId, options = {}) {
     rowLastCol.set(targetRow, targetCol);
   }
 
-  return { view, template, maxCols: Number.isFinite(maxCols) ? maxCols : (rowLastCol.size ? Math.max(...rowLastCol.values()) + 1 : 0) };
+  resultMaxCols = Number.isFinite(maxCols) ? maxCols : (rowLastCol.size ? Math.max(...rowLastCol.values()) + 1 : 0);
+  }
+
+  const allMiddleVms = [...remainingVms, ...passiveVms];
+
+  // Crossing minimization and connector-length minimization (both opt-in, both only
+  // ever touch middle-grid rows/columns, never the edge bands below): the classic
+  // Sugiyama two-phase pipeline — minimizeRowCrossings settles column ORDER first,
+  // then minimizeConnectorLength refines exact x POSITIONS within whatever order is
+  // now in place (crossing-minimized if that ran, otherwise the existing sort-key
+  // order). Share the same row grouping between both so the second phase sees the
+  // first's actual result rather than rebuilding from scratch.
+  if ((minimizeCrossings || minimizeConnectorLength) && allMiddleVms.length > 0) {
+    const rowsMap = new Map();
+    for (const vm of allMiddleVms) {
+      if (!rowsMap.has(vm.y)) rowsMap.set(vm.y, []);
+      rowsMap.get(vm.y).push(vm);
+    }
+    const rowGroups = [...rowsMap.entries()].sort((a, b) => a[0] - b[0]).map(([, vms]) => vms.sort((a, b) => a.x - b.x));
+    if (minimizeCrossings) minimizeRowCrossings(rowGroups, connVms, stepX, baseX);
+    if (minimizeConnectorLength) minimizeConnectorLengthPass(rowGroups, connVms, stepX, baseX);
+  }
+
+  // Edge Assignment placement: shift the middle grid over to make room for a left/top
+  // band (if either has any members), then lay each band out as a single row/column
+  // along its own edge of the whole layout — ordered by the same sort-priority keys as
+  // everything else by default (reusing remapSortValue so "ordered by connector
+  // order/natural flow" works here too), UNLESS minimizeCrossings is also on, in which
+  // case each band's order is instead a barycenter reordering against the middle
+  // grid's own final positions (see orderBand below) — the sortKeys order becomes just
+  // the tie-break for members with no middle-grid connection to align to.
+  const hasTop = edgeBuckets.top.length > 0, hasBottom = edgeBuckets.bottom.length > 0;
+  const hasLeft = edgeBuckets.left.length > 0, hasRight = edgeBuckets.right.length > 0;
+  if (hasTop || hasBottom || hasLeft || hasRight) {
+    const shiftX = hasLeft ? stepX : 0, shiftY = hasTop ? stepY : 0;
+    if (shiftX || shiftY) {
+      for (const vm of allMiddleVms) { vm.x += shiftX; vm.y += shiftY; }
+    }
+    const xs = allMiddleVms.map((vm) => vm.x), ys = allMiddleVms.map((vm) => vm.y);
+    const middleMinX = xs.length ? Math.min(...xs) : baseX + shiftX;
+    const middleMaxX = xs.length ? Math.max(...xs) : baseX + shiftX;
+    const middleMinY = ys.length ? Math.min(...ys) : rowBaseY + shiftY;
+    const middleMaxY = ys.length ? Math.max(...ys) : rowBaseY + shiftY;
+
+    const orderByKeys = (vms) => [...vms].sort((a, b) => {
+      const partA = store.findPart(a.objectId), partB = store.findPart(b.objectId);
+      for (const key of keys) {
+        const va = remapSortValue(store, template, partA, key, connectionOrderMap, viewRelevantStreams);
+        const vb = remapSortValue(store, template, partB, key, connectionOrderMap, viewRelevantStreams);
+        if (va < vb) return -1;
+        if (va > vb) return 1;
+      }
+      return 0;
+    });
+
+    const bandNeighborsOf = buildNeighborMap(connVms);
+    const middlePosOf = new Map();
+    for (const vm of allMiddleVms) middlePosOf.set(vm.id, { x: vm.x, y: vm.y });
+
+    // Barycenter reordering against the (already-final) middle grid — same idea as
+    // minimizeRowCrossings, but a band isn't a "row with neighbor rows above/below": its
+    // one and only neighbor to align against is the middle grid itself. A member with
+    // no middle-grid connection at all (only connects to other band members, or
+    // nothing) has no preference, so it falls back to (and ties break by) the plain
+    // sortKeys order — never reordered relative to other such members.
+    const orderBand = (vms, axis) => {
+      const baseOrder = orderByKeys(vms);
+      if (!minimizeCrossings || baseOrder.length === 0) return baseOrder;
+      const indexOf = new Map(baseOrder.map((vm, i) => [vm.id, i]));
+      const barycenterOf = (vm) => {
+        const vals = (bandNeighborsOf.get(vm.id) || []).map((nid) => middlePosOf.get(nid)?.[axis]).filter((v) => v !== undefined);
+        return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
+      };
+      return baseOrder
+        .map((vm) => ({ vm, b: barycenterOf(vm) }))
+        .sort((a, b) => {
+          if (a.b === null && b.b === null) return indexOf.get(a.vm.id) - indexOf.get(b.vm.id);
+          if (a.b === null) return 1;
+          if (b.b === null) return -1;
+          return a.b - b.b;
+        })
+        .map((e) => e.vm);
+    };
+
+    const orderedTop = orderBand(edgeBuckets.top, 'x');
+    const orderedBottom = orderBand(edgeBuckets.bottom, 'x');
+    const orderedLeft = orderBand(edgeBuckets.left, 'y');
+    const orderedRight = orderBand(edgeBuckets.right, 'y');
+
+    orderedTop.forEach((vm, i) => { vm.x = middleMinX + i * stepX; vm.y = rowBaseY; });
+    orderedBottom.forEach((vm, i) => { vm.x = middleMinX + i * stepX; vm.y = middleMaxY + stepY; });
+    orderedLeft.forEach((vm, i) => { vm.x = baseX; vm.y = middleMinY + i * stepY; });
+    orderedRight.forEach((vm, i) => { vm.x = middleMaxX + stepX; vm.y = middleMinY + i * stepY; });
+
+    // Minimize Connector Length also aligns each band's CROSS axis (x for top/bottom,
+    // y for left/right) toward whatever its members are actually connected to — the
+    // placement above only fixes each band's ORDER at evenly-spaced slots; without
+    // this, a part pinned to an edge never benefits from length minimization at all,
+    // even though the middle grid it's connected to just did. Same
+    // resolveSpacedPositions machinery as minimizeConnectorLengthPass, applied to one
+    // band (a single "row") at a time — keeps the band's own order (whichever ordering
+    // above produced) and minimum spacing, reads neighbor positions from the middle
+    // grid's now-FINAL coordinates (and whichever other bands were already aligned this
+    // call), never the reverse, so the middle grid itself is never perturbed by where a
+    // band ends up.
+    if (minimizeConnectorLength) {
+      const posOf = new Map(middlePosOf);
+      const alignBand = (bandVmsOrdered, axis, step) => {
+        if (bandVmsOrdered.length === 0) return;
+        const desired = bandVmsOrdered.map((vm) => {
+          const vals = (bandNeighborsOf.get(vm.id) || []).map((nid) => posOf.get(nid)?.[axis]).filter((v) => v !== undefined);
+          return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : vm[axis];
+        });
+        const resolved = resolveSpacedPositions(desired, step);
+        bandVmsOrdered.forEach((vm, i) => { vm[axis] = resolved[i]; posOf.set(vm.id, { x: vm.x, y: vm.y }); });
+      };
+      alignBand(orderedTop, 'x', stepX);
+      alignBand(orderedBottom, 'x', stepX);
+      alignBand(orderedLeft, 'y', stepY);
+      alignBand(orderedRight, 'y', stepY);
+    }
+  }
+
+  return { view, template, maxCols: resultMaxCols };
 }
 
 function remap(app, tab, options = {}) {
   const result = applyRemapLayout(app, tab.viewId, options);
   if (!result) { app.toast('No stream templates available to remap against.', true); return; }
   if (options.sortKeys && options.sortKeys.length) result.view.remapSortKeys = options.sortKeys;
+  // Remembers every OTHER dialog field too (sortKeys stays in its own remapSortKeys
+  // field above, unchanged) so reopening Remap on THIS SPECIFIC view starts from what
+  // was last used here, not just the cross-view defaults (getCachedRemapOptions,
+  // main.js) — same "this view's own history wins" precedent remapSortKeys already
+  // set. Only recorded on success (mirrors remapSortKeys, set after the same guard).
+  result.view.remapLastOptions = {
+    templateName: options.templateName || result.template.name,
+    pattern: options.pattern || 'default',
+    limitColumnsToView: !!options.limitColumnsToView,
+    filteredOnly: !!options.filteredOnly,
+    forcePreferRight: !!options.forcePreferRight,
+    forceGroupRows: !!options.forceGroupRows,
+    edgeAssignment: options.edgeAssignment || {},
+    minimizeCrossings: !!options.minimizeCrossings,
+    minimizeConnectorLength: !!options.minimizeConnectorLength,
+  };
   app.recordAndRender();
   const detail = options.pattern === 'force' ? 'force-directed placement' : `${result.maxCols} columns`;
   app.toast(`Remapped "${result.view.viewName}" using template "${result.template.name}" (${detail}).`);
