@@ -78,6 +78,17 @@ function disposeView3DTab(tabId) {
   if (view3dModule) view3dModule.disposeView3D(tabId);
 }
 
+/** The cached view3d.js module, if it's been loaded at least once (i.e. a 3D tab has
+ * actually been rendered this session) — null otherwise. Lets a caller elsewhere in
+ * the app (main.js's File > Export View as Image, for a 3D tab) reach view3d.js's own
+ * exports synchronously, without importing it eagerly and defeating the whole point of
+ * the lazy-load above, and without needing its own separate load-promise cache. Safe to
+ * assume non-null whenever a 3D tab is the ACTIVE tab (rendering it once already
+ * triggered the load), but callers should still null-check rather than assume it. */
+function getView3DModule() {
+  return view3dModule;
+}
+
 // ===================== CANVAS PAGE =====================
 /** Stream visibility filter. null/undefined = no filter configured yet (show
  * everything) — an explicit empty array (set via either filter menu's "Select All /
@@ -1261,4 +1272,4 @@ function renderDocsPage(app, tab, container) {
     });
 }
 
-export { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, getNodeSize, redrawAndResolveLayout, passesStreamFilter, passesElementTypeFilter, passesSectionFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab };
+export { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, getNodeSize, redrawAndResolveLayout, passesStreamFilter, passesElementTypeFilter, passesSectionFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule };

@@ -843,7 +843,13 @@ function createInstance(app, tab, container) {
   const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 20000);
   camera.position.set(6, 6, 10);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  // preserveDrawingBuffer:true costs a little (the browser can't just discard the
+  // drawing buffer after each frame, it has to keep a copy) but is what makes
+  // captureView3DImage's canvas.toBlob() reliable at all -- without it, whether a
+  // capture taken some arbitrary time after the last requestAnimationFrame call
+  // returns real pixels or a blank/black image depends on browser-internal timing the
+  // app has no control over, not on anything captureView3DImage itself does.
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(window.devicePixelRatio || 1);
   renderer.setSize(width, height);
   container.appendChild(renderer.domElement);
@@ -1413,6 +1419,24 @@ function disposeView3D(tabId) {
   instances.delete(tabId);
 }
 
+/** File > Export View as Image, for a 3D View tab -- the WebGL counterpart to the 2D
+ * canvas' SVG-based buildViewSvgString/exportViewAsPng (main.js), which can't apply
+ * here at all (there's no SVG-serializable scene, just a real WebGL framebuffer). Forces
+ * one synchronous render() call immediately before capturing -- not strictly required
+ * once the renderer's own preserveDrawingBuffer:true (createInstance, above) is set, but
+ * cheap insurance against capturing a stale frame mid-interaction (e.g. right after
+ * OrbitControls damping has moved the camera but before the next animation frame has
+ * actually painted it). Returns a Promise<Blob|null> — null if no 3D View instance
+ * exists for this tab (the caller's only realistic path to calling this at all is via
+ * an already-open, already-rendered 3D tab, so this is a paranoid fallback, not the
+ * expected case) or if toBlob itself fails. */
+function captureView3DImage(tabId) {
+  const inst = instances.get(tabId);
+  if (!inst) return Promise.resolve(null);
+  inst.renderer.render(inst.scene, inst.camera);
+  return new Promise((resolve) => inst.renderer.domElement.toBlob(resolve, 'image/png'));
+}
+
 /** Read-only introspection of a 3D tab's actual current scene contents — for the
  * regression suite to assert on genuine internal state (per-type instance counts, Z
  * layer position, mesh identity) rather than only what a screenshot happens to show.
@@ -1556,4 +1580,4 @@ function debugGetScreenPosition(tabId, partId) {
   return null;
 }
 
-export { renderView3D, disposeView3D, getDebugSceneInfo, debugFocusPart, debugJumpToMatching2DView, debugSetCameraDistance, debugGetSimMarkerScale, debugGetScreenPosition };
+export { renderView3D, disposeView3D, captureView3DImage, getDebugSceneInfo, debugFocusPart, debugJumpToMatching2DView, debugSetCameraDistance, debugGetSimMarkerScale, debugGetScreenPosition };

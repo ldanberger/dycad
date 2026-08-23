@@ -3499,4 +3499,45 @@
 // hand-derived expectations -- traced and empirically verified via a standalone node
 // script before writing the assertions). DESIGN_DOCUMENT.md SS6.1c, tests/README.md,
 // and public/instructions.html updated. Full suite 121/121.
-export const APP_VERSION = '0.872';
+//
+// v0.873: "enable 'export view as image' for 3d view." File > Export View as Image
+// already worked for a 2D canvas view but just toasted "No view open to export." for
+// the 3D View tab -- tab.type !== 'canvas' there, and there's no SVG-serializable
+// scene to build in the first place (the existing 2D export path is a hand-written
+// SVG serializer, buildViewSvgString), just a real WebGL framebuffer that needs a
+// genuinely different capture mechanism.
+// New captureView3DImage(tabId) (view3d.js): forces one synchronous
+// renderer.render(scene, camera) call immediately before capturing, then
+// renderer.domElement.toBlob(..., 'image/png'). Relies on the renderer now being
+// constructed with preserveDrawingBuffer:true (createInstance) -- without it, whether
+// a capture returns real pixels or a blank/black image depends on browser-internal
+// timing (when the drawing buffer gets cleared after the last requestAnimationFrame)
+// the app has no control over; the small extra cost (the browser can't just discard
+// the buffer each frame) is the accepted tradeoff for reliable export. Exported
+// alongside the existing debugXxx introspection hooks, but given a real name since
+// it's used by the app itself now, not just the test suite.
+// canvas.js gained getView3DModule() -- returns the already-lazy-loaded view3d.js
+// module reference (set once renderView3DPage's own dynamic import() populates it)
+// rather than main.js importing view3d.js eagerly, which would defeat the entire
+// point of the lazy-load (the ~800KB vendored Three.js payload only loads once a 3D
+// tab is actually opened).
+// main.js's promptExportViewAsImage now branches on tab.type === '3d' before its
+// existing 'canvas' check, delegating to new App.exportView3DAsImage -- skips the
+// SVG/PNG format-picker modal entirely (PNG is the only meaningful choice for a
+// rendered 3D scene) and reuses the exact same Blob -> URL.createObjectURL ->
+// synthetic <a download> -> revokeObjectURL pattern exportViewAsPng/exportViewAsSvg
+// already use.
+// New check_export_view3d_as_image: captureView3DImage resolves to a real non-empty
+// image/png Blob for an open, rendered 3D tab (and null, not a throw, for a tabId
+// with no live instance); the real File menu entry point on an active 3D tab skips
+// the format picker and hands a real PNG Blob to URL.createObjectURL with a specific
+// success toast; the pre-existing 2D canvas export path is unaffected. Proven to
+// catch a regression two ways (disabling the 3D branch reproduces the exact original
+// bug; forcing captureView3DImage to always resolve null reproduces a failed-capture
+// toast), both reverted. Also verified visually outside the test suite: captured a
+// real PNG of the bundled "smart factory 3d demo" showing actual cube meshes/
+// connector lines, not a blank frame -- confirms preserveDrawingBuffer actually fixes
+// the capture-timing risk it's meant to, not just that the code path runs.
+// DESIGN_DOCUMENT.md SS9, tests/README.md, and public/instructions.html updated.
+// Full suite 122/122.
+export const APP_VERSION = '0.873';

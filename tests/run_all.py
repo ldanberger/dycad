@@ -5690,6 +5690,91 @@ def check_view3d_disposed_on_full_document_load(page):
     return True, "a genuine File > Load disposes the open 3D tab's WebGL instance before replacing the document, instead of leaking it"
 
 
+def check_export_view3d_as_image(page):
+    """Regression guard/new-feature check, reported directly: "enable 'export view as
+    image' for 3d view." File > Export View as Image (App.promptExportViewAsImage,
+    main.js) previously guarded on `tab.type !== 'canvas'` and just toasted "No view
+    open to export." for a 3D tab -- there was no WebGL capture path at all. Fixed with
+    view3d.js's new captureView3DImage(tabId) (forces one synchronous render() call,
+    relies on the renderer's own new preserveDrawingBuffer:true so canvas.toBlob()
+    reliably returns real pixels instead of occasionally blank ones) plus
+    App.exportView3DAsImage, reached via canvas.js's new getView3DModule() (the
+    already-lazy-loaded view3d.js module, without eagerly importing Three.js). Covers:
+    (1) captureView3DImage on a genuinely open, rendered 3D tab resolves to a real,
+    non-empty image/png Blob; (2) captureView3DImage on a tabId with no live instance
+    (e.g. never opened) resolves to null rather than throwing; (3) the real File menu
+    entry point on an ACTIVE 3D tab skips the SVG/PNG format-picker modal entirely (3D
+    has no meaningful SVG serialization) and triggers a real Blob download directly
+    (intercepting URL.createObjectURL to inspect what was actually about to be saved,
+    without needing to handle an OS-level download), reporting a specific PNG-export
+    success toast; (4) the pre-existing 2D canvas SVG/PNG export path (format picker
+    modal) is completely unaffected by this change."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+
+      // (2) no live instance for this tabId -- must resolve to null, not throw
+      const blobForMissingTab = await view3d.captureView3DImage('regr-no-such-tab-' + Date.now());
+
+      // (1) a genuinely open, rendered 3D tab
+      app.openOrSwitch3DView();
+      const tab3d = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 400)); // let the module load and render at least once
+      const blob = await view3d.captureView3DImage(tab3d.id);
+      const blobInfo = blob ? { type: blob.type, size: blob.size } : null;
+
+      // (3) the real File > Export View as Image entry point, on the active 3D tab
+      app.switchToTab(tab3d.id);
+      let capturedBlobType = null, capturedBlobSize = null;
+      const origCreateObjectURL = URL.createObjectURL;
+      URL.createObjectURL = (b) => { capturedBlobType = b.type; capturedBlobSize = b.size; return origCreateObjectURL(new Blob(['x'])); };
+      document.getElementById('file-menu-btn').click();
+      await new Promise(r => setTimeout(r, 50));
+      document.querySelector('#file-menu .dd-item[data-action="exportImage"]').click();
+      await new Promise(r => setTimeout(r, 300));
+      URL.createObjectURL = origCreateObjectURL;
+      const noModalOpened = !document.querySelector('.modal-box');
+      const lastToast = (() => { const all = document.querySelectorAll('.toast'); return all.length ? all[all.length - 1].textContent : null; })();
+
+      // (4) the pre-existing 2D canvas path still opens its format-picker modal, unaffected
+      const view2d = store.addView('RegrExport3DCanvas_' + Date.now(), 'ff');
+      const p = store.createPart({ type: 'Unknown', label: 'X', model: store.defaultModel, streams: [] });
+      store.createViewMember({ view: view2d.id, objectType: 'part', objectId: p.id, x: 0, y: 0 });
+      const tab2d = app.createCanvasTab(view2d);
+      app.switchToTab(tab2d.id);
+      document.getElementById('file-menu-btn').click();
+      await new Promise(r => setTimeout(r, 50));
+      document.querySelector('#file-menu .dd-item[data-action="exportImage"]').click();
+      await new Promise(r => setTimeout(r, 50));
+      const canvasModalOpened = !!document.querySelector('.modal-box');
+      document.querySelector('.modal-box .cancel')?.click();
+
+      return {
+        blobForMissingTabIsNull: blobForMissingTab === null,
+        blobInfo, noModalOpened, lastToast, capturedBlobType, capturedBlobSize,
+        canvasModalOpened,
+      };
+    }
+    """)
+    problems = []
+    if not result["blobForMissingTabIsNull"]:
+        problems.append("expected captureView3DImage on a tabId with no live instance to resolve to null")
+    if not result["blobInfo"] or result["blobInfo"]["type"] != "image/png" or result["blobInfo"]["size"] <= 0:
+        problems.append(f"expected captureView3DImage on a real, open, rendered 3D tab to resolve to a non-empty image/png Blob, got {result['blobInfo']}")
+    if not result["noModalOpened"]:
+        problems.append("expected exporting a 3D tab to skip the SVG/PNG format-picker modal entirely (no meaningful SVG choice for a 3D scene)")
+    if not result["lastToast"] or "3D View" not in result["lastToast"] or "PNG" not in result["lastToast"]:
+        problems.append(f"expected a specific '...3D View... as PNG' success toast, got {result['lastToast']!r}")
+    if result["capturedBlobType"] != "image/png" or not result["capturedBlobSize"]:
+        problems.append(f"expected the real File > Export View as Image menu action to hand a non-empty image/png Blob to URL.createObjectURL, got type={result['capturedBlobType']!r} size={result['capturedBlobSize']}")
+    if not result["canvasModalOpened"]:
+        problems.append("expected the pre-existing 2D canvas Export View as Image format-picker modal to still open normally, unaffected by the 3D export path")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "File > Export View as Image now works for a 3D View tab (captures a real PNG via the WebGL renderer, no format picker, specific success toast) without touching the pre-existing 2D canvas SVG/PNG export path"
+
+
 def check_view3d_section_boundaries(page):
     """Regression guard for the 3D View's Section boundary + label: each Part.section's
     own cluster within a TYPE's grid (the same row-break clustering
@@ -9143,6 +9228,7 @@ CHECKS = [
     check_view3d_reset_pinned_positions,
     check_view3d_highlight_type_picker,
     check_view3d_disposed_on_full_document_load,
+    check_export_view3d_as_image,
     check_view3d_section_boundaries,
     check_generate_industry_propagates_section_to_whole_chain,
     check_business_organization_unit_element_and_generation,

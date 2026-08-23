@@ -2,7 +2,7 @@ import { loadAllData } from './data.js';
 import { Store, ciEq, newId } from './state.js';
 import { parseArchimateXml } from './archimate.js';
 import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
-import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab } from './canvas.js';
+import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
 import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors } from './commands.js';
 import { APP_VERSION } from './version.js';
@@ -2818,10 +2818,15 @@ class App {
     }
   }
 
-  /** File > Export View as Image: choose SVG or PNG for the current view. */
+  /** File > Export View as Image: choose SVG or PNG for a 2D canvas view; a 3D View
+   * tab has no format choice (PNG only — there's no meaningful SVG serialization of a
+   * rendered WebGL scene) so it skips straight to exporting instead of opening a
+   * picker with a single real option. */
   promptExportViewAsImage() {
     const tab = this.store.activeTab();
-    if (!tab || tab.type !== 'canvas') { this.toast('No view open to export.', true); return; }
+    if (!tab) { this.toast('No view open to export.', true); return; }
+    if (tab.type === '3d') { this.exportView3DAsImage(tab); return; }
+    if (tab.type !== 'canvas') { this.toast('No view open to export.', true); return; }
     const view = this.store.findView(tab.viewId);
     if (!view) return;
 
@@ -2833,6 +2838,29 @@ class App {
         else this.exportViewAsSvg(view);
       },
     });
+  }
+
+  /** File > Export View as Image, for a 3D View tab — the WebGL counterpart to
+   * exportViewAsPng/exportViewAsSvg below, delegating the actual WebGL capture to
+   * view3d.js's captureView3DImage (canvas.js's getView3DModule reaches the already-
+   * lazy-loaded module directly, without triggering an eager import of Three.js —
+   * reaching this method at all requires the 3D tab to already be active, i.e.
+   * already rendered at least once, so the module is already loaded in practice; the
+   * null checks below are a paranoid fallback, not the expected path). Same Blob →
+   * object URL → synthetic <a download> → revoke pattern exportViewAsPng/
+   * exportViewAsSvg already use. */
+  async exportView3DAsImage(tab) {
+    const mod = getView3DModule();
+    if (!mod) { this.toast('3D View export failed — the 3D view has not finished loading yet.', true); return; }
+    const blob = await mod.captureView3DImage(tab.id);
+    if (!blob) { this.toast('3D View export failed.', true); return; }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '3D View.png';
+    a.click();
+    URL.revokeObjectURL(url);
+    this.toast('Exported "3D View" as PNG.');
   }
 
   /** Builds a standalone, portable SVG for one view — deliberately a SEPARATE, purpose-

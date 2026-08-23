@@ -1562,6 +1562,33 @@ so a future session doesn't have to re-derive it from scratch):
     keep the common unscoped case exactly as cheap as before) — nothing else it already
     hashes changes when a part is merely added to/removed from a view, so without this
     a scoped rebuild could be silently skipped.
+  - **Export View as Image.** Reported directly: "enable 'export view as image' for 3d
+    view." File > Export View as Image (`main.js`'s `promptExportViewAsImage`) already
+    worked for a 2D canvas view (a hand-written SVG serializer, `buildViewSvgString` —
+    plain `<rect>`/`<text>`/`<path>` only, no `<foreignObject>`, since an SVG containing
+    embedded HTML taints a `<canvas>` on rasterization and breaks `toDataURL`/`toBlob`
+    outright — with an optional SVG→canvas→PNG rasterization pass) but simply toasted
+    "No view open to export." for a 3D tab, since `tab.type !== 'canvas'` there and
+    there's no SVG-serializable scene to build in the first place, just a real WebGL
+    framebuffer. New `captureView3DImage(tabId)` (`view3d.js`) is the WebGL-native
+    counterpart: forces one synchronous `renderer.render(scene, camera)` call
+    immediately before capturing, then `renderer.domElement.toBlob(..., 'image/png')`.
+    This relies on the renderer now being constructed with `preserveDrawingBuffer:
+    true` (`createInstance`) — without it, whether a capture returns real pixels or a
+    blank/black image depends on exactly when the browser decides to clear the
+    drawing buffer after the last `requestAnimationFrame`, timing the app has no
+    control over; the extra `preserveDrawingBuffer` cost (the browser can't just
+    discard the buffer each frame) is an accepted tradeoff for reliable export.
+    `App.exportView3DAsImage` (`main.js`) reaches this through `canvas.js`'s new
+    `getView3DModule()` — returns the module's already-lazy-loaded reference (set once
+    `view3dModule` is populated by `renderView3DPage`'s own dynamic `import()`) rather
+    than importing `view3d.js` eagerly from `main.js`, which would defeat the whole
+    point of the lazy-load described above. `promptExportViewAsImage` now branches on
+    `tab.type === '3d'` before its existing `'canvas'` check and skips straight to
+    exporting — no SVG/PNG format-picker modal, since PNG is the only meaningful
+    choice for a rendered 3D scene — reusing the exact same `Blob` → `URL
+    .createObjectURL` → synthetic `<a download>` → `revokeObjectURL` pattern
+    `exportViewAsPng`/`exportViewAsSvg` already use.
 
 ## 10. Testing strategy
 
