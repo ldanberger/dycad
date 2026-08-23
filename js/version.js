@@ -3305,4 +3305,69 @@
 // not have count limits on any type of data, please remove"). No code changes; no new
 // test (nothing in run_all.py asserts this section's content). Full suite 112/112
 // (unaffected, run as a sanity check).
-export const APP_VERSION = '0.867';
+//
+// v0.868: reported directly: "update SFCCE load: add to dialog something like 'section
+// for shared functions', and default it to sectionId cof but provide selector for
+// known sections. Any shared functions should go to that section." Before this, a
+// collapsed shared Function (spanning more than one Section, Domain-level sharing --
+// SFCCE_SHARED_LEVELS[0]) always landed on the literal placeholder string "Shared"
+// with no real sectionId at all. promptSFCCEMapping (main.js) gained a new
+// #sfcce-shared-section <select>, listing every real content-bearing org-viewType
+// Section from custom.json (excludes a header/label row like 'title', whose
+// elementTypes:[] means it can't hold BusinessFunction content), defaulted to 'cof'
+// (Centralized Operational Functions). sfce.js's resolveSharedLevel gained optional
+// sharedSectionName/sharedSectionId params (default 'Shared'/null, preserving exact
+// prior behavior for any caller that doesn't pass them) -- when collapsing, a row's
+// section becomes the given name, and sectionId is only overwritten when a real id is
+// given. Threaded uniformly through promptSFCCESharedLevelConfirm's whole recursive
+// walk (SFCCE_SHARED_LEVELS gained an allowsSharedSectionOverride flag on the Domain
+// entry only), so the loop itself needs no special-casing -- only the Domain level's
+// own resolve wrapper actually forwards the override into resolveSharedFunctions;
+// Business Capability/Application Capability-level sharing still collapses to the
+// plain "Shared" tag, unchanged (the request specifically said "shared functions").
+// The confirm modal's own copy/button text now names the real chosen Section instead
+// of a generic "Shared" placeholder when it's the Domain level being resolved. Known,
+// documented (not fixed) limitation: if the SAME row is ALSO shared at a deeper level,
+// that level's own (still-'Shared') resolution runs afterward and overwrites the
+// Domain level's chosen Section back to the literal string -- out of scope per the
+// request's own "shared functions" wording; see DESIGN_DOCUMENT.md SS7.1. New
+// check_load_sfcce_shared_section_selector (tests/run_all.py), proven via a deliberate
+// revert-then-restore of resolveSharedLevel's new params. DESIGN_DOCUMENT.md SS7.1,
+// tests/README.md, and public/instructions.html updated. Full suite 113/113.
+//
+// v0.869: two direct reports handled together.
+// (1) "In SFCCE load command, remove option for combining into 'shared' at business
+// capability or application capability level. these will never be combined into
+// shared, only functions are combined." Load SFCCE used to ask up to three separate
+// "combine into Shared?" questions (Domain, then Business Capability, then Application
+// Capability, walked via an SFCCE_SHARED_LEVELS array of level configs). Removed the
+// deeper two ENTIRELY, not just their UI option -- confirmed structurally safe: a
+// Capability/Application Capability identity can only span more than one ORIGINAL
+// section when its parent Function's own rows ALSO span those sections, so
+// Function-level resolution (which always runs) already disambiguates the scope
+// those keys are built from either way. detectSharedCapabilities/
+// resolveSharedCapabilities/detectSharedApplicationCapabilities/
+// resolveSharedApplicationCapabilities (sfce.js) deleted outright, along with the
+// now-dead originalCapabilityName/originalApplicationCapabilityName row fields only
+// they read. promptSFCCESharedLevelConfirm's level-walking loop (main.js) and the
+// SFCCE_SHARED_LEVELS array it walked are gone, replaced by a single, simpler
+// promptSFCCESharedFunctionsConfirm. New check_load_sfcce_shared_functions_only
+// (tests/run_all.py); check_load_sfcce updated (its old step4/step5 assertions
+// tested modals that no longer exist -- counts stay the same, achieved via one
+// confirm instead of three, since buildIndustryTree's own key-based dedup already
+// merges what the removed levels used to handle explicitly).
+// (2) "Problem: data entity detail does not get sized correctly upon creation, using
+// remap, or redraw" -- reported with an exact failing DDL fixture (two ordinary
+// tables, 9 and 8 columns). redrawNodeSizes (canvas.js) -- the single content-
+// measuring function Import DDL/Remap/Redraw all funnel through -- clamped
+// view.nodeHeight to a stale 140px ceiling that an 8-9 column DataEntityDetails
+// node's own on-canvas attribute list already exceeded; .fnode has no
+// overflow:hidden, so this wasn't invisible clipping, the last row(s) visually
+// overflowed the node's fixed-height box. Fixed by raising the ceiling to 600px
+// (fits ~40 attribute rows -- still a real ceiling, not removed outright). New
+// check_data_entity_details_sizing_fits_attribute_count (tests/run_all.py), using
+// the exact reported DDL, asserting every attribute row's own bounding rect falls
+// within its node's rendered box across all three named paths.
+// Both proven via deliberate revert-then-restore. DESIGN_DOCUMENT.md SS7.1/SS7a,
+// tests/README.md, and public/instructions.html updated. Full suite 115/115.
+export const APP_VERSION = '0.869';

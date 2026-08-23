@@ -6352,6 +6352,96 @@ def check_data_modeling_node_attributes_and_manual_connector_creation(page):
     return True, "DataEntityDetails nodes render their own attribute list on the canvas (toggleable via chkShowAttributes), drag-to-connect infers connectorType 'd' between two DataEntityDetails (staying 'c' for other type pairs like DataDataEntity), and connectorType is now a genuinely editable select so FK relationships (and any other type change) are always reachable through the UI"
 
 
+def check_data_entity_details_sizing_fits_attribute_count(page):
+    """Regression guard for a real bug, reported directly with an exact failing DDL
+    fixture (two tables, 9 and 8 columns): "data entity detail does not get sized
+    correctly upon creation, using remap, or redraw." redrawNodeSizes (canvas.js) --
+    the SAME content-measuring function importDDL/Remap/Redraw all funnel through --
+    clamped view.nodeHeight to a 140px ceiling, which a DataEntityDetails node's own
+    on-canvas attribute list (chkShowAttributes) already exceeds at around 8-9 columns
+    (ordinary, not a pathological case) -- .fnode has no overflow:hidden, so this wasn't
+    invisible clipping, it visually overflowed past the node's own fixed-height box.
+    Covers: right after File > Import DDL with the exact reported fixture,
+    view.nodeHeight is NOT clamped to the old 140px ceiling (it's tall enough that
+    every attribute row's own bounding rect falls within the rendered node's box, i.e.
+    nothing hangs out below it); the SAME correct, non-clamped height still holds after
+    both the Redraw command AND a real Remap call -- not just at creation, matching all
+    three paths named in the report."""
+    ddl = """CREATE TABLE legal_entities (
+    entity_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_name VARCHAR(255) NOT NULL,
+    entity_type VARCHAR(100) NOT NULL,
+    formation_date DATE,
+    jurisdiction VARCHAR(100) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'Active',
+    parent_entity_id UUID REFERENCES legal_entities(entity_id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE Trust_Ledger_Entries (
+    trust_ledger_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    client_id UUID NOT NULL,
+    entity_id UUID REFERENCES legal_entities(entity_id),
+    transaction_type VARCHAR(50) NOT NULL,
+    amount NUMERIC(15, 2) NOT NULL,
+    balance_after NUMERIC(15, 2) NOT NULL,
+    transaction_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    description TEXT
+);"""
+    result = js(page, f"""
+    async () => {{
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const ddl = {json.dumps(ddl)};
+      commands.importDDL(app, ddl);
+      await new Promise(r => setTimeout(r, 150));
+      const view = store.findView(store.currentView);
+      const tab = store.activeTab();
+
+      const measureFit = () => {{
+        const nodeBottoms = new Map();
+        for (const el of document.querySelectorAll('.fnode')) {{
+          const box = el.getBoundingClientRect();
+          nodeBottoms.set(el, box.bottom);
+        }}
+        let allRowsFit = true;
+        const details = [];
+        for (const [nodeEl, bottom] of nodeBottoms) {{
+          const rows = nodeEl.querySelectorAll('.fnode-attr-row');
+          let lastRowBottom = 0;
+          for (const row of rows) lastRowBottom = Math.max(lastRowBottom, row.getBoundingClientRect().bottom);
+          const fits = rows.length === 0 || lastRowBottom <= bottom + 0.5;
+          if (!fits) allRowsFit = false;
+          details.push({{ rowCount: rows.length, fits }});
+        }}
+        return {{ allRowsFit, details }};
+      }};
+
+      const afterCreate = {{ nodeHeight: view.nodeHeight, ...measureFit() }};
+
+      app.runCommand('redraw');
+      await new Promise(r => setTimeout(r, 150));
+      const afterRedraw = {{ nodeHeight: view.nodeHeight, ...measureFit() }};
+
+      commands.remap(app, tab, {{ pattern: 'default' }});
+      await new Promise(r => setTimeout(r, 150));
+      const afterRemap = {{ nodeHeight: view.nodeHeight, ...measureFit() }};
+
+      return {{ afterCreate, afterRedraw, afterRemap }};
+    }}
+    """)
+    problems = []
+    for label, snapshot in [("creation", result["afterCreate"]), ("Redraw", result["afterRedraw"]), ("Remap", result["afterRemap"])]:
+        if snapshot["nodeHeight"] >= 140 and snapshot["nodeHeight"] <= 145:
+            problems.append(f"expected view.nodeHeight to NOT sit right at the old 140px clamp after {label}, got {snapshot['nodeHeight']}")
+        if not snapshot["allRowsFit"]:
+            problems.append(f"expected every attribute row to fit within its node's own rendered box after {label}, got {snapshot['details']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "a DataEntityDetails node with a realistic 8-9 column attribute list sizes tall enough to show every row, on creation (Import DDL), Redraw, and Remap alike"
+
+
 def check_data_modeling_attribute_editing_and_auto_fk(page):
     """Regression guard for six issues reported directly in one follow-up round on the
     Data Modeling feature: "when keying in data entity details attributes, tab should
@@ -7782,14 +7872,13 @@ def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
     features. Uses a small, deliberate 2-level-nested fixture (one domain, one business
-    capability, one application capability that itself lists 2 ministries) designed so
-    ALL THREE independently-resolvable sharing levels (Domain, Business Capability,
-    Application Capability) fire simultaneously from one row — this specifically guards a
-    real bug found while building this: capability-level sharing detection was
-    structurally unable to fire once domain-level resolution had already consumed the
-    section diversity (fixed via frozen originalFunctionName/originalCapabilityName/
-    originalApplicationCapabilityName/originalSection fields, immune to resolution order — see
-    sfce.js's detectSharedLevel). Also exercises flattenJsonRecords' full-dot-path field
+    capability, one application capability that itself lists 2 ministries) designed so a
+    single row splits into 2, making the Domain shared across both resulting sections —
+    only ONE sharing question is asked (Business Capability/Application Capability-level
+    sharing were removed entirely — see check_load_sfcce_shared_functions_only), and
+    collapsing just the Domain still correctly merges the capability/appcap/entity down
+    to 1 each via buildIndustryTree's own key-based dedup, no separate confirm needed.
+    Also exercises flattenJsonRecords' full-dot-path field
     naming (both nesting levels have their own "name"/"description" fields, which must
     surface as distinct businessCapabilities.name / businessCapabilities.applicationCapabilities.name
     rather than clobbering each other), the cascade-when-unmapped design (Entity isn't
@@ -7858,14 +7947,6 @@ def check_load_sfcce(page):
 
       const step3Title = document.querySelector('.modal-box h3')?.textContent || '';
       document.getElementById('sfcce-shared-yes')?.click(); // Domain: collapse
-      await new Promise(r => setTimeout(r, 80));
-
-      const step4Title = document.querySelector('.modal-box h3')?.textContent || '';
-      document.getElementById('sfcce-shared-yes')?.click(); // Business Capability: collapse
-      await new Promise(r => setTimeout(r, 80));
-
-      const step5Title = document.querySelector('.modal-box h3')?.textContent || '';
-      document.getElementById('sfcce-shared-yes')?.click(); // Application Capability: collapse
       await new Promise(r => setTimeout(r, 100));
 
       const tree = store.doc.industryTree;
@@ -7885,7 +7966,7 @@ def check_load_sfcce(page):
       const appPhysicalComponentParts = store.doc.parts.filter(p => p.type === 'ApplicationPhysicalComponent');
 
       return {{
-        step2Title, step3Title, step4Title, step5Title, replaceConfirmShown,
+        step2Title, step3Title, replaceConfirmShown,
         treeLength: tree?.length,
         templateName,
         funcCount: funcParts.length,
@@ -7906,14 +7987,16 @@ def check_load_sfcce(page):
         return False, f"expected the 'clear and replace' warning since the built-in default industry data is already loaded at boot: {result}"
     if result['step3Title'] != 'Shared Domains found':
         return False, f"expected the Domain-sharing question to appear: {result}"
-    if result['step4Title'] != 'Shared Business Capabilities found':
-        return False, f"expected the Business-Capability-sharing question to appear too — this is the ordering bug this check guards against: {result}"
-    if result['step5Title'] != 'Shared Application Capabilities found':
-        return False, f"expected the Application-Capability-sharing question to appear too (the app capability itself lists 2 ministries directly): {result}"
     if result['templateName'] != 'SFCCE':
         return False, f"expected store.doc.industryTemplateName to register the 'SFCCE' template: {result}"
+    # Business Capability/Application Capability-level sharing is no longer its own
+    # question (removed per direct request — see check_load_sfcce_shared_functions_only)
+    # — collapsing ONLY the Domain level still merges the capability/appcap/entity
+    # correctly down to 1 each, since they're now scoped under the SAME single
+    # collapsed Function+Section identity (buildIndustryTree's own key-based dedup
+    # handles it with no separate confirm step needed).
     if result['funcCount'] != 1 or result['capCount'] != 1 or result['appCapCount'] != 1:
-        return False, f"expected exactly 1 part at each of Function/Capability/ApplicationCapability (all 3 levels collapsed to 'Shared'): {result}"
+        return False, f"expected exactly 1 part at each of Function/Capability/ApplicationCapability after collapsing only the Domain level: {result}"
     # Entity was left unmapped, so it cascades from the Application Capability's own name
     # (not left absent) — a real DataDataEntity part IS expected here, one level deeper
     # than the ApplicationCapability part, both sharing the same cascaded name/label.
@@ -7929,7 +8012,190 @@ def check_load_sfcce(page):
         return False, f"unexpected ApplicationCapability part label: {result['appCapLabel']}"
     if result['appCapDescription'] != 'Desc one.':
         return False, f"expected the ApplicationCapability part's description threaded through from the collision-renamed field, got: {result['appCapDescription']}"
-    return True, "Load SFCCE's unified wizard correctly resolves all three independent sharing levels, and Generate Industry produces a real ApplicationCapability-typed part via the 'SFCCE' template"
+    return True, "Load SFCCE's unified wizard resolves Domain-level sharing (the only level asked about) and Generate Industry produces a real ApplicationCapability-typed part via the 'SFCCE' template"
+
+
+def check_load_sfcce_shared_functions_only(page):
+    """Regression guard/new-feature check, reported directly: "remove option for
+    combining into 'shared' at business capability or application capability level.
+    these will never be combined into shared, only functions are combined." Before
+    this, Load SFCCE asked up to THREE separate "combine into Shared?" questions
+    (Domain, then Business Capability, then Application Capability). Using a fixture
+    engineered to previously trigger all three (one Application Capability whose own
+    ministries field splits into 2 sections — the same fixture check_load_sfcce uses),
+    covers: after resolving the single Domain-level question, NO further "Shared ...
+    found" modal ever appears (not even transiently) — the wizard goes straight to
+    finishSFCCEImport; and sfce.js no longer exports detectSharedCapabilities/
+    resolveSharedCapabilities/detectSharedApplicationCapabilities/
+    resolveSharedApplicationCapabilities at all (removed, not just unused), locking
+    in that this was a real deletion, not just a UI path no longer reachable."""
+    fixture = {
+        "value": [
+            {
+                "domain": "Alpha Domain",
+                "businessCapabilities": [
+                    {
+                        "name": "Shared Business Cap",
+                        "description": "Biz cap desc",
+                        "applicationCapabilities": [
+                            {"name": "App Cap One", "description": "Desc one.", "ministries": ["Ministry A", "Ministry B"]},
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    result = js(page, f"""
+    async () => {{
+      const app = window.dycadApp, store = app.store;
+      const sfce = await import('./js/sfce.js');
+      const sfceExports = Object.keys(sfce);
+
+      const text = {json.dumps(json.dumps(fixture["value"]))};
+      const blob = new Blob([text], {{ type: 'application/json' }});
+      const file = new File([blob], 'regr-shared-only-fixture.json', {{ type: 'application/json' }});
+      const dt = new DataTransfer();
+      dt.items.add(file);
+
+      document.getElementById('file-menu-btn').click();
+      await new Promise(r => setTimeout(r, 50));
+      [...document.querySelectorAll('#file-menu .dd-item')].find(el => el.dataset.action === 'loadSFCCE')?.click();
+      await new Promise(r => setTimeout(r, 50));
+      const input = document.getElementById('sfcce-file-input');
+      input.files = dt.files;
+      document.getElementById('sfcce-preread-btn').click();
+      await new Promise(r => setTimeout(r, 100));
+
+      document.getElementById('sfcce-field-section').value = 'businessCapabilities.applicationCapabilities.ministries';
+      document.getElementById('sfcce-field-function').value = 'domain';
+      document.getElementById('sfcce-field-capability').value = 'businessCapabilities.name';
+      document.getElementById('sfcce-field-application-capability').value = 'businessCapabilities.applicationCapabilities.name';
+      document.querySelector('.modal-box .submit').click();
+      await new Promise(r => setTimeout(r, 80));
+      [...document.querySelectorAll('.modal-box')].find(b => b.textContent.includes('clear and replace'))?.querySelector('.submit')?.click();
+      await new Promise(r => setTimeout(r, 80));
+
+      const domainTitle = document.querySelector('.modal-box h3')?.textContent || '';
+      document.getElementById('sfcce-shared-yes')?.click(); // Domain: collapse (the only question)
+      await new Promise(r => setTimeout(r, 100));
+
+      const remainingModalCount = document.querySelectorAll('.modal-overlay').length;
+      const remainingModalTitle = document.querySelector('.modal-box h3')?.textContent || null;
+
+      return {{ sfceExports, domainTitle, remainingModalCount, remainingModalTitle, treeLength: store.doc.industryTree?.length }};
+    }}
+    """)
+    problems = []
+    for name in ["detectSharedCapabilities", "resolveSharedCapabilities", "detectSharedApplicationCapabilities", "resolveSharedApplicationCapabilities"]:
+        if name in result["sfceExports"]:
+            problems.append(f"expected sfce.js to no longer export {name} at all")
+    if result["domainTitle"] != "Shared Domains found":
+        problems.append(f"expected the (only) sharing question to be the Domain one, got {result['domainTitle']!r}")
+    if result["remainingModalCount"] != 0:
+        problems.append(f"expected NO further modal after resolving the single Domain-sharing question, got {result['remainingModalCount']} still open (title: {result['remainingModalTitle']!r})")
+    if not result["treeLength"]:
+        problems.append(f"expected the import to complete (finishSFCCEImport reached directly after the one Domain question), got tree length {result['treeLength']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Load SFCCE only ever asks about Domain-level sharing now; Business Capability/Application Capability-level sharing (and its underlying detect/resolve functions) are gone entirely"
+
+
+def check_load_sfcce_shared_section_selector(page):
+    """Regression guard/new-feature check, reported directly: "update SFCCE load: add
+    to dialog something like 'section for shared functions', and default it to
+    sectionId cof but provide selector for known sections. Any shared functions should
+    go to that section." Before this, a collapsed shared Function (spanning more than
+    one Section) always landed on the literal placeholder string "Shared" with no real
+    sectionId at all. Covers: the mapping dialog's new #sfcce-shared-section select
+    exists, defaults to 'cof' (Centralized Operational Functions), lists only the real
+    content Sections (excludes custom.json's 'title' header row, which has
+    elementTypes:[] and can't actually hold BusinessFunction content); choosing a
+    different known Section and then collapsing a detected shared Function actually
+    lands that Function's nodeSection/nodeSectionId on the CHOSEN Section (not the
+    literal "Shared" string, and not blank) — verified both via the resulting tree AND
+    via the confirm modal's own "Yes, use ..." button text and body copy naming the
+    real Section. Business Capability/Application Capability-level sharing (a
+    DIFFERENT, independent step in the same wizard) is untouched by this feature —
+    still collapses to the plain "Shared" tag, confirmed by the full suite's
+    pre-existing check_load_sfcce (which exercises all three levels together) staying
+    green."""
+    fixture = [
+        {"domain": "Domain One", "capabilities": [
+            {"name": "Cap A", "description": "desc A", "ministries": ["Sec1"]},
+            {"name": "Cap B", "description": "desc B", "ministries": ["Sec2"]},
+        ]},
+    ]
+    result = js(page, f"""
+    async () => {{
+      const app = window.dycadApp, store = app.store;
+      const text = {json.dumps(json.dumps(fixture))};
+      const blob = new Blob([text], {{ type: 'application/json' }});
+      const file = new File([blob], 'regr-shared-section-fixture.json', {{ type: 'application/json' }});
+      const dt = new DataTransfer();
+      dt.items.add(file);
+
+      document.getElementById('file-menu-btn').click();
+      await new Promise(r => setTimeout(r, 50));
+      [...document.querySelectorAll('#file-menu .dd-item')].find(el => el.dataset.action === 'loadSFCCE')?.click();
+      await new Promise(r => setTimeout(r, 50));
+      const input = document.getElementById('sfcce-file-input');
+      input.files = dt.files;
+      document.getElementById('sfcce-preread-btn').click();
+      await new Promise(r => setTimeout(r, 100));
+
+      const sel = document.getElementById('sfcce-shared-section');
+      const selExists = !!sel;
+      const defaultValue = sel?.value;
+      const optionValues = sel ? [...sel.options].map(o => o.value) : [];
+      sel.value = 'ssf';
+
+      document.getElementById('sfcce-field-section').value = 'capabilities.ministries';
+      document.getElementById('sfcce-field-function').value = 'domain';
+      document.getElementById('sfcce-field-capability').value = 'capabilities.name';
+      document.getElementById('sfcce-field-capability-desc').value = 'capabilities.description';
+      document.querySelector('.modal-box .submit').click();
+      await new Promise(r => setTimeout(r, 80));
+      [...document.querySelectorAll('.modal-box')].find(b => b.textContent.includes('clear and replace'))?.querySelector('.submit')?.click();
+      await new Promise(r => setTimeout(r, 100));
+
+      const domainBodyText = [...document.querySelectorAll('.modal-box p')].map(p => p.textContent).join(' ');
+      const yesBtnText = document.getElementById('sfcce-shared-yes')?.textContent || '';
+      document.getElementById('sfcce-shared-yes')?.click();
+      await new Promise(r => setTimeout(r, 100));
+
+      const tree = store.doc.industryTree;
+      return {{
+        selExists, defaultValue, optionValues,
+        domainMentionsChosenSection: domainBodyText.includes('Staff Specialist Functions'),
+        yesBtnText,
+        treeFunctionCount: tree.length,
+        funcSection: tree[0]?.nodeSection,
+        funcSectionId: tree[0]?.nodeSectionId,
+      }};
+    }}
+    """)
+    problems = []
+    if not result["selExists"]:
+        problems.append("expected a #sfcce-shared-section select in the Load SFCCE mapping dialog")
+    if result["defaultValue"] != "cof":
+        problems.append(f"expected the selector to default to sectionId 'cof', got {result['defaultValue']!r}")
+    if "title" in result["optionValues"]:
+        problems.append(f"expected the header-row 'title' section excluded from the selector's options, got {result['optionValues']}")
+    if sorted(result["optionValues"]) != sorted(["esf", "mof", "cof", "ssf", "cif", "rsf", "fcf"]):
+        problems.append(f"expected exactly the 7 real content Sections as options, got {result['optionValues']}")
+    if not result["domainMentionsChosenSection"]:
+        problems.append("expected the 'Shared Domains found' modal's own copy to name the chosen Section ('Staff Specialist Functions'), not a generic 'Shared' placeholder")
+    if 'Staff Specialist Functions' not in result["yesBtnText"]:
+        problems.append(f"expected the confirm button to read 'Yes, use \"Staff Specialist Functions\"', got {result['yesBtnText']!r}")
+    if result["treeFunctionCount"] != 1:
+        problems.append(f"expected the shared Function to collapse into exactly 1 tree node, got {result['treeFunctionCount']}")
+    if result["funcSection"] != "Staff Specialist Functions":
+        problems.append(f"expected the collapsed Function's nodeSection to be the CHOSEN Section, not a literal 'Shared' tag, got {result['funcSection']!r}")
+    if result["funcSectionId"] != "ssf":
+        problems.append(f"expected the collapsed Function's nodeSectionId to be 'ssf' (matching the chosen Section), got {result['funcSectionId']!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "the Load SFCCE wizard's new 'Section for shared functions' selector defaults to cof, offers only real content Sections, and a collapsed shared Function actually lands on the chosen Section (both nodeSection and nodeSectionId), not the old literal 'Shared' placeholder"
 
 
 def check_load_sfcce_id_and_description_mapping(page):
@@ -8267,6 +8533,8 @@ CHECKS = [
     check_smart_stream_preset_dialog_save_and_load,
     check_instructions_closed_persists_across_reload,
     check_load_sfcce,
+    check_load_sfcce_shared_functions_only,
+    check_load_sfcce_shared_section_selector,
     check_load_sfcce_id_and_description_mapping,
     check_load_sfcce_dialog_ux_and_generate_unique_id,
     check_stream_template_shared_default,
@@ -8308,6 +8576,7 @@ CHECKS = [
     check_data_modeling_crowfoot_rendering,
     check_data_modeling_menu_and_ddl_import_export,
     check_data_modeling_node_attributes_and_manual_connector_creation,
+    check_data_entity_details_sizing_fits_attribute_count,
     check_data_modeling_attribute_editing_and_auto_fk,
     check_data_modeling_autofill,
     check_level_up_creates_data_data_entity,

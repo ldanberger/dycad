@@ -286,10 +286,15 @@ canvas. Availability depends on what's selected — greyed out means the current
     document, so it survives Save/Load JSON.
     Capability, Application Capability, and Entity are all optional: leaving one unmapped means it simply inherits the
     name of the level above it, rather than being dropped — so the same wizard handles data with only a single
-    capability concept just as well as data with a distinct Business/Application Capability split. A Domain,
-    Business Capability, or Application Capability that ends up spanning more than one Section can
-    independently be collapsed into one shared node or kept as separate numbered copies, one question per
-    level. Review the result via <strong>Catalogs &gt; SFCCE</strong> before generating. Every part a Section's
+    capability concept just as well as data with a distinct Business/Application Capability split. A Domain
+    that ends up spanning more than one Section (its own Business Capabilities/Application Capabilities
+    combined together) can be collapsed into one shared Domain or kept as separate numbered copies — the one
+    "combine into shared?" question the wizard asks (a Business Capability or Application Capability that
+    happens to span sections independently of its own Domain is folded into whichever choice its Domain got,
+    automatically, no separate question). A collapsed shared Domain lands under the real Section chosen in the
+    mapping dialog's own "Section for shared functions" selector (defaults to Centralized Operational
+    Functions), not a placeholder "Shared" tag. Review the result via <strong>Catalogs &gt; SFCCE</strong>
+    before generating. Every part a Section's
     Function generates (capability, application capability, entity, and any supporting nodes) inherits that
     same Section, so the Section filter shows the whole related chain, not just the Function itself. Each
     distinct Section also gets its own <strong>Business Organization Unit</strong> node generated (reused, not

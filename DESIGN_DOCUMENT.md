@@ -376,11 +376,41 @@ per value.
 **Shared-Function resolution**: after building rows, `detectSharedFunctions` finds
 Function names spanning more than one distinct Section (not: a Capability whose own
 Section field had multiple values — that's the row-split, a different, earlier step).
-If any are found, `resolveSharedFunctions` applies the user's choice: collapse every
-copy into one Function in a literal `"Shared"` section (capabilities from every
-original section combined; true post-collapse duplicates merge naturally in the
-tree-build step's own uniqueness handling), or keep each section's own copy with a
-numbered suffix (plain name, then `Name1`, `Name2`, ... by first-seen section order).
+If any are found, `promptSFCCESharedFunctionsConfirm` (`main.js`) asks the user's
+choice ONE time: `resolveSharedFunctions` either collapses every copy into one
+Function under a real, chosen Section (capabilities from every original section
+combined; true post-collapse duplicates merge naturally in the tree-build step's own
+uniqueness handling), or keeps each section's own copy with a numbered suffix (plain
+name, then `Name1`, `Name2`, ... by first-seen section order). This is the ONLY
+"combine into shared" question the wizard ever asks — Business Capability and
+Application Capability-level sharing questions existed once (a 3-question walk over
+`SFCCE_SHARED_LEVELS`, an array of level configs) but were removed entirely, reported
+directly: *"remove option for combining into 'shared' at business capability or
+application capability level. these will never be combined into shared, only functions
+are combined."* Confirmed structurally safe to delete outright (not just hide the
+option): a Capability/Application Capability identity can only span more than one
+ORIGINAL section when its parent Function's own rows ALSO span those same sections —
+so Function-level resolution, which always runs, already disambiguates the scope
+Capability/Application Capability keys are built from either way (collapsed: they
+share one funcKey, so `buildIndustryTree`'s own capKey/appCapKey dedup merges them
+naturally; kept separate: their funcKeys already differ, so no clash is possible).
+`detectSharedCapabilities`/`resolveSharedCapabilities`/
+`detectSharedApplicationCapabilities`/`resolveSharedApplicationCapabilities` (and the
+now-unused `originalCapabilityName`/`originalApplicationCapabilityName` row fields
+they alone read) were deleted from `sfce.js` along with the UI path, not left as dead
+exports.
+
+Which Section a collapsed shared Function lands under is itself a mapping-dialog
+setting, reported directly (same request as above, its first half): *"add to dialog
+something like 'section for shared functions', and default it to sectionId cof but
+provide selector for known sections. Any shared functions should go to that section."*
+`promptSFCCEMapping`'s `#sfcce-shared-section` `<select>` lists every real,
+content-bearing org-viewType Section from `custom.json` (excludes a header/label row
+like `title`, whose `elementTypes: []` means it can't actually hold `BusinessFunction`
+content), defaulted to `cof` (Centralized Operational Functions). The chosen
+`{name, sectionId}` pair passes straight into `resolveSharedFunctions`; its collapse
+branch (`resolveSharedLevel`) only overwrites a row's `sectionId` when a real one is
+given.
 
 **Description/Id mapping, every level** — the wizard's per-level mapping fields
 (`buildRowsFromRecords`' `mapping` param) are fully symmetric across all 5 levels
@@ -976,6 +1006,20 @@ ArchiMate import) creates all-or-nothing: if `parseDDL` throws, nothing is creat
 connectors are actually placed on the *current view* (matching Insert Smart Stream's
 own per-view scoping, not whole-model) — shown via the existing `promptTextEdit`
 readonly viewer (same one Code Summary uses), not a bespoke dialog.
+
+**Attribute-list sizing had a stale 140px ceiling** — reported directly, with an exact
+failing DDL fixture (two ordinary tables, 9 and 8 columns): *"data entity detail does
+not get sized correctly upon creation, using remap, or redraw."* `redrawNodeSizes`'
+content-measuring pass (the single mechanism `Import DDL`/Remap/Redraw all funnel
+through — see the `chkShowAttributes` bullet above) correctly measured a
+`DataEntityDetails` node's true rendered height, but then clamped the RESULT to a
+`140px` ceiling meant for the feature's original (attribute-list-free) node content —
+an 8-9 column table, not a pathological case, already exceeded it. Since `.fnode` has
+no `overflow: hidden`, this wasn't invisible clipping: the last attribute row(s)
+visually overflowed past the node's own fixed-height box, overlapping whatever the
+canvas placed below it. Fixed by raising the ceiling to `600px` (comfortably fits
+~40 attribute rows — still a real ceiling, so one pathologically huge pasted table
+can't blow up every other node's shared, uniform-per-view size without limit).
 
 ## 8. Simulation engine
 

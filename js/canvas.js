@@ -735,7 +735,19 @@ function redrawNodeSizes(app, tab) {
 
   const oldNodeWidth = view.nodeWidth, oldNodeHeight = view.nodeHeight;
   const newNodeWidth = Math.min(Math.max(maxW, 100), 260);
-  const newNodeHeight = Math.min(Math.max(maxH, 40), 140);
+  // 600 (not 140): a DataEntityDetails node with its own attribute list rendered
+  // on-canvas (chkShowAttributes) grows roughly linearly with column count — a table
+  // with 8-9 columns (a perfectly ordinary DDL import, not a pathological case) already
+  // needed more than the old 140px cap, so its LAST attribute row(s) silently
+  // overflowed the node's fixed-height box (no overflow:hidden on .fnode itself,
+  // so this wasn't invisible clipping — it visually overlapped whatever sat below the
+  // node on the canvas). Reported directly, with a real two-table DDL fixture (9 and 8
+  // columns) confirmed via getBoundingClientRect()/scrollHeight to overflow the old cap
+  // by 3-5px. 600px comfortably fits ~40 attribute rows before hitting the new ceiling
+  // — still a real ceiling (an accidentally pasted, truly enormous table doesn't blow
+  // up every other node in a uniform-per-view-sized view without limit), just sized for
+  // realistic schemas instead of the old chrome-only-content estimate.
+  const newNodeHeight = Math.min(Math.max(maxH, 40), 600);
   view.nodeWidth = newNodeWidth;
   view.nodeHeight = newNodeHeight;
   // Section-based views: the grid's cell size derives from nodeWidth/nodeHeight, so a

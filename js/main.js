@@ -8,38 +8,7 @@ import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, leve
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection, computeSectionLayout, getAllowedTypesForView } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
-import { flattenJsonRecords, buildRowsFromRecords, detectSharedFunctions, resolveSharedFunctions, detectSharedCapabilities, resolveSharedCapabilities, detectSharedApplicationCapabilities, resolveSharedApplicationCapabilities, buildIndustryTree, flattenIndustryTree, GENERATE_UNIQUE_ID } from './sfce.js';
-
-/** The three independently-resolvable "spans more than one Section" levels Load SFCCE's
- * wizard walks through in order — see sfce.js's detectSharedLevel for why each is safe
- * to resolve independently of the others. `detect`/`resolve` are thin adapters over
- * sfce.js's per-level exports (each returns/expects slightly different key names —
- * sectionsByFunction/sharedFunctionNames vs. sectionsByCapability/sharedCapabilityKeys
- * etc. — normalized here to one common shape so promptSFCCESharedLevelConfirm below can
- * stay level-agnostic instead of three near-duplicate modal functions).
- * `exampleName` extracts the human-readable name from a shared identity key (a compound
- * `function|capability|applicationCapability` string for the deeper levels) for the modal's
- * example sentence. */
-const SFCCE_SHARED_LEVELS = [
-  {
-    label: 'Domain', plural: 'Domains',
-    detect: (rows) => { const { sectionsByFunction, sharedFunctionNames } = detectSharedFunctions(rows); return { sectionsByIdentity: sectionsByFunction, sharedIdentities: sharedFunctionNames }; },
-    resolve: (rows, sectionsByIdentity, sharedIdentities, collapse) => resolveSharedFunctions(rows, sectionsByIdentity, sharedIdentities, collapse),
-    exampleName: (key) => key,
-  },
-  {
-    label: 'Business Capability', plural: 'Business Capabilities',
-    detect: (rows) => { const { sectionsByCapability, sharedCapabilityKeys } = detectSharedCapabilities(rows); return { sectionsByIdentity: sectionsByCapability, sharedIdentities: sharedCapabilityKeys }; },
-    resolve: (rows, sectionsByIdentity, sharedIdentities, collapse) => resolveSharedCapabilities(rows, sectionsByIdentity, sharedIdentities, collapse),
-    exampleName: (key) => key.split('|')[1],
-  },
-  {
-    label: 'Application Capability', plural: 'Application Capabilities',
-    detect: (rows) => { const { sectionsByApplicationCapability, sharedApplicationCapabilityKeys } = detectSharedApplicationCapabilities(rows); return { sectionsByIdentity: sectionsByApplicationCapability, sharedIdentities: sharedApplicationCapabilityKeys }; },
-    resolve: (rows, sectionsByIdentity, sharedIdentities, collapse) => resolveSharedApplicationCapabilities(rows, sectionsByIdentity, sharedIdentities, collapse),
-    exampleName: (key) => key.split('|')[2],
-  },
-];
+import { flattenJsonRecords, buildRowsFromRecords, detectSharedFunctions, resolveSharedFunctions, buildIndustryTree, flattenIndustryTree, GENERATE_UNIQUE_ID } from './sfce.js';
 
 /** Pretty-prints a Script Console result. JSON.stringify covers plain data (the common
  * case — arrays of parts, objects, etc.); falls back to String() for anything it can't
@@ -3157,6 +3126,16 @@ class App {
     const box = document.createElement('div');
     box.className = 'modal-box modal-box-textedit';
 
+    // "Section for shared functions" (below): the real, known Sections a shared
+    // Function can be collapsed into, sorted the same way custom.json's own org-view
+    // sections display — see promptSFCCESharedFunctionsConfirm's own comment for how
+    // this is actually used.
+    // elementTypes-filtered: a header/label row (e.g. custom.json's 'title' section, with
+    // elementTypes: []) can't actually hold BusinessFunction content in the org view, so
+    // it's not a valid destination for a shared Function either.
+    const orgSections = (this.store.settings.sections || []).filter((s) => ciEq(s.viewType, 'org') && (s.elementTypes || []).some((t) => ciEq(t, 'BusinessFunction'))).slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const defaultSharedSectionId = orgSections.some((s) => s.sectionId === 'cof') ? 'cof' : (orgSections[0]?.sectionId || '');
+
     // Lightweight keyword-based suggestion per field — the person can always override
     // via the dropdown; this just saves picking through the list for the common case.
     // Tries each keyword in priority order across ALL fields before falling back to the
@@ -3267,6 +3246,8 @@ class App {
         </div>
       </div>
       <p style="font-size:12px; color:var(--text-muted);">A Section value containing multiple entries (a comma-separated list, or an array) is split into one row per section. A missing Function value is kept as "(unspecified)" rather than dropped. A missing Capability/Application Capability/Entity value inherits the level above it instead. Description is always optional metadata — left blank if unmapped. Id is optional too: left blank, a level gets a deterministic id derived from its own name; "(generate unique)" mints a genuinely fresh, random id instead regardless of anything in the file.</p>
+      <div class="prop-row"><label>Section for shared functions</label><select id="sfcce-shared-section">${orgSections.map((s) => `<option value="${escapeHtml(s.sectionId)}" ${s.sectionId === defaultSharedSectionId ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select></div>
+      <p style="font-size:11px; color:var(--text-muted); margin-top:-6px;">If a Function name ends up needing to exist in more than one Section and you choose to combine it into one shared node (next step, if it comes up), it's placed under this real Section instead of a generic "Shared" tag.</p>
       <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Load</button></div>
     `;
     overlay.appendChild(box);
@@ -3298,7 +3279,9 @@ class App {
     box.querySelector('.submit').addEventListener('click', () => {
       const mapping = collectSfcceMapping();
       const parsed = buildRowsFromRecords(records, mapping);
-      const proceed = () => { overlay.remove(); this.promptSFCCESharedLevelConfirm(parsed, parsed.rows, 0); };
+      const sharedSectionId = box.querySelector('#sfcce-shared-section').value;
+      const sharedSectionName = orgSections.find((s) => s.sectionId === sharedSectionId)?.name || sharedSectionId;
+      const proceed = () => { overlay.remove(); this.promptSFCCESharedFunctionsConfirm(parsed, parsed.rows, sharedSectionName, sharedSectionId); };
       // Only one industry dataset ever exists — this always REPLACES it, so warn first
       // if something is already loaded (the built-in default counts too, not just a
       // previous Load SFCCE import) rather than silently discarding it.
@@ -3312,49 +3295,49 @@ class App {
     });
   }
 
-  /** Walks SFCCE_SHARED_LEVELS (Domain, then Business Capability, then Application
-   * Capability) in order, skipping straight past any level with nothing shared and
-   * showing one confirm modal per level that DOES have something — each level's
-   * collapse-vs-numbered-suffix choice is fully independent of the others' (see
-   * sfce.js's detectSharedLevel for why they can resolve in any order/combination
-   * without corrupting each other). Recurses to the next level after each resolution or
-   * skip; calls finishSFCCEImport once all three are done. */
-  promptSFCCESharedLevelConfirm(parsed, rows, levelIndex) {
-    if (levelIndex >= SFCCE_SHARED_LEVELS.length) {
+  /** Checks whether any Function name ends up needing to exist in more than one
+   * Section, and if so, shows one confirm modal asking whether to combine those
+   * copies into a single shared Function (placed under `sharedSectionName`, from
+   * promptSFCCEMapping's own "Section for shared functions" selector) or keep each
+   * section's own numbered copy. Calls finishSFCCEImport either way. Reported directly:
+   * "remove option for combining into 'shared' at business capability or application
+   * capability level. these will never be combined into shared, only functions are
+   * combined." — this used to walk THREE independently-resolvable levels (Function,
+   * then Business Capability, then Application Capability, each its own confirm
+   * modal); the deeper two are gone now, not just their UI option, since genuine
+   * Capability/Application Capability-level sharing is structurally impossible once
+   * Function-level sharing has always been resolved (see sfce.js's
+   * resolveSharedFunctions comment for the proof). */
+  promptSFCCESharedFunctionsConfirm(parsed, rows, sharedSectionName, sharedSectionId) {
+    const { sectionsByFunction, sharedFunctionNames } = detectSharedFunctions(rows);
+    if (sharedFunctionNames.size === 0) {
       this.finishSFCCEImport(rows, parsed);
       return;
     }
-    const level = SFCCE_SHARED_LEVELS[levelIndex];
-    const { sectionsByIdentity, sharedIdentities } = level.detect(rows);
-    if (sharedIdentities.size === 0) {
-      this.promptSFCCESharedLevelConfirm(parsed, rows, levelIndex + 1);
-      return;
-    }
 
-    const sharedCount = sharedIdentities.size;
-    const exampleKey = [...sharedIdentities][0];
-    const exampleName = level.exampleName(exampleKey);
-    const exampleSections = sectionsByIdentity.get(exampleKey);
+    const sharedCount = sharedFunctionNames.size;
+    const exampleName = [...sharedFunctionNames][0];
+    const exampleSections = sectionsByFunction.get(exampleName);
 
     const root = document.getElementById('modal-root');
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const box = document.createElement('div');
     box.className = 'modal-box';
-    box.innerHTML = `<h3>Shared ${escapeHtml(level.plural)} found</h3>
-      <p>${sharedCount} ${escapeHtml(level.label)}${sharedCount === 1 ? '' : ' name'}${sharedCount === 1 ? ' ends' : 's end'} up needing to exist in more than one Section — e.g. "${escapeHtml(exampleName)}" appears in: ${exampleSections.map(escapeHtml).join(', ')}.</p>
-      <p>Combine each of these into a single shared ${escapeHtml(level.label)} (with everything below it from every section combined), placed in one Section called "Shared"? This choice is independent of any other level's choice.</p>
-      <div class="modal-actions"><button class="cancel" id="sfcce-shared-no">No, keep in original sections</button><button class="primary" id="sfcce-shared-yes">Yes, use "Shared"</button></div>
+    box.innerHTML = `<h3>Shared Domains found</h3>
+      <p>${sharedCount} Domain${sharedCount === 1 ? '' : ' name'}${sharedCount === 1 ? ' ends' : 's end'} up needing to exist in more than one Section — e.g. "${escapeHtml(exampleName)}" appears in: ${exampleSections.map(escapeHtml).join(', ')}.</p>
+      <p>Combine each of these into a single shared Domain (with everything below it from every section combined), placed under Section "${escapeHtml(sharedSectionName)}"?</p>
+      <div class="modal-actions"><button class="cancel" id="sfcce-shared-no">No, keep in original sections</button><button class="primary" id="sfcce-shared-yes">Yes, use "${escapeHtml(sharedSectionName)}"</button></div>
     `;
     overlay.appendChild(box);
     root.appendChild(overlay);
     box.querySelector('#sfcce-shared-yes').addEventListener('click', () => {
       overlay.remove();
-      this.promptSFCCESharedLevelConfirm(parsed, level.resolve(rows, sectionsByIdentity, sharedIdentities, true), levelIndex + 1);
+      this.finishSFCCEImport(resolveSharedFunctions(rows, sectionsByFunction, sharedFunctionNames, true, sharedSectionName, sharedSectionId), parsed);
     });
     box.querySelector('#sfcce-shared-no').addEventListener('click', () => {
       overlay.remove();
-      this.promptSFCCESharedLevelConfirm(parsed, level.resolve(rows, sectionsByIdentity, sharedIdentities, false), levelIndex + 1);
+      this.finishSFCCEImport(resolveSharedFunctions(rows, sectionsByFunction, sharedFunctionNames, false, sharedSectionName, sharedSectionId), parsed);
     });
   }
 

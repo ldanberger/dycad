@@ -264,10 +264,9 @@ function resolveMappedId(record, field) {
  * Section field that splits one record into several rows produces that many
  * genuinely distinct nodes once sections diverge.
  *
- * Every row also carries originalFunctionName/originalCapabilityName/
- * originalApplicationCapabilityName/originalSection — frozen at build time, never touched by
- * resolveSharedFunctions/resolveSharedCapabilities/resolveSharedApplicationCapabilities below —
- * see detectSharedLevel's own comment for why that stability matters.
+ * Every row also carries originalFunctionName/originalSection — frozen at build time,
+ * never touched by resolveSharedFunctions below — see detectSharedLevel's own comment
+ * for why that stability matters.
  */
 export function buildRowsFromRecords(records, mapping) {
   const {
@@ -321,9 +320,9 @@ export function buildRowsFromRecords(records, mapping) {
       rows.push({
         section, originalSection: section, sectionDescription, sectionId, sectionOrder,
         functionName, originalFunctionName: functionName, functionDescription, functionId,
-        capabilityName, originalCapabilityName: capabilityName,
+        capabilityName,
         description, capabilityId,
-        applicationCapabilityName, originalApplicationCapabilityName: applicationCapabilityName,
+        applicationCapabilityName,
         applicationCapabilityDescription, applicationCapabilityId,
         entityName, entityDescription, entityId,
       });
@@ -334,19 +333,14 @@ export function buildRowsFromRecords(records, mapping) {
 
 /**
  * Finds identities that end up needing to exist in more than one distinct Section —
- * generic core shared by the three exported detect/resolve pairs below (Function,
- * Capability, Application Capability each independently need this: a real merged capabilities
- * dataset showed ~93% of business capabilities span multiple sections through their own
- * application capabilities alone, so this is the common case here, not a rare edge case).
- * `identityKeyFn(row)` returns a STABLE identity for the level being checked, scoped to
- * its own ancestors (e.g. a Capability's identity includes its Function, so two
- * different Functions coincidentally sharing a Capability name aren't conflated) — reads
- * row.originalSection (frozen, never mutated by resolveSharedLevel) rather than the live
- * row.section, so all three levels' detection AND resolution give the identical answer
- * regardless of what order they run in or what the other levels' choices were. Without
- * that stability, whichever resolution ran second would rank against whatever section
- * value the first one already rewrote (e.g. to 'Shared'), silently losing its own
- * numbered-suffix distinctions for any row more than one level touched.
+ * generic core behind detectSharedFunctions/resolveSharedFunctions below (Function is
+ * the only level this still runs for — see resolveSharedFunctions' own comment on why
+ * Capability/Application Capability-level sharing was removed as redundant once
+ * Function-level sharing always resolves). `identityKeyFn(row)` returns a STABLE
+ * identity for the level being checked — reads row.originalSection (frozen, never
+ * mutated by resolveSharedLevel) rather than the live row.section, so detection AND
+ * resolution give the same answer regardless of what a repeat call might have already
+ * rewritten the live section value to.
  */
 function detectSharedLevel(rows, identityKeyFn) {
   const sectionsByIdentity = new Map();
@@ -365,11 +359,15 @@ function detectSharedLevel(rows, identityKeyFn) {
  * Applies the user's decision about the identities detectSharedLevel found.
  *
  * collapseToShared=true: every row whose identity is shared gets its section forced to
- * the literal 'Shared' — so e.g. every row of a Function/Capability/Application Capability that
- * spans several sections (regardless of which section it originally came from) ends up
- * combined under section "Shared". (No explicit de-duplication needed beyond that — rows
- * that become identical after this rewrite are naturally merged by buildIndustryTree's
- * own merge-to-uniqueness step.)
+ * `sharedSectionName` (default the literal 'Shared', for callers that don't override
+ * it — Capability/Application Capability sharing, below, never do) — so e.g. every row
+ * of a Function/Capability/Application Capability that spans several sections
+ * (regardless of which section it originally came from) ends up combined under one
+ * section. (No explicit de-duplication needed beyond that — rows that become identical
+ * after this rewrite are naturally merged by buildIndustryTree's own
+ * merge-to-uniqueness step.) `sharedSectionId`, when given (a real, known Section's
+ * id, not the placeholder 'Shared' string), also overwrites the row's own sectionId —
+ * left untouched otherwise, since a bare 'Shared' tag has no real id to give it.
  *
  * collapseToShared=false: rows keep their original individual sections, but a shared
  * identity gets a numbered suffix on `levelField` in every section after its first (by
@@ -378,10 +376,15 @@ function detectSharedLevel(rows, identityKeyFn) {
  * section that saw this identity first keeps the plain name; the second section's copy
  * becomes "Name1"; the third "Name2"; and so on.
  */
-function resolveSharedLevel(rows, sectionsByIdentity, sharedIdentities, identityKeyFn, levelField, collapseToShared) {
+function resolveSharedLevel(rows, sectionsByIdentity, sharedIdentities, identityKeyFn, levelField, collapseToShared, sharedSectionName = 'Shared', sharedSectionId = null) {
   if (sharedIdentities.size === 0) return rows;
   if (collapseToShared) {
-    return rows.map((row) => (sharedIdentities.has(identityKeyFn(row)) ? { ...row, section: 'Shared' } : row));
+    return rows.map((row) => {
+      if (!sharedIdentities.has(identityKeyFn(row))) return row;
+      const updated = { ...row, section: sharedSectionName };
+      if (sharedSectionId) updated.sectionId = sharedSectionId;
+      return updated;
+    });
   }
   return rows.map((row) => {
     const key = identityKeyFn(row);
@@ -395,35 +398,32 @@ function resolveSharedLevel(rows, sectionsByIdentity, sharedIdentities, identity
 
 /** Function-level sharing — e.g. "Transportation & Roads" appearing under both
  * "Environment" and "Justice" sections. Independent of the Capability/Application Capability
- * checks below (see detectSharedLevel's own comment for why they can run in any order). */
+ * checks below (see detectSharedLevel's own comment for why they can run in any order).
+ * `sharedSectionName`/`sharedSectionId` (optional): where a COLLAPSED shared Function
+ * actually lands — main.js's wizard lets the person pick a real, known Section instead
+ * of the placeholder 'Shared' tag (defaults preserved for any direct/non-UI caller). */
 export function detectSharedFunctions(rows) {
   const { sectionsByIdentity, sharedIdentities } = detectSharedLevel(rows, (row) => row.originalFunctionName);
   return { sectionsByFunction: sectionsByIdentity, sharedFunctionNames: sharedIdentities };
 }
-export function resolveSharedFunctions(rows, sectionsByFunction, sharedFunctionNames, collapseToShared) {
-  return resolveSharedLevel(rows, sectionsByFunction, sharedFunctionNames, (row) => row.originalFunctionName, 'functionName', collapseToShared);
+export function resolveSharedFunctions(rows, sectionsByFunction, sharedFunctionNames, collapseToShared, sharedSectionName, sharedSectionId) {
+  return resolveSharedLevel(rows, sectionsByFunction, sharedFunctionNames, (row) => row.originalFunctionName, 'functionName', collapseToShared, sharedSectionName, sharedSectionId);
 }
-
-/** Capability-level sharing, scoped within its own Function so two different Functions
- * coincidentally sharing a Capability name aren't conflated. Independent of the
- * Function/Application Capability checks. */
-export function detectSharedCapabilities(rows) {
-  const { sectionsByIdentity, sharedIdentities } = detectSharedLevel(rows, (row) => `${row.originalFunctionName}|${row.originalCapabilityName}`);
-  return { sectionsByCapability: sectionsByIdentity, sharedCapabilityKeys: sharedIdentities };
-}
-export function resolveSharedCapabilities(rows, sectionsByCapability, sharedCapabilityKeys, collapseToShared) {
-  return resolveSharedLevel(rows, sectionsByCapability, sharedCapabilityKeys, (row) => `${row.originalFunctionName}|${row.originalCapabilityName}`, 'capabilityName', collapseToShared);
-}
-
-/** Application Capability-level sharing, scoped within its own (Function, Capability) pair.
- * Independent of the Function/Capability checks. */
-export function detectSharedApplicationCapabilities(rows) {
-  const { sectionsByIdentity, sharedIdentities } = detectSharedLevel(rows, (row) => `${row.originalFunctionName}|${row.originalCapabilityName}|${row.originalApplicationCapabilityName}`);
-  return { sectionsByApplicationCapability: sectionsByIdentity, sharedApplicationCapabilityKeys: sharedIdentities };
-}
-export function resolveSharedApplicationCapabilities(rows, sectionsByApplicationCapability, sharedApplicationCapabilityKeys, collapseToShared) {
-  return resolveSharedLevel(rows, sectionsByApplicationCapability, sharedApplicationCapabilityKeys, (row) => `${row.originalFunctionName}|${row.originalCapabilityName}|${row.originalApplicationCapabilityName}`, 'applicationCapabilityName', collapseToShared);
-}
+// Capability-level and Application Capability-level "shares across sections" were ONCE
+// independently detected/resolved here too (their own detect*/resolve* pairs, since
+// removed) -- reported directly: "remove option for combining into 'shared' at business
+// capability or application capability level. these will never be combined into
+// shared, only functions are combined." Confirmed safe to drop entirely, not just the
+// UI option: genuine Capability/Application Capability-level sharing (the exact same
+// (function, capability[, applicationCapability]) identity appearing in more than one
+// ORIGINAL section) can only occur when its parent Function's own rows ALSO span those
+// same sections -- which detectSharedFunctions/resolveSharedFunctions (above) always
+// already resolves, either collapsing to one shared functionName+section (after which
+// buildIndustryTree's own capKey/appCapKey dedup naturally merges the capability, no
+// numbered suffix needed) or keeping distinct numbered functionNames (after which the
+// capability keys are already scoped apart by their now-distinct parent funcKey, no
+// clash possible either way). Function-level resolution alone is structurally
+// sufficient.
 
 function slugify(text) {
   return String(text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'x';
