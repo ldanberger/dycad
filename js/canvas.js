@@ -185,7 +185,7 @@ function renderCanvasPage(app, tab, container) {
     if (passesStreamFilter(tab, part.streams) && passesElementTypeFilter(tab, part.type) && passesSectionFilter(tab, part.section)) seedVmIds.add(vm.id);
   }
 
-  let partVms, connVms;
+  let partVms;
   if (isAnyVisibilityFilterActive(tab)) {
     // NOT `tab.connectorLevels ?? 0` — connectorLevels is always explicitly initialized
     // (never truly undefined), and `??` would incorrectly collapse an explicit null
@@ -193,15 +193,15 @@ function renderCanvasPage(app, tab, container) {
     const levels = tab.connectorLevels;
     const visiblePartVmIds = expandVisiblePartVmIdsByLevel(seedVmIds, allConnVmsInView, levels);
     partVms = allPartVmsInView.filter((vm) => visiblePartVmIds.has(vm.id));
-    // level 0 means "just the matching nodes" — no connectors at all, even between two
-    // matching nodes; levels >= 1 (or null/unlimited) fall through to redrawEdges' own
-    // both-endpoints-visible check below, which — since partVms is now the BFS-expanded
-    // set — already resolves to exactly the connectors that participated in the walk.
-    connVms = levels === 0 ? [] : allConnVmsInView;
   } else {
     partVms = allPartVmsInView;
-    connVms = allConnVmsInView;
   }
+  // Connector visibility is NOT gated by connectorLevels (that setting only controls how
+  // many extra hops of NODES to pull in, per instructions.html) — a connector between two
+  // already-visible parts must always be offered to redrawEdges, which is the sole place
+  // that decides per-connector visibility (stream filter + chkShowConnectorType/
+  // chkShowStreamType/chkShowDataType view properties + both-endpoints-present check).
+  const connVms = allConnVmsInView;
 
   const nodeEls = new Map();
   for (const pvm of partVms) {
@@ -1137,7 +1137,7 @@ function renderTablePage(app, tab, container) {
   // a large dataset before Generate Industry is exactly when this matters most) — case-
   // insensitive substring match against ANY column's formatted cell value, so searching
   // "risk" finds it whether it's in the label, a note, or anywhere else in the row.
-  const isFilterable = !!(tab.catalogType || tab.sfceIndustryKey);
+  const isFilterable = !!(tab.catalogType || tab.sfceCatalog);
   const totalCount = rows.length;
   if (isFilterable) {
     const filterText = (tab.catalogFilterText || '').trim().toLowerCase();

@@ -1,0 +1,289 @@
+[
+  {
+    "function": "Production",
+    "functionDescription": "Activities involved in manufacturing or creating products and services.",
+    "section": "Mainstream Operational Functions",
+    "sectionId": "mof",
+    "order": 2,
+    "capabilities": [
+      {
+        "name": "Manufacturing Operations",
+        "description": "Plan, execute, and monitor the production of goods or services, ensuring efficiency and adherence to production targets.",
+        "applicationCapability": "Manufacturing Operations",
+        "entities": [
+          { "name": "Production Schedule", "description": "Detailed timetable outlining when and how products will be manufactured, including resource allocation." },
+          { "name": "Bill of Materials", "description": "Comprehensive list of raw materials, components, and instructions required for production." }
+        ]
+      },
+      {
+        "name": "Production Planning",
+        "description": "Forecast, plan, and allocate resources to meet production demand.",
+        "applicationCapability": "Production Planning",
+        "entities": [
+          { "name": "Production Schedule", "description": "Detailed timetable outlining when and how products will be manufactured, including resource allocation." },
+          { "name": "Demand Forecast", "description": "Projected customer demand used to plan production volumes." }
+        ]
+      }
+    ]
+  },
+
+  {
+    "function": "Product Improvement & Development",
+    "functionDescription": "Enhancing existing products and developing new ones.",
+    "section": "Mainstream Operational Functions",
+    "sectionId": "mof",
+    "order": 2,
+    "capabilities": [
+      {
+        "name": "R&D Management",
+        "description": "Manage research initiatives and innovation pipelines.",
+        "applicationCapability": "R&D Management",
+        "entities": [
+          { "name": "Product Specification", "description": "Technical and functional details of the product." },
+          { "name": "Research Findings", "description": "Insights and results from research activities." }
+        ]
+      },
+      {
+        "name": "Product Lifecycle Management",
+        "description": "Manage product evolution from concept to retirement.",
+        "applicationCapability": "Product Lifecycle Management",
+        "entities": [
+          { "name": "Product Specification", "description": "Technical and functional details of the product." },
+          { "name": "Change Request", "description": "Formal proposals for product modifications." }
+        ]
+      }
+    ]
+  },
+
+  {
+    "function": "Selling",
+    "functionDescription": "Activities related to selling products and services.",
+    "section": "Mainstream Operational Functions",
+    "sectionId": "mof",
+    "order": 2,
+    "capabilities": [
+      {
+        "name": "Sales Management",
+        "description": "Manage sales operations, pipelines, and performance.",
+        "applicationCapability": "Sales Management",
+        "entities": [
+          { "name": "Customer Profile", "description": "Information describing customer identity and attributes." },
+          { "name": "Sales Order", "description": "Confirmed customer purchase request." }
+        ]
+      },
+      {
+        "name": "Channel Management",
+        "description": "Manage sales channels such as retail, online, and partners.",
+        "applicationCapability": "Channel Management",
+        "entities": [
+          { "name": "Channel Partner", "description": "Information about external sales partners." },
+          { "name": "Sales Contract", "description": "Formal agreement governing sales terms." }
+        ]
+      }
+    ]
+  },
+
+  {
+    "function": "Marketing",
+    "functionDescription": "Promoting products and engaging target audiences.",
+    "section": "Mainstream Operational Functions",
+    "sectionId": "mof",
+    "order": 2,
+    "capabilities": [
+      {
+        "name": "Campaign Management",
+        "description": "Plan and execute marketing campaigns.",
+        "applicationCapability": "Campaign Management",
+        "entities": [
+          { "name": "Customer Profile", "description": "Information describing customer identity and attributes." },
+          { "name": "Marketing Asset", "description": "Creative materials used in marketing campaigns." }
+        ]
+      },
+      {
+        "name": "Market Analysis",
+        "description": "Analyze market trends, competitors, and opportunities.",
+        "applicationCapability": "Market Analysis",
+        "entities": [
+          { "name": "Market Data", "description": "Information about market conditions and trends." },
+          { "name": "Competitor Profile", "description": "Information describing competitors and their offerings." }
+        ]
+      }
+    ]
+  },
+
+  {
+    "function": "Delivery",
+    "functionDescription": "Delivering products and services to customers.",
+    "section": "Mainstream Operational Functions",
+    "sectionId": "mof",
+    "order": 2,
+    "capabilities": [
+      {
+        "name": "Logistics Management",
+        "description": "Manage transportation, warehousing, and distribution.",
+        "applicationCapability": "Logistics Management",
+        "entities": [
+          { "name": "Delivery Order", "description": "Instruction for delivering goods to customers." },
+          { "name": "Shipment", "description": "Record of goods being transported." }
+        ]
+      },
+      {
+        "name": "Fulfillment Management",
+        "description": "Ensure customer orders are fulfilled accurately and on time.",
+        "applicationCapability": "Fulfillment Management",
+        "entities": [
+          { "name": "Sales Order", "description": "Confirmed customer purchase request." },
+          { "name": "Inventory Item", "description": "Record of stock items available for sale." }
+        ]
+      }
+    ]
+  },
+
+  {
+    "function": "Customer Relations",
+    "functionDescription": "Managing customer interactions and satisfaction.",
+    "section": "Mainstream Operational Functions",
+    "sectionId": "mof",
+    "order": 2,
+    "capabilities": [
+      {
+        "name": "Customer Support",
+        "description": "Provide assistance and resolve customer issues.",
+        "applicationCapability": "Customer Support",
+        "entities": [
+          { "name": "Customer Profile", "description": "Information describing customer identity and attributes." },
+          { "name": "Support Ticket", "description": "Record of customer issues and resolutions." }
+        ]
+      },
+      {
+        "name": "Customer Feedback Management",
+        "description": "Collect and analyze customer feedback.",
+        "applicationCapability": "Customer Feedback Management",
+        "entities": [
+          { "name": "Feedback Record", "description": "Customer comments, ratings, and suggestions." },
+          { "name": "Customer Profile", "description": "Information describing customer identity and attributes." }
+        ]
+      }
+    ]
+  },
+
+  {
+    "function": "Data Management",
+    "functionDescription": "Managing enterprise data, governance, and analytics.",
+    "section": "Mainstream Operational Functions",
+    "sectionId": "mof",
+    "order": 2,
+    "capabilities": [
+      {
+        "name": "Data Governance",
+        "description": "Define policies and standards for data usage.",
+        "applicationCapability": "Data Governance",
+        "entities": [
+          { "name": "Data Dictionary", "description": "Definitions and metadata for enterprise data." },
+          { "name": "Data Policy", "description": "Rules governing data access and usage." }
+        ]
+      },
+      {
+        "name": "Analytics & Reporting",
+        "description": "Analyze data and generate insights.",
+        "applicationCapability": "Analytics & Reporting",
+        "entities": [
+          { "name": "Market Data", "description": "Information about market conditions and trends." },
+          { "name": "Sales Order", "description": "Confirmed customer purchase request." }
+        ]
+      }
+    ]
+  },
+
+  {
+    "function": "Procurement",
+    "functionDescription": "Acquiring goods and services from suppliers.",
+    "section": "Centralized Operational Functions (Economies of Scale)",
+    "sectionId": "cof",
+    "order": 3,
+    "capabilities": [
+      {
+        "name": "Supplier Management",
+        "description": "Manage relationships and performance of suppliers.",
+        "applicationCapability": "Supplier Management",
+        "entities": [
+          { "name": "Supplier Profile", "description": "Information describing suppliers and capabilities." },
+          { "name": "Purchase Contract", "description": "Agreement governing procurement terms." }
+        ]
+      },
+      {
+        "name": "Procurement Execution",
+        "description": "Execute purchasing activities and manage orders.",
+        "applicationCapability": "Procurement Execution",
+        "entities": [
+          { "name": "Purchase Order", "description": "Formal request to procure goods or services." },
+          { "name": "Inventory Item", "description": "Record of stock items available for sale." }
+        ]
+      }
+    ]
+  },
+
+  {
+    "function": "Human Resourcing",
+    "functionDescription": "Managing employees, recruitment, and workforce development.",
+    "section": "Staff Specialist Functions",
+    "sectionId": "ssf",
+    "order": 4,
+    "capabilities": [
+      {
+        "name": "Recruitment Management",
+        "description": "Manage hiring processes and candidate evaluation.",
+        "applicationCapability": "Recruitment Management",
+        "entities": [
+          { "name": "Candidate Profile", "description": "Information describing job applicants." },
+          { "name": "Job Posting", "description": "Descriptions of open roles and requirements." }
+        ]
+      },
+      {
+        "name": "Employee Management",
+        "description": "Manage employee records, performance, and development.",
+        "applicationCapability": "Employee Management",
+        "entities": [
+          { "name": "Employee Record", "description": "Information describing employees and employment history." },
+          { "name": "Training Record", "description": "Documentation of employee training activities." }
+        ]
+      }
+    ]
+  },
+
+  {
+    "function": "Enterprise Scope Functions",
+    "functionDescription": "",
+    "section": "Enterprise Scope Functions",
+    "sectionId": "esf",
+    "order": 1,
+    "capabilities": []
+  },
+
+  {
+    "function": "Continuous Improvement Functions",
+    "functionDescription": "",
+    "section": "Continuous Improvement Functions",
+    "sectionId": "cif",
+    "order": 5,
+    "capabilities": []
+  },
+
+  {
+    "function": "Resources Sustainment Functions",
+    "functionDescription": "",
+    "section": "Resources Sustainment Functions",
+    "sectionId": "rsf",
+    "order": 6,
+    "capabilities": []
+  },
+
+  {
+    "function": "Finance Control Functions",
+    "functionDescription": "",
+    "section": "Finance Control Functions",
+    "sectionId": "fcf",
+    "order": 7,
+    "capabilities": []
+  }
+]

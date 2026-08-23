@@ -1,5 +1,28 @@
-// data.js — startup data loads: fce-generalnodes.json, custom.json, relationships.xml
-// All three run in parallel, non-blocking. Failure -> alert with retry/abort (abort ends program).
+// data.js — startup data loads: capabilities-general-SFCCE.json, custom.json,
+// relationships.xml. All three run in parallel, non-blocking. Failure -> alert with
+// retry/abort (abort ends program).
+
+import { flattenJsonRecords, buildRowsFromRecords, buildIndustryTree } from './sfce.js';
+
+/** Field mapping for the built-in default industry dataset
+ * (public/capabilities-general-SFCCE.json), in the same shape a real File > Load SFCCE
+ * upload of this exact file would use -- run through the identical pipeline
+ * (flattenJsonRecords -> buildRowsFromRecords -> buildIndustryTree) rather than assigning
+ * a hand-built tree directly, so the built-in default and any user-imported dataset are
+ * produced by exactly one code path (per the direct request: "Now load the
+ * capabilities-general-SFCCE.json file automatically, replacing the load and all logic
+ * for loading fce-generalnodes.json"). No id fields mapped -- every level gets
+ * buildIndustryTree's own deterministic, slugified-name-derived id, same as any other
+ * unmapped-id Load SFCCE import. sectionId/sectionOrder ARE mapped -- the file's own
+ * per-function `sectionId`/`order` fields (matching custom.json's org-viewType
+ * sections) ride through to each Function node's nodeSectionId/nodeSectionOrder. */
+const GENERAL_SFCCE_MAPPING = {
+  sectionField: 'section', sectionIdField: 'sectionId', sectionOrderField: 'order',
+  functionField: 'function', functionDescriptionField: 'functionDescription',
+  capabilityField: 'capabilities.name', capabilityDescriptionField: 'capabilities.description',
+  applicationCapabilityField: 'capabilities.applicationCapability',
+  entityField: 'capabilities.entities.name', entityDescriptionField: 'capabilities.entities.description',
+};
 
 async function fetchJson(url) {
   const res = await fetch(url, { cache: 'no-store' });
@@ -75,7 +98,11 @@ function mergeRelationshipPairs(customPairs, xmlPairs) {
 /**
  * Loads all three startup resources in parallel. Each is independently retryable.
  * onRetryPrompt(label, error) must return a Promise<'retry'|'abort'>.
- * Returns { fce, settings, relationshipsXmlPairs, mergedRelationshipPairs } or throws on abort.
+ * Returns { industryTree, settings, relationshipsXmlPairs, mergedRelationshipPairs } or
+ * throws on abort. industryTree is the built-in default industry dataset, already run
+ * through the Load SFCCE pipeline (see GENERAL_SFCCE_MAPPING above) -- a genuine 4-level
+ * Section/Function/Capability/Application Capability/Entity tree, the same shape any
+ * Load SFCCE import produces.
  */
 async function loadAllData({ onRetryPrompt }) {
   async function loadWithRetry(label, loaderFn) {
@@ -90,8 +117,8 @@ async function loadAllData({ onRetryPrompt }) {
     }
   }
 
-  const [fce, settings, relXmlText] = await Promise.all([
-    loadWithRetry('fce-generalnodes.json', () => fetchJson('public/fce-generalnodes.json')),
+  const [rawIndustry, settings, relXmlText] = await Promise.all([
+    loadWithRetry('capabilities-general-SFCCE.json', () => fetchJson('public/capabilities-general-SFCCE.json')),
     loadWithRetry('custom.json', () => fetchJson('public/custom.json')),
     loadWithRetry('relationships.xml', () => fetchText('public/relationships.xml')),
   ]);
@@ -107,7 +134,11 @@ async function loadAllData({ onRetryPrompt }) {
 
   const mergedRelationshipPairs = mergeRelationshipPairs(settings.relationshipPairs || [], xmlPairs);
 
-  return { fce, settings, relationshipsXmlPairs: xmlPairs, mergedRelationshipPairs };
+  const { records } = flattenJsonRecords(rawIndustry);
+  const { rows } = buildRowsFromRecords(records, GENERAL_SFCCE_MAPPING);
+  const { tree: industryTree } = buildIndustryTree(rows);
+
+  return { industryTree, settings, relationshipsXmlPairs: xmlPairs, mergedRelationshipPairs };
 }
 
 export { loadAllData, parseRelationshipsXml, mergeRelationshipPairs };

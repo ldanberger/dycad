@@ -499,6 +499,21 @@ button, select, input { font-family: inherit; font-size: inherit; color: inherit
 .modal-box .prop-row { margin-bottom: 12px; }
 .modal-box-textedit { width: min(640px, 90vw); }
 .modal-box-wide { width: min(620px, 92vw); }
+/* Load SFCCE's mapping step: one row per level (Section/Function/Capability/
+   Application Capability/Entity), each with its Field/Description/Id selects laid
+   out side by side instead of one .prop-row per select — 5 compact rows instead of
+   15 tall ones. Reported directly: "make shorter, perhaps 2 columns or reduced
+   spacing." */
+.sfcce-mapping-grid { margin-bottom: 8px; }
+/* .modal-box .prop-row (12px margin-bottom) has higher specificity than a bare single
+   class -- .modal-box .sfcce-mapping-row here needs to match that to actually win. */
+.modal-box .sfcce-mapping-row {
+  display: grid; grid-template-columns: 150px repeat(3, 1fr); gap: 6px;
+  align-items: center; margin-bottom: 6px;
+}
+.sfcce-mapping-row label { font-size: 11px; color: var(--text-muted); }
+.sfcce-mapping-row select { width: 100%; box-sizing: border-box; }
+.sfcce-mapping-header span { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .02em; }
 .text-edit-area {
   width: 100%; box-sizing: border-box; height: 50vh; min-height: 240px; resize: vertical;
   font-family: var(--mono); font-size: 12.5px; line-height: 1.5;

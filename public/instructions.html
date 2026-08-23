@@ -277,10 +277,13 @@ canvas. Availability depends on what's selected — greyed out means the current
     node: if a node it pulls in turns out to also carry some other stream, that other stream is not used to
     keep expanding the search.</td></tr>
     <tr><td><strong>Generate Industry / Generate Inventory View</strong></td><td>(Advanced menu) Bulk-generate
-    a starter set of parts/connectors for a named industry, or a summary inventory view of everything in the
-    model. The built-in "general" industry data can be supplemented with your own via <strong>File &gt; Load
-    SFCCE</strong> — a Section/Function/Capability/Application Capability/Entity collection from an arbitrary JSON
-    file (with a field-mapping step, since the shape can be anything, including nested groups of groups).
+    a starter set of parts/connectors from the currently-loaded industry data, or a summary inventory view of
+    everything in the model. Only one industry dataset is ever loaded at a time — DyCAD starts with a built-in
+    default; <strong>File &gt; Load SFCCE</strong> replaces it (warning first if something's already loaded, since
+    this can't be undone by re-picking a name — there isn't one) with a Section/Function/Capability/Application
+    Capability/Entity collection read from an arbitrary JSON file (with a field-mapping step, since the shape
+    can be anything, including nested groups of groups). Whatever's currently loaded is saved as part of your
+    document, so it survives Save/Load JSON.
     Capability, Application Capability, and Entity are all optional: leaving one unmapped means it simply inherits the
     name of the level above it, rather than being dropped — so the same wizard handles data with only a single
     capability concept just as well as data with a distinct Business/Application Capability split. A Domain,
@@ -288,7 +291,19 @@ canvas. Availability depends on what's selected — greyed out means the current
     independently be collapsed into one shared node or kept as separate numbered copies, one question per
     level. Review the result via <strong>Catalogs &gt; SFCCE</strong> before generating. Every part a Section's
     Function generates (capability, application capability, entity, and any supporting nodes) inherits that
-    same Section, so the Section filter shows the whole related chain, not just the Function itself.</td></tr>
+    same Section, so the Section filter shows the whole related chain, not just the Function itself. Each
+    distinct Section also gets its own <strong>Business Organization Unit</strong> node generated (reused, not
+    duplicated, across every Function that shares it), Assignment-connected to the Function(s) it's
+    responsible for — a real, visible node representing the section itself, not just a filterable tag.
+    Every level (Section, Function, Capability, Application Capability, Entity) can also optionally map a
+    Description field and an Id field — an unmapped Id falls back to an auto-generated one, while a mapped
+    Id gives that node a real, stable identity (so re-generating later reuses it instead of creating a
+    duplicate). Unlike names, Ids never inherit from the level above when left unmapped. An Id field also
+    offers <strong>(generate unique)</strong> — mints a genuinely fresh, random id instead of reading
+    anything from the file at all. The mapped Section Id/Description also show up directly on the
+    generated Business Organization Unit node's own properties (previously always empty), and in the
+    <strong>Catalogs &gt; SFCCE</strong> table. Right-click the <strong>Load</strong> button to copy the
+    exact mapping as a ready-to-paste function call, the same shortcut Remap's own submit button offers.</td></tr>
   </tbody>
 </table>
 
@@ -331,8 +346,8 @@ file needed. Fill in the <code>{{INDUSTRY}}</code> placeholder before running it
 Application Capability level (as the prompt itself notes) produces the simpler 3-level Function/Capability/Entity
 shape instead, for a plain <strong>Load SFCE</strong>-style import. Entities are the concrete data
 records/objects a Capability or Application Capability manages — e.g. "Sales Order," "Customer Profile,"
-"Bill of Materials," the same kind you'll see if you look at DyCAD's own built-in "general" industry dataset
-(Advanced &gt; Generate Industry) — not systems, processes, or documents.</p>
+"Bill of Materials," the same kind you'll see if you look at DyCAD's own built-in default industry dataset
+(<strong>Catalogs &gt; SFCCE</strong>) — not systems, processes, or documents.</p>
 <pre class="docs-code">Generate a capability map for the {{INDUSTRY}} industry, suitable for import into
 DyCAD via File > Load SFCCE.
 

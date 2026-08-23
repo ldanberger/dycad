@@ -24,6 +24,7 @@ small, fast, and easy to tell apart in the failure output.
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -805,7 +806,7 @@ def check_batch_script_quickstart(page):
     (store.batchScriptCode's out-of-the-box default, DEFAULT_BATCH_SCRIPT_CODE in
     state.js) — verifies main() actually runs BOTH starter scripts in sequence, via the
     real Script Console UI. BatchScript_QuickStart: (1) Generate Industry with the
-    default "general" industry, not placed on any view; (2) a new View "Business
+    built-in default industry data, not placed on any view; (2) a new View "Business
     Functions" of type "org" (Business Function Organization); (3) Populate From
     Template using "Enterprise Functions" inside that view; (4) the "mof" (Mainstream
     Operational Functions) section's rowCount changed from its default of 2 down to 1;
@@ -819,8 +820,13 @@ def check_batch_script_quickstart(page):
     insertSmartStream example into the main() script after 3d view" —
     BatchScript_InsertSmartStreamExample runs next (main() awaits QuickStart first, so
     this genuinely happens after the 3D View step, not concurrently), tracing from the
-    "Production" Business Function QuickStart's own "general" industry data creates into
-    a new "Smart Stream Example" freeform view/tab. Then, reported directly (this
+    "Production" Business Function QuickStart's own default industry data creates into
+    a new "Smart Stream Example" freeform view/tab -- via connectorType 's' (Stream),
+    not 'c' (Connector): 'c' also carries the section-reification BusinessOrganizationUnit
+    Assignment edges, and since the default dataset now genuinely tags every function
+    with a real Section, walking 'c' from Production would fan out into every OTHER
+    function sharing its Section instead of staying scoped to Production's own chain.
+    Then, reported directly (this
     session's own layout report): "The cleanest result of drawing the script resulting
     data 'Smart Stream Example' ... would be (in a 4 x 4 grid): General Actor
     Manufacturing Operation Consumer; Business Function Production; empty; General
@@ -917,7 +923,12 @@ def check_batch_script_quickstart(page):
         problems.append("expected 'Done' written to the persistent Message Log")
     if not result["streamExampleViewCreated"]:
         problems.append("expected main() to also run BatchScript_InsertSmartStreamExample after BatchScript_QuickStart, creating a 'Smart Stream Example' view")
-    expected_stream_labels = sorted(['Production', 'Production Planning Process', 'Production Planning Consumer', 'Manage Production Planning', 'Manage Production Planning', 'Manufacturing Operations Process', 'Manufacturing Operations Consumer', 'Manage Manufacturing Operations', 'Manage Manufacturing Operations', 'Demand Forecast', 'Production Schedule', 'Bill of Materials'])
+    # Two 'Production Schedule' parts, not one: the built-in default dataset (unlike the
+    # old hand-curated fce-generalnodes.json) maps no explicit entity id, so each of
+    # Production's two capabilities' own "Production Schedule" entity auto-derives its
+    # id from its own full ancestor chain (see buildIndustryTree) rather than sharing
+    # one id across capabilities — two distinct parts with the same label, not a bug.
+    expected_stream_labels = sorted(['Production', 'Production Planning Process', 'Production Planning Consumer', 'Manage Production Planning', 'Manage Production Planning', 'Manufacturing Operations Process', 'Manufacturing Operations Consumer', 'Manage Manufacturing Operations', 'Manage Manufacturing Operations', 'Demand Forecast', 'Production Schedule', 'Production Schedule', 'Bill of Materials'])
     if sorted(result["streamExamplePartLabels"]) != expected_stream_labels:
         problems.append(f"expected BatchScript_InsertSmartStreamExample to trace the full chain from 'Production', got {sorted(result['streamExamplePartLabels'])}")
     if not result["streamExampleTabIsActive"]:
@@ -1585,9 +1596,8 @@ def check_new_content_sized_and_non_overlapping(page):
       view3.viewType = 'ff';
       const tab3 = app.createCanvasTab(view3);
       app.switchToTab(tab3.id);
-      const industryKeys = Object.keys(store.industryData || {});
-      if (industryKeys.length > 0) {
-        await commands.generateIndustry(app, industryKeys[0], () => {});
+      if ((store.doc.industryTree || []).length > 0) {
+        await commands.generateIndustry(app, () => {});
         const partVms = store.viewMembersForView(view3.id).filter(v => v.objectType === 'part');
         function overlap(v1, v2, w, h) { return !(v1.x+w<=v2.x || v2.x+w<=v1.x || v1.y+h<=v2.y || v2.y+h<=v1.y); }
         let overlapCount = 0;
@@ -1741,14 +1751,16 @@ def check_sfce_import_and_generate(page):
       const { sectionsByFunction, sharedFunctionNames } = sfce.detectSharedFunctions(parsed.rows);
       const resolved = sfce.resolveSharedFunctions(parsed.rows, sectionsByFunction, sharedFunctionNames, true);
       const { tree, stats } = sfce.buildIndustryTree(resolved);
-      store.industryData['sfce-fixture'] = tree;
-      // Registering 'SFCCE' here is what File > Load SFCCE's own wizard always does
-      // (finishSFCCEImport) — required now that buildIndustryTree always produces a
-      // 4-level tree (Application Capability cascades from Capability when unmapped, same as
-      // here): without it generateIndustry defaults to 'Enterprise', which has no
-      // Application Capability concept and would reject every Application Capability-typed child as an
-      // invalid entity, producing zero jobs.
-      store.industryTemplates['sfce-fixture'] = 'SFCCE';
+      // Only one industry dataset exists (store.doc.industryTree) — setting it directly
+      // is exactly what Load SFCCE's own wizard does (finishSFCCEImport), replacing
+      // whatever the boot default loaded. Registering 'SFCCE' here is required now that
+      // buildIndustryTree always produces a 4-level tree (Application Capability
+      // cascades from Capability when unmapped, same as here): without it
+      // generateIndustry defaults to 'Enterprise', which has no Application Capability
+      // concept and would reject every Application Capability-typed child as an invalid
+      // entity, producing zero jobs.
+      store.doc.industryTree = tree;
+      store.doc.industryTemplateName = 'SFCCE';
 
       const view = store.addView('SFCERegr_' + Date.now());
       view.viewType = 'ff';
@@ -1756,7 +1768,7 @@ def check_sfce_import_and_generate(page):
       app.switchToTab(tab.id);
       const before = store.doc.parts.length;
       let threw = null;
-      try { await commands.generateIndustry(app, 'sfce-fixture', () => {}); } catch (e) { threw = e.message; }
+      try { await commands.generateIndustry(app, () => {}); } catch (e) { threw = e.message; }
       const created = store.doc.parts.length - before;
 
       const funcParts = store.doc.parts.filter(p => p.type === 'BusinessFunction');
@@ -1818,14 +1830,14 @@ def check_generate_industry_no_collapse_keeps_functions_separate(page):
       const { sectionsByFunction, sharedFunctionNames } = sfce.detectSharedFunctions(rows);
       const resolved = sfce.resolveSharedFunctions(rows, sectionsByFunction, sharedFunctionNames, false);
       const { tree } = sfce.buildIndustryTree(resolved);
-      store.industryData['sfce-nocollapse-fixture'] = tree;
-      store.industryTemplates['sfce-nocollapse-fixture'] = 'SFCCE'; // see check_sfce_import_and_generate's own comment on this line
+      store.doc.industryTree = tree; // see check_sfce_import_and_generate's own comment on this line
+      store.doc.industryTemplateName = 'SFCCE';
 
       const view = store.addView('SFCENoCollapse_' + Date.now());
       view.viewType = 'ff';
       const tab = app.createCanvasTab(view);
       app.switchToTab(tab.id);
-      await commands.generateIndustry(app, 'sfce-nocollapse-fixture', () => {});
+      await commands.generateIndustry(app, () => {});
 
       const funcParts = store.doc.parts.filter(p => p.type === 'BusinessFunction');
       return {
@@ -1886,13 +1898,14 @@ def check_generate_industry_selection_cap(page):
           { nodeElementType: 'BusinessCapability', nodeName: 'CapCap' + i, nodeId: 'capfunc-' + i + '-cap', nodeDescription: 'd', nodeChildren: [] }
         ]});
       }
-      store.industryData['regrSelectionCap150'] = tree;
+      store.doc.industryTree = tree;
+      store.doc.industryTemplateName = 'SFCCE';
 
       const view = store.addView('RegrSelCap_' + Date.now());
       view.viewType = 'ff';
       const tab = app.createCanvasTab(view);
       app.switchToTab(tab.id);
-      await commands.generateIndustry(app, 'regrSelectionCap150', () => {});
+      await commands.generateIndustry(app, () => {});
       return { selectionSize: tab.selection.size };
     }
     """)
@@ -2070,6 +2083,81 @@ def check_section_filter(page):
     return True, "the Section filter lists every distinct section with '(no section)' last, filters the 2D canvas correctly, and the same tab.activeSections field also filters the 3D scene"
 
 
+def check_types_filter_keeps_connectors_visible(page):
+    """Reported directly: "connectors not showing when types filtered; on a view when
+    using Filter Types, connectors should continue to be displayed unless unselected in
+    view properties." Root cause: renderCanvasPage forced connVms to [] whenever
+    tab.connectorLevels was 0 (the default) and any Stream/Type/Section filter was
+    active, even for a connector directly between two parts that both individually
+    passed the filter — contradicting instructions.html's own documented meaning of
+    "Connector levels" (controls extra NODES pulled in beyond direct matches, not
+    whether a directly-matching connector draws at all). Covers: with the default
+    connectorLevels (0) and a Types filter that includes BOTH connected parts' types,
+    the connector between them still renders; narrowing the Types filter to exclude one
+    endpoint still correctly hides it (endpoint genuinely gone, not a filter bypass);
+    and the per-view "view properties" checkbox (chkShowConnectorType) still hides it
+    even when both endpoints pass the Types filter, proving visibility is governed by
+    that checkbox, not by connectorLevels."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.findView(store.currentView) || store.doc.views[0];
+      const canvasTab = store.tabs.find(t => t.type === 'canvas') || app.createCanvasTab(view);
+      app.switchToTab(canvasTab.id);
+      view.chkShowConnectorType = true;
+
+      const a = store.createPart({ type: 'GeneralActor', label: 'A', model: store.defaultModel, streams: [] });
+      const b = store.createPart({ type: 'BusinessCapability', label: 'B', model: store.defaultModel, streams: [] });
+      const avm = store.createViewMember({ view: view.id, objectType: 'part', objectId: a.id, x: 100, y: 100 });
+      const bvm = store.createViewMember({ view: view.id, objectType: 'part', objectId: b.id, x: 400, y: 100 });
+      const conn = store.createConnector({ from: a.id, to: b.id, model: store.defaultModel, connectorType: 'c' });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn.id, fromVmId: avm.id, toVmId: bvm.id });
+
+      canvasTab.activeElementTypes = null;
+      canvasTab.connectorLevels = 0;
+      app.render();
+      await new Promise(r => setTimeout(r, 80));
+      const unfilteredEdges = document.querySelectorAll('.edge-hit').length;
+
+      // Types filter includes BOTH connected parts' types, connectorLevels stays 0
+      canvasTab.activeElementTypes = ['GeneralActor', 'BusinessCapability'];
+      app.render();
+      await new Promise(r => setTimeout(r, 80));
+      const edgesWithBothTypesShown = document.querySelectorAll('.edge-hit').length;
+      const nodesWithBothTypesShown = document.querySelectorAll('.fnode').length;
+
+      // narrow to exclude B's type entirely -> connector must genuinely disappear
+      canvasTab.activeElementTypes = ['GeneralActor'];
+      app.render();
+      await new Promise(r => setTimeout(r, 80));
+      const edgesWithOneEndpointHidden = document.querySelectorAll('.edge-hit').length;
+
+      // back to both types shown, but now the view property turns connectors off
+      canvasTab.activeElementTypes = ['GeneralActor', 'BusinessCapability'];
+      view.chkShowConnectorType = false;
+      app.render();
+      await new Promise(r => setTimeout(r, 80));
+      const edgesWithViewPropertyOff = document.querySelectorAll('.edge-hit').length;
+
+      return { unfilteredEdges, edgesWithBothTypesShown, nodesWithBothTypesShown, edgesWithOneEndpointHidden, edgesWithViewPropertyOff };
+    }
+    """)
+    problems = []
+    if result["unfilteredEdges"] != 1:
+        problems.append(f"expected 1 connector rendered with no filter active, got {result['unfilteredEdges']}")
+    if result["nodesWithBothTypesShown"] != 2:
+        problems.append(f"expected both parts visible once the Types filter includes both their types, got {result['nodesWithBothTypesShown']} nodes")
+    if result["edgesWithBothTypesShown"] != 1:
+        problems.append(f"expected the connector to STILL render when Filter Types includes both endpoints' types (connectorLevels=0 default), got {result['edgesWithBothTypesShown']}")
+    if result["edgesWithOneEndpointHidden"] != 0:
+        problems.append(f"expected the connector hidden once its endpoint's type is filtered out, got {result['edgesWithOneEndpointHidden']}")
+    if result["edgesWithViewPropertyOff"] != 0:
+        problems.append(f"expected chkShowConnectorType=false to hide the connector even with both endpoints passing the Types filter, got {result['edgesWithViewPropertyOff']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "a connector between two parts that both pass the active Types filter stays visible regardless of connectorLevels, still disappears when an endpoint is actually filtered out, and is still governed by the chkShowConnectorType view property"
+
+
 def check_export_svg_includes_sections(page):
     """Regression guard: File > Export View as Image (buildViewSvgString) only ever drew
     connectors and part nodes — for a section-based view type (anything other than
@@ -2192,7 +2280,7 @@ def check_generate_industry_place_on_view_defaults_unchecked(page):
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
-      store.industryData['CopyCheckIndustry'] = [];
+      if (!store.doc.industryTree.length) store.doc.industryTree = [{ nodeElementType: 'BusinessFunction', nodeName: 'x', nodeId: 'x', nodeDescription: '', nodeChildren: [] }];
       app.promptGenerateIndustry();
       await new Promise(r => setTimeout(r, 60));
       const cb = document.getElementById('gi-place-view');
@@ -2227,11 +2315,14 @@ def check_dropdown_scrollable(page):
 
 
 def check_sfce_catalog_page(page):
-    """Regression guard: Catalogs > SFCE should open a read-only table of the
-    Section/Function/Capability/Application Capability/Entity hierarchy, with id and description
-    at every level, working for the built-in "general" data (a genuine 3-level tree, no
-    Application Capability concept, blank Application Capability columns) as well as a Load SFCCE
-    import."""
+    """Regression guard: Catalogs > SFCE should open a read-only table of the single
+    loaded industry dataset's Section/Function/Capability/Application Capability/Entity
+    hierarchy, with id and description at EVERY level including Section (sectionId/
+    sectionDescription — a later addition; Section has no tree node of its own, so these
+    ride along on the Function node, see DESIGN_DOCUMENT.md SS7.1) — the built-in
+    default (public/capabilities-general-SFCCE.json, boot-loaded through the same
+    pipeline a real Load SFCCE import uses, so it's a genuine 4-level tree with real
+    Application Capability values, not blank ones)."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -2239,7 +2330,7 @@ def check_sfce_catalog_page(page):
       app.switchToTab(homeTab.id);
       app.promptSfceCatalog();
       await new Promise(r => setTimeout(r, 50));
-      const catalogTab = store.tabs.find(t => t.sfceIndustryKey === 'general');
+      const catalogTab = store.tabs.find(t => t.sfceCatalog);
       const tableEl = document.querySelector('.table-page table');
       return {
         tabCreated: !!catalogTab,
@@ -2250,7 +2341,7 @@ def check_sfce_catalog_page(page):
       };
     }
     """)
-    expectedCols = ["section", "functionId", "functionName", "functionDescription", "capabilityId", "capabilityName", "capabilityDescription", "applicationCapabilityId", "applicationCapabilityName", "applicationCapabilityDescription", "entityId", "entityName", "entityDescription"]
+    expectedCols = ["section", "sectionId", "sectionDescription", "sectionOrder", "functionId", "functionName", "functionDescription", "capabilityId", "capabilityName", "capabilityDescription", "applicationCapabilityId", "applicationCapabilityName", "applicationCapabilityDescription", "entityId", "entityName", "entityDescription"]
     if not result["tabCreated"] or result["rowCount"] == 0:
         return False, f"catalog tab wasn't created or has no rows: {result}"
     if result["cols"] != expectedCols:
@@ -2258,6 +2349,71 @@ def check_sfce_catalog_page(page):
     if not result["tableRendered"] or result["headerCount"] != len(expectedCols):
         return False, f"table didn't render correctly: {result}"
     return True, f"SFCE Catalog opened with {result['rowCount']} rows and all {len(expectedCols)} id/description columns"
+
+
+def check_boot_loader_wires_section_id_and_order(page):
+    """Regression guard/new-feature check, reported directly: "wire sectionId and order
+    into the boot loader." public/capabilities-general-SFCCE.json's own per-function
+    `sectionId`/`order` fields (matching custom.json's org-viewType sections) previously
+    reached nothing — GENERAL_SFCCE_MAPPING (data.js) didn't map either, so every
+    Function node's nodeSectionId stayed null and there was no nodeSectionOrder concept
+    at all (sfce.js's buildRowsFromRecords/buildIndustryTree had no sectionOrderField/
+    nodeSectionOrder). Covers: every boot-loaded Function node's nodeSectionId matches
+    its section's real sectionId (not null); nodeSectionOrder matches the section's real
+    numeric order (as a string, same as sectionId — sfce.js's readScalar always
+    stringifies); Generate Industry's dedicated section-reification block now gives each
+    generated BusinessOrganizationUnit part a real xIds (the sectionId) instead of the
+    previous empty string, one real fix this surfaced (mof/cof/ssf were the only 3
+    sections with a mapped sectionId before; all 7 real content sections have one now,
+    since the file's own remaining-rows entries — Enterprise Scope/Continuous
+    Improvement/Resources Sustainment/Finance Control Functions — also carry it); and
+    the SFCE Catalog's tableCols include the new sectionOrder column, populated with the
+    matching real value in a sample row."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+
+      const bySectionId = {};
+      for (const f of store.doc.industryTree) bySectionId[f.nodeSectionId] = { sectionId: f.nodeSectionId, sectionOrder: f.nodeSectionOrder, section: f.nodeSection };
+
+      await commands.generateIndustry(app, null, false);
+      const orgUnits = store.doc.parts.filter(p => p.type === 'BusinessOrganizationUnit');
+      const orgUnitXIdsBySection = {};
+      for (const o of orgUnits) orgUnitXIdsBySection[o.label] = o.xIds;
+
+      const catalogTab = app.openOrSwitchSfceCatalog();
+      const sampleRow = catalogTab.tableRows.find(r => r.section === 'Mainstream Operational Functions');
+
+      return {
+        bySectionId,
+        orgUnitCount: orgUnits.length,
+        orgUnitXIdsBySection,
+        catalogCols: catalogTab.tableCols,
+        sampleRowSectionOrder: sampleRow ? sampleRow.sectionOrder : null,
+      };
+    }
+    """)
+    problems = []
+    expectedOrders = {'esf': '1', 'mof': '2', 'cof': '3', 'ssf': '4', 'cif': '5', 'rsf': '6', 'fcf': '7'}
+    for sectionId, expectedOrder in expectedOrders.items():
+        entry = result["bySectionId"].get(sectionId)
+        if not entry:
+            problems.append(f"expected a Function node with nodeSectionId {sectionId!r}, found none among {list(result['bySectionId'].keys())}")
+        elif entry["sectionOrder"] != expectedOrder:
+            problems.append(f"expected nodeSectionOrder {expectedOrder!r} for section {sectionId!r}, got {entry['sectionOrder']!r}")
+    if result["orgUnitCount"] != 7:
+        problems.append(f"expected 7 BusinessOrganizationUnit parts (one per real content section: esf/mof/cof/ssf/cif/rsf/fcf), got {result['orgUnitCount']}")
+    for label, xIds in result["orgUnitXIdsBySection"].items():
+        if not xIds:
+            problems.append(f"expected every generated BusinessOrganizationUnit part to have a real xIds (its sectionId), got blank for {label!r}")
+    if "sectionOrder" not in result["catalogCols"]:
+        problems.append(f"expected the SFCE Catalog's tableCols to include 'sectionOrder', got {result['catalogCols']}")
+    if result["sampleRowSectionOrder"] != "2":
+        problems.append(f"expected the 'Mainstream Operational Functions' catalog row's sectionOrder to be '2', got {result['sampleRowSectionOrder']!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "the boot loader now wires sectionId/order from capabilities-general-SFCCE.json into nodeSectionId/nodeSectionOrder, every generated BusinessOrganizationUnit gets a real xIds, and the SFCE Catalog surfaces the new sectionOrder column"
 
 
 def check_routing_style_per_connector_type(page):
@@ -5304,9 +5460,9 @@ def check_generate_industry_propagates_section_to_whole_chain(page):
         applicationCapabilityDescription: '', entityName: 'Forecast Record', entityDescription: '',
       };
       const { tree } = sfce.buildIndustryTree([row]);
-      store.industryData['SectionPropagationTest'] = tree;
-      store.industryTemplates['SectionPropagationTest'] = 'SFCCE';
-      await commands.generateIndustry(app, 'SectionPropagationTest', null, false);
+      store.doc.industryTree = tree;
+      store.doc.industryTemplateName = 'SFCCE';
+      await commands.generateIndustry(app, null, false);
 
       // A fresh page starts with no parts, so everything in the document now is exactly
       // what this one generateIndustry call created.
@@ -5321,6 +5477,127 @@ def check_generate_industry_propagates_section_to_whole_chain(page):
     if wrongSection:
         return False, f"expected EVERY part generated from this one stream to inherit the function's own section 'Agriculture' (capability/application capability/entity/passive nodes included, not just the BusinessFunction), but these didn't: {wrongSection} (full: {parts})"
     return True, f"all {len(parts)} parts generated from one stream (function, capability, application capability, entity, and passive nodes) correctly inherited the function's own section"
+
+
+def check_business_organization_unit_element_and_generation(page):
+    """Regression guard/new-feature check for a new element type, reported directly:
+    'please confirm that a togaf element business organization unit or organization
+    unit is missing' -> confirmed missing, then: 'add it as a new element type, with
+    oval icon (similar to requirement but looks different), same group (and
+    coloring, relations, etc.) as togaf business actor. When we import or generate
+    involving sections, these will now be business organization units (aka orgunit);
+    meaning when loading SFCCE for example, now generate a orgunit part.' Covers: (1)
+    the new BusinessOrganizationUnit element definition itself -- Business group
+    (same fill as Business Actor), TOGAF-only source tag ('t', not 'at' -- this is a
+    TOGAF Content Metamodel concept, not core ArchiMate), an oval icon path distinct
+    from Requirement's own oval (both are ellipses, but not the identical path); (2)
+    relationshipPairs mirrored from Business Actor's own real ArchiMate 3.2 relations
+    (relationships.xml) in both directions plus a self-pair, not left with zero
+    valid relations (which would make it uncreatable as a manual connector
+    endpoint); (3) generateIndustry (used by both Load SFCCE and the built-in
+    'general' industry, though 'general' itself carries no section data) now reifies
+    each function's own section as an actual BusinessOrganizationUnit part instead of
+    only tagging Part.section as a string -- one OrgUnit per unique section VALUE,
+    reused (not duplicated) across every function that shares it, Assignment-connected
+    to the function it's responsible for, and placed on the view; re-running
+    generateIndustry is idempotent (no duplicate OrgUnits or connectors); and this
+    only ever triggers via generateIndustry (Load SFCCE / built-in industries), never
+    the plain manual Generate Stream dialog, which has no section concept at all."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const { generateIndustry } = await import('./js/commands.js');
+
+      const el = (store.settings.elements || []).find(e => e.type === 'BusinessOrganizationUnit');
+      const requirementEl = (store.settings.elements || []).find(e => e.type === 'Requirement');
+      const businessActorFill = (store.settings.elementGroups || []).find(g => g.group === 'Business')?.fill;
+
+      const relPairs = store.mergedRelationshipPairs;
+      const toFunction = relPairs.find(p => p.typeA === 'BusinessOrganizationUnit' && p.typeB === 'BusinessFunction');
+      const toActor = relPairs.find(p => p.typeA === 'BusinessOrganizationUnit' && p.typeB === 'BusinessActor');
+      const fromActor = relPairs.find(p => p.typeA === 'BusinessActor' && p.typeB === 'BusinessOrganizationUnit');
+      const selfPair = relPairs.find(p => p.typeA === 'BusinessOrganizationUnit' && p.typeB === 'BusinessOrganizationUnit');
+
+      const view = store.addView('RegrOrgUnit_' + Date.now(), 'ff');
+      store.currentView = view.id;
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      store.doc.industryTree = [
+        { nodeElementType: 'BusinessFunction', nodeName: 'RegrOUFuncA', nodeId: 'ouA', nodeSection: 'RegrEnvironment',
+          nodeChildren: [{ nodeElementType: 'BusinessCapability', nodeName: 'RegrOUCapA', nodeId: 'oucA',
+            nodeChildren: [{ nodeElementType: 'ApplicationCapability', nodeName: 'RegrOUAppCapA', nodeId: 'ouacA',
+              nodeChildren: [{ nodeElementType: 'DataDataEntity', nodeName: 'RegrOUEntA', nodeId: 'oueA' }] }] }] },
+        { nodeElementType: 'BusinessFunction', nodeName: 'RegrOUFuncB', nodeId: 'ouB', nodeSection: 'RegrEnvironment',
+          nodeChildren: [{ nodeElementType: 'BusinessCapability', nodeName: 'RegrOUCapB', nodeId: 'oucB',
+            nodeChildren: [{ nodeElementType: 'ApplicationCapability', nodeName: 'RegrOUAppCapB', nodeId: 'ouacB',
+              nodeChildren: [{ nodeElementType: 'DataDataEntity', nodeName: 'RegrOUEntB', nodeId: 'oueB' }] }] }] },
+      ];
+      store.doc.industryTemplateName = 'SFCCE';
+
+      await generateIndustry(app, null, true);
+      const orgUnitsAfterFirst = store.doc.parts.filter(p => p.type === 'BusinessOrganizationUnit' && p.label === 'RegrEnvironment');
+      // ALL BusinessOrganizationUnit parts, not just correctly-labeled ones -- catches the
+      // generic passive-node mechanism (every template's own passive[] also lists
+      // {from:'BusinessOrganizationUnit', to:'BusinessFunction'}, added for 3D View layer
+      // visibility) creating a SECOND, wrongly-labeled (by capability/entity name instead
+      // of the section value) OrgUnit per stream, which the label-filtered count above
+      // would never see.
+      const allOrgUnitsAfterFirst = store.doc.parts.filter(p => p.type === 'BusinessOrganizationUnit');
+      const assignConnsAfterFirst = store.doc.connectors.filter(c => c.connectorType === 'c' && c.relationship === 'Assignment' && orgUnitsAfterFirst.some(o => o.id === c.from));
+      const orgUnitVms = store.viewMembersForView(view.id).filter(v => v.objectType === 'part' && orgUnitsAfterFirst.some(o => o.id === v.objectId));
+
+      // Re-run: must reuse the same OrgUnit and not duplicate the Assignment connectors.
+      await generateIndustry(app, null, true);
+      const orgUnitsAfterSecond = store.doc.parts.filter(p => p.type === 'BusinessOrganizationUnit' && p.label === 'RegrEnvironment');
+      const assignConnsAfterSecond = store.doc.connectors.filter(c => c.connectorType === 'c' && c.relationship === 'Assignment' && orgUnitsAfterSecond.some(o => o.id === c.from));
+
+      return {
+        el, requirementPath: requirementEl?.path, businessActorFill,
+        toFunction, toActor, fromActor, selfPair,
+        orgUnitCountAfterFirst: orgUnitsAfterFirst.length,
+        allOrgUnitCountAfterFirst: allOrgUnitsAfterFirst.length,
+        assignConnCountAfterFirst: assignConnsAfterFirst.length,
+        orgUnitVmCount: orgUnitVms.length,
+        orgUnitCountAfterSecond: orgUnitsAfterSecond.length,
+        assignConnCountAfterSecond: assignConnsAfterSecond.length,
+      };
+    }
+    """)
+    problems = []
+    el = result["el"]
+    if not el:
+        problems.append("expected a BusinessOrganizationUnit entry in settings.elements")
+    else:
+        if el["group"] != "Business":
+            problems.append(f"expected BusinessOrganizationUnit in the Business group, got {el['group']!r}")
+        if el["sources"] != "t":
+            problems.append(f"expected sources 't' (TOGAF-only, not core ArchiMate), got {el['sources']!r}")
+        if el["path"] == result["requirementPath"]:
+            problems.append("expected a distinct icon path from Requirement's own oval, got an identical path")
+        if "A" not in el["path"] or el["path"].count("A") < 2:
+            problems.append(f"expected an oval (elliptical arc) icon path, got {el['path']!r}")
+    for label, pair in [("BusinessOrganizationUnit->BusinessFunction", result["toFunction"]),
+                         ("BusinessOrganizationUnit->BusinessActor", result["toActor"]),
+                         ("BusinessActor->BusinessOrganizationUnit", result["fromActor"]),
+                         ("BusinessOrganizationUnit self-pair", result["selfPair"])]:
+        if not pair or not pair.get("relations"):
+            problems.append(f"expected a real relationshipPairs entry with allowed relations for {label}, got {pair}")
+    if result["orgUnitCountAfterFirst"] != 1:
+        problems.append(f"expected exactly 1 OrgUnit ('RegrEnvironment', shared by both functions), got {result['orgUnitCountAfterFirst']}")
+    if result["allOrgUnitCountAfterFirst"] != 1:
+        problems.append(f"expected exactly 1 BusinessOrganizationUnit part TOTAL (not just correctly-labeled ones) — the generic passive-node mechanism must not also create a second, wrongly-labeled OrgUnit for the same stream, got {result['allOrgUnitCountAfterFirst']}")
+    if result["assignConnCountAfterFirst"] != 2:
+        problems.append(f"expected 2 Assignment connectors (one per function sharing the OrgUnit), got {result['assignConnCountAfterFirst']}")
+    if result["orgUnitVmCount"] != 1:
+        problems.append(f"expected the OrgUnit placed exactly once on the view, got {result['orgUnitVmCount']}")
+    if result["orgUnitCountAfterSecond"] != result["orgUnitCountAfterFirst"]:
+        problems.append(f"expected OrgUnit count unchanged on re-run, got {result['orgUnitCountAfterFirst']} -> {result['orgUnitCountAfterSecond']}")
+    if result["assignConnCountAfterSecond"] != result["assignConnCountAfterFirst"]:
+        problems.append(f"expected Assignment connector count unchanged on re-run (no duplicates), got {result['assignConnCountAfterFirst']} -> {result['assignConnCountAfterSecond']}")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "BusinessOrganizationUnit is a real Business-group element with a distinct oval icon and mirrored Business Actor relations, and generateIndustry now reifies each function's section as a shared, Assignment-connected OrgUnit part instead of only a string tag, idempotently across re-runs"
 
 
 def check_level_down_single_creates_new_part(page):
@@ -7519,7 +7796,9 @@ def check_load_sfcce(page):
     mapped here, so it inherits the Application Capability's own name — producing a real
     DataDataEntity part one level deeper, not an absent one), confirms Generate Industry
     produces a real ApplicationCapability-typed part via the 'SFCCE' stream template
-    (through store.industryTemplates, not always 'Enterprise'), and confirms SFCCE's
+    (through store.doc.industryTemplateName, not always 'Enterprise'), confirms the
+    "clear and replace" warning appears (the built-in default industry data is already
+    loaded at boot, so Load SFCCE always replaces something), and confirms SFCCE's
     passive entries (matching Enterprise's: BusinessFunction->BusinessProcess,
     ApplicationApplication->ApplicationPhysicalComponent) each produce their own part —
     the BusinessFunction side reusing the chain's own node rather than duplicating it."""
@@ -7568,8 +7847,13 @@ def check_load_sfcce(page):
       document.getElementById('sfcce-field-capability-desc').value = 'businessCapabilities.description';
       document.getElementById('sfcce-field-application-capability').value = 'businessCapabilities.applicationCapabilities.name';
       document.getElementById('sfcce-field-application-capability-desc').value = 'businessCapabilities.applicationCapabilities.description';
-      document.getElementById('sfcce-industry-name').value = 'RegrSFCCE';
       document.querySelector('.modal-box .submit').click();
+      await new Promise(r => setTimeout(r, 80));
+      // Only one industry dataset ever exists — the built-in default is already loaded
+      // at boot, so this always triggers the "clear and replace" warning first.
+      const replaceConfirmBox = [...document.querySelectorAll('.modal-box')].find(b => b.textContent.includes('clear and replace'));
+      const replaceConfirmShown = !!replaceConfirmBox;
+      replaceConfirmBox?.querySelector('.submit')?.click();
       await new Promise(r => setTimeout(r, 80));
 
       const step3Title = document.querySelector('.modal-box h3')?.textContent || '';
@@ -7584,13 +7868,13 @@ def check_load_sfcce(page):
       document.getElementById('sfcce-shared-yes')?.click(); // Application Capability: collapse
       await new Promise(r => setTimeout(r, 100));
 
-      const tree = store.industryData['RegrSFCCE'];
-      const templateName = store.industryTemplates['RegrSFCCE'];
+      const tree = store.doc.industryTree;
+      const templateName = store.doc.industryTemplateName;
 
       const commands = await import('./js/commands.js');
       const homeTab = store.tabs.find(t => t.type === 'canvas');
       store.currentView = homeTab.viewId;
-      await commands.generateIndustry(app, 'RegrSFCCE', null, false);
+      await commands.generateIndustry(app, null, false);
 
       const funcParts = store.doc.parts.filter(p => p.type === 'BusinessFunction');
       const capParts = store.doc.parts.filter(p => p.type === 'BusinessCapability');
@@ -7601,7 +7885,7 @@ def check_load_sfcce(page):
       const appPhysicalComponentParts = store.doc.parts.filter(p => p.type === 'ApplicationPhysicalComponent');
 
       return {{
-        step2Title, step3Title, step4Title, step5Title,
+        step2Title, step3Title, step4Title, step5Title, replaceConfirmShown,
         treeLength: tree?.length,
         templateName,
         funcCount: funcParts.length,
@@ -7618,6 +7902,8 @@ def check_load_sfcce(page):
     """)
     if 'record' not in result['step2Title']:
         return False, f"unexpected step 2 title (preread didn't parse the 2-level-nested fixture correctly): {result}"
+    if not result['replaceConfirmShown']:
+        return False, f"expected the 'clear and replace' warning since the built-in default industry data is already loaded at boot: {result}"
     if result['step3Title'] != 'Shared Domains found':
         return False, f"expected the Domain-sharing question to appear: {result}"
     if result['step4Title'] != 'Shared Business Capabilities found':
@@ -7625,7 +7911,7 @@ def check_load_sfcce(page):
     if result['step5Title'] != 'Shared Application Capabilities found':
         return False, f"expected the Application-Capability-sharing question to appear too (the app capability itself lists 2 ministries directly): {result}"
     if result['templateName'] != 'SFCCE':
-        return False, f"expected store.industryTemplates to register the 'SFCCE' template: {result}"
+        return False, f"expected store.doc.industryTemplateName to register the 'SFCCE' template: {result}"
     if result['funcCount'] != 1 or result['capCount'] != 1 or result['appCapCount'] != 1:
         return False, f"expected exactly 1 part at each of Function/Capability/ApplicationCapability (all 3 levels collapsed to 'Shared'): {result}"
     # Entity was left unmapped, so it cascades from the Application Capability's own name
@@ -7644,6 +7930,283 @@ def check_load_sfcce(page):
     if result['appCapDescription'] != 'Desc one.':
         return False, f"expected the ApplicationCapability part's description threaded through from the collision-renamed field, got: {result['appCapDescription']}"
     return True, "Load SFCCE's unified wizard correctly resolves all three independent sharing levels, and Generate Industry produces a real ApplicationCapability-typed part via the 'SFCCE' template"
+
+
+def check_load_sfcce_id_and_description_mapping(page):
+    """Regression guard/new-feature check, reported directly: "Add to Load SFCCE
+    mapping, into the appropriate fields: Section Description, Section Id, Function
+    Description, Function Id, Capability Id, Application Capability Id, Entity Id."
+    Before this, the wizard only supported mapping a Description for Capability/
+    Application Capability/Entity (never Section or Function) and NO explicit Id field
+    at any level at all — every node's id was always auto-derived by chaining
+    slugified names together, and Section (which has no tree node of its own — it's a
+    plain string tag on each Function) had nowhere to carry an id/description at all.
+    Covers: all 7 new `<select>` mapping rows exist in the real wizard DOM; explicitly
+    mapping each of them (via the actual wizard UI, not a direct sfce.js call) produces
+    a tree whose Function node picks up the mapped functionId (overriding its own
+    auto-slugify-chain id) and functionDescription (previously always blank, no matter
+    what), plus nodeSectionId/nodeSectionDescription (a new pair of fields riding along
+    on the Function node, since Section has no node of its own); the Application
+    Capability level, left deliberately UNMAPPED, still cascades its name from the
+    Business Capability (proving the new id/description fields don't interfere with
+    the pre-existing name-cascade mechanism) while auto-deriving its own id from the
+    mapped Capability id (not from scratch) since IDs don't cascade the way names do;
+    and the mapped Capability/Entity ids DO override their own auto-derivation. Also
+    covers a real bug found while building this: the auto-suggestion heuristic for
+    Capability Id / Application Capability Id used a bare 'id' keyword, which matched
+    an unrelated shallow field ("domainId") ahead of the real, deeper
+    "capabilities.capId" — fixed by scoping the candidate set to fields whose own
+    dotted path signals "this belongs to the capability group" before ranking by
+    depth, same shallow-vs-deepest split already used for Capability vs. Application
+    Capability name/description suggestions."""
+    fixture = [
+        {
+            "domain": "Finance", "domainDescription": "Financial ops", "domainId": "fin",
+            "section": "Corporate", "sectionDescription": "Corporate-wide functions", "sectionId": "corp",
+            "capabilities": [
+                {"name": "Budgeting", "description": "Budget planning", "capId": "budget-cap",
+                 "entities": [{"name": "Budget Record", "description": "A budget line", "entId": "budget-rec"}]},
+            ],
+        },
+    ]
+    result = js(page, f"""
+    async () => {{
+      const app = window.dycadApp, store = app.store;
+      const text = {json.dumps(json.dumps(fixture))};
+      const blob = new Blob([text], {{ type: 'application/json' }});
+      const file = new File([blob], 'regr-id-fixture.json', {{ type: 'application/json' }});
+      const dt = new DataTransfer();
+      dt.items.add(file);
+
+      document.getElementById('file-menu-btn').click();
+      await new Promise(r => setTimeout(r, 50));
+      [...document.querySelectorAll('#file-menu .dd-item')].find(el => el.dataset.action === 'loadSFCCE')?.click();
+      await new Promise(r => setTimeout(r, 50));
+
+      const input = document.getElementById('sfcce-file-input');
+      input.files = dt.files;
+      document.getElementById('sfcce-preread-btn').click();
+      await new Promise(r => setTimeout(r, 100));
+
+      const newFieldIds = ['sfcce-field-section-desc', 'sfcce-field-section-id', 'sfcce-field-function-desc', 'sfcce-field-function-id',
+                            'sfcce-field-capability-id', 'sfcce-field-application-capability-id', 'sfcce-field-entity-id'];
+      const allNewFieldsPresent = newFieldIds.every((id) => !!document.getElementById(id));
+      const suggestedCapabilityId = document.getElementById('sfcce-field-capability-id')?.value;
+
+      document.getElementById('sfcce-field-section').value = 'section';
+      document.getElementById('sfcce-field-section-desc').value = 'sectionDescription';
+      document.getElementById('sfcce-field-section-id').value = 'sectionId';
+      document.getElementById('sfcce-field-function').value = 'domain';
+      document.getElementById('sfcce-field-function-desc').value = 'domainDescription';
+      document.getElementById('sfcce-field-function-id').value = 'domainId';
+      document.getElementById('sfcce-field-capability').value = 'capabilities.name';
+      document.getElementById('sfcce-field-capability-desc').value = 'capabilities.description';
+      document.getElementById('sfcce-field-capability-id').value = 'capabilities.capId';
+      // Application Capability deliberately left UNMAPPED (explicitly blanked, not just
+      // left at whatever the auto-suggestion pre-filled -- in a genuinely 3-level
+      // dataset like this one, the depth-based suggestion heuristic can pick the
+      // deeper Entity name field instead, a real user would need to notice and clear
+      // it too) -- must still cascade its name from Capability, and auto-derive its
+      // own id from the mapped Capability id.
+      document.getElementById('sfcce-field-application-capability').value = '';
+      document.getElementById('sfcce-field-application-capability-desc').value = '';
+      document.getElementById('sfcce-field-application-capability-id').value = '';
+      document.getElementById('sfcce-field-entity').value = 'capabilities.entities.name';
+      document.getElementById('sfcce-field-entity-desc').value = 'capabilities.entities.description';
+      document.getElementById('sfcce-field-entity-id').value = 'capabilities.entities.entId';
+      document.querySelector('.modal-box .submit').click();
+      await new Promise(r => setTimeout(r, 80));
+      // Only one industry dataset ever exists — the built-in default is already loaded
+      // at boot, so this always triggers the "clear and replace" warning first.
+      [...document.querySelectorAll('.modal-box')].find(b => b.textContent.includes('clear and replace'))?.querySelector('.submit')?.click();
+      await new Promise(r => setTimeout(r, 100));
+
+      // No sharing across sections here, so no shared-level confirm steps should appear.
+      const tree = store.doc.industryTree;
+      const func = tree[0];
+      const cap = func.nodeChildren[0];
+      const appCap = cap.nodeChildren[0];
+      const ent = appCap.nodeChildren[0];
+
+      return {{
+        allNewFieldsPresent, suggestedCapabilityId,
+        functionId: func.nodeId, functionDescription: func.nodeDescription,
+        nodeSectionId: func.nodeSectionId, nodeSectionDescription: func.nodeSectionDescription,
+        capabilityId: cap.nodeId,
+        appCapName: appCap.nodeName, appCapId: appCap.nodeId,
+        entityId: ent.nodeId,
+      }};
+    }}
+    """)
+    problems = []
+    if not result["allNewFieldsPresent"]:
+        problems.append("expected all 7 new mapping <select> rows (Section/Function Description+Id, Capability/Application Capability/Entity Id) to exist in the real wizard DOM")
+    if result["suggestedCapabilityId"] != "capabilities.capId":
+        problems.append(f"expected the Capability Id auto-suggestion to correctly pick 'capabilities.capId' (not an unrelated shallow field like 'domainId'), got {result['suggestedCapabilityId']!r}")
+    if result["functionId"] != "fin":
+        problems.append(f"expected the mapped Function Id to override the auto-derived one, got {result['functionId']!r}")
+    if result["functionDescription"] != "Financial ops":
+        problems.append(f"expected the mapped Function Description to land on the Function node (previously always blank), got {result['functionDescription']!r}")
+    if result["nodeSectionId"] != "corp" or result["nodeSectionDescription"] != "Corporate-wide functions":
+        problems.append(f"expected Section Id/Description to be carried on the Function node (nodeSectionId/nodeSectionDescription), got {result['nodeSectionId']!r}/{result['nodeSectionDescription']!r}")
+    if result["capabilityId"] != "budget-cap":
+        problems.append(f"expected the mapped Capability Id to override the auto-derived one, got {result['capabilityId']!r}")
+    if result["appCapName"] != "Budgeting":
+        problems.append(f"expected the unmapped Application Capability to still cascade its name from the Capability, got {result['appCapName']!r}")
+    if result["appCapId"] != "budget-cap-budgeting":
+        problems.append(f"expected the unmapped Application Capability's id to auto-derive from the mapped Capability id (ids don't cascade), got {result['appCapId']!r}")
+    if result["entityId"] != "budget-rec":
+        problems.append(f"expected the mapped Entity Id to override the auto-derived one, got {result['entityId']!r}")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "Load SFCCE's wizard now supports mapping Section/Function Description+Id and Capability/Application Capability/Entity Id, correctly overriding auto-derived node ids and populating previously-always-blank Function/Section description fields, without disturbing the existing name-cascade-when-unmapped mechanism"
+
+
+def check_load_sfcce_dialog_ux_and_generate_unique_id(page):
+    """Regression guard/new-feature check for a follow-up round of UX requests on the
+    Load SFCCE mapping dialog, reported directly: "Load SFCCE dialog: make shorter,
+    perhaps 2 columns or reduced spacing. add '(none)' as an option so nothing is
+    added. add '(generate unique' to generate a unique id. Update submit button to
+    show script call with parameters, as done with other form submit buttons. Update
+    SFCE catalog display and properties for all new fields." Covers: (1) the compact
+    grid layout (.sfcce-mapping-row, one row per level with Field/Description/Id
+    selects side by side) actually renders as exactly 6 rows (header + 5 levels)
+    instead of the original 16 stacked .prop-rows, with a genuinely short modal
+    height; (2) a Description select's blank option reads plainly "(none)" (not the
+    misleading "(none — inherit from the level above)" carried over from the
+    genuinely-cascading NAME fields — Descriptions never cascade); (3) an Id select
+    offers a distinct "(generate unique)" option, and choosing it for a mapped level
+    (here: Entity Id) produces a genuinely random id for each resulting row instead
+    of either a real file value or the deterministic auto-derived (slugified-name)
+    chain; (4) right-click on the dialog's Load button copies a
+    buildRowsFromRecords(records, {...}) call reflecting the exact current mapping to
+    the clipboard, the same "copy call" mechanism (wireCopyCallOnRightClick) Remap's
+    own submit button already uses; (5) the generated BusinessOrganizationUnit Part's
+    own description/xIds now come from the mapped Section Description/Id (previously
+    the OrgUnit was always created with no description and no xIds at all), and the
+    SFCE Catalog's own table columns (tab.tableCols) include the new sectionId/
+    sectionDescription columns alongside every other level's existing id/description
+    columns."""
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    fixture = [
+        {
+            "domain": "Finance", "domainDescription": "Financial ops", "domainId": "fin",
+            "section": "Corporate", "sectionDescription": "Corporate-wide functions", "sectionId": "corp",
+            "capabilities": [
+                {"name": "Budgeting", "description": "Budget planning", "capId": "budget-cap",
+                 "entities": [{"name": "Budget Record", "description": "A budget line", "entId": "budget-rec"}]},
+            ],
+        },
+    ]
+    result = js(page, f"""
+    async () => {{
+      const app = window.dycadApp, store = app.store;
+      const text = {json.dumps(json.dumps(fixture))};
+      const blob = new Blob([text], {{ type: 'application/json' }});
+      const file = new File([blob], 'regr-dialog-ux-fixture.json', {{ type: 'application/json' }});
+      const dt = new DataTransfer();
+      dt.items.add(file);
+
+      document.getElementById('file-menu-btn').click();
+      await new Promise(r => setTimeout(r, 50));
+      [...document.querySelectorAll('#file-menu .dd-item')].find(el => el.dataset.action === 'loadSFCCE')?.click();
+      await new Promise(r => setTimeout(r, 50));
+
+      const input = document.getElementById('sfcce-file-input');
+      input.files = dt.files;
+      document.getElementById('sfcce-preread-btn').click();
+      await new Promise(r => setTimeout(r, 100));
+
+      const gridRows = document.querySelectorAll('.sfcce-mapping-row').length;
+      const modalHeight = document.querySelector('.modal-box').getBoundingClientRect().height;
+      const descOptions = [...document.getElementById('sfcce-field-capability-desc').options].map(o => o.textContent);
+      const idOptions = [...document.getElementById('sfcce-field-capability-id').options].map(o => o.textContent);
+      const genUniqueOption = [...document.getElementById('sfcce-field-entity-id').options].find(o => o.textContent === '(generate unique)');
+
+      document.getElementById('sfcce-field-section').value = 'section';
+      document.getElementById('sfcce-field-section-desc').value = 'sectionDescription';
+      document.getElementById('sfcce-field-section-id').value = 'sectionId';
+      document.getElementById('sfcce-field-function').value = 'domain';
+      document.getElementById('sfcce-field-function-desc').value = 'domainDescription';
+      document.getElementById('sfcce-field-function-id').value = 'domainId';
+      document.getElementById('sfcce-field-capability').value = 'capabilities.name';
+      document.getElementById('sfcce-field-capability-desc').value = 'capabilities.description';
+      document.getElementById('sfcce-field-capability-id').value = 'capabilities.capId';
+      document.getElementById('sfcce-field-application-capability').value = '';
+      document.getElementById('sfcce-field-application-capability-desc').value = '';
+      document.getElementById('sfcce-field-application-capability-id').value = '';
+      document.getElementById('sfcce-field-entity').value = 'capabilities.entities.name';
+      document.getElementById('sfcce-field-entity-desc').value = 'capabilities.entities.description';
+      document.getElementById('sfcce-field-entity-id').value = genUniqueOption.value; // "(generate unique)", not a real field
+
+      const submitBtn = document.querySelector('.modal-box .submit');
+      submitBtn.dispatchEvent(new MouseEvent('contextmenu', {{ bubbles: true, cancelable: true }}));
+      await new Promise(r => setTimeout(r, 100));
+      let clipboardText = null;
+      try {{ clipboardText = await navigator.clipboard.readText(); }} catch (e) {{ clipboardText = null; }}
+
+      submitBtn.click();
+      await new Promise(r => setTimeout(r, 80));
+      // Only one industry dataset ever exists — the built-in default is already loaded
+      // at boot, so this always triggers the "clear and replace" warning first.
+      [...document.querySelectorAll('.modal-box')].find(b => b.textContent.includes('clear and replace'))?.querySelector('.submit')?.click();
+      await new Promise(r => setTimeout(r, 100));
+
+      const tree = store.doc.industryTree;
+      const ent = tree[0].nodeChildren[0].nodeChildren[0].nodeChildren[0];
+
+      const commands = await import('./js/commands.js');
+      const view = store.addView('RegrDialogUxView_' + Date.now(), 'ff');
+      store.currentView = view.id;
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      await commands.generateIndustry(app, null, true);
+      const orgUnit = store.doc.parts.find(p => p.type === 'BusinessOrganizationUnit' && p.label === 'Corporate');
+
+      app.openOrSwitchSfceCatalog();
+      const catalogTab = store.tabs.find(t => t.sfceCatalog);
+
+      return {{
+        gridRows, modalHeight, descOptions, idOptions, clipboardText,
+        entityId: ent.nodeId,
+        orgUnitDescription: orgUnit?.description, orgUnitXIds: orgUnit?.xIds,
+        catalogCols: catalogTab?.tableCols,
+      }};
+    }}
+    """)
+    problems = []
+    if result["gridRows"] != 6:
+        problems.append(f"expected the compact grid layout to render exactly 6 rows (header + 5 levels), got {result['gridRows']}")
+    if result["modalHeight"] >= 500:
+        problems.append(f"expected a genuinely compact modal (<500px tall), got {result['modalHeight']}")
+    if "(none)" not in result["descOptions"]:
+        problems.append(f"expected a plain, non-misleading '(none)' option in a Description select, got {result['descOptions']}")
+    if not any("generate unique" in o for o in result["idOptions"]):
+        problems.append(f"expected a '(generate unique)' option in an Id select, got {result['idOptions']}")
+    if not result["clipboardText"] or "buildRowsFromRecords(records," not in result["clipboardText"]:
+        problems.append(f"expected right-click on the submit button to copy a buildRowsFromRecords(records, {{...}}) call, got {result['clipboardText']!r}")
+    elif "capabilityIdField" not in result["clipboardText"] or "sectionDescriptionField" not in result["clipboardText"]:
+        problems.append(f"expected the copied call to reflect the actual current mapping (all 15 fields), got {result['clipboardText']!r}")
+    # The deterministic auto-derived fallback chain for this exact fixture (capability
+    # id mapped to "budget-cap", Application Capability left unmapped so it cascades
+    # the capability's own name) would be precisely "budget-cap-budgeting-budget-
+    # record" -- checking against this EXACT string (not just a length/shape guess)
+    # is what actually distinguishes "(generate unique)" firing from silently falling
+    # back to auto-derivation, since a UUID and a slugified-name chain can both be
+    # long strings.
+    if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", result["entityId"] or ""):
+        problems.append(f"expected '(generate unique)' to produce a genuine UUID, got {result['entityId']!r}")
+    if result["entityId"] == "budget-cap-budgeting-budget-record":
+        problems.append("expected '(generate unique)' to NOT silently fall back to the deterministic auto-derived id chain")
+    if result["orgUnitDescription"] != "Corporate-wide functions":
+        problems.append(f"expected the generated BusinessOrganizationUnit part's own description to come from the mapped Section Description, got {result['orgUnitDescription']!r}")
+    if result["orgUnitXIds"] != "corp":
+        problems.append(f"expected the generated BusinessOrganizationUnit part's own xIds to come from the mapped Section Id, got {result['orgUnitXIds']!r}")
+    if not result["catalogCols"] or "sectionId" not in result["catalogCols"] or "sectionDescription" not in result["catalogCols"]:
+        problems.append(f"expected the SFCE Catalog's own tableCols to include sectionId/sectionDescription, got {result['catalogCols']}")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "Load SFCCE's dialog is now a compact 6-row grid with correctly-worded (none)/(generate unique) options, right-click-copies its exact mapping call like Remap's own submit button, and the mapped Section Id/Description now surface on the generated BusinessOrganizationUnit part's own properties and in the SFCE Catalog's table columns"
 
 
 CHECKS = [
@@ -7687,11 +8250,13 @@ CHECKS = [
     check_modal_no_close_on_outside_click,
     check_stream_filter_select_all_exclude_all,
     check_section_filter,
+    check_types_filter_keeps_connectors_visible,
     check_export_svg_includes_sections,
     check_catalog_row_copy_includes_all_part_fields,
     check_generate_industry_place_on_view_defaults_unchecked,
     check_dropdown_scrollable,
     check_sfce_catalog_page,
+    check_boot_loader_wires_section_id_and_order,
     check_routing_style_per_connector_type,
     check_auto_complete_streams_ui,
     check_streams_field_editable,
@@ -7702,6 +8267,8 @@ CHECKS = [
     check_smart_stream_preset_dialog_save_and_load,
     check_instructions_closed_persists_across_reload,
     check_load_sfcce,
+    check_load_sfcce_id_and_description_mapping,
+    check_load_sfcce_dialog_ux_and_generate_unique_id,
     check_stream_template_shared_default,
     check_remap_options_persist_across_views,
     check_remap_edge_assignment_and_layout_optimization,
@@ -7732,6 +8299,7 @@ CHECKS = [
     check_view3d_disposed_on_full_document_load,
     check_view3d_section_boundaries,
     check_generate_industry_propagates_section_to_whole_chain,
+    check_business_organization_unit_element_and_generation,
     check_level_down_single_creates_new_part,
     check_level_down_downstream_external_placed_near_anchor,
     check_level_down_creates_composition_link,

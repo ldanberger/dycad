@@ -3026,4 +3026,255 @@
 // DESIGN_DOCUMENT.md SS7a, tests/README.md, and public/instructions.html (Level Up's
 // own row, the new Data Modeling reverse-direction paragraph, and the FK badge
 // description) updated. Full suite 107/107.
-export const APP_VERSION = '0.860';
+//
+// 0.861: New element type, reported directly: "please confirm that a togaf element
+// 'business organization unit' or 'organization unit' is missing" -- confirmed: zero
+// matches for "org"/"unit" anywhere across all 78 existing element types, in any
+// group. Not a core ArchiMate 3.x notation element either (the closest existing
+// concepts are Business Actor and Grouping) -- it's a TOGAF Content Metamodel entity.
+// Follow-up: "add it as a new element type, with oval icon (similar to requirement
+// but looks different), same group (and coloring, relations, etc.) as togaf business
+// actor. When we import or generate involving sections, these will now be business
+// organization units (aka orgunit); meaning when loading SFCCE for example, now
+// generate a orgunit part."
+// New BusinessOrganizationUnit element (public/custom.json): Business group (fill
+// color matches Business Actor automatically, since coloring is purely by group
+// membership, not per-type), sources:'t' (TOGAF-only, not "at" -- honestly reflects
+// that this isn't a core ArchiMate concept), a taller oval-with-divider icon path
+// distinct from Requirement's own plain oval. relationshipPairs: every relationships.xml
+// entry naming BusinessActor (source and target, 125 pairs including a self-pair) was
+// mechanically mirrored with BusinessOrganizationUnit substituted, preserving the exact
+// same relation letters/computed defaults BusinessActor itself gets for those same
+// pairs -- relationships.xml (the official ArchiMate 3.2 spec matrix) itself was left
+// untouched, since hand-fabricating entries there for a non-standard concept would
+// misrepresent invented data as the official spec. Also added to the "All"
+// streamTemplate's value[] (kept in 1:1 correspondence with every element type, same
+// requirement as every other element addition this project has made).
+// Generation behavior: createStream/generateIndustry now reifies each stream's own
+// section as an actual BusinessOrganizationUnit part instead of only tagging
+// Part.section as a string -- one OrgUnit per unique section VALUE per model, reused
+// (never duplicated) across every function sharing it, Assignment-connected to the
+// function it's responsible for, placed on the view, idempotent across re-runs. The
+// capture had to run in BOTH createStream's main value[] loop AND its passive-node
+// loop, since every currently-shipped template (Enterprise, SFCCE, Enterprise Full,
+// Test) puts BusinessFunction only in template.passive[], never the main chain -- the
+// main-loop capture is correct but currently-dead code, kept for template shapes that
+// might do it differently. A new plainConnsByFromTo map was added to
+// createBulkLookupCache (mirroring connsByFromToModel's own pattern, for connectorType
+// 'c' instead of 's') so the Assignment-connector dedup check stays O(1) per job, not
+// reintroducing the O(n^2) risk this cache exists to avoid. Only ever triggers via
+// generateIndustry (Load SFCCE's data, or any future industryData with real sections --
+// the built-in "general" dataset has none, so unaffected); the plain manual Generate
+// Stream dialog never passes a section at all, so it's completely unaffected too.
+// New check_business_organization_unit_element_and_generation (tests/run_all.py)
+// covers the element definition itself, relationshipPairs in both directions plus the
+// self-pair, and the generation behavior end to end -- proven via three separate
+// reverted regressions (the whole wiring block, the passive-loop capture specifically
+// since that's the actually-exercised path, and the reuse/dedup lookup), each
+// confirmed to fail with an informative message, then restored. Existing
+// check_generate_industry_propagates_section_to_whole_chain's part count changed
+// (11 -> 12) as an expected, verified side effect of the new OrgUnit part+connector,
+// not a regression. DESIGN_DOCUMENT.md SS7.3 (new), tests/README.md, and
+// public/instructions.html's Generate Industry row updated. Full suite 108/108.
+//
+// 0.862: New Load SFCCE mapping fields, reported directly: "Add to Load SFCCE
+// mapping, into the appropriate fields: Section Description, Section Id, Function
+// Description, Function Id, Capability Id, Application Capability Id, Entity Id."
+// Before this, the wizard only supported a Description for Capability/Application
+// Capability/Entity (never Section or Function) and no explicit Id at any level --
+// every node's id was always an auto-derived chained-slugify of names, and Section
+// (a plain string tag on each Function node, not a tree node of its own) had nowhere
+// to carry an id/description at all.
+// buildRowsFromRecords/buildIndustryTree (js/sfce.js) extended: every level now
+// supports an optional mapped Id, which overrides that node's auto-derived one
+// (surfacing immediately as xIds-based find-or-reuse once generateIndustry creates
+// the Part -- it already threads func.nodeId/cap.nodeId/appCap.nodeId/ent.nodeId
+// through as functionxIds/capabilityxIds/applicationCapabilityxIds/entityxIds, no
+// changes needed there); Ids deliberately do NOT cascade the way names do (an
+// unmapped level just falls back to auto-derivation, never inheriting a DIFFERENT
+// level's id, which would wrongly conflate two distinct identities). Function now
+// also supports a mapped Description (previously always blank regardless of any
+// mapping). Section's mapped Id/Description ride along on the Function node(s)
+// under it as new nodeSectionId/nodeSectionDescription fields, surfaced in the SFCE
+// Catalog page (flattenIndustryTree's makeRow) as new sectionId/sectionDescription
+// columns for parity with every other level.
+// The wizard (main.js's promptSFCCEMapping) gained 7 new <select> mapping rows.
+// Found and fixed a real suggestion-heuristic bug while building this: Capability
+// Id/Application Capability Id's auto-suggestion used a bare 'id' keyword, which
+// matched an unrelated SHALLOWER field (e.g. a top-level "domainId") ahead of the
+// real, deeper "capabilities.capId" -- the existing shallow-vs-deepest depth
+// tiebreak (already used for Capability vs Application Capability name/description)
+// only disambiguates WITHIN the right group of fields, not across unrelated ones.
+// Fixed by first filtering candidates to fields whose own dotted path contains a
+// "capab" substring before ranking by depth. Other new fields' suggestion keywords
+// needed camelCase-joined variants too (e.g. "sectiondescription" alongside "section
+// description") since a dotted-path field name has no word-boundary separator.
+// New check_load_sfcce_id_and_description_mapping (tests/run_all.py) covers all 7
+// new fields end to end through the real wizard DOM, each of the 5 distinct wiring
+// points (function id/description override, section id/description attachment,
+// capability/entity id override, unmapped-application-capability still cascading
+// its name while auto-deriving its id from the capability's) proven via its own
+// reverted regression, plus the suggestion-heuristic fix itself. DESIGN_DOCUMENT.md
+// SS7.1, tests/README.md, and public/instructions.html's Generate Industry row
+// updated. Also created public/capabilities-general-SFCCE.json (a new raw-input
+// JSON reshaping the built-in "general" dataset with Section values derived from
+// custom.json's "Enterprise Functions" template + "org"-viewType sections, and
+// Application Capability values cascaded from each Business Capability's own name,
+// matching Load SFCCE's own inherit-from-the-level-above convention) -- not yet
+// wired into the boot-time load path; that replacement is a deliberately separate,
+// not-yet-built next step. Full suite 109/109.
+//
+// 0.863: Follow-up UX round on the Load SFCCE mapping dialog, reported directly:
+// "Load SFCCE dialog: make shorter, perhaps 2 columns or reduced spacing. add
+// '(none)' as an option so nothing is added. add '(generate unique' to generate a
+// unique id. Update submit button to show script call with parameters, as done with
+// other form submit buttons. Update SFCE catalog display and properties for all new
+// fields."
+// (1) Compact layout: the 16 stacked .prop-rows collapse to 6 -- a new
+// .sfcce-mapping-row CSS grid lays out each level's Field/Description/Id selects
+// side by side (Section/Function/Capability/Application Capability/Entity, one row
+// each, plus a header row), each still carrying .prop-row for its select/input
+// styling (a .modal-box .sfcce-mapping-row override was needed since .modal-box
+// .prop-row's own margin-bottom rule has higher specificity than a bare single
+// class).
+// (2) "(none)" wording: the original single fieldOptionsWithNone's "(none — inherit
+// from the level above)" was only accurate for the 3 genuinely-cascading NAME
+// fields -- reused verbatim for the new Description/Id fields, it was actively
+// misleading (neither cascades). Now three distinct builders: fieldOptionsCascade
+// (unchanged, NAME fields only), fieldOptionsDescription (a plain "(none)"),
+// fieldOptionsId (blank = auto-derive from name, distinct from the new option
+// below).
+// (3) "(generate unique)": a new GENERATE_UNIQUE_ID sentinel (js/sfce.js, exported)
+// selectable in any Id dropdown -- mints a genuinely random id (crypto.randomUUID(),
+// resolveMappedId) instead of reading a file field or falling back to the
+// deterministic slugified-name chain. Resolved once per RESULTING ROW (moved inside
+// buildRowsFromRecords' per-section loop, not once per input record), since a
+// Section field that splits one record into several rows produces that many
+// genuinely distinct nodes once sections diverge, each needing its own fresh id.
+// (4) Submit button script call: wired the SAME wireCopyCallOnRightClick mechanism
+// Remap's own submit button already uses onto Load SFCCE's Load button -- right-click
+// copies a buildRowsFromRecords(records, {...}) call reflecting the live form,
+// via a new collectSfcceMapping() helper shared between the submit handler and the
+// snippet builder (same pattern collectRemapOptions already established).
+// (5) Catalog + properties: the mapped Section Id/Description now actually reach
+// the generated BusinessOrganizationUnit Part's own xIds/description fields
+// (createStream gained sectionId/sectionDescription params, threaded from
+// generateIndustry's func.nodeSectionId/nodeSectionDescription -- previously the
+// OrgUnit was always created with neither set). The SFCE Catalog's own tab.tableCols
+// (openOrSwitchSfceCatalog, main.js) gained matching sectionId/sectionDescription
+// columns, which flattenIndustryTree's makeRow already produces.
+// New check_load_sfcce_dialog_ux_and_generate_unique_id (tests/run_all.py) covers
+// all 6 mechanisms above, each proven via its own reverted regression (including a
+// precise UUID-regex check for "(generate unique)", not just a length/shape guess,
+// since a UUID and the deterministic fallback chain can both be long strings for a
+// given fixture). Required updating the PRE-EXISTING check_sfce_catalog_page's
+// exact-column-list assertion for the two new columns -- an expected, documented
+// side effect, not a regression. DESIGN_DOCUMENT.md SS7.1, tests/README.md, and
+// public/instructions.html's Generate Industry row updated. Full suite 110/110.
+//
+// v0.864: fixed a real bug reported directly: "connectors not showing when types
+// filtered; on a view when using Filter Types, connectors should continue to be
+// displayed unless unselected in view properties." renderCanvasPage (canvas.js) forced
+// connVms = [] whenever tab.connectorLevels was 0 (the default) and any Stream/Type/
+// Section filter was active -- even for a connector directly between two parts that
+// BOTH individually passed the filter -- contradicting instructions.html's own
+// documented meaning of "Connector levels" (how many extra hops of NODES to pull in
+// beyond direct matches, not whether an already-matching connector draws at all).
+// Fixed by always passing the full allConnVmsInView through to redrawEdges, which
+// already does the correct per-connector check on its own (stream filter,
+// chkShowConnectorType/chkShowStreamType/chkShowDataType view properties, and both-
+// endpoints-present); connectorLevels now purely controls the BFS node-expansion
+// radius (expandVisiblePartVmIdsByLevel), never connector visibility directly. New
+// check_types_filter_keeps_connectors_visible (tests/run_all.py), proven via a
+// deliberate revert-then-restore against the exact reported scenario. DESIGN_DOCUMENT.md
+// SS9's Stage-5-series log and tests/README.md updated. Full suite 111/111.
+//
+// v0.865: reported directly: "Now load the capabilities-general-SFCCE.json file
+// automatically, replacing the load and all logic for loading fce-generalnodes.json.
+// Change logic so only one Industry will be available, if user does a 'Load SFCCE' it
+// clears and replaces any existing industry SFCCE data (warn user first if data has
+// already been created). Can now remove any dialogs or parameters for industry (SFCCE
+// dataset), there will be only the one. It needs to be saved in the json file when user
+// selects save, and loaded if they load later." A large refactor collapsing the whole
+// industry-data subsystem onto ONE dataset:
+// - data.js now fetches public/capabilities-general-SFCCE.json (a raw, loosely-nested
+//   JSON array with section-per-function and applicationCapability-per-capability
+//   already baked in) and runs it through the EXACT SAME pipeline a real Load SFCCE
+//   upload uses (flattenJsonRecords -> buildRowsFromRecords -> buildIndustryTree, via
+//   a new GENERAL_SFCCE_MAPPING) -- no more hand-built fce-generalnodes.json tree
+//   assigned directly. Every node's id auto-derives from its own ancestor chain (no id
+//   fields mapped), a real, deliberate difference from the old file's hand-shared ids
+//   (e.g. "Production Schedule" under two different capabilities is now two Parts, not
+//   one) -- see DESIGN_DOCUMENT.md SS7.5.
+// - store.industryData/{[key]:tree} and store.industryTemplates/{[key]:name} (memory-
+//   only, never persisted) are GONE, replaced by store.doc.industryTree (array) and
+//   store.doc.industryTemplateName (string) -- genuinely part of the persisted
+//   document now, so a Load SFCCE import survives Save/Load JSON (previously entirely
+//   memory-only). migrateDoc defaults an older file with neither field to an empty
+//   industryTree/'SFCCE' -- no prior users, so no attempt to reconstruct a lost
+//   dataset.
+// - Every industryKey parameter is GONE, not just hardcoded to a constant --
+//   generateIndustry(app, onProgress, placeInView), App.runGenerateIndustryWithProgress
+//   (placeInView), App.openOrSwitchSfceCatalog() all dropped it, since there is
+//   structurally nowhere left for a second dataset to live. promptGenerateIndustry's
+//   industry <select> and promptSfceCatalog's multi-industry picker modal are both
+//   gone (only ever one option). promptSFCCEMapping's "Industry Name" text input and
+//   its duplicate-name guard are gone too.
+// - Load SFCCE now REPLACES store.doc.industryTree (finishSFCCEImport sets it
+//   directly, no longer merges into a keyed map) and warns first
+//   (App.confirmModal(...)) whenever industryTree is already non-empty -- which, since
+//   the built-in default is always loaded at boot, is effectively every real Load
+//   SFCCE a person runs. Cancelling leaves the mapping dialog open rather than
+//   discarding the person's field-mapping choices.
+// - Real bug caught once the boot data actually became section-tagged for the first
+//   time: every shipped streamTemplate's own passive[] array lists
+//   {from:'BusinessOrganizationUnit', to:'BusinessFunction'} (added earlier purely for
+//   3D View layer-visibility scanning) -- unguarded, createStream's GENERIC passive-
+//   node mechanism processed this entry too, creating a second, wrongly-labeled OrgUnit
+//   per stream alongside the dedicated section-reification block's correct one (3
+//   correct OrgUnits ballooned to 21 on the built-in dataset). Fixed with a one-line
+//   guard skipping BusinessOrganizationUnit entries in that loop entirely -- the
+//   dedicated block is now the sole owner of OrgUnit creation. Strengthened the
+//   pre-existing check_business_organization_unit_element_and_generation to count ALL
+//   BusinessOrganizationUnit parts (not just correctly-labeled ones), since the old
+//   label-filtered assertion could never have caught this.
+// - DEFAULT_BATCH_SCRIPT_CODE's BatchScript_InsertSmartStreamExample switched from
+//   connectorType 'c' to 's': 'c' also carries the OrgUnit Assignment edges, so tracing
+//   from "Production" via 'c' now fans out into every other function sharing its
+//   Section (89 elements instead of a tight ~13-element demo) -- 's' is the network
+//   createStream itself builds one stream at a time, so it stays scoped correctly.
+// - Unrelated fix bundled into the same request: promptGenerateIndustry/openOrSwitchSfceCatalog
+//   toast "No industry data loaded" instead of erroring when doc.industryTree is empty.
+// New check_types_filter_keeps_connectors_visible (last version) and this version's
+// updates to check_sfce_import_and_generate, check_generate_industry_no_collapse_keeps_functions_separate,
+// check_generate_industry_selection_cap, check_sfce_catalog_page, check_load_sfcce (now
+// also asserts the replace-warning fires), check_load_sfcce_id_and_description_mapping,
+// check_load_sfcce_dialog_ux_and_generate_unique_id, check_business_organization_unit_element_and_generation
+// (strengthened), check_batch_script_quickstart (connectorType 's', two "Production
+// Schedule" parts) -- every fixture-injection call site moved from
+// store.industryData[key]=tree to store.doc.industryTree=tree. Proven via two separate
+// revert-then-restore cycles (the BusinessOrganizationUnit passive-loop guard, and the
+// "clear and replace" warning). DESIGN_DOCUMENT.md SS7 substantially rewritten (new
+// SS7.5), tests/README.md, and public/instructions.html updated. Full suite 111/111.
+//
+// v0.866: capabilities-general-SFCCE.json gained sectionId/order fields per function
+// (matching custom.json's org-viewType sections), plus 4 new placeholder function
+// entries for the org sections that had none yet (Enterprise Scope/Continuous
+// Improvement/Resources Sustainment/Finance Control Functions -- 'title' excluded,
+// it's a header row with elementTypes:[], not a real content section). Then, reported
+// directly: "wire sectionId and order into the boot loader" -- GENERAL_SFCCE_MAPPING
+// (data.js) now maps sectionIdField:'sectionId'/sectionOrderField:'order' (previously
+// only mof/cof/ssf's functions carried an id at all, via nothing -- sectionId was
+// entirely unmapped). sfce.js gained a new sectionOrderField/nodeSectionOrder concept,
+// parallel to the existing sectionDescriptionField/nodeSectionDescription -- a plain
+// read-through value (readScalar), not an id, so no cascade/GENERATE_UNIQUE_ID
+// semantics. Real, visible effect: every generated BusinessOrganizationUnit part now
+// gets a genuine xIds (its sectionId) instead of blank, and all 7 real content
+// sections (not just 3) now generate their own OrgUnit. sectionOrder also surfaced as
+// a new SFCE Catalog column (flattenIndustryTree's makeRow, main.js's tableCols). New
+// check_boot_loader_wires_section_id_and_order (tests/run_all.py), proven via a
+// deliberate revert-then-restore of GENERAL_SFCCE_MAPPING; updated the PRE-EXISTING
+// check_sfce_catalog_page's exact-column-list assertion for the new column (an
+// expected, documented side effect, not a regression). DESIGN_DOCUMENT.md SS7.5 and
+// tests/README.md updated. Full suite 112/112.
+export const APP_VERSION = '0.866';

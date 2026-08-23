@@ -23,7 +23,7 @@ index.html            3-column layout shell, loads js/main.js as a module
 css/styles.css        light/dark theme via CSS custom properties
 public/custom.json     the single configuration file — see §3
 public/relationships.xml   merged into settings.relationshipPairs at boot
-public/fce-generalnodes.json   default "general" industry dataset — see §7
+public/capabilities-general-SFCCE.json   default industry dataset — see §7
 public/instructions.html   static content for the in-app Instructions tab
 ```
 
@@ -40,8 +40,8 @@ There is no client-side router and no history API usage — the whole app is one
 
 | Module | Responsibility |
 |---|---|
-| `js/state.js` | `Store` class: `doc` (models/parts/connectors/views/viewMembers), tabs, undo/redo, settings, industryData, message log, save/load JSON (de)serialization and `migrateDoc` forward-compatibility defaults, id generation, timestamp formatting |
-| `js/data.js` | Startup fetches (custom.json, relationships.xml, fce-generalnodes.json) with retry |
+| `js/state.js` | `Store` class: `doc` (models/parts/connectors/views/viewMembers, plus `industryTree`/`industryTemplateName` — the single loaded industry dataset), tabs, undo/redo, settings, message log, save/load JSON (de)serialization and `migrateDoc` forward-compatibility defaults, id generation, timestamp formatting |
+| `js/data.js` | Startup fetches (custom.json, relationships.xml, capabilities-general-SFCCE.json) with retry — the industry file is run through the same Load-SFCCE pipeline (`sfce.js`) a real import uses, not assigned as a pre-built tree |
 | `js/rules.js` | Relationship-validity lookups (`validRelationOptions`, `elementByType`, `defaultRelationKeyFor`) — all keyed off `settings.relationshipPairs`/`settings.elements` |
 | `js/render.js` | Header/toolbox/property-panel rendering; the schema-driven `renderShowFieldsPanel` that every editable-field UI in the app is built from; catalog row rendering; light/dark theme application |
 | `js/canvas.js` | The interactive canvas itself: node/edge SVG rendering, drag/connect/lasso-select, zoom/pan, node sizing (`redrawNodeSizes`/`redrawAndResolveLayout`), generic table-tab rendering (`renderTablePage`, drives catalogs *and* the SFCE Catalog page), the Instructions tab's content-fetch renderer, connector routing dispatch (delegates path computation to `routing.js`) |
@@ -336,18 +336,26 @@ fallback.
 
 ## 7. The SFCE subsystem
 
-"SFCE" = Section → Function → Capability → Entity, a four-level hierarchy used to
-bulk-generate Streams. `store.industryData: {[key]: tree}` holds one or more such
-trees; the built-in `general` key comes from `fce-generalnodes.json` (no section
-concept — every Function's `nodeSection` is blank). Tree shape:
+"SFCE" = Section → Function → Capability → [Application Capability] → Entity, a
+4-level hierarchy (Application Capability optional — see `buildRowsFromRecords`' own
+cascade comment for the 3-level fallback) used to bulk-generate Streams. Exactly ONE
+such tree is ever loaded at a time — `store.doc.industryTree` (plus
+`store.doc.industryTemplateName`, the streamTemplate `generateIndustry` §7.2 should
+walk it with) — persisted as part of the document (round-trips through Save/Load
+JSON), not a memory-only, multi-keyed map. See §7.5 for how it's boot-seeded and how
+File > Load SFCCE replaces it. Tree shape:
 
 ```js
 [{
   nodeElementType: 'BusinessFunction', nodeName, nodeId, nodeDescription, nodeSection,
+  nodeSectionId, nodeSectionDescription,
   nodeChildren: [{
     nodeElementType: 'BusinessCapability', nodeName, nodeId, nodeDescription,
     nodeChildren: [{
-      nodeElementType: 'DataDataEntity', nodeName, nodeId, nodeDescription,
+      nodeElementType: 'ApplicationCapability', nodeName, nodeId, nodeDescription,
+      nodeChildren: [{
+        nodeElementType: 'DataDataEntity', nodeName, nodeId, nodeDescription,
+      }],
     }],
   }],
 }]
@@ -355,13 +363,15 @@ concept — every Function's `nodeSection` is blank). Tree shape:
 
 ### 7.1 Load SFCE (`js/sfce.js` + `main.js` wizard)
 
-Imports an arbitrary external JSON file as a new `industryData` entry. `flattenJsonRecords`
-detects the common "outer array of groups, each with a nested array of items" shape and
-flattens it, carrying the outer item's own scalar fields onto each flattened record.
-The wizard suggests an industry name (from the filename) and field mappings (keyword
-search, trying each candidate keyword across every available field before moving to
-the next keyword, so a low-priority-but-early-matching field name can't beat a
-better-but-later one). A multi-valued Section field splits into one row per value.
+Imports an arbitrary external JSON file, replacing whatever `store.doc.industryTree`
+currently holds (see §7.5 — there's no "Industry Name" to pick, since only one
+industry dataset ever exists). `flattenJsonRecords` detects the common "outer array of
+groups, each with a nested array of items" shape and flattens it, carrying the outer
+item's own scalar fields onto each flattened record. The wizard suggests field
+mappings (keyword search, trying each candidate keyword across every available field
+before moving to the next keyword, so a low-priority-but-early-matching field name
+can't beat a better-but-later one). A multi-valued Section field splits into one row
+per value.
 
 **Shared-Function resolution**: after building rows, `detectSharedFunctions` finds
 Function names spanning more than one distinct Section (not: a Capability whose own
@@ -372,16 +382,98 @@ original section combined; true post-collapse duplicates merge naturally in the
 tree-build step's own uniqueness handling), or keep each section's own copy with a
 numbered suffix (plain name, then `Name1`, `Name2`, ... by first-seen section order).
 
+**Description/Id mapping, every level** — the wizard's per-level mapping fields
+(`buildRowsFromRecords`' `mapping` param) are fully symmetric across all 5 levels
+(Section/Function/Capability/Application Capability/Entity): every level supports an
+optional Description field, and every level supports an optional explicit Id field.
+Descriptions behave exactly as before (never cascaded — see the module comment).
+**Ids deliberately do NOT cascade either** — unlike names, inheriting an id from a
+different level would wrongly conflate two distinct identities — a level with no
+mapped/blank id field simply falls back to `buildIndustryTree`'s existing
+auto-derivation (a chained `slugify` of section/function/.../name). An explicit id
+gives that node real, stable identity, surfacing as `xIds`-based find-or-reuse once
+`generateIndustry` (§7.2) creates the actual Part (it already passes `func.nodeId`/
+`cap.nodeId`/`appCap.nodeId`/`ent.nodeId` through as `functionxIds`/`capabilityxIds`/
+`applicationCapabilityxIds`/`entityxIds` — no changes needed there at all). Section
+itself has no dedicated tree node (it's a plain string tag on each Function node, per
+the module comment above) — its mapped id/description ride along on whichever
+Function node(s) fall under that section instead, as `nodeSectionId`/
+`nodeSectionDescription` (new sibling fields to the existing `nodeSection` string),
+surfaced in the SFCE Catalog page (`flattenIndustryTree`'s `makeRow`) as new
+`sectionId`/`sectionDescription` columns for full parity with every other level's own
+id/description columns.
+
+The wizard's per-field auto-suggestion (keyword search) needed one real fix while
+building this: a bare `'id'` keyword is too generic for Capability Id/Application
+Capability Id specifically — it happily matched an unrelated SHALLOWER field (e.g. a
+top-level `domainId`) ahead of the real, deeper `capabilities.capId`, since the
+existing depth-based shallow-vs-deepest tiebreak (already used to tell Capability
+from Application Capability apart) only helps once the candidate set is scoped to
+the right GROUP of fields in the first place. Fixed by first filtering to fields
+whose own dotted path contains a `capab` substring (matching how a real
+`capabilities`/`businessCapabilities` nesting key would appear in the path) before
+ranking by depth — every other new field's suggestion keyword list is specific enough
+(`'section id'`, `'functiondescription'`, etc., including camelCase-joined variants
+since a dotted-path field name has no word-boundary separator to match `'section
+description'` against) to not need this same group-scoping treatment.
+
+**Dialog layout, "(generate unique)", and properties wiring** — a follow-up round on
+the same feature. The wizard's 16 stacked `.prop-row`s (Industry Name + 15 mapping
+fields) got long enough to warrant a dedicated compact layout: `.sfcce-mapping-row`
+(CSS, new) lays out one row per level — Section/Function/Capability/Application
+Capability/Entity — with its Field/Description/Id `<select>`s side by side via CSS
+grid, collapsing 15 rows down to 5 (+1 header row), each `.sfcce-mapping-row` also
+carrying `.prop-row` so it still inherits the shared select/input styling; a
+`.modal-box .sfcce-mapping-row` override is needed since `.modal-box .prop-row`'s own
+`margin-bottom` rule has higher specificity than a bare single-class selector would.
+
+The mapping dialog's "nothing mapped" option is now worded per field KIND instead of
+one shared, sometimes-misleading string: `fieldOptionsCascade` (Capability/
+Application Capability/Entity NAME — genuinely inherits from the level above, so
+"(none — inherit from the level above)" is accurate), `fieldOptionsDescription`
+(never cascades — a plain "(none)"), and `fieldOptionsId` (adds a distinct
+`GENERATE_UNIQUE_ID` sentinel option, "(generate unique)", alongside the existing
+"(none — auto-generate from name)" blank). Choosing "(generate unique)" for any Id
+field mints a genuinely random id (`crypto.randomUUID()`, `resolveMappedId` in
+`sfce.js`) instead of either reading a real file value or falling back to the
+deterministic slugified-name chain — resolved once per RESULTING ROW (inside the
+per-section loop, not once per input record), since a Section field that splits one
+record into several rows produces that many genuinely distinct nodes once sections
+diverge, and each needs its own fresh id rather than sharing one.
+
+The dialog's Load button now uses the same `wireCopyCallOnRightClick` mechanism
+Remap's own submit button already established (§5.3-adjacent, `main.js`) —
+right-click copies a `buildRowsFromRecords(records, {...})` call reflecting the
+CURRENT mapping to the clipboard, via a `collectSfcceMapping()` helper shared between
+the submit handler and the copy-call snippet (same "read the form once, use it
+twice" pattern `collectRemapOptions` already established).
+
+Finally, the mapped Section Id/Description now actually reach the generated
+`BusinessOrganizationUnit` Part's own properties, not just the industry tree:
+`createStream` (commands.js) gained `sectionId`/`sectionDescription` params, threaded
+from `generateIndustry`'s own `func.nodeSectionId`/`func.nodeSectionDescription`, and
+sets them as the OrgUnit part's `xIds`/`description` at creation — previously the
+OrgUnit was always created with neither. (Note: reuse of an already-existing OrgUnit
+still matches by section-string label, not by `xIds` — if the SAME section string
+ever carried two different mapped ids across different generation runs, whichever id
+created the part first wins; not something this round changes.) The SFCE Catalog
+page's own `tab.tableCols` (`main.js`'s `openOrSwitchSfceCatalog`) gained matching
+`sectionId`/`sectionDescription` columns for parity with every other level's own
+id/description columns, which `flattenIndustryTree`'s `makeRow` already produces.
+
 ### 7.2 Generate Industry (`commands.js`)
 
-Walks a chosen `industryData` tree, calling `createStream` once per Capability×Entity
-pair (a Capability with no Entity children falls back to its own name/description
-standing in for the entity). A `functionSection` parameter threads the Function's
-`nodeSection` onto the generated Part — but note the actual Function-level node for the
-default "Enterprise" stream template is produced via the *passive*-node code path
-(`template.passive`), not the main chain-building loop; wiring a new per-Function field
-into the wrong path is a real, previously-shipped bug (silently drops the field with no
-error) worth re-checking if the default template ever changes shape again.
+Walks `store.doc.industryTree` (no key/argument — there's only ever the one), calling
+`createStream` once per Capability×[ApplicationCapability×]Entity job (a level with no
+children falls back to its own name/description standing in for the next level down —
+`hasApplicationCapability`, driven by the TEMPLATE's `applicationCapabilityNameBegin`,
+picks which of the two walk shapes applies). A `functionSection` parameter threads the
+Function's `nodeSection` onto the generated Part — but note the actual Function-level
+node for the default "Enterprise"/"SFCCE" stream templates is produced via the
+*passive*-node code path (`template.passive`), not the main chain-building loop; wiring
+a new per-Function field into the wrong path is a real, previously-shipped bug
+(silently drops the field with no error) worth re-checking if the default template
+ever changes shape again.
 
 Performance: an explicit, opt-in `createBulkLookupCache(store)` — plain `Map`s keyed by
 the same composite keys (`label|type|model`, `xIds|model`, `partId|viewId`, etc.) the
@@ -397,12 +489,196 @@ nodes, the tab's selection is explicitly cleared (before, not after, the
 resize/redraw step, since that step can throw and must not gate whether the selection
 gets cleared).
 
-### 7.3 SFCE Catalog page
+### 7.3 Section reification: `BusinessOrganizationUnit` (aka "OrgUnit")
 
-`flattenIndustryTree(tree)` turns any tree (Load SFCE's or the built-in `general`'s)
-into flat rows — one per Function/Capability/Entity combination, id and description at
-every level, blank Section column for trees that don't have one — fed directly into
-the generic table-tab mechanism (§5.2). Read-only; no new rendering code.
+A new element type (`public/custom.json`'s `settings.elements`, "Business" group,
+`sources: 't'` — a TOGAF Content Metamodel concept, not core ArchiMate, unlike
+`BusinessActor`'s `"at"`), added after confirming ArchiMate itself has no "Organization
+Unit" notation element — the closest core concepts are `Business Actor` and `Grouping`,
+neither literally named this. Its icon is a taller oval with a horizontal divider line
+(distinct path from `Requirement`'s own plain, flatter oval, even though both are
+ellipses). Reported directly: *"add it as a new element type, with oval icon (similar
+to requirement but looks different), same group (and coloring, relations, etc.) as
+togaf business actor."*
+
+**Coloring** needed no code change at all — fill color is looked up purely by
+`elementGroups` group membership (`elementGroupFill`), never per-type, so placing
+`BusinessOrganizationUnit` in the same `"Business"` group as `BusinessActor`
+automatically matches its color.
+
+**Relations** needed real data, though: `store.mergedRelationshipPairs` unions
+`custom.json`'s own (sparse, ~35-entry, hand-authored) `relationshipPairs` array with
+`public/relationships.xml` (the official, ~3800-pair ArchiMate 3.2 concept matrix,
+XML-first then custom.json overlays/extends — see `data.js`'s `mergeRelationshipPairs`).
+Since `BusinessOrganizationUnit` isn't a real ArchiMate concept, it has zero entries in
+that XML file, and — critically — hand-fabricating entries directly into
+`relationships.xml` itself would misrepresent invented data as the official spec, so
+that file was left untouched. Instead, every `relationships.xml` entry naming
+`BusinessActor` (as source AND as target — 62 pairs each direction, 125 total including
+a self-pair) was mirrored into `custom.json`'s own `relationshipPairs` array with
+`BusinessOrganizationUnit` substituted for `BusinessActor`, preserving the exact same
+relation-letter strings (and therefore the same computed default, since
+`mergeRelationshipPairs` picks the first letter of the merged set as the default when
+none is given explicitly — matching `BusinessActor`'s own real, un-overridden default
+for every one of those same pairs). Generated mechanically (a one-off script, not
+hand-typed), not maintained as ongoing generated output.
+
+**Generation behavior** — the more involved half of the request: *"When we import or
+generate involving sections, these will now be business organization units... when
+loading SFCCE for example, now generate a orgunit part."* Section (`functionSection`,
+§7.2 above) previously only ever landed on `Part.section` as a plain string tag,
+propagated onto every part a stream generates but never itself represented as a node.
+`createStream` (`commands.js`) now additionally reifies it: for each unique section
+*value* (not per-function), find-or-create exactly one `BusinessOrganizationUnit` part
+with that value as its label (reused across every function sharing the same section,
+via the same `lookupCache.partsByKey`-style find-or-create convention used everywhere
+else in this function for capability/entity reuse — never duplicated), then
+Assignment-connect (`connectorType: 'c'`, relation key `'i'`) it to the function it's
+responsible for — the standard ArchiMate "active structure element assigned to a
+behavior element" pattern, matching how a `BusinessActor`/`BusinessRole` would
+ordinarily relate to a `BusinessFunction` it performs. If `placeInView`, the OrgUnit
+also gets its own ViewMember (positioned above the function, `store.
+findNonOverlappingPosition` or the view's own section placer) and the connector gets
+placed too — both idempotently: re-running `generateIndustry` over the same data
+reuses the existing OrgUnit/connector/ViewMembers rather than creating duplicates.
+
+The tricky part: `createStream`'s main `template.value[]` chain-building loop was the
+obvious place to capture "the" canonical `BusinessFunction` part/ViewMember for this
+wiring — but **every currently-shipped template** (`Enterprise`, `SFCCE`, `Enterprise
+Full`, `Test`) puts `BusinessFunction` only in `template.passive[]`
+(`{from:'BusinessFunction', to:'BusinessProcess'}`), never in `value[]` at all (this is
+the exact same shape that caused a real, previously-shipped bug for the `functionSection`
+field itself — see §7.2's own note). So the capture has to run in BOTH places: the main
+loop (dead code for every template that ships today, but correct and harmless if a
+future/custom template ever puts `BusinessFunction` in its main chain) and the passive
+loop (the one actually exercised). The OrgUnit-wiring block itself runs once, after
+BOTH loops finish, so it's fed whichever loop supplied the function part. A new
+`plainConnsByFromTo` map was added to `createBulkLookupCache` (mirroring the existing
+`connsByFromToModel`'s pattern exactly, just for `connectorType: 'c'` instead of `'s'`)
+so the Assignment-connector existence check stays O(1) per job — the same
+O(n²)-avoidance discipline §7.2 already documents for everything else in this loop.
+
+**A second, real bug caught once §7.5's boot data actually became section-tagged**:
+every shipped template's own `passive[]` array ALSO lists
+`{from:'BusinessOrganizationUnit', to:'BusinessFunction'}` (added earlier, purely so
+the 3D View's own "is this type in this Layer Order template" scan — which reads
+`value[]`+`passive[]` — keeps OrgUnit parts visible). Left unguarded, the GENERIC
+passive-node mechanism (the same loop, for every OTHER passive pair) would ALSO
+process this entry, creating a second, wrongly-labeled (by capability/entity name
+instead of the actual section value) OrgUnit per stream, Stream/Passive-connected
+instead of Assignment-connected — duplicating this dedicated block's own work. Never
+surfaced while the built-in dataset had no sections at all (§2's `general` predates
+§7.5); became a real, reproducible bug (3 correct OrgUnits ballooning to 21) the first
+time `generateIndustry` actually ran a section-tagged dataset through a template
+carrying this passive entry. Fixed with a one-line guard at the top of the passive
+loop: `if (ciEq(p.from, 'BusinessOrganizationUnit') || ciEq(p.to,
+'BusinessOrganizationUnit')) continue;` — this dedicated block stays the SOLE owner of
+OrgUnit creation.
+
+This only ever triggers through `generateIndustry` — Load SFCCE's own data, or the
+built-in default dataset (§7.5), which now also carries real section values; the plain
+manual Generate Stream dialog never passes a `functionSection` at all, so it's
+completely unaffected.
+
+### 7.4 SFCE Catalog page
+
+`flattenIndustryTree(tree)` turns any tree (Load SFCE's or the built-in default's)
+into flat rows — one per Function/Capability/[ApplicationCapability/]Entity
+combination, id and description at every level (blank ApplicationCapability columns
+for the rarer 3-level shape) — fed directly into the generic table-tab mechanism
+(§5.2). Read-only; no new rendering code. `App.openOrSwitchSfceCatalog()` (no
+industryKey — only one dataset — see §7.5) always refreshes `tab.tableRows`/
+`tableCols` from the CURRENT `store.doc.industryTree` on every open/switch-to, since
+Load SFCCE can replace the data out from under an already-open tab; `finishSFCCEImport`
+also refreshes it directly so a tab left open and visible during the import doesn't
+show stale rows until next switched away and back.
+
+### 7.5 Single industry dataset: boot auto-load, replace-with-warning, persistence
+
+Reported directly: *"Now load the capabilities-general-SFCCE.json file automatically,
+replacing the load and all logic for loading fce-generalnodes.json. Change logic so
+only one Industry will be available, if user does a 'Load SFCCE' it clears and
+replaces any existing industry SFCCE data (warn user first if data has already been
+created). Can now remove any dialogs or parameters for industry (SFCCE dataset), there
+will be only the one. It needs to be saved in the json file when user selects save,
+and loaded if they load later."*
+
+**Boot-load** (`js/data.js`): the built-in dataset now lives in
+`public/capabilities-general-SFCCE.json` — a raw, loosely-nested JSON array (function →
+capabilities[] → entities[], with `section` per function and `applicationCapability`
+per capability, both already baked into the file rather than derived at load time) —
+run through the EXACT SAME pipeline a real `File > Load SFCCE` upload uses
+(`flattenJsonRecords` → `buildRowsFromRecords` → `buildIndustryTree`, via a fixed
+`GENERAL_SFCCE_MAPPING` matching this file's own dot-path field names). No id fields
+are mapped, so every node's id auto-derives from its own full ancestor chain (same as
+any Load SFCCE import that leaves Id unmapped) — this is a real, deliberate difference
+from the old `fce-generalnodes.json`, whose ids were hand-curated to be SHARED across
+capabilities that happened to reuse the same entity (e.g. "Production Schedule" under
+both "Manufacturing Operations" and "Production Planning" used to be ONE Part; now
+they're two, since their auto-derived ids differ by ancestor path). `data.js` returns
+`industryTree` (not a raw `fce` blob); `Store`'s constructor takes it directly as its
+second positional param and seeds `doc.industryTree`/`doc.industryTemplateName:
+'SFCCE'` with it. `GENERAL_SFCCE_MAPPING` DOES map `sectionIdField`/`sectionOrderField`
+(`'sectionId'`/`'order'`, matching the file's own per-function fields, themselves
+matching `custom.json`'s org-viewType `sections[]`) — this is what gives every
+generated `BusinessOrganizationUnit` part a real `xIds` (previously blank, since only
+mof/cof/ssf's functions carried an id at all) and lets `sfce.js`'s new
+`nodeSectionOrder` (parallel to `nodeSectionId`/`nodeSectionDescription` — a plain
+read-through value, not an id, so no cascade/`GENERATE_UNIQUE_ID` semantics) surface a
+real display/generation order per section, both in the tree and as a new
+`sectionOrder` column in the SFCE Catalog (§7.4).
+
+**Single dataset, not a keyed map**: `store.industryData: {[key]: tree}` /
+`store.industryTemplates: {[key]: name}` (memory-only, never persisted) are gone,
+replaced by `store.doc.industryTree` (array) / `store.doc.industryTemplateName`
+(string) — genuinely part of the persisted document now (see Persistence below).
+Every call site that used to thread an `industryKey` string through
+(`generateIndustry`, `App.runGenerateIndustryWithProgress`,
+`App.openOrSwitchSfceCatalog`) dropped that parameter entirely rather than just
+hardcoding a constant — there is structurally nowhere left for a second dataset to
+live. `App.promptGenerateIndustry`'s industry `<select>` and
+`App.promptSfceCatalog`'s multi-industry picker modal are both gone for the same
+reason (only ever one option, so no picker was ever meaningful); each now just
+toasts "No industry data loaded" if `doc.industryTree` is empty, then proceeds
+directly. `promptSFCCEMapping`'s "Industry Name" text input and its duplicate-name
+guard are gone too — there's no name to collide with any more.
+
+**Replace with warning**: `promptSFCCEMapping`'s submit handler now always REPLACES
+`doc.industryTree` (`finishSFCCEImport` sets it directly, doesn't merge/append), and
+warns first — `App.confirmModal('...clear and replace the current industry data...')`
+— whenever `doc.industryTree` is already non-empty. Since the built-in default is
+always loaded at boot, this means the warning fires on effectively every real Load
+SFCCE a person ever runs, which is the deliberately conservative reading of "if data
+has already been created": there's no way to distinguish "just the untouched boot
+default" from "something the person actually cares about" without more state than the
+request asked for, so both count. Cancelling leaves the mapping dialog open
+(un-removed) rather than discarding the person's field-mapping choices along with the
+warning.
+
+**Persistence**: `doc.industryTree`/`doc.industryTemplateName` are set inside the
+`Store` constructor's `this.doc = {...}` object (previously `industryData`/
+`industryTemplates` were set as separate `this.*` fields OUTSIDE `this.doc`,
+specifically so they'd stay memory-only) — since `toJSON()`/`loadFromJSON()` both
+operate on `this.doc` as a whole, this alone is what makes a Load SFCCE import survive
+a Save/Load JSON round-trip. `migrateDoc` defaults a save file with neither field
+(anything predating this change) to `industryTree: []`/`industryTemplateName:
+'SFCCE'` — no prior users, so no attempt to reconstruct a lost industry dataset from an
+old file; the person just re-runs Load SFCCE (or accepts an empty one) after loading
+it.
+
+**Types-filter connectors bug, fixed the same day**: unrelated to the above, but
+reported alongside it — *"connectors not showing when types filtered; on a view when
+using Filter Types, connectors should continue to be displayed unless unselected in
+view properties."* `renderCanvasPage` (`canvas.js`) forced `connVms = []` whenever
+`tab.connectorLevels` was 0 (the default) and any Stream/Type/Section filter was
+active, even for a connector directly between two parts that both individually passed
+the filter — contradicting `instructions.html`'s own documented meaning of "Connector
+levels" (controls how many extra HOPS OF NODES to pull in beyond direct matches, not
+whether an already-matching connector draws). Fixed by always passing the full
+`allConnVmsInView` through to `redrawEdges`, which already does the correct
+per-connector check on its own (stream filter, `chkShowConnectorType`/
+`chkShowStreamType`/`chkShowDataType` view properties, both-endpoints-present) —
+`connectorLevels` now purely controls the BFS node-expansion radius.
 
 ## 7a. The Data Modeling subsystem (crow's-foot ERD)
 
@@ -959,6 +1235,20 @@ so a future session doesn't have to re-derive it from scratch):
     THEY create — but never touch it when reusing an existing part (a capability shared
     across streams from two different sections keeps whichever section it was first
     created with, rather than flipping to whichever stream runs last).
+  - **Connector levels (0, the default) was hiding connectors on the 2D canvas whenever
+    a Stream/Type/Section filter was active — reported directly: "connectors not showing
+    when types filtered; on a view when using Filter Types, connectors should continue
+    to be displayed unless unselected in view properties."** `renderCanvasPage`
+    (`canvas.js`) forced `connVms = []` whenever `tab.connectorLevels === 0` and any
+    filter was active, even for a connector directly between two parts that BOTH
+    individually passed the filter — contradicting `instructions.html`'s own documented
+    meaning of "Connector levels" (how many extra hops of NODES to pull in beyond direct
+    matches, not whether an already-matching connector draws). Fixed by always passing
+    the full `allConnVmsInView` through to `redrawEdges`, which already does the correct
+    per-connector check on its own (stream filter, `chkShowConnectorType`/
+    `chkShowStreamType`/`chkShowDataType` view properties, and both-endpoints-present) —
+    `connectorLevels` now purely controls the BFS node-expansion radius
+    (`expandVisiblePartVmIdsByLevel`), never connector visibility directly.
 
 - **Stage 6 series (done)** — six further real-usage fixes; see `view3d.js`'s own
   inline Stage 5.2/6/6.1/6.2/6.3/6.4/6.5 header comments for full rationale/tradeoffs

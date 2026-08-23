@@ -7,30 +7,44 @@
 // with one extra level — see buildRowsFromRecords' own comment for how the extra level
 // is made optional via cascade rather than requiring two different code paths.
 //
-// Output shape (stored into store.industryData[industryName]) is a 4-level tree —
-// BusinessFunction (carrying nodeSection) -> BusinessCapability -> ApplicationCapability
-// -> DataDataEntity:
+// Output shape (stored into store.doc.industryTree — only one industry dataset ever
+// exists at a time; Load SFCCE replaces it) is a 4-level tree —
+// BusinessFunction (carrying nodeSection, and optionally nodeSectionId/
+// nodeSectionDescription/nodeSectionOrder — Section has no tree node of its own, so
+// its id/description/order ride along on whichever Function(s) fall under it) ->
+// BusinessCapability -> ApplicationCapability -> DataDataEntity:
 //   [{ nodeElementType:'BusinessFunction', nodeName, nodeId, nodeDescription, nodeSection,
+//      nodeSectionId, nodeSectionDescription, nodeSectionOrder,
 //      nodeChildren:[{ nodeElementType:'BusinessCapability', nodeName, nodeId, nodeDescription,
 //        nodeChildren:[{ nodeElementType:'ApplicationCapability', nodeName, nodeId, nodeDescription,
 //          nodeChildren:[{ nodeElementType:'DataDataEntity', nodeName, nodeId, nodeDescription }] }] }] }]
+// Every nodeId is auto-derived (a chained slugify of section/function/capability/.../
+// name) UNLESS the wizard's mapping supplies an explicit id field for that level, in
+// which case the mapped value is used as-is — this is what lets Load SFCCE-imported
+// data get real, stable identity (and therefore xIds-based find-or-reuse in
+// generateIndustry/createStream, commands.js) instead of a derived-from-name one.
 // generateIndustry (commands.js) walks this via the 'SFCCE' stream template
-// (custom.json) — registered per industryData key in store.industryTemplates (state.js)
-// so the built-in 'general' dataset (a genuine 3-level tree, unrelated to this wizard)
-// keeps using 'Enterprise' and is completely unaffected by anything in this file.
-// generateIndustry itself isn't changed by this file to place nodes per-section — that's
-// a separate placement-algorithm concern. This produces and stores the section-tagged
-// data; it doesn't touch the canvas (no viewMembers, no new view).
+// (custom.json) — registered in store.doc.industryTemplateName (state.js). The built-in
+// default dataset (public/capabilities-general-SFCCE.json, boot-loaded through this
+// exact same pipeline by data.js) is ALSO a genuine 4-level tree and also registers
+// 'SFCCE' — there is no separate 3-level "general" dataset anymore. generateIndustry
+// itself isn't changed by this file to place nodes per-section — that's a separate
+// placement-algorithm concern. This produces and stores the section-tagged data; it
+// doesn't touch the canvas (no viewMembers, no new view).
 
 /**
  * Flattens an industry tree into flat rows for a catalog-style table: one row per
  * Function/Capability/Application Capability/Entity combination, with id and description at
  * every level. Handles TWO tree shapes transparently, detected structurally per
- * Capability (not assumed globally, so a tree could in principle mix both — though in
- * practice only the built-in 'general' dataset is ever the 3-level shape):
- *   - 4-level (from this file's own buildIndustryTree): a Capability's children are
- *     ApplicationCapability nodes, each with its own Entity children.
- *   - 3-level (fce-generalnodes.json, predating this file entirely): a Capability's
+ * Capability (not assumed globally, so a tree could in principle mix both) — every tree
+ * buildIndustryTree itself produces (including the built-in default dataset, now
+ * boot-loaded through this same pipeline) is always the 4-level shape below, but a
+ * Load SFCCE upload that leaves Application Capability entirely unmapped still produces
+ * the simpler 3-level shape (see buildRowsFromRecords' own cascade comment), so this
+ * stays tolerant of both rather than assuming every tree is 4-level:
+ *   - 4-level (the common case): a Capability's children are ApplicationCapability
+ *     nodes, each with its own Entity children.
+ *   - 3-level (an Application-Capability-less Load SFCCE import): a Capability's
  *     children ARE the Entity nodes directly, no Application Capability layer at all — those
  *     rows come back with the Application Capability columns blank, not fabricated.
  * A Capability/Application Capability with no further children still produces one row, with
@@ -69,7 +83,7 @@ function ciEqLocal(a, b) {
 function makeRow(func, cap, appCap, ent) {
   return {
     id: `${func.nodeId || ''}|${cap?.nodeId || ''}|${appCap?.nodeId || ''}|${ent?.nodeId || ''}`,
-    section: func.nodeSection || '',
+    section: func.nodeSection || '', sectionId: func.nodeSectionId || '', sectionDescription: func.nodeSectionDescription || '', sectionOrder: func.nodeSectionOrder || '',
     functionId: func.nodeId || '', functionName: func.nodeName || '', functionDescription: func.nodeDescription || '',
     capabilityId: cap?.nodeId || '', capabilityName: cap?.nodeName || '', capabilityDescription: cap?.nodeDescription || '',
     applicationCapabilityId: appCap?.nodeId || '', applicationCapabilityName: appCap?.nodeName || '', applicationCapabilityDescription: appCap?.nodeDescription || '',
@@ -192,6 +206,24 @@ function readScalar(record, field, fallback) {
   return String(v);
 }
 
+/** Sentinel value for the wizard's Id mapping selects (main.js's promptSFCCEMapping) —
+ * picking it means "don't read an id from the file at all, mint a fresh one," as
+ * opposed to leaving the select blank (which means "no id mapped, fall back to
+ * buildIndustryTree's own auto-derived slugified-name chain" — a DETERMINISTIC id,
+ * not a random one). Exported so main.js can compare a select's value against this
+ * exact string when building the mapping object; not itself a real field name any
+ * uploaded file could plausibly contain. */
+export const GENERATE_UNIQUE_ID = '__generate_unique__';
+
+/** Resolves one row's mapped id value: the `GENERATE_UNIQUE_ID` sentinel mints a fresh
+ * random id (via the real global crypto.randomUUID(), same mechanism newId() in
+ * state.js itself uses) instead of reading anything from the record; any other field
+ * value reads through readScalar exactly like every other mapped field. */
+function resolveMappedId(record, field) {
+  if (field === GENERATE_UNIQUE_ID) return crypto.randomUUID();
+  return readScalar(record, field, null);
+}
+
 /**
  * Turns raw records into (section, function, capability, applicationCapability, entity,
  * description, applicationCapabilityDescription, entityDescription) rows — one row per record
@@ -210,6 +242,28 @@ function readScalar(record, field, fallback) {
  * rather than a copy of its parent's, since duplicating description TEXT (unlike a
  * name, which is what makes the level exist and connect at all) has no benefit.
  *
+ * Section/Function Description, and an explicit Id for every level (Section/Function/
+ * Capability/Application Capability/Entity), are all OPTIONAL in `mapping` too, same
+ * "absent/blank -> null" convention as the description fields above — an explicit id
+ * gives buildIndustryTree a STABLE identity to use for that node (surfacing later as
+ * xIds-based find-or-reuse in generateIndustry/createStream, commands.js) instead of
+ * its own auto-derived slugified-name chain. IDs deliberately do NOT cascade the way
+ * names do — inheriting a DIFFERENT level's id would wrongly conflate two distinct
+ * identities, so a level with no mapped/blank id field just falls back to
+ * buildIndustryTree's existing auto-derivation, same as if this feature didn't exist.
+ * Section itself has no dedicated tree node (it's a plain string tag on each Function
+ * node, see the module comment above) — its id/description/order are carried on the
+ * row and attached to whichever Function node(s) end up under that section instead
+ * (see buildIndustryTree's nodeSectionId/nodeSectionDescription/nodeSectionOrder).
+ * `sectionOrderField` (also OPTIONAL) is a plain read-through value like
+ * sectionDescriptionField — not an id, so no cascade/GENERATE_UNIQUE_ID semantics.
+ *
+ * An id field's mapped value can also be the `GENERATE_UNIQUE_ID` sentinel (below) —
+ * "mint a genuinely fresh, random id" rather than "read this field" or "leave it
+ * unmapped" — resolved once per resulting ROW (not once per input record), since a
+ * Section field that splits one record into several rows produces that many
+ * genuinely distinct nodes once sections diverge.
+ *
  * Every row also carries originalFunctionName/originalCapabilityName/
  * originalApplicationCapabilityName/originalSection — frozen at build time, never touched by
  * resolveSharedFunctions/resolveSharedCapabilities/resolveSharedApplicationCapabilities below —
@@ -217,17 +271,25 @@ function readScalar(record, field, fallback) {
  */
 export function buildRowsFromRecords(records, mapping) {
   const {
-    sectionField, functionField,
-    capabilityField, capabilityDescriptionField,
-    applicationCapabilityField, applicationCapabilityDescriptionField,
-    entityField, entityDescriptionField,
+    sectionField, sectionDescriptionField, sectionIdField, sectionOrderField,
+    functionField, functionDescriptionField, functionIdField,
+    capabilityField, capabilityDescriptionField, capabilityIdField,
+    applicationCapabilityField, applicationCapabilityDescriptionField, applicationCapabilityIdField,
+    entityField, entityDescriptionField, entityIdField,
   } = mapping;
   const rows = [];
   let missingFunction = 0, missingCapability = 0, missingApplicationCapability = 0, missingEntity = 0, missingDescription = 0;
   for (const record of records) {
     const sections = readSectionValues(record, sectionField);
+    const sectionDescription = readScalar(record, sectionDescriptionField, '');
+    // Not an id (no cascade/GENERATE_UNIQUE_ID semantics), just a plain read-through
+    // value like sectionDescription -- a section's display/generation order, read once
+    // per record (not per resulting row) since it describes the section as a whole,
+    // same as sectionDescription.
+    const sectionOrder = readScalar(record, sectionOrderField, '');
     const functionName = readScalar(record, functionField, '(unspecified)');
     if (functionName === '(unspecified)') missingFunction += 1;
+    const functionDescription = readScalar(record, functionDescriptionField, '');
 
     const rawCapability = readScalar(record, capabilityField, null);
     const capabilityName = rawCapability ?? functionName; // cascade: capability <- function
@@ -245,15 +307,25 @@ export function buildRowsFromRecords(records, mapping) {
     if (rawEntity == null) missingEntity += 1;
     const entityDescription = readScalar(record, entityDescriptionField, '');
 
+    // Ids are resolved per RESULTING ROW, not once per record — a record whose Section
+    // field splits into several rows (see readSectionValues above) genuinely produces
+    // several distinct nodes once sections differ, so "(generate unique)" must hand
+    // each of those its own fresh id rather than one shared across all of them. A real
+    // mapped field, by contrast, reads identically regardless of loop position.
     for (const section of sections) {
+      const sectionId = resolveMappedId(record, sectionIdField);
+      const functionId = resolveMappedId(record, functionIdField);
+      const capabilityId = resolveMappedId(record, capabilityIdField);
+      const applicationCapabilityId = resolveMappedId(record, applicationCapabilityIdField);
+      const entityId = resolveMappedId(record, entityIdField);
       rows.push({
-        section, originalSection: section,
-        functionName, originalFunctionName: functionName,
+        section, originalSection: section, sectionDescription, sectionId, sectionOrder,
+        functionName, originalFunctionName: functionName, functionDescription, functionId,
         capabilityName, originalCapabilityName: capabilityName,
-        description,
+        description, capabilityId,
         applicationCapabilityName, originalApplicationCapabilityName: applicationCapabilityName,
-        applicationCapabilityDescription,
-        entityName, entityDescription,
+        applicationCapabilityDescription, applicationCapabilityId,
+        entityName, entityDescription, entityId,
       });
     }
   }
@@ -396,13 +468,21 @@ export function buildIndustryTree(rows) {
       funcNode = {
         nodeElementType: 'BusinessFunction',
         nodeName: displayName,
-        nodeId: `${slugify(row.section)}-${slugify(displayName)}`,
-        nodeDescription: '',
+        nodeId: row.functionId || `${slugify(row.section)}-${slugify(displayName)}`,
+        nodeDescription: row.functionDescription || '',
         nodeSection: row.section,
+        nodeSectionId: row.sectionId || null,
+        nodeSectionDescription: row.sectionDescription || '',
+        nodeSectionOrder: row.sectionOrder || null,
         nodeChildren: [],
       };
       functionsByKey.set(funcKey, funcNode);
       functionCount += 1;
+    } else {
+      if (!funcNode.nodeDescription && row.functionDescription) funcNode.nodeDescription = row.functionDescription;
+      if (!funcNode.nodeSectionId && row.sectionId) funcNode.nodeSectionId = row.sectionId;
+      if (!funcNode.nodeSectionDescription && row.sectionDescription) funcNode.nodeSectionDescription = row.sectionDescription;
+      if (!funcNode.nodeSectionOrder && row.sectionOrder) funcNode.nodeSectionOrder = row.sectionOrder;
     }
 
     const capKey = `${funcKey}|${row.capabilityName}`;
@@ -411,7 +491,7 @@ export function buildIndustryTree(rows) {
       capNode = {
         nodeElementType: 'BusinessCapability',
         nodeName: row.capabilityName,
-        nodeId: `${funcNode.nodeId}-${slugify(row.capabilityName)}`,
+        nodeId: row.capabilityId || `${funcNode.nodeId}-${slugify(row.capabilityName)}`,
         nodeDescription: row.description || '',
         nodeChildren: [],
       };
@@ -428,7 +508,7 @@ export function buildIndustryTree(rows) {
       appCapNode = {
         nodeElementType: 'ApplicationCapability',
         nodeName: row.applicationCapabilityName,
-        nodeId: `${capNode.nodeId}-${slugify(row.applicationCapabilityName)}`,
+        nodeId: row.applicationCapabilityId || `${capNode.nodeId}-${slugify(row.applicationCapabilityName)}`,
         nodeDescription: row.applicationCapabilityDescription || '',
         nodeChildren: [],
       };
@@ -446,7 +526,7 @@ export function buildIndustryTree(rows) {
       appCapNode.nodeChildren.push({
         nodeElementType: 'DataDataEntity',
         nodeName: row.entityName,
-        nodeId: `${appCapNode.nodeId}-${slugify(row.entityName)}`,
+        nodeId: row.entityId || `${appCapNode.nodeId}-${slugify(row.entityName)}`,
         nodeDescription: row.entityDescription || '',
       });
       entityCount += 1;

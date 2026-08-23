@@ -8,7 +8,7 @@ import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, leve
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection, computeSectionLayout, getAllowedTypesForView } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
-import { flattenJsonRecords, buildRowsFromRecords, detectSharedFunctions, resolveSharedFunctions, detectSharedCapabilities, resolveSharedCapabilities, detectSharedApplicationCapabilities, resolveSharedApplicationCapabilities, buildIndustryTree, flattenIndustryTree } from './sfce.js';
+import { flattenJsonRecords, buildRowsFromRecords, detectSharedFunctions, resolveSharedFunctions, detectSharedCapabilities, resolveSharedCapabilities, detectSharedApplicationCapabilities, resolveSharedApplicationCapabilities, buildIndustryTree, flattenIndustryTree, GENERATE_UNIQUE_ID } from './sfce.js';
 
 /** The three independently-resolvable "spans more than one Section" levels Load SFCCE's
  * wizard walks through in order — see sfce.js's detectSharedLevel for why each is safe
@@ -628,7 +628,7 @@ class App {
         ${modelName ? '' : ' <span style="color:#c0392b;">(no simulation model selected — model will be null)</span>'},
         <code>findParts({type, model})</code>, <code>log(...)</code> (prints below),
         <code>messageLog(...)</code> (writes to the persistent Message Log),
-        <code>generateIndustry(app, industryKey, onProgress, placeInView)</code>,
+        <code>generateIndustry(app, onProgress, placeInView)</code>,
         <code>populateFromTemplate(app, tab, templateName)</code>,
         <code>remap(app, tab, options)</code> (options: <code>sortKeys, templateName, pattern
         ('default'|'none'|'layered'|'force'), limitColumnsToView, visiblePartVmIds, forcePreferRight,
@@ -1450,14 +1450,18 @@ class App {
   }
 
   /** Bespoke (not the generic promptModal) so it can carry the "Place on current view"
-   * checkbox alongside the industry picker. To review a dataset before generating, use
-   * Catalogs > SFCCE first, separately — this dialog is a modal overlay (like every
-   * other modal in the app; see CLAUDE.md's "no click-outside-to-close" convention),
-   * so nothing behind it is reachable while it's open, which ruled out a "preview"
-   * button that would open the catalog in another tab the person still couldn't see. */
+   * checkbox. Only one industry dataset ever exists (see state.js's doc.industryTree
+   * comment), so there's no picker to show — just confirms there IS data loaded at all.
+   * To review the dataset before generating, use Catalogs > SFCCE first, separately —
+   * this dialog is a modal overlay (like every other modal in the app; see CLAUDE.md's
+   * "no click-outside-to-close" convention), so nothing behind it is reachable while
+   * it's open, which ruled out a "preview" button that would open the catalog in
+   * another tab the person still couldn't see. */
   promptGenerateIndustry() {
-    const industries = Object.keys(this.store.industryData || {});
-    if (industries.length === 0) { this.toast('No industry data loaded.', true); return; }
+    if (!this.store.doc.industryTree || this.store.doc.industryTree.length === 0) {
+      this.toast('No industry data loaded — use File > Load SFCCE.', true);
+      return;
+    }
 
     const root = document.getElementById('modal-root');
     const overlay = document.createElement('div');
@@ -1465,7 +1469,6 @@ class App {
     const box = document.createElement('div');
     box.className = 'modal-box';
     box.innerHTML = `<h3>Generate Industry</h3>
-      <div class="prop-row"><label>Industry</label><select id="gi-industry">${industries.map((i) => `<option value="${escapeHtml(i)}">${escapeHtml(i)}</option>`).join('')}</select></div>
       <div class="prop-row checkbox"><input type="checkbox" id="gi-place-view" /><label for="gi-place-view">Place on current view</label></div>
       <div style="font-size:11px;color:var(--text-muted);margin:-4px 0 12px 0;">Unchecked: creates the parts/connectors only — much faster for a large dataset, but nothing is placed on any view. Review via Catalogs &gt; Parts, then Add Existing to bring chosen ones into a view.</div>
       <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Generate</button></div>`;
@@ -1474,10 +1477,9 @@ class App {
 
     box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
     box.querySelector('.submit').addEventListener('click', () => {
-      const industry = box.querySelector('#gi-industry').value;
       const placeInView = box.querySelector('#gi-place-view').checked;
       overlay.remove();
-      this.runGenerateIndustryWithProgress(industry, placeInView);
+      this.runGenerateIndustryWithProgress(placeInView);
     });
   }
 
@@ -1485,18 +1487,18 @@ class App {
    * imported dataset (see Load SFCE) — generateIndustry is async and yields
    * periodically specifically so this can show real progress instead of the tab
    * appearing to freeze for however long the whole operation takes. */
-  async runGenerateIndustryWithProgress(industryKey, placeInView = true) {
+  async runGenerateIndustryWithProgress(placeInView = true) {
     const root = document.getElementById('modal-root');
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const box = document.createElement('div');
     box.className = 'modal-box';
-    box.innerHTML = `<h3>Generating "${escapeHtml(industryKey)}"…</h3><p id="gi-progress-text">Starting…</p>`;
+    box.innerHTML = `<h3>Generating…</h3><p id="gi-progress-text">Starting…</p>`;
     overlay.appendChild(box);
     root.appendChild(overlay);
     const progressText = box.querySelector('#gi-progress-text');
     try {
-      await generateIndustry(this, industryKey, (done, total) => {
+      await generateIndustry(this, (done, total) => {
         progressText.textContent = `${done} / ${total} capabilities processed…`;
       }, placeInView);
     } finally {
@@ -1504,43 +1506,39 @@ class App {
     }
   }
 
-  /** Catalogs > SFCCE: a read-only, flattened table of one industryData
-   * collection's Section/Function/Capability/Entity hierarchy — works for both a
-   * Load SFCE import and the built-in "general" data (fce-generalnodes.json), since
-   * flattenIndustryTree supports both shapes. Read-only for now; the request notes
-   * this'll be expanded to a showFields-driven editor at a later step, so this
-   * deliberately doesn't try to anticipate that — just a real, working table today. */
+  /** Catalogs > SFCCE: a read-only, flattened table of the single loaded industry
+   * dataset's Section/Function/Capability/Application Capability/Entity hierarchy (the
+   * built-in default, or whatever File > Load SFCCE last replaced it with). Read-only
+   * for now; the request notes this'll be expanded to a showFields-driven editor at a
+   * later step, so this deliberately doesn't try to anticipate that — just a real,
+   * working table today. */
   promptSfceCatalog() {
-    const industries = Object.keys(this.store.industryData || {});
-    if (industries.length === 0) { this.toast('No industry data loaded.', true); return; }
-    if (industries.length === 1) { this.openOrSwitchSfceCatalog(industries[0]); return; }
-    this.promptModal({
-      title: 'SFCCE Catalog',
-      fields: [
-        { key: 'industry', label: 'Industry', type: 'select', options: industries, value: industries[0] },
-      ],
-      onSubmit: (vals) => this.openOrSwitchSfceCatalog(vals.industry),
-    });
+    if (!this.store.doc.industryTree || this.store.doc.industryTree.length === 0) {
+      this.toast('No industry data loaded — use File > Load SFCCE.', true);
+      return;
+    }
+    this.openOrSwitchSfceCatalog();
   }
 
-  /** Find-or-create pattern matching openOrSwitchCatalog, keyed by industryKey so a
-   * separate tab opens per dataset rather than one shared, overwritten tab. */
-  openOrSwitchSfceCatalog(industryKey) {
-    let tab = this.store.tabs.find((t) => t.type === 'table' && t.sfceIndustryKey === industryKey);
+  /** Find-or-create pattern matching openOrSwitchCatalog — only one SFCCE Catalog tab
+   * ever exists (only one industry dataset does). Always refreshes tableRows/tableCols
+   * from the CURRENT store.doc.industryTree, whether the tab is newly created, reused,
+   * or restored from closedTabs, since Load SFCCE can replace the underlying data out
+   * from under an already-open tab. */
+  openOrSwitchSfceCatalog() {
+    let tab = this.store.tabs.find((t) => t.type === 'table' && t.sfceCatalog);
     if (!tab) {
-      const closedIdx = this.store.closedTabs.findIndex((t) => t.type === 'table' && t.sfceIndustryKey === industryKey);
+      const closedIdx = this.store.closedTabs.findIndex((t) => t.type === 'table' && t.sfceCatalog);
       if (closedIdx !== -1) {
         tab = this.store.closedTabs.splice(closedIdx, 1)[0];
         this.store.tabs.push(tab);
       } else {
-        const tree = this.store.industryData?.[industryKey] || [];
-        const rows = flattenIndustryTree(tree);
-        tab = this.store.createTab({ type: 'table', title: `SFCCE: ${industryKey}` });
-        tab.sfceIndustryKey = industryKey;
-        tab.tableRows = rows;
-        tab.tableCols = ['section', 'functionId', 'functionName', 'functionDescription', 'capabilityId', 'capabilityName', 'capabilityDescription', 'applicationCapabilityId', 'applicationCapabilityName', 'applicationCapabilityDescription', 'entityId', 'entityName', 'entityDescription'];
+        tab = this.store.createTab({ type: 'table', title: 'SFCCE Catalog' });
+        tab.sfceCatalog = true;
       }
     }
+    tab.tableRows = flattenIndustryTree(this.store.doc.industryTree || []);
+    tab.tableCols = ['section', 'sectionId', 'sectionDescription', 'sectionOrder', 'functionId', 'functionName', 'functionDescription', 'capabilityId', 'capabilityName', 'capabilityDescription', 'applicationCapabilityId', 'applicationCapabilityName', 'applicationCapabilityDescription', 'entityId', 'entityName', 'entityDescription'];
     this.switchToTab(tab.id);
     return tab;
   }
@@ -3102,9 +3100,12 @@ class App {
     });
   }
 
-  /** File > Load SFCE: imports an arbitrary JSON file as an alternate industry
-   * collection (Section/Function/Capability/Entity) for Advanced > Generate Industry.
-   * Doesn't touch the canvas — no viewMembers, no new view; only store.industryData. */
+  /** File > Load SFCE: imports an arbitrary JSON file as THE industry collection
+   * (Section/Function/Capability/Application Capability/Entity) for Advanced > Generate
+   * Industry — CLEARS and REPLACES whatever's currently loaded (the built-in default or
+   * a previous Load SFCCE import; only one ever exists at a time), warning first if
+   * something is already loaded (see promptSFCCEMapping's submit handler). Doesn't
+   * touch the canvas — no viewMembers, no new view; only store.doc.industryTree. */
   promptLoadSFCCE() {
     const root = document.getElementById('modal-root');
     const overlay = document.createElement('div');
@@ -3138,23 +3139,24 @@ class App {
         return;
       }
       overlay.remove();
-      this.promptSFCCEMapping(file.name, records, fields);
+      this.promptSFCCEMapping(records, fields);
     });
   }
 
-  /** Second step: suggested industry name + field selectors, built from what
-   * flattenJsonRecords found in the file. Capability/Application Capability/Entity (and their
-   * description fields) are all optional — "(none)" means that level cascades from the
-   * one above it (see buildRowsFromRecords' own comment) rather than being dropped, the
-   * way Load SFCE's original Entity field alone used to work. */
-  promptSFCCEMapping(fileName, records, fields) {
+  /** Second step: field selectors, built from what flattenJsonRecords found in the
+   * file. Capability/Application Capability/Entity (and their description fields) are
+   * all optional — "(none)" means that level cascades from the one above it (see
+   * buildRowsFromRecords' own comment) rather than being dropped, the way Load SFCE's
+   * original Entity field alone used to work. No Industry Name field — there's only
+   * ever one industry dataset (see state.js's doc.industryTree comment), so this always
+   * replaces it rather than adding a new named one. */
+  promptSFCCEMapping(records, fields) {
     const root = document.getElementById('modal-root');
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const box = document.createElement('div');
     box.className = 'modal-box modal-box-textedit';
 
-    const suggestedName = fileName.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || 'imported';
     // Lightweight keyword-based suggestion per field — the person can always override
     // via the dropdown; this just saves picking through the list for the common case.
     // Tries each keyword in priority order across ALL fields before falling back to the
@@ -3183,55 +3185,130 @@ class App {
       });
     };
     const suggestedSection = suggest('section', 'ministr', 'department', 'group');
+    const suggestedSectionDescription = suggest('sectiondescription', 'section description', 'section_description', 'section desc');
+    const suggestedSectionId = suggest('sectionid', 'section id', 'section_id');
     const suggestedFunction = suggest('function', 'domain', 'category');
+    const suggestedFunctionDescription = suggest('functiondescription', 'domaindescription', 'function description', 'function_description', 'function desc', 'domain description');
+    const suggestedFunctionId = suggest('functionid', 'domainid', 'function id', 'function_id', 'domain id');
     const capabilityKeywords = ['capability', 'name', 'title'];
     const suggestedCapability = suggestByDepth(capabilityKeywords, false);
     const suggestedCapabilityDescription = suggestByDepth(['description', 'desc', 'summary'], false);
+    // A bare 'id' keyword is too generic here — it'd happily match an unrelated shallow
+    // field like "domainId"/"sectionId" ahead of the real "capabilities.capId" (confirmed:
+    // a real false-positive found via direct testing). Scope the candidate set to fields
+    // whose OWN dotted path already signals "this belongs to the capability group" (an
+    // "capab" substring, matching how a real capabilities/businessCapabilities nesting
+    // key would appear in the dot-path) before ranking by depth, same shallow-vs-deepest
+    // split the name/description suggestions already use to tell Capability from
+    // Application Capability.
+    const isIdLikeField = (f) => {
+      const last = f.split('.').pop();
+      return /Id$/.test(last) || /^id$/i.test(last) || /_id$/i.test(last);
+    };
+    const suggestCapabilityIdByDepth = (deepest) => {
+      const matches = fields.filter((f) => isIdLikeField(f) && f.toLowerCase().includes('capab'));
+      if (matches.length === 0) return '';
+      return matches.reduce((best, f) => {
+        const better = deepest ? f.split('.').length > best.split('.').length : f.split('.').length < best.split('.').length;
+        return better ? f : best;
+      });
+    };
+    const suggestedCapabilityId = suggestCapabilityIdByDepth(false);
     const suggestedApplicationCapability = suggestByDepth(capabilityKeywords, true);
     const suggestedApplicationCapabilityDescription = suggestByDepth(['description', 'desc', 'summary'], true);
+    const suggestedApplicationCapabilityId = suggestCapabilityIdByDepth(true);
     const suggestedEntity = suggest('entity', 'object', 'data');
     const suggestedEntityDescription = suggest('entity description', 'entity_description');
+    const suggestedEntityId = suggest('entity id', 'entity_id');
 
     const fieldOptions = (selected) => fields.map((f) => `<option value="${escapeHtml(f)}" ${f === selected ? 'selected' : ''}>${escapeHtml(f)}</option>`).join('');
-    const fieldOptionsWithNone = (selected) => `<option value="">(none — inherit from the level above)</option>` + fieldOptions(selected);
+    // Three distinct "nothing mapped" conventions, each worded for what actually
+    // happens — conflating them (the original single fieldOptionsWithNone did, for
+    // every optional field alike) is misleading: only Capability/Application
+    // Capability/Entity NAME genuinely inherit from the level above when left
+    // unmapped; a Description just stays blank (never inherited); an Id falls back to
+    // an auto-DERIVED (deterministic, name-based) one, not inherited from anywhere.
+    const fieldOptionsCascade = (selected) => `<option value="">(none — inherit from the level above)</option>` + fieldOptions(selected);
+    const fieldOptionsDescription = (selected) => `<option value="">(none)</option>` + fieldOptions(selected);
+    const fieldOptionsId = (selected) => `<option value="">(none — auto-generate from name)</option><option value="${GENERATE_UNIQUE_ID}" ${selected === GENERATE_UNIQUE_ID ? 'selected' : ''}>(generate unique)</option>` + fieldOptions(selected);
 
     box.innerHTML = `<h3>Load SFCCE — ${records.length} record${records.length === 1 ? '' : 's'} found</h3>
-      <div class="prop-row"><label>Industry Name</label><input type="text" id="sfcce-industry-name" value="${escapeHtml(suggestedName)}" /></div>
-      <div class="prop-row"><label>Section field</label><select id="sfcce-field-section">${fieldOptions(suggestedSection)}</select></div>
-      <div class="prop-row"><label>Function field</label><select id="sfcce-field-function">${fieldOptions(suggestedFunction)}</select></div>
-      <div class="prop-row"><label>Capability field</label><select id="sfcce-field-capability">${fieldOptionsWithNone(suggestedCapability)}</select></div>
-      <div class="prop-row"><label>Capability Description</label><select id="sfcce-field-capability-desc">${fieldOptionsWithNone(suggestedCapabilityDescription)}</select></div>
-      <div class="prop-row"><label>Application Capability field</label><select id="sfcce-field-application-capability">${fieldOptionsWithNone(suggestedApplicationCapability)}</select></div>
-      <div class="prop-row"><label>Application Capability Description</label><select id="sfcce-field-application-capability-desc">${fieldOptionsWithNone(suggestedApplicationCapabilityDescription)}</select></div>
-      <div class="prop-row"><label>Entity field</label><select id="sfcce-field-entity">${fieldOptionsWithNone(suggestedEntity)}</select></div>
-      <div class="prop-row"><label>Entity Description</label><select id="sfcce-field-entity-desc">${fieldOptionsWithNone(suggestedEntityDescription)}</select></div>
-      <p style="font-size:12px; color:var(--text-muted);">A Section value containing multiple entries (a comma-separated list, or an array) is split into one row per section. A missing Function value is kept as "(unspecified)" rather than dropped. A missing Capability/Application Capability/Entity value inherits the level above it instead — see the note on the previous step.</p>
+      <div class="sfcce-mapping-grid">
+        <div class="sfcce-mapping-row sfcce-mapping-header prop-row"><span></span><span>Field</span><span>Description</span><span>Id</span></div>
+        <div class="sfcce-mapping-row prop-row">
+          <label>Section</label>
+          <select id="sfcce-field-section">${fieldOptions(suggestedSection)}</select>
+          <select id="sfcce-field-section-desc">${fieldOptionsDescription(suggestedSectionDescription)}</select>
+          <select id="sfcce-field-section-id">${fieldOptionsId(suggestedSectionId)}</select>
+        </div>
+        <div class="sfcce-mapping-row prop-row">
+          <label>Function</label>
+          <select id="sfcce-field-function">${fieldOptions(suggestedFunction)}</select>
+          <select id="sfcce-field-function-desc">${fieldOptionsDescription(suggestedFunctionDescription)}</select>
+          <select id="sfcce-field-function-id">${fieldOptionsId(suggestedFunctionId)}</select>
+        </div>
+        <div class="sfcce-mapping-row prop-row">
+          <label>Capability</label>
+          <select id="sfcce-field-capability">${fieldOptionsCascade(suggestedCapability)}</select>
+          <select id="sfcce-field-capability-desc">${fieldOptionsDescription(suggestedCapabilityDescription)}</select>
+          <select id="sfcce-field-capability-id">${fieldOptionsId(suggestedCapabilityId)}</select>
+        </div>
+        <div class="sfcce-mapping-row prop-row">
+          <label>Application Capability</label>
+          <select id="sfcce-field-application-capability">${fieldOptionsCascade(suggestedApplicationCapability)}</select>
+          <select id="sfcce-field-application-capability-desc">${fieldOptionsDescription(suggestedApplicationCapabilityDescription)}</select>
+          <select id="sfcce-field-application-capability-id">${fieldOptionsId(suggestedApplicationCapabilityId)}</select>
+        </div>
+        <div class="sfcce-mapping-row prop-row">
+          <label>Entity</label>
+          <select id="sfcce-field-entity">${fieldOptionsCascade(suggestedEntity)}</select>
+          <select id="sfcce-field-entity-desc">${fieldOptionsDescription(suggestedEntityDescription)}</select>
+          <select id="sfcce-field-entity-id">${fieldOptionsId(suggestedEntityId)}</select>
+        </div>
+      </div>
+      <p style="font-size:12px; color:var(--text-muted);">A Section value containing multiple entries (a comma-separated list, or an array) is split into one row per section. A missing Function value is kept as "(unspecified)" rather than dropped. A missing Capability/Application Capability/Entity value inherits the level above it instead. Description is always optional metadata — left blank if unmapped. Id is optional too: left blank, a level gets a deterministic id derived from its own name; "(generate unique)" mints a genuinely fresh, random id instead regardless of anything in the file.</p>
       <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Load</button></div>
     `;
     overlay.appendChild(box);
     root.appendChild(overlay);
     box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
 
+    // Shared by the submit handler and the right-click "copy call" handler below, so
+    // both read the form the same way and can never drift out of sync with each other
+    // (same pattern promptRemap's collectRemapOptions already established).
+    const collectSfcceMapping = () => ({
+      sectionField: box.querySelector('#sfcce-field-section').value,
+      sectionDescriptionField: box.querySelector('#sfcce-field-section-desc').value || null,
+      sectionIdField: box.querySelector('#sfcce-field-section-id').value || null,
+      functionField: box.querySelector('#sfcce-field-function').value,
+      functionDescriptionField: box.querySelector('#sfcce-field-function-desc').value || null,
+      functionIdField: box.querySelector('#sfcce-field-function-id').value || null,
+      capabilityField: box.querySelector('#sfcce-field-capability').value || null,
+      capabilityDescriptionField: box.querySelector('#sfcce-field-capability-desc').value || null,
+      capabilityIdField: box.querySelector('#sfcce-field-capability-id').value || null,
+      applicationCapabilityField: box.querySelector('#sfcce-field-application-capability').value || null,
+      applicationCapabilityDescriptionField: box.querySelector('#sfcce-field-application-capability-desc').value || null,
+      applicationCapabilityIdField: box.querySelector('#sfcce-field-application-capability-id').value || null,
+      entityField: box.querySelector('#sfcce-field-entity').value || null,
+      entityDescriptionField: box.querySelector('#sfcce-field-entity-desc').value || null,
+      entityIdField: box.querySelector('#sfcce-field-entity-id').value || null,
+    });
+
+    wireCopyCallOnRightClick(this, box.querySelector('.submit'), () => `buildRowsFromRecords(records, ${JSON.stringify(collectSfcceMapping(), null, 2)});`);
     box.querySelector('.submit').addEventListener('click', () => {
-      const industryName = box.querySelector('#sfcce-industry-name').value.trim();
-      if (!industryName) { this.toast('Industry Name is required.', true); return; }
-      if (this.store.industryData?.[industryName]) {
-        this.toast(`"${industryName}" already exists — choose a different Industry Name.`, true);
-        return;
-      }
-      const mapping = {
-        sectionField: box.querySelector('#sfcce-field-section').value,
-        functionField: box.querySelector('#sfcce-field-function').value,
-        capabilityField: box.querySelector('#sfcce-field-capability').value || null,
-        capabilityDescriptionField: box.querySelector('#sfcce-field-capability-desc').value || null,
-        applicationCapabilityField: box.querySelector('#sfcce-field-application-capability').value || null,
-        applicationCapabilityDescriptionField: box.querySelector('#sfcce-field-application-capability-desc').value || null,
-        entityField: box.querySelector('#sfcce-field-entity').value || null,
-        entityDescriptionField: box.querySelector('#sfcce-field-entity-desc').value || null,
-      };
-      overlay.remove();
+      const mapping = collectSfcceMapping();
       const parsed = buildRowsFromRecords(records, mapping);
-      this.promptSFCCESharedLevelConfirm(industryName, parsed, parsed.rows, 0);
+      const proceed = () => { overlay.remove(); this.promptSFCCESharedLevelConfirm(parsed, parsed.rows, 0); };
+      // Only one industry dataset ever exists — this always REPLACES it, so warn first
+      // if something is already loaded (the built-in default counts too, not just a
+      // previous Load SFCCE import) rather than silently discarding it.
+      if (this.store.doc.industryTree && this.store.doc.industryTree.length > 0) {
+        this.confirmModal('Loading this file will clear and replace the current industry data (used by Advanced > Generate Industry and Catalogs > SFCCE). Continue?').then((confirmed) => {
+          if (confirmed) proceed();
+        });
+      } else {
+        proceed();
+      }
     });
   }
 
@@ -3242,15 +3319,15 @@ class App {
    * sfce.js's detectSharedLevel for why they can resolve in any order/combination
    * without corrupting each other). Recurses to the next level after each resolution or
    * skip; calls finishSFCCEImport once all three are done. */
-  promptSFCCESharedLevelConfirm(industryName, parsed, rows, levelIndex) {
+  promptSFCCESharedLevelConfirm(parsed, rows, levelIndex) {
     if (levelIndex >= SFCCE_SHARED_LEVELS.length) {
-      this.finishSFCCEImport(industryName, rows, parsed);
+      this.finishSFCCEImport(rows, parsed);
       return;
     }
     const level = SFCCE_SHARED_LEVELS[levelIndex];
     const { sectionsByIdentity, sharedIdentities } = level.detect(rows);
     if (sharedIdentities.size === 0) {
-      this.promptSFCCESharedLevelConfirm(industryName, parsed, rows, levelIndex + 1);
+      this.promptSFCCESharedLevelConfirm(parsed, rows, levelIndex + 1);
       return;
     }
 
@@ -3273,26 +3350,30 @@ class App {
     root.appendChild(overlay);
     box.querySelector('#sfcce-shared-yes').addEventListener('click', () => {
       overlay.remove();
-      this.promptSFCCESharedLevelConfirm(industryName, parsed, level.resolve(rows, sectionsByIdentity, sharedIdentities, true), levelIndex + 1);
+      this.promptSFCCESharedLevelConfirm(parsed, level.resolve(rows, sectionsByIdentity, sharedIdentities, true), levelIndex + 1);
     });
     box.querySelector('#sfcce-shared-no').addEventListener('click', () => {
       overlay.remove();
-      this.promptSFCCESharedLevelConfirm(industryName, parsed, level.resolve(rows, sectionsByIdentity, sharedIdentities, false), levelIndex + 1);
+      this.promptSFCCESharedLevelConfirm(parsed, level.resolve(rows, sectionsByIdentity, sharedIdentities, false), levelIndex + 1);
     });
   }
 
-  /** Builds the tree, stores it (registering the 'SFCCE' stream template so Generate
-   * Industry walks its 4 levels instead of assuming 'Enterprise' — see
-   * store.industryTemplates' own comment in state.js), and reports statistics — the
-   * unique section list (first-seen order) and subtotals — to the Message Log as well as
-   * a toast summary. */
-  finishSFCCEImport(industryName, resolvedRows, parsed) {
+  /** Builds the tree and REPLACES store.doc.industryTree with it (registering the
+   * 'SFCCE' stream template so Generate Industry walks its 4 levels — see
+   * store.doc.industryTemplateName's own comment in state.js), refreshes an already-
+   * open SFCCE Catalog tab if there is one (it would otherwise keep showing the just-
+   * replaced data until next switched away from and back to), and reports statistics —
+   * the unique section list (first-seen order) and subtotals — to the Message Log as
+   * well as a toast summary. */
+  finishSFCCEImport(resolvedRows, parsed) {
     const { tree, stats } = buildIndustryTree(resolvedRows);
-    this.store.industryData = { ...(this.store.industryData || {}), [industryName]: tree };
-    this.store.industryTemplates = { ...(this.store.industryTemplates || {}), [industryName]: 'SFCCE' };
+    this.store.doc.industryTree = tree;
+    this.store.doc.industryTemplateName = 'SFCCE';
+    const catalogTab = this.store.tabs.find((t) => t.type === 'table' && t.sfceCatalog);
+    if (catalogTab) catalogTab.tableRows = flattenIndustryTree(tree);
 
     const lines = [
-      `[Load SFCCE: "${industryName}"] ${parsed.rows.length} row${parsed.rows.length === 1 ? '' : 's'} processed.`,
+      `[Load SFCCE] ${parsed.rows.length} row${parsed.rows.length === 1 ? '' : 's'} processed.`,
       `Sections (${stats.sectionOrder.length}, in order): ${stats.sectionOrder.join(', ')}`,
       `Subtotals — Functions: ${stats.functionCount}, Capabilities: ${stats.capabilityCount}, Application Capabilities: ${stats.applicationCapabilityCount}, Entities: ${stats.entityCount}`,
     ];
@@ -3306,8 +3387,8 @@ class App {
     if (notes.length) lines.push(`Missing-value handling: ${notes.join('; ')} — kept, not dropped.`);
 
     for (const line of lines) pushMessageLog(this.store, line);
-    this.render();
-    this.toast(`Loaded "${industryName}": ${stats.sectionOrder.length} sections, ${stats.functionCount} functions, ${stats.capabilityCount} capabilities, ${stats.applicationCapabilityCount} application capabilities, ${stats.entityCount} entities. Details in the Message Log.`);
+    this.recordAndRender();
+    this.toast(`Loaded: ${stats.sectionOrder.length} sections, ${stats.functionCount} functions, ${stats.capabilityCount} capabilities, ${stats.applicationCapabilityCount} application capabilities, ${stats.entityCount} entities. Details in the Message Log.`);
   }
 }
 
@@ -3501,7 +3582,7 @@ async function bootstrapApp() {
   // construction time, not applied after the fact, so a cached custom value must reach
   // the constructor itself rather than overwriting store.nodeSizeMultiplier afterward.
   const cachedMultiplier = getCachedNodeSizeMultiplier();
-  const store = new Store(data.settings, data.fce, cachedMultiplier ?? undefined);
+  const store = new Store(data.settings, data.industryTree, cachedMultiplier ?? undefined);
   store.mergedRelationshipPairs = data.mergedRelationshipPairs;
   // Local Settings' maxScriptEntities auto-loads from its localStorage cache here — see
   // LOCAL_SETTINGS_CACHE_KEY's comment for why this is safe to cache (unlike Local

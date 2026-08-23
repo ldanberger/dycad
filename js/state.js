@@ -5,7 +5,7 @@
  * main.js), which can in turn call any number of other functions defined alongside it.
  * This one gives a working starting point: main() calling three starter batch scripts
  * in sequence — BatchScript_QuickStart(), which builds a basic Business Functions
- * organization view from the built-in "general" industry data end to end (ending with
+ * organization view from the built-in default industry data end to end (ending with
  * the 3D View); BatchScript_InsertSmartStreamExample(), which traces a Smart Stream
  * from data QuickStart itself just generated; then BatchScript_RemapExample(), which
  * remaps that same Smart Stream view with Edge Assignment and both layout-optimization
@@ -28,11 +28,12 @@ async function main() {
 }
 
 // A starter batch script: builds a basic Business Functions organization view from the
-// built-in "general" industry data, ready to look at with one click.
+// built-in default industry data, ready to look at with one click.
 async function BatchScript_QuickStart() {
-  // Generate Industry (Advanced menu), default "General" industry -- parts/connectors
-  // only, not placed on any view (Populate From Template below does the placing).
-  await generateIndustry(app, 'general', null, false);
+  // Generate Industry (Advanced menu), the built-in default industry data -- parts/
+  // connectors only, not placed on any view (Populate From Template below does the
+  // placing).
+  await generateIndustry(app, null, false);
 
   // New view: "Business Functions", type "Business Function Organization".
   const view = store.addView('Business Functions', 'org');
@@ -62,7 +63,7 @@ async function BatchScript_QuickStart() {
 // Example: Insert Smart Stream called directly with explicit options (same shape the
 // dialog builds from the user's picks -- see promptInsertSmartStream in main.js).
 // Called by main() above, after BatchScript_QuickStart. Depends on a Business Function
-// named "Production", which BatchScript_QuickStart's "general" industry data creates
+// named "Production", which BatchScript_QuickStart's default industry data creates
 // (adjust the label/types below to match your own model if you remove that call).
 async function BatchScript_InsertSmartStreamExample() {
   let tab = store.activeTab();
@@ -75,8 +76,16 @@ async function BatchScript_InsertSmartStreamExample() {
   const start = findParts({ type: 'BusinessFunction', model: store.defaultModel }).find((p) => p.label === 'Production');
   if (!start) { log('No Business Function named "Production" found in model "' + store.defaultModel + '".'); return; }
 
+  // connectorType 's' (Stream), not 'c' (Connector) -- 'c' also carries every generated
+  // stream's parallel "companion"/inventory relationship AND the section-reification
+  // BusinessOrganizationUnit -> BusinessFunction Assignment edges (see commands.js's
+  // createStream), and since the default industry data now genuinely tags every
+  // function with a real Section, walking 'c' from Production fans out through its
+  // shared OrgUnit into every OTHER function in the same Section too -- 's' is the
+  // network createStream itself builds one stream at a time, so it stays scoped to
+  // Production's own chain, matching this example's actual intent.
   insertSmartStream(app, tab, {
-    connectorType: 'c',
+    connectorType: 's',
     startPartIds: [start.id],
     direction: 'both',
     endType: 'DataDataEntity',
@@ -244,13 +253,6 @@ function ciEq(a, b) {
   return String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
 }
 
-/** e.g. 'fce-generalnodes.json' -> 'general' (segment after the first '-', before 'nodes'). */
-function deriveIndustryName(filename) {
-  const afterDash = filename.split('-').slice(1).join('-');
-  const idx = afterDash.indexOf('nodes');
-  return idx >= 0 ? afterDash.slice(0, idx) : afterDash;
-}
-
 // The base node box size (matches canvas.js's getNodeSize fallback and NODE_HALF_W/H)
 // BEFORE nodeSizeMultiplier is applied. Kept here, not exported, since only
 // defaultNodeSize below and Store's own view-creation code need it.
@@ -271,25 +273,10 @@ class Store {
    * Settings) and passes it in at construction time instead. Defaults to 1.2 (the new
    * out-of-the-box default node size, 1.2x the original 130x46 — nodes generated at the
    * old size were cramped and often clipped their own label text). */
-  constructor(settings, fce, nodeSizeMultiplier = 1.2) {
+  constructor(settings, industryTree, nodeSizeMultiplier = 1.2) {
     this.nodeSizeMultiplier = nodeSizeMultiplier;
     this.settings = settings;   // custom.json contents
-    this.fce = fce;             // fce-generalnodes.json contents
     this.mergedRelationshipPairs = []; // set by main.js after data load
-
-    // Industry reference data for "Generate Industry": keyed by name derived from each
-    // source filename (the segment after the first '-' and before 'nodes', e.g.
-    // 'fce-generalnodes.json' -> 'general'). Only one file is loaded today; more can be
-    // added here later without changing how Generate Industry consumes this map.
-    this.industryData = { [deriveIndustryName('fce-generalnodes.json')]: fce };
-    // Which stream template generateIndustry (commands.js) should use for each
-    // industryData key — every key defaults to 'Enterprise' (generateIndustry's own
-    // fallback when a key has no entry here, matching the built-in 'general' dataset's
-    // 3-level Function/Capability/Entity shape) except keys imported via File > Load
-    // SFCCE, which register 'SFCCE' here (a 4-level Function/Capability/Application Capability/
-    // Entity chain — see sfce.js's own module comment). Memory-only, same lifetime as
-    // industryData itself.
-    this.industryTemplates = {};
 
     // ---- persisted model doc (round-trips via Save/Load JSON, shape ~ onestream.json) ----
     this.doc = {
@@ -297,6 +284,18 @@ class Store {
       readme: { note: '' },
       defaultModel: 'Reference',
       currentView: 'home',
+      // Industry reference data for "Generate Industry" — a single Section/Function/
+      // Capability/Application Capability/Entity tree (industryTree, boot-seeded from
+      // public/capabilities-general-SFCCE.json via data.js's own Load-SFCCE pipeline
+      // run) plus which streamTemplate (custom.json) generateIndustry (commands.js)
+      // should walk it with (industryTemplateName). Only ONE industry dataset ever
+      // exists at a time — File > Load SFCCE CLEARS and REPLACES both fields rather
+      // than adding a new named entry (main.js's finishSFCCEImport), warning first if
+      // industryTree is already non-empty. Persisted (round-trips through Save/Load
+      // JSON, unlike the old memory-only industryData/industryTemplates maps this
+      // replaced) so a person's Load SFCCE import survives a save/reload.
+      industryTree: industryTree || [],
+      industryTemplateName: 'SFCCE',
       models: [{ modelName: 'Reference' }, { modelName: 'As-is' }, { modelName: 'To-be' }, { modelName: 'Gap' }],
       views: [
         { id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1 },
@@ -819,6 +818,12 @@ function migrateDoc(obj, nodeSizeMultiplier = 1.2) {
     readme: obj.readme || { note: '' },
     defaultModel: obj.defaultModel || (obj.models?.[0]?.modelName ?? 'Reference'),
     currentView: obj.currentView || 'home',
+    // A save file predating this field (or the old memory-only industryData/
+    // industryTemplates maps) has nothing to migrate from — falls back to an empty
+    // industry dataset, same as if no Load SFCCE had ever run, per this session's "no
+    // prior users, no backwards-compat needed" convention.
+    industryTree: obj.industryTree ?? [],
+    industryTemplateName: obj.industryTemplateName || 'SFCCE',
     models: obj.models && obj.models.length ? obj.models : [{ modelName: 'Reference' }],
     views: obj.views && obj.views.length ? obj.views.map((v) => ({ ...v, viewType: v.viewType || 'ff', sections: v.sections ?? [], nodeWidth: v.nodeWidth ?? defaultNodeSize(nodeSizeMultiplier).nodeWidth, nodeHeight: v.nodeHeight ?? defaultNodeSize(nodeSizeMultiplier).nodeHeight, remapSortKeys: v.remapSortKeys ?? null, remapLastOptions: v.remapLastOptions ?? null, chkShowConnectorType: v.chkShowConnectorType ?? (v.chkShowConnectors ?? true), chkShowStreamType: v.chkShowStreamType ?? (v.chkShowConnectors ?? true), chkShowDataType: v.chkShowDataType ?? true, chkShowDescription: v.chkShowDescription ?? true, chkShowAttributes: v.chkShowAttributes ?? true, chkShowSimValues: v.chkShowSimValues ?? false, chkShowScriptBadge: v.chkShowScriptBadge ?? false, routingStyle: v.routingStyle ?? 'default', routingStyleStream: v.routingStyleStream ?? 'default', spacingScale: v.spacingScale ?? 1 })) : [{ id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1 }],
     parts: (obj.parts || []).map((p) => ({

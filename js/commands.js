@@ -43,10 +43,14 @@ function createBulkLookupCache(store) {
     // same as every other map here.
     partVmsByView: new Map(),
     connsByFromToModel: new Map(), // `${fromId}|${toId}|${model}`.toLowerCase() -> connector (connectorType 's' only)
+    plainConnsByFromTo: new Map(), // `${fromId}|${toId}|${model}`.toLowerCase() -> connector (connectorType 'c' only) -- Organization Unit assignment wiring
     connVmsByConnView: new Map(),  // `${connId}|${viewId}` -> viewMember
   };
   for (const p of store.doc.parts) cacheRegisterPart(cache, p);
-  for (const c of store.doc.connectors) if (ciEq(c.connectorType, 's')) cacheRegisterStreamConn(cache, c);
+  for (const c of store.doc.connectors) {
+    if (ciEq(c.connectorType, 's')) cacheRegisterStreamConn(cache, c);
+    else if (ciEq(c.connectorType, 'c')) cacheRegisterPlainConn(cache, c);
+  }
   for (const vm of store.doc.viewMembers) {
     if (vm.objectType === 'part') cacheRegisterVm(cache, vm);
     else if (vm.objectType === 'connector') cacheRegisterConnVm(cache, vm);
@@ -66,6 +70,9 @@ function cacheRegisterVm(cache, vm) {
 function cacheRegisterStreamConn(cache, conn) {
   cache.connsByFromToModel.set(`${conn.from}|${conn.to}|${conn.model}`.toLowerCase(), conn);
 }
+function cacheRegisterPlainConn(cache, conn) {
+  cache.plainConnsByFromTo.set(`${conn.from}|${conn.to}|${conn.model}`.toLowerCase(), conn);
+}
 function cacheRegisterConnVm(cache, vm) {
   cache.connVmsByConnView.set(`${vm.objectId}|${vm.view}`, vm);
 }
@@ -73,6 +80,7 @@ function cacheRegisterConnVm(cache, vm) {
 function createStream(app, {
   templateName, streamName, functionName, capabilityName, entityName, modelName, viewName, anchorX, anchorY,
   functionDescription = '', functionxIds = '', functionSection = '',
+  sectionId = '', sectionDescription = '',
   capabilityDescription = '', capabilityxIds = '',
   applicationCapabilityName, applicationCapabilityDescription = '', applicationCapabilityxIds = '',
   entityDescription = '', entityxIds = '',
@@ -146,6 +154,10 @@ function createStream(app, {
   const newlyCreatedVmIds = [];
   const placer = (placeInView && isSectionViewType(view.viewType)) ? (store.ensureViewSections(view), createSectionPlacer(store, view)) : null;
   let step = 0;
+  // Captured for the Organization Unit wiring below — the ONE canonical BusinessFunction
+  // part/vm this stream's chain creates or reuses, not every "function-category"
+  // supporting node the loop below also walks through.
+  let functionPart = null, functionVm = null;
 
   for (let i = 0; i < template.value.length; i++) {
     const rawType = template.value[i];
@@ -253,6 +265,7 @@ function createStream(app, {
       }
     }
     createdVms.push({ vm, part });
+    if (category === 'function' && isPreciseCategoryMatch) { functionPart = part; functionVm = vm; }
 
     if (i > 0) {
       const prev = createdVms[i - 1];
@@ -278,6 +291,19 @@ function createStream(app, {
     return ciEq(resolvedType, 'businessFunction') ? joinLabel(el, functionName) : joinLabel(el, capabilityName || entityName || type);
   };
   for (const p of template.passive || []) {
+    // BusinessOrganizationUnit is handled entirely by the dedicated section-reification
+    // block below (labeled by the function's actual Section value, Assignment-connected,
+    // shared across every function in that section) — every shipped template's own
+    // passive[] array also lists {from:'BusinessOrganizationUnit', to:'BusinessFunction'}
+    // (added so the 3D View's own "is this type in this Layer Order template" scan, which
+    // reads value[]+passive[], keeps OrgUnit parts visible there), so without this guard
+    // the generic mechanism below would ALSO create a second, wrongly-labeled (by
+    // capability/entity name instead of section) OrgUnit per stream, connected via a
+    // generic Stream/Passive connector instead of Assignment, duplicating that block's
+    // own work. Confirmed as a real, not just theoretical, bug: surfaced the first time
+    // generateIndustry actually ran a section-tagged dataset (the built-in default, once
+    // it became a genuine 4-level SFCCE tree) through a template with this passive entry.
+    if (ciEq(p.from, 'BusinessOrganizationUnit') || ciEq(p.to, 'BusinessOrganizationUnit')) continue;
     passiveRow += 1;
     const fromMatch = createdVms.find((c) => ciEq(c.part.type, p.from)) || findExistingStreamNode(store, view?.id, streamName, p.from, expectedPassiveLabel(p.from), modelName, lookupCache, placeInView);
     const toMatch = createdVms.find((c) => ciEq(c.part.type, p.to)) || findExistingStreamNode(store, view?.id, streamName, p.to, expectedPassiveLabel(p.to), modelName, lookupCache, placeInView);
@@ -295,8 +321,75 @@ function createStream(app, {
       createdVms.push(toEntry);
     }
     for (const entry of [fromEntry, toEntry]) if (entry.wasNew) newlyCreatedVmIds.push(entry.vm.id);
+    // Some templates (e.g. 'SFCCE') carry BusinessFunction only as a passive node, not
+    // in the main value[] chain at all — capture it here too, same as the main loop
+    // above, so the Organization Unit wiring below finds it regardless of which shape
+    // this particular template uses.
+    for (const entry of [fromEntry, toEntry]) if (!functionPart && ciEq(entry.part.type, 'BusinessFunction')) { functionPart = entry.part; functionVm = entry.vm; }
 
     const conn = findOrCreateStreamConnector(store, view, fromEntry.part, toEntry.part, fromEntry.vm, toEntry.vm, modelName, streamName, 'Passive', `p${passiveRow}c`, lookupCache, placeInView);
+  }
+
+  // Reify the function's own "section" as an actual Business Organization Unit part
+  // (aka OrgUnit) instead of leaving it as only a plain string tag on the function part
+  // -- reported directly: "When we import or generate involving sections, these will
+  // now be business organization units... when loading SFCCE for example, now generate
+  // a orgunit part." One OrgUnit part per unique section VALUE per model, reused across
+  // every function that shares it (never duplicated) — same find-or-create-by-(label,
+  // type, model) convention the rest of this function already uses for capability/
+  // entity reuse, just keyed on the section string as the label. Assignment-connected
+  // to the function it's responsible for: the standard ArchiMate "active structure
+  // element assigned to a behavior element" relationship, matching how a Business
+  // Actor/Role would ordinarily relate to a Business Function it performs. Runs after
+  // BOTH the main chain loop and the passive loop above, since the function node can
+  // come from either one depending on the template's own shape.
+  if (functionSection && functionPart) {
+    const orgUnitKey = `${functionSection}|BusinessOrganizationUnit|${modelName}`.toLowerCase();
+    let orgUnitPart = lookupCache
+      ? lookupCache.partsByKey.get(orgUnitKey)
+      : store.doc.parts.find((p) => ciEq(p.label, functionSection) && ciEq(p.type, 'BusinessOrganizationUnit') && ciEq(p.model, modelName));
+    if (!orgUnitPart) {
+      orgUnitPart = store.createPart({ type: 'BusinessOrganizationUnit', label: functionSection, model: modelName, streams: [], note: 'org unit', order: 0, other: {}, section: functionSection, description: sectionDescription, xIds: sectionId });
+      if (lookupCache) cacheRegisterPart(lookupCache, orgUnitPart);
+    }
+
+    let orgUnitVm = null;
+    if (placeInView) {
+      orgUnitVm = lookupCache
+        ? lookupCache.vmsByPartView.get(`${orgUnitPart.id}|${view.id}`)
+        : store.doc.viewMembers.find((v) => v.objectType === 'part' && ciEq(v.objectId, orgUnitPart.id) && ciEq(v.view, view.id));
+      if (!orgUnitVm) {
+        const desired = { x: (functionVm?.x ?? baseX), y: (functionVm?.y ?? baseY) - stepY };
+        const { w: orgUnitNodeW, h: orgUnitNodeH } = getNodeSize(view);
+        const free = placer ? placer('BusinessOrganizationUnit') : store.findNonOverlappingPosition(view.id, desired.x, desired.y, undefined, orgUnitNodeW, orgUnitNodeH, genSpacing, lookupCache);
+        orgUnitVm = store.createViewMember({
+          view: view.id, objectType: 'part', objectId: orgUnitPart.id,
+          x: free.x, y: free.y, sectionId: free.sectionId || '', fillColor: elementGroupFill(store, 'BusinessOrganizationUnit'),
+        });
+        newlyCreatedVmIds.push(orgUnitVm.id);
+        if (lookupCache) cacheRegisterVm(lookupCache, orgUnitVm);
+      }
+    }
+
+    const orgUnitConnKey = `${orgUnitPart.id}|${functionPart.id}|${modelName}`.toLowerCase();
+    let orgUnitConn = lookupCache
+      ? lookupCache.plainConnsByFromTo.get(orgUnitConnKey)
+      : store.findExistingConnector(orgUnitPart.id, functionPart.id, modelName, 'c');
+    if (!orgUnitConn) {
+      const assignRel = (store.settings.relations || []).find((r) => r.key === 'i'); // Assignment
+      orgUnitConn = store.createConnector({ from: orgUnitPart.id, to: functionPart.id, model: modelName, connectorType: 'c', relationship: assignRel?.name || 'Assignment' });
+      if (lookupCache) cacheRegisterPlainConn(lookupCache, orgUnitConn);
+    }
+
+    if (placeInView) {
+      const orgUnitConnVm = lookupCache
+        ? lookupCache.connVmsByConnView.get(`${orgUnitConn.id}|${view.id}`)
+        : store.doc.viewMembers.find((v) => v.objectType === 'connector' && ciEq(v.objectId, orgUnitConn.id) && ciEq(v.view, view.id));
+      if (!orgUnitConnVm) {
+        const connVm = store.createViewMember({ view: view.id, objectType: 'connector', objectId: orgUnitConn.id, fromVmId: orgUnitVm.id, toVmId: functionVm.id });
+        if (lookupCache) cacheRegisterConnVm(lookupCache, connVm);
+      }
+    }
   }
 
   if (placeInView) {
@@ -2061,14 +2154,13 @@ function smartCheckNode(app, tab, partId, options = {}) {
  * caller can show real progress instead of a frozen page.
  */
 const GENERATE_INDUSTRY_CHUNK_SIZE = 40;
-async function generateIndustry(app, industryKey, onProgress, placeInView = true) {
+async function generateIndustry(app, onProgress, placeInView = true) {
   const { store } = app;
-  const data = store.industryData?.[industryKey];
-  if (!data) { app.toast(`Industry data "${industryKey}" not found.`, true); return; }
-  // See store.industryTemplates' own comment (state.js) — defaults to 'Enterprise' for
-  // every existing dataset (the general one, and anything from a pre-SFCCE Load SFCE);
-  // only File > Load SFCCE's data registers a different template here.
-  const templateName = store.industryTemplates?.[industryKey] || 'Enterprise';
+  const data = store.doc.industryTree;
+  if (!data || !data.length) { app.toast('No industry data loaded — use File > Load SFCCE.', true); return; }
+  // See store.doc.industryTemplateName's own comment (state.js) — 'SFCCE' by default
+  // (the built-in dataset, and any Load SFCCE import, are both genuine 4-level trees).
+  const templateName = store.doc.industryTemplateName || 'Enterprise';
   const genTemplate = (store.settings.streamTemplates || []).find((t) => ciEq(t.name, templateName));
   // Whether this run's tree has a genuine 4th (Application Capability) level — driven by the
   // TEMPLATE, not by inspecting the tree data itself, so the built-in 'general' dataset
@@ -2156,6 +2248,7 @@ async function generateIndustry(app, industryKey, onProgress, placeInView = true
         templateName,
         streamName: ent.nodeName,
         functionName: func.nodeName, functionDescription: func.nodeDescription, functionxIds: func.nodeId, functionSection: func.nodeSection || '',
+        sectionId: func.nodeSectionId || '', sectionDescription: func.nodeSectionDescription || '',
         capabilityName: cap.nodeName, capabilityDescription: cap.nodeDescription, capabilityxIds: cap.nodeId,
         applicationCapabilityName: appCap ? appCap.nodeName : undefined, applicationCapabilityDescription: appCap ? appCap.nodeDescription : undefined, applicationCapabilityxIds: appCap ? appCap.nodeId : undefined,
         entityName: ent.nodeName, entityDescription: ent.nodeDescription, entityxIds: ent.nodeId,
@@ -2199,7 +2292,7 @@ async function generateIndustry(app, industryKey, onProgress, placeInView = true
   }
   app.recordAndRender();
   const placementNote = placeInView ? '' : ' — not placed on any view; see Catalogs > Parts or Add Existing';
-  app.toast(`Generated ${entityCount} stream${entityCount === 1 ? '' : 's'} from industry "${industryKey}"${skippedCount ? ` (${skippedCount} already existed, skipped)` : ''}${placementNote}.`);
+  app.toast(`Generated ${entityCount} stream${entityCount === 1 ? '' : 's'} from the loaded industry data${skippedCount ? ` (${skippedCount} already existed, skipped)` : ''}${placementNote}.`);
 }
 
 // ===================== GENERATE INVENTORY VIEW =====================
