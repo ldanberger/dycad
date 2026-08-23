@@ -3370,4 +3370,42 @@
 // within its node's rendered box across all three named paths.
 // Both proven via deliberate revert-then-restore. DESIGN_DOCUMENT.md SS7.1/SS7a,
 // tests/README.md, and public/instructions.html updated. Full suite 115/115.
-export const APP_VERSION = '0.869';
+//
+// v0.870: "let's finish data connectors in data modeling -> erd. Part A: auto
+// determine from ddl content 'references'. Part B: find matching field names where
+// one is primary key and other is not, this is potential for n to 1 and foreign key,
+// show preview list to user to confirm before creating new connectors." Part A
+// already existed inside importDDL, but only for tables being created fresh from
+// pasted DDL text -- this adds the missing piece: a new Data Modeling menu command,
+// Auto-Detect Connectors..., that finds candidate 'd' connectors between tables that
+// ALREADY exist in the document (scoped to the whole document, not just the current
+// view -- these tables may not even share a view yet), previews them, and creates
+// only what's confirmed.
+// commands.js gained detectConnectorCandidates(store, ddlText) -- pure logic,
+// combining Part A (ddl.js's parseDDL, the exact REFERENCES parsing importDDL itself
+// uses, matched against EXISTING tables/columns by name instead of creating new ones)
+// and Part B (a field-name heuristic: any non-primary-key attribute whose name
+// matches another table's primary key, either exactly or via the common
+// "<Table>Id" convention, e.g. Customer's PK "Id" matching Order's "CustomerId") into
+// one de-duplicated candidate list, using importDDL's own fromAttribute/toAttribute/
+// cardinality convention throughout. A pair already linked by a real 'd' connector
+// (checked by exact attribute-id pair, not store.findExistingConnector's coarser
+// from/to/model/type key, which would wrongly collapse two distinct FK relationships
+// between the same two tables into one) is never re-proposed.
+// createDetectedConnectors(app, candidates) creates a real connector for each
+// CONFIRMED candidate, placing a viewMember in every view where both endpoint parts
+// are already placed together (mirroring smartCheckView's own missingConnectors
+// placement rule) -- a pair sharing no view yet still gets its connector created,
+// just left unplaced, the same "unplaced Composition connector" precedent Level
+// Up/Down already established, rather than being silently dropped.
+// App.promptAutoDetectConnectors (main.js) is a single modal: optional DDL-paste
+// textarea, a Detect Connectors button populating a checkbox preview table (every row
+// checked by default, Select All toggle), and a Create Selected Connectors button
+// (hidden until Detect has run) that creates only what's checked. New Data Modeling
+// menu item after Export DDL.
+// New check_auto_detect_connectors_detection_and_creation (Part A/B, de-dup,
+// placement-vs-unplaced, idempotent re-detection) and check_auto_detect_connectors_
+// dialog (real menu/DOM wiring), both proven via deliberate revert-then-restore.
+// DESIGN_DOCUMENT.md SS7a, tests/README.md, and public/instructions.html updated.
+// Full suite 117/117.
+export const APP_VERSION = '0.870';

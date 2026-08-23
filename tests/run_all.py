@@ -6767,6 +6767,257 @@ def check_data_modeling_autofill(page):
     return True, "Data Modeling > Autofill runs the user-editable dataAutoFill() batch script against the current view: scaffolds Id/Name/Description on tables with no attributes yet (leaving already-detailed tables untouched), wires From/To Attribute + One/OneOrMany cardinality on 'd' connectors with no fromAttribute yet (leaving already-wired ones untouched), the auto-created FK attribute genuinely shows its FK badge (both in the property panel and on the canvas node), and dataAutoFill() stays out of main()'s own call chain"
 
 
+def check_auto_detect_connectors_detection_and_creation(page):
+    """Regression guard/new-feature check for Data Modeling > Auto-Detect Connectors,
+    reported directly: "Part A: auto determine from ddl content 'references'. Part B:
+    find matching field names where one is primary key and other is not, this is
+    potential for n to 1 and foreign key, show preview list to user to confirm before
+    creating new connectors." Exercises commands.js's detectConnectorCandidates/
+    createDetectedConnectors directly (not the dialog UI -- see
+    check_auto_detect_connectors_dialog for that), scoped to the WHOLE document per
+    the user's own explicit choice (not just the current view), covering:
+    - Part A: DDL text pasted with an explicit FOREIGN KEY ... REFERENCES clause is
+      matched against an EXISTING table/column already in the document (not creating a
+      new table the way Import DDL does) -- proven with a column name ("cust_ref")
+      that the Part B heuristic would NOT catch on its own, so this specifically
+      isolates Part A's own mechanism.
+    - Part B, exact match: a non-PK attribute name equal (case/punctuation-
+      insensitive) to another table's PK attribute name is proposed.
+    - Part B, "<Table>Id"-style match: a non-PK attribute name equal to the PK table's
+      OWN LABEL concatenated with its PK's name (e.g. "RegrCust_<n>Id") is proposed.
+    - De-duplication: a pair already linked by a real 'd' connector between those exact
+      two attributes is never proposed again.
+    - createDetectedConnectors' placement rule: a candidate whose two tables already
+      share a view gets a connector viewMember placed there automatically; a candidate
+      whose two tables are NOT placed together on any view yet still gets its
+      document-level connector created, just with zero placements (counted in
+      `unplaced`) -- mirroring Level Up/Down's own "unplaced Composition connector"
+      precedent rather than silently dropping it.
+    - Re-running detection after creation finds zero further candidates for the same
+      pairs (the dedup above also holds for connectors this feature itself just
+      created, not just pre-existing ones)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const ts = Date.now();
+      const mkTable = (label, attributes) => store.createPart({ type: 'DataEntityDetails', label, model, streams: [], attributes });
+
+      const viewA = store.addView('RegrADCViewA_' + ts, 'ff'); // cust + ord + inv all placed here (shared view)
+      const viewC = store.addView('RegrADCViewC_' + ts, 'ff'); // dept placed here only
+      const viewD = store.addView('RegrADCViewD_' + ts, 'ff'); // emp placed here only (NOT shared with dept)
+      const place = (view, part) => store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: 0, y: 0 });
+
+      const custLabel = 'RegrCust_' + ts;
+      const cust = mkTable(custLabel, [{ id: 'c-pk-' + ts, name: 'Id', dataType: 'numeric', nullable: false, isPrimaryKey: true }]);
+      // Part B, "<Table>Id" pattern: ord's FK column is literally custLabel + 'Id'.
+      const ord = mkTable('RegrOrd_' + ts, [
+        { id: 'o-pk-' + ts, name: 'Id', dataType: 'numeric', nullable: false, isPrimaryKey: true },
+        { id: 'o-fk-' + ts, name: custLabel + 'Id', dataType: 'numeric', nullable: true, isPrimaryKey: false },
+      ]);
+      // Part A only: 'cust_ref' matches neither 'Id' nor the '<Table>Id' pattern, so
+      // the field-name heuristic (Part B) must NOT catch this -- only explicit DDL text can.
+      const inv = mkTable('RegrInv_' + ts, [
+        { id: 'i-pk-' + ts, name: 'Id', dataType: 'numeric', nullable: false, isPrimaryKey: true },
+        { id: 'i-fk-' + ts, name: 'cust_ref', dataType: 'numeric', nullable: true, isPrimaryKey: false },
+      ]);
+      place(viewA, cust); place(viewA, ord); place(viewA, inv);
+
+      // Part B, exact-name match, but tables placed on DIFFERENT views -> should still
+      // be created (whole-document scope) but land unplaced (no shared view).
+      const dept = mkTable('RegrDept_' + ts, [{ id: 'd-pk-' + ts, name: 'Code', dataType: 'string', nullable: false, isPrimaryKey: true }]);
+      const emp = mkTable('RegrEmp_' + ts, [
+        { id: 'e-pk-' + ts, name: 'Id', dataType: 'numeric', nullable: false, isPrimaryKey: true },
+        { id: 'e-fk-' + ts, name: 'Code', dataType: 'string', nullable: true, isPrimaryKey: false },
+      ]);
+      place(viewC, dept); place(viewD, emp);
+
+      // De-dup fixture: a pair ALREADY linked by a real 'd' connector between the exact
+      // two attributes -- must never be re-proposed.
+      const region = mkTable('RegrRegion_' + ts, [{ id: 'r-pk-' + ts, name: 'Code2', dataType: 'string', nullable: false, isPrimaryKey: true }]);
+      const branch = mkTable('RegrBranch_' + ts, [{ id: 'b-fk-' + ts, name: 'Code2', dataType: 'string', nullable: true, isPrimaryKey: false }]);
+      place(viewC, region); place(viewC, branch);
+      store.createConnector({ from: branch.id, to: region.id, model, connectorType: 'd', relationship: 'Association', fromAttribute: 'b-fk-' + ts, toAttribute: 'r-pk-' + ts, fromCardinality: 'many', toCardinality: 'one' });
+
+      const ddlText = `CREATE TABLE ${inv.label} (id INTEGER, cust_ref INTEGER, FOREIGN KEY (cust_ref) REFERENCES ${cust.label}(Id));`;
+      const candidates = commands.detectConnectorCandidates(store, ddlText);
+
+      const findCand = (fromAttributeId, toAttributeId) => candidates.find(c => c.fromAttributeId === fromAttributeId && c.toAttributeId === toAttributeId);
+      const ordCand = findCand('o-fk-' + ts, 'c-pk-' + ts);
+      const invCand = findCand('i-fk-' + ts, 'c-pk-' + ts);
+      const deptCand = findCand('e-fk-' + ts, 'd-pk-' + ts);
+      const branchProposed = candidates.some(c => c.fromAttributeId === 'b-fk-' + ts || c.toAttributeId === 'b-fk-' + ts);
+
+      const { created, placements, unplaced } = commands.createDetectedConnectors(app, candidates);
+
+      const ordConn = store.doc.connectors.find(c => c.connectorType === 'd' && c.fromAttribute === 'o-fk-' + ts && c.toAttribute === 'c-pk-' + ts);
+      const invConn = store.doc.connectors.find(c => c.connectorType === 'd' && c.fromAttribute === 'i-fk-' + ts && c.toAttribute === 'c-pk-' + ts);
+      const deptConn = store.doc.connectors.find(c => c.connectorType === 'd' && c.fromAttribute === 'e-fk-' + ts && c.toAttribute === 'd-pk-' + ts);
+      const ordPlaced = store.doc.viewMembers.some(vm => vm.objectType === 'connector' && vm.objectId === ordConn?.id && vm.view === viewA.id);
+      const invPlaced = store.doc.viewMembers.some(vm => vm.objectType === 'connector' && vm.objectId === invConn?.id && vm.view === viewA.id);
+      const deptPlacedAnywhere = store.doc.viewMembers.some(vm => vm.objectType === 'connector' && vm.objectId === deptConn?.id);
+
+      const reDetected = commands.detectConnectorCandidates(store, ddlText);
+      const stillProposesOrd = !!findCandIn(reDetected, 'o-fk-' + ts, 'c-pk-' + ts);
+      function findCandIn(list, f, t) { return list.find(c => c.fromAttributeId === f && c.toAttributeId === t); }
+
+      return {
+        candidateCount: candidates.length,
+        ordCandSource: ordCand ? ordCand.source : null,
+        invCandSource: invCand ? invCand.source : null,
+        deptCandSource: deptCand ? deptCand.source : null,
+        branchProposed,
+        created, placements, unplaced,
+        ordConnCardinality: ordConn ? [ordConn.fromCardinality, ordConn.toCardinality] : null,
+        ordPlaced, invPlaced, deptPlacedAnywhere,
+        stillProposesOrd,
+      };
+    }
+    """)
+    problems = []
+    if result["candidateCount"] != 3:
+        problems.append(f"expected exactly 3 candidates (ord/inv/dept pairs; branch's pair already connected), got {result['candidateCount']}")
+    if result["ordCandSource"] != "Name match":
+        problems.append(f"expected the '<Table>Id'-pattern ord/cust pair to be proposed with source 'Name match', got {result['ordCandSource']!r}")
+    if result["invCandSource"] != "DDL REFERENCES":
+        problems.append(f"expected the inv/cust pair (name-mismatched FK column) to be proposed ONLY via Part A's DDL REFERENCES match, got {result['invCandSource']!r}")
+    if result["deptCandSource"] != "Name match":
+        problems.append(f"expected the exact-name dept/emp pair to be proposed with source 'Name match', got {result['deptCandSource']!r}")
+    if result["branchProposed"]:
+        problems.append("expected the branch/region pair (already linked by a real 'd' connector) to NEVER be re-proposed")
+    if result["created"] != 3:
+        problems.append(f"expected createDetectedConnectors to create 3 connectors, got {result['created']}")
+    if result["unplaced"] != 1:
+        problems.append(f"expected exactly 1 of the 3 created connectors to land unplaced (dept/emp share no view), got unplaced={result['unplaced']}")
+    if result["placements"] != 2:
+        problems.append(f"expected 2 total connector placements (ord and inv both share viewA with their PK table), got {result['placements']}")
+    if result["ordConnCardinality"] != ["many", "one"]:
+        problems.append(f"expected the created connector to use fromCardinality:'many'/toCardinality:'one' (importDDL's own convention), got {result['ordConnCardinality']}")
+    if not result["ordPlaced"] or not result["invPlaced"]:
+        problems.append(f"expected the ord/cust and inv/cust connectors to be auto-placed on viewA (both endpoints already there), got ordPlaced={result['ordPlaced']} invPlaced={result['invPlaced']}")
+    if result["deptPlacedAnywhere"]:
+        problems.append("expected the dept/emp connector to be created but placed NOWHERE (its two tables share no view)")
+    if result["stillProposesOrd"]:
+        problems.append("expected re-running detection after creation to find ZERO further candidates for the same pair (dedup must also cover connectors this feature itself just created)")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "detectConnectorCandidates finds explicit DDL REFERENCES matched against EXISTING tables (Part A), exact-name and '<Table>Id'-pattern field-name matches (Part B), never re-proposes an already-connected pair, and createDetectedConnectors places new connectors only where both tables already share a view (leaving the rest created-but-unplaced) -- all idempotent on re-detection"
+
+
+def check_auto_detect_connectors_dialog(page):
+    """UI-wiring regression guard for the Auto-Detect Connectors... dialog itself
+    (Data Modeling menu, App.promptAutoDetectConnectors, main.js) -- driven through the
+    real menu click and DOM, not by calling commands.js directly (see
+    check_auto_detect_connectors_detection_and_creation for the underlying logic).
+    Covers: the menu item opens a dialog with a DDL textarea and a Detect button; a
+    Data Entity Details table with no candidates found before the button is ever
+    clicked doesn't show a Create button; clicking Detect (with no DDL pasted, relying
+    only on the field-name heuristic) populates a preview row per candidate, every row
+    starting checked; unchecking one row before clicking "Create Selected Connectors"
+    excludes exactly that one candidate from what actually gets created (proving the
+    dialog's own selection state, not just detection, drives what's created); and
+    Cancel closes the dialog without creating anything."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const ts = Date.now();
+      const view = store.addView('RegrADCDlg_' + ts, 'ff');
+      const custLabel = 'RegrDlgCust_' + ts;
+      const cust = store.createPart({ type: 'DataEntityDetails', label: custLabel, model, streams: [],
+        attributes: [{ id: 'dc-pk-' + ts, name: 'Id', dataType: 'numeric', nullable: false, isPrimaryKey: true }] });
+      const ord = store.createPart({ type: 'DataEntityDetails', label: 'RegrDlgOrd_' + ts, model, streams: [],
+        attributes: [
+          { id: 'dc-pk2-' + ts, name: 'Id', dataType: 'numeric', nullable: false, isPrimaryKey: true },
+          { id: 'dc-fk-' + ts, name: custLabel + 'Id', dataType: 'numeric', nullable: true, isPrimaryKey: false },
+        ] });
+      // second, independent candidate pair (exact-name match) so unchecking ONE row
+      // below still leaves a second one checked to actually create.
+      const dept = store.createPart({ type: 'DataEntityDetails', label: 'RegrDlgDept_' + ts, model, streams: [],
+        attributes: [{ id: 'dc-pk3-' + ts, name: 'Code', dataType: 'string', nullable: false, isPrimaryKey: true }] });
+      const emp = store.createPart({ type: 'DataEntityDetails', label: 'RegrDlgEmp_' + ts, model, streams: [],
+        attributes: [
+          { id: 'dc-pk4-' + ts, name: 'Id', dataType: 'numeric', nullable: false, isPrimaryKey: true },
+          { id: 'dc-fk2-' + ts, name: 'Code', dataType: 'string', nullable: true, isPrimaryKey: false },
+        ] });
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: cust.id, x: 0, y: 0 });
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: ord.id, x: 200, y: 0 });
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: dept.id, x: 0, y: 200 });
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: emp.id, x: 200, y: 200 });
+      app.recordAndRender();
+
+      document.getElementById('data-modeling-menu-btn').click();
+      await new Promise(r => setTimeout(r, 40));
+      document.querySelector('[data-action="autoDetectConnectors"]').click();
+      await new Promise(r => setTimeout(r, 40));
+
+      const box = document.querySelector('.modal-box');
+      const hasTextarea = !!box.querySelector('#adc-ddl');
+      const createHiddenBeforeDetect = box.querySelector('#adc-create').classList.contains('hidden');
+
+      box.querySelector('#adc-detect').click();
+      await new Promise(r => setTimeout(r, 40));
+
+      const rows = [...box.querySelectorAll('.adc-row-check')];
+      const rowCountAfterDetect = rows.length;
+      const allCheckedByDefault = rows.every(cb => cb.checked);
+      const createVisibleAfterDetect = !box.querySelector('#adc-create').classList.contains('hidden');
+
+      // uncheck the first row before confirming
+      if (rows.length) { rows[0].checked = false; rows[0].dispatchEvent(new Event('change', { bubbles: true })); }
+
+      const connCountBefore = store.doc.connectors.filter(c => c.connectorType === 'd').length;
+      box.querySelector('#adc-create').click();
+      await new Promise(r => setTimeout(r, 40));
+      const connCountAfter = store.doc.connectors.filter(c => c.connectorType === 'd').length;
+      const dialogClosedAfterCreate = !document.querySelector('.modal-box');
+      const toastText = (() => { const all = document.querySelectorAll('.toast'); return all.length ? all[all.length - 1].textContent : null; })();
+
+      // Cancel path: open again, confirm Cancel closes with no changes
+      document.getElementById('data-modeling-menu-btn').click();
+      await new Promise(r => setTimeout(r, 40));
+      document.querySelector('[data-action="autoDetectConnectors"]').click();
+      await new Promise(r => setTimeout(r, 40));
+      const box2 = document.querySelector('.modal-box');
+      box2.querySelector('.cancel').click();
+      await new Promise(r => setTimeout(r, 40));
+      const dialogClosedAfterCancel = !document.querySelector('.modal-box');
+      const connCountAfterCancel = store.doc.connectors.filter(c => c.connectorType === 'd').length;
+
+      return {
+        hasTextarea, createHiddenBeforeDetect, rowCountAfterDetect, allCheckedByDefault, createVisibleAfterDetect,
+        connCountBefore, connCountAfter, dialogClosedAfterCreate, toastText,
+        dialogClosedAfterCancel, connCountAfterCancel,
+      };
+    }
+    """)
+    problems = []
+    if not result["hasTextarea"]:
+        problems.append("expected the Auto-Detect Connectors dialog to include a DDL paste textarea (#adc-ddl)")
+    if not result["createHiddenBeforeDetect"]:
+        problems.append("expected the Create button to stay hidden until Detect Connectors has actually run")
+    if result["rowCountAfterDetect"] < 1:
+        problems.append(f"expected at least one candidate row after clicking Detect (field-name heuristic should catch the '<Table>Id' fixture), got {result['rowCountAfterDetect']}")
+    if not result["allCheckedByDefault"]:
+        problems.append("expected every candidate row to start checked")
+    if not result["createVisibleAfterDetect"]:
+        problems.append("expected the Create Selected Connectors button to become visible once candidates are found")
+    if result["connCountAfter"] - result["connCountBefore"] != result["rowCountAfterDetect"] - 1:
+        problems.append(f"expected unchecking one row to exclude exactly that candidate from creation ({result['rowCountAfterDetect'] - 1} of {result['rowCountAfterDetect']} expected created), got {result['connCountAfter'] - result['connCountBefore']} created")
+    if not result["dialogClosedAfterCreate"]:
+        problems.append("expected the dialog to close after Create Selected Connectors")
+    if not result["toastText"] or "Created" not in result["toastText"]:
+        problems.append(f"expected a specific 'Created N connector(s)...' toast, got {result['toastText']!r}")
+    if not result["dialogClosedAfterCancel"]:
+        problems.append("expected Cancel to close the dialog")
+    if result["connCountAfterCancel"] != result["connCountAfter"]:
+        problems.append(f"expected Cancel to create NOTHING, got connector count changed from {result['connCountAfter']} to {result['connCountAfterCancel']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Auto-Detect Connectors... dialog (Data Modeling menu) opens with a DDL textarea, Detect Connectors populates a checked-by-default preview list, unchecking a row excludes exactly that candidate from what Create Selected Connectors actually creates, and Cancel closes without creating anything"
+
+
 def check_level_up_creates_data_data_entity(page):
     """Regression guard/new-feature check, reported directly: "Enhancement: when a
     single dataentitydetail is selected and user selects 'level-up' command, create
@@ -8579,6 +8830,8 @@ CHECKS = [
     check_data_entity_details_sizing_fits_attribute_count,
     check_data_modeling_attribute_editing_and_auto_fk,
     check_data_modeling_autofill,
+    check_auto_detect_connectors_detection_and_creation,
+    check_auto_detect_connectors_dialog,
     check_level_up_creates_data_data_entity,
     check_smart_check_composition_top_down,
     check_smart_check_composition_bottom_up,

@@ -1021,6 +1021,63 @@ canvas placed below it. Fixed by raising the ceiling to `600px` (comfortably fit
 ~40 attribute rows — still a real ceiling, so one pathologically huge pasted table
 can't blow up every other node's shared, uniform-per-view size without limit).
 
+**Auto-Detect Connectors** (`js/commands.js`'s `detectConnectorCandidates`/
+`createDetectedConnectors`; `App.promptAutoDetectConnectors`, `main.js`) — reported
+directly: *"Part A: auto determine from ddl content 'references'. Part B: find
+matching field names where one is primary key and other is not, this is potential for
+n to 1 and foreign key, show preview list to user to confirm before creating new
+connectors."* Part A itself already existed inside `importDDL` (above) but only for
+tables being created fresh from the pasted DDL; this is the missing piece — finding
+candidate `'d'` connectors between tables that ALREADY exist in the document, with a
+preview-then-confirm step before anything is created (the field-name heuristic in
+particular is a guess, not a certainty). Deliberately scoped to the WHOLE document,
+not the current view (the user's own explicit choice over the current-view scoping
+every other Data Modeling command uses) — the two tables involved may not even be
+placed together on any view yet.
+- `detectConnectorCandidates(store, ddlText)` is pure logic (no DOM, no mutation),
+  combining two independent mechanisms into one merged, de-duplicated list:
+  - **Part A**: if `ddlText` is given, `ddl.js`'s `parseDDL` — the exact same
+    `FOREIGN KEY ... REFERENCES` parsing `importDDL` itself uses — has its
+    `foreignKeys` matched against EXISTING `DataEntityDetails` tables/attributes by
+    name. A reference `parseDDL` can't resolve among existing tables is silently
+    skipped (not fabricated), same principle as `importDDL`'s own `fkSkipped`.
+  - **Part B**: every (primary-key attribute, non-primary-key attribute) pair across
+    two DIFFERENT tables whose names match — either exactly (case/punctuation-
+    insensitive, via a small `normalizeIdent` helper) or the non-PK name matches the
+    PK table's own label concatenated with the PK's name (the "`<Table>Id`"
+    convention, e.g. Customer's PK "Id" matching Order's "CustomerId") — is proposed.
+  - Both mechanisms use `importDDL`'s own `fromAttribute`/`toAttribute` convention
+    (`fromAttribute` = the FK/child/"many" side, `toAttribute` = the referenced/PK/
+    "one" side, `fromCardinality:'many'`/`toCardinality:'one'`), so a confirmed
+    candidate is indistinguishable from one DDL import would have produced directly.
+  - A pair already linked by an existing `'d'` connector between those exact two
+    attributes (either direction) is never proposed again — checked by attribute-id
+    pair, deliberately NOT via `store.findExistingConnector`'s coarser (from, to,
+    model, connectorType) uniqueness key, since that key would incorrectly collapse
+    two genuinely different FK relationships between the same two tables (e.g. Order
+    referencing Customer via both `CustomerId` and `ShipToCustomerId`) into one.
+- `createDetectedConnectors(app, candidates)` creates a real `'d'` connector for each
+  CONFIRMED candidate (the caller has already filtered to whatever a person checked in
+  the preview list), then places a connector viewMember in every view where both
+  endpoint parts already have a part viewMember — the same "both endpoints already on
+  this view" placement rule `smartCheckView`'s own `missingConnectors` block uses,
+  just applied across every view in the document at once since detection isn't scoped
+  to one view. A pair with no shared view yet still gets its connector created at the
+  document level (mirrors Level Up/Down's own "unplaced Composition connector"
+  precedent, above) rather than being silently dropped — it becomes visible once both
+  tables are eventually placed together on some view, including automatically the next
+  time Smart Check View runs there. Returns `{ created, placements, unplaced }`.
+- `App.promptAutoDetectConnectors` (new Data Modeling menu item, after a separator
+  following Export DDL) is a single modal: an optional DDL-paste textarea, a "Detect
+  Connectors" button that runs `detectConnectorCandidates` and renders a checkbox
+  table (every row checked by default, with a Select All toggle), and a "Create
+  Selected Connectors" button (hidden until at least one Detect has run) that filters
+  to what's checked and calls `createDetectedConnectors`. Follows this codebase's
+  standard `.modal-overlay > .modal-box` convention (closes only via its own Cancel/
+  Create buttons). New `check_auto_detect_connectors_detection_and_creation` (pure
+  logic, covering Part A/B, de-dup, and placement-vs-unplaced) and
+  `check_auto_detect_connectors_dialog` (real menu/DOM wiring) in `tests/run_all.py`.
+
 ## 8. Simulation engine
 
 Per-model tick engine (`simulation.js`). `store.simRuntime: Map<modelName, {tick,

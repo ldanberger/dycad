@@ -819,6 +819,24 @@ falls outside that subset, nothing is imported and you'll see exactly which tabl
 <strong>Export DDL</strong> generates DDL text back from whatever Data Entity Details nodes and Data
 connectors are on the <em>current view</em> (not the whole model) and shows it in a read-only text box you
 can select and copy from.</p>
+<h3>Auto-Detect Connectors</h3>
+<p><strong>Data Modeling &gt; Auto-Detect Connectors...</strong> scans every Data Entity Details table in the
+whole model (not just the current view) for likely relationships that aren't connected yet, and shows you a
+preview list to check over before anything is actually created — nothing happens until you click
+<strong>Create Selected Connectors</strong>. It combines two ways of finding candidates:</p>
+<ul>
+  <li>Paste DDL text containing <code>FOREIGN KEY ... REFERENCES</code> clauses into the box at the top (this
+  is optional) — each one is matched against tables/columns that already exist in your model. This is the
+  same explicit signal Import DDL uses, just matched against existing tables instead of creating new ones.</li>
+  <li>Whether or not you paste anything, a field-name match always runs too: any non-primary-key attribute
+  whose name matches another table's primary key — either exactly (e.g. both called "Code") or by the common
+  "&lt;Table&gt;Id" convention (e.g. Customer's primary key "Id" matching an Order attribute named
+  "CustomerId") — is proposed as a likely one-to-many/foreign-key relationship.</li>
+</ul>
+<p>Every candidate starts checked; uncheck any you don't want before confirming. A pair already connected by
+an existing Data connector is never proposed again. If both tables in a confirmed pair already share a view,
+the new connector is placed there automatically; if they don't share any view yet, the connector is still
+created (so it's ready once you do place them together) but won't be visible on any diagram until then.</p>
 
 <h2 id="tips">8. Tips &amp; Things to Know</h2>
 <ul>

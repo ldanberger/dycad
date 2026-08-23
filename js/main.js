@@ -4,7 +4,7 @@ import { parseArchimateXml } from './archimate.js';
 import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
-import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL } from './commands.js';
+import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors } from './commands.js';
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection, computeSectionLayout, getAllowedTypesForView } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
@@ -440,6 +440,128 @@ class App {
     } catch (err) {
       this.toast(err.message, true);
     }
+  }
+
+  /** Data Modeling > Auto-Detect Connectors...: preview-then-confirm UI over
+   * commands.js's detectConnectorCandidates/createDetectedConnectors. Scoped to the
+   * WHOLE document (every DataEntityDetails table, not just the current view — see
+   * detectConnectorCandidates' own doc comment), so this is reachable with no canvas
+   * tab open at all. A pasted DDL text box drives Part A (explicit REFERENCES,
+   * matched against existing tables); Part B (field-name heuristic) always runs
+   * regardless of whether any DDL text is given. Nothing is created until "Create
+   * Selected Connectors" is clicked — every candidate starts checked, but a person can
+   * uncheck individual rows (or Select All / none) first, since Part B in particular is
+   * a guess, not a certainty. */
+  promptAutoDetectConnectors() {
+    const tableCount = this.store.doc.parts.filter((p) => ciEq(p.type, 'DataEntityDetails')).length;
+    if (tableCount < 2) { this.toast('Need at least two Data Entity Details tables in the model to detect connectors.', true); return; }
+
+    const root = document.getElementById('modal-root');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal-box';
+    box.style.width = '760px';
+    box.style.maxWidth = '92vw';
+    box.innerHTML = `
+      <h3>Auto-Detect Connectors</h3>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
+        Scans every Data Entity Details table in the model (not just the current view) for likely
+        foreign-key relationships that aren't already connected: explicit DDL
+        <code>FOREIGN KEY ... REFERENCES</code> text pasted below (optional), plus a field-name match
+        against existing primary keys (e.g. a "CustomerId" column matching Customer's own primary
+        key). Nothing is created until you review and confirm the list below.
+      </div>
+      <div class="prop-row"><label>Paste DDL (optional)</label></div>
+      <textarea id="adc-ddl" rows="5" style="width:100%;font-family:monospace;font-size:12px;box-sizing:border-box;" placeholder="CREATE TABLE ... FOREIGN KEY (...) REFERENCES ...(...); -- optional, matched against existing tables only"></textarea>
+      <div id="adc-results" style="margin-top:12px;">
+        <div style="color:var(--text-muted);font-size:12px;">No candidates detected yet — click "Detect Connectors" below.</div>
+      </div>
+      <div class="modal-actions">
+        <button class="cancel">Cancel</button>
+        <button id="adc-detect" class="primary">Detect Connectors</button>
+        <button id="adc-create" class="primary hidden">Create Selected Connectors</button>
+      </div>
+    `;
+    overlay.appendChild(box);
+    root.appendChild(overlay);
+    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+
+    let candidates = [];
+    const selected = new Set();
+    const resultsEl = box.querySelector('#adc-results');
+    const createBtn = box.querySelector('#adc-create');
+
+    const renderResults = () => {
+      if (candidates.length === 0) {
+        resultsEl.innerHTML = `<div style="color:var(--text-muted);font-size:12px;">No new connector candidates found.</div>`;
+        createBtn.classList.add('hidden');
+        return;
+      }
+      resultsEl.innerHTML = `
+        <div style="max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:6px;">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead><tr>
+              <th style="width:28px;"><input type="checkbox" id="adc-select-all" title="Select/deselect all" /></th>
+              <th style="text-align:left;padding:5px 8px;">From (foreign key)</th>
+              <th style="text-align:left;padding:5px 8px;">To (referenced primary key)</th>
+              <th style="text-align:left;padding:5px 8px;">Source</th>
+            </tr></thead>
+            <tbody id="adc-tbody">
+              ${candidates.map((c, i) => `
+                <tr>
+                  <td style="padding:4px 8px;"><input type="checkbox" class="adc-row-check" data-idx="${i}" ${selected.has(i) ? 'checked' : ''} /></td>
+                  <td style="padding:4px 8px;">${escapeHtml(c.fromTableLabel)}.${escapeHtml(c.fromAttrName)}</td>
+                  <td style="padding:4px 8px;">${escapeHtml(c.toTableLabel)}.${escapeHtml(c.toAttrName)}</td>
+                  <td style="padding:4px 8px;">${escapeHtml(c.source)}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+      const syncSelectAll = () => {
+        const sa = resultsEl.querySelector('#adc-select-all');
+        sa.checked = selected.size === candidates.length;
+        sa.indeterminate = selected.size > 0 && selected.size < candidates.length;
+      };
+      resultsEl.querySelectorAll('.adc-row-check').forEach((cb) => {
+        cb.addEventListener('change', () => {
+          const idx = Number(cb.dataset.idx);
+          if (cb.checked) selected.add(idx); else selected.delete(idx);
+          syncSelectAll();
+        });
+      });
+      resultsEl.querySelector('#adc-select-all').addEventListener('change', (e) => {
+        if (e.target.checked) candidates.forEach((_, i) => selected.add(i));
+        else selected.clear();
+        renderResults();
+      });
+      syncSelectAll();
+      createBtn.classList.remove('hidden');
+    };
+
+    box.querySelector('#adc-detect').addEventListener('click', () => {
+      const ddlText = box.querySelector('#adc-ddl').value;
+      try {
+        candidates = detectConnectorCandidates(this.store, ddlText);
+      } catch (err) {
+        this.toast(`DDL parse error: ${err.message}`, true);
+        return;
+      }
+      selected.clear();
+      candidates.forEach((_, i) => selected.add(i)); // every candidate starts checked
+      renderResults();
+    });
+
+    createBtn.addEventListener('click', () => {
+      const chosen = candidates.filter((_, i) => selected.has(i));
+      overlay.remove();
+      if (chosen.length === 0) { this.toast('No connectors selected.', true); return; }
+      const { created, unplaced } = createDetectedConnectors(this, chosen);
+      this.recordAndRender();
+      const unplacedSuffix = unplaced > 0 ? ` (${unplaced} not yet placed on any view — both tables aren't shown together anywhere yet)` : '';
+      this.toast(`Created ${created} connector${created === 1 ? '' : 's'}${unplacedSuffix}.`);
+    });
   }
 
   /** Data Modeling > Autofill: extracts and calls a top-level `dataAutoFill()` function
@@ -4067,10 +4189,11 @@ function wireGlobalEvents(app) {
   // import/export) — "Add/Edit Entity Details" is the menu-triggered equivalent of
   // double-clicking a DataDataEntity node (see promptAddEditEntityDetails); "Autofill"
   // runs the user-editable dataAutoFill() batch script (see promptAutofill below and
-  // DEFAULT_BATCH_SCRIPT_CODE, state.js); Import/Export DDL are the only two commands
-  // that need a real dialog/file-picker, so they dispatch through app methods below
-  // rather than being handled inline here, matching how Advanced's own
-  // generateIndustry/scriptConsole items work. =====
+  // DEFAULT_BATCH_SCRIPT_CODE, state.js); Import/Export DDL, and Auto-Detect Connectors
+  // (see promptAutoDetectConnectors above) are the commands that need a real
+  // dialog/file-picker, so they dispatch through app methods below rather than being
+  // handled inline here, matching how Advanced's own generateIndustry/scriptConsole
+  // items work. =====
   const DATA_MODELING_LINKS = [
     { label: 'Add/Edit Entity Details', action: 'addEditEntityDetails' },
     { separator: true },
@@ -4078,6 +4201,8 @@ function wireGlobalEvents(app) {
     { separator: true },
     { label: 'Import DDL...', action: 'importDDL' },
     { label: 'Export DDL', action: 'exportDDL' },
+    { separator: true },
+    { label: 'Auto-Detect Connectors...', action: 'autoDetectConnectors' },
   ];
   const dataModelingMenu = document.getElementById('data-modeling-menu');
   dataModelingMenu.innerHTML = DATA_MODELING_LINKS.map((l) => l.separator ? '<div class="dd-separator"></div>' : `<div class="dd-item" data-action="${l.action}">${l.label}</div>`).join('');
@@ -4087,6 +4212,7 @@ function wireGlobalEvents(app) {
       else if (item.dataset.action === 'autofill') app.promptAutofill();
       else if (item.dataset.action === 'importDDL') document.getElementById('import-ddl-input').click();
       else if (item.dataset.action === 'exportDDL') app.promptExportDDL();
+      else if (item.dataset.action === 'autoDetectConnectors') app.promptAutoDetectConnectors();
       dataModelingMenu.classList.add('hidden');
     });
   });

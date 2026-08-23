@@ -3904,5 +3904,147 @@ function exportDDL(app, viewId) {
   return generateDDL(parts, conns);
 }
 
+/** Case/punctuation-insensitive identifier normalization ("Customer Id", "customer_id",
+ * "CustomerID" all collapse to "customerid") — used only by the field-name heuristic
+ * below, where a person's own naming convention shouldn't defeat an otherwise-obvious
+ * match. */
+function normalizeIdent(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
 
-export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL };
+/** Data Modeling > Auto-Detect Connectors: finds candidate 'd' connectors across every
+ * 'DataEntityDetails' part in the WHOLE document (not scoped to one view — the tables
+ * involved may not even be placed together on any view yet), combining two independent
+ * detection mechanisms into one merged, de-duplicated list for the caller to preview
+ * and let a person confirm before anything is actually created:
+ *
+ *   Part A (explicit): if ddlText is given, ddl.js's parseDDL — the exact same
+ *   FOREIGN KEY ... REFERENCES parsing importDDL itself uses when creating brand-new
+ *   tables — is matched here against EXISTING DataEntityDetails tables/attributes
+ *   already in the document, by name. A reference to a table/column that isn't found
+ *   among existing tables is simply not proposed (skipped, not fabricated — same
+ *   principle as importDDL's own fkSkipped count).
+ *
+ *   Part B (heuristic): every (primary-key attribute, non-primary-key attribute) pair
+ *   across two DIFFERENT tables whose names match — either exactly (case/punctuation-
+ *   insensitive) or the non-PK name matches the PK table's own label concatenated with
+ *   the PK's own name (the common "<Table>Id" convention, e.g. Customer's PK "Id"
+ *   matching Order's "CustomerId") — is a candidate "this is probably a foreign key"
+ *   match. This is a heuristic guess, not a certainty — false positives (an unrelated
+ *   "Id"-named column, a coincidental name collision) are expected and are exactly what
+ *   the caller's confirm step is for.
+ *
+ * Both mechanisms use the same fromAttribute/toAttribute convention importDDL itself
+ * produces (fromAttribute = the FK/child/"many" side, toAttribute = the referenced/PK
+ * /"one" side, fromCardinality:'many'/toCardinality:'one') so a confirmed candidate is
+ * indistinguishable from one DDL import would have created directly. A pair already
+ * linked by an existing 'd' connector between those exact two attributes (in either
+ * direction) is never proposed again, and a pair matched by both mechanisms is only
+ * listed once (Part A's match wins, since it's the explicit, non-heuristic one).
+ * Pure logic, no DOM, no store mutation — safe to call on every keystroke/click of a
+ * "Detect" button. */
+function detectConnectorCandidates(store, ddlText) {
+  const tables = store.doc.parts.filter((p) => ciEq(p.type, 'DataEntityDetails'));
+
+  const existingPairs = new Set();
+  for (const c of store.doc.connectors) {
+    if (!ciEq(c.connectorType, 'd') || !c.fromAttribute || !c.toAttribute) continue;
+    existingPairs.add(`${c.fromAttribute}|${c.toAttribute}`);
+    existingPairs.add(`${c.toAttribute}|${c.fromAttribute}`);
+  }
+
+  const candidates = [];
+  const proposedPairs = new Set();
+  const addCandidate = (fromPart, fromAttr, toPart, toAttr, source) => {
+    const key = `${fromAttr.id}|${toAttr.id}`;
+    if (existingPairs.has(key) || proposedPairs.has(key) || proposedPairs.has(`${toAttr.id}|${fromAttr.id}`)) return;
+    proposedPairs.add(key);
+    candidates.push({
+      fromPartId: fromPart.id, fromAttributeId: fromAttr.id, fromTableLabel: fromPart.label, fromAttrName: fromAttr.name,
+      toPartId: toPart.id, toAttributeId: toAttr.id, toTableLabel: toPart.label, toAttrName: toAttr.name,
+      fromCardinality: 'many', toCardinality: 'one', source,
+    });
+  };
+
+  if (ddlText && ddlText.trim()) {
+    const { foreignKeys } = parseDDL(ddlText); // throws on unparseable text -- propagated to the caller
+    const byName = new Map(tables.map((t) => [t.label.toLowerCase(), t]));
+    for (const fk of foreignKeys) {
+      const fromPart = byName.get(fk.fromTable.toLowerCase());
+      const toPart = byName.get(fk.toTable.toLowerCase());
+      const fromAttr = fromPart?.attributes?.find((a) => ciEq(a.name, fk.fromColumn));
+      const toAttr = toPart?.attributes?.find((a) => ciEq(a.name, fk.toColumn));
+      if (!fromPart || !toPart || !fromAttr || !toAttr) continue; // not found among existing tables -- skipped, not fabricated
+      addCandidate(fromPart, fromAttr, toPart, toAttr, 'DDL REFERENCES');
+    }
+  }
+
+  for (const pkTable of tables) {
+    for (const pkAttr of pkTable.attributes || []) {
+      if (!pkAttr.isPrimaryKey) continue;
+      const exactTarget = normalizeIdent(pkAttr.name);
+      const prefixedTarget = normalizeIdent(`${pkTable.label}${pkAttr.name}`);
+      for (const otherTable of tables) {
+        if (otherTable.id === pkTable.id) continue;
+        for (const candAttr of otherTable.attributes || []) {
+          if (candAttr.isPrimaryKey) continue;
+          const n = normalizeIdent(candAttr.name);
+          if (n === exactTarget || n === prefixedTarget) addCandidate(otherTable, candAttr, pkTable, pkAttr, 'Name match');
+        }
+      }
+    }
+  }
+
+  candidates.sort((a, b) =>
+    (a.source === b.source ? 0 : a.source === 'DDL REFERENCES' ? -1 : 1) ||
+    a.fromTableLabel.localeCompare(b.fromTableLabel) || a.fromAttrName.localeCompare(b.fromAttrName));
+  return candidates;
+}
+
+/** Creates a real 'd' connector for each CONFIRMED candidate (detectConnectorCandidates'
+ * own shape — the caller has already filtered this down to whatever a person checked in
+ * the preview list) and places a connector viewMember in every view where both endpoint
+ * parts already have a part viewMember — the same "both endpoints already on this view"
+ * placement rule smartCheckView's own missingConnectors uses (js/commands.js above),
+ * just applied across every view in the document at once since detection itself isn't
+ * scoped to one view. A pair with no shared view yet still gets its connector created at
+ * the document level (mirrors Level Up/Down's own "unplaced Composition connector"
+ * precedent, DESIGN_DOCUMENT.md §7a) — it becomes visible once both tables are eventually
+ * placed together on some view, including automatically the next time Smart Check View
+ * runs there. Returns { created, placements, unplaced } — `placements` is the total
+ * count of connector viewMembers created (a pair sharing MORE than one view gets more
+ * than one placement per connector, so this can exceed `created`); `unplaced` is the
+ * number of newly-created connectors that got zero placements anywhere. */
+function createDetectedConnectors(app, candidates) {
+  const { store } = app;
+  const vmsByPart = new Map(); // partId -> Map<viewId, vmId>
+  for (const vm of store.doc.viewMembers) {
+    if (vm.objectType !== 'part') continue;
+    if (!vmsByPart.has(vm.objectId)) vmsByPart.set(vm.objectId, new Map());
+    vmsByPart.get(vm.objectId).set(vm.view, vm.id);
+  }
+
+  let created = 0, placements = 0, unplaced = 0;
+  for (const cand of candidates) {
+    const conn = store.createConnector({
+      from: cand.fromPartId, to: cand.toPartId, model: store.defaultModel, connectorType: 'd', relationship: 'Association',
+      fromAttribute: cand.fromAttributeId, toAttribute: cand.toAttributeId,
+      fromCardinality: cand.fromCardinality, toCardinality: cand.toCardinality,
+    });
+    created += 1;
+    const fromViews = vmsByPart.get(cand.fromPartId) || new Map();
+    const toViews = vmsByPart.get(cand.toPartId) || new Map();
+    let placedSomewhere = false;
+    for (const [viewId, fromVmId] of fromViews) {
+      const toVmId = toViews.get(viewId);
+      if (!toVmId) continue;
+      store.createViewMember({ view: viewId, objectType: 'connector', objectId: conn.id, fromVmId, toVmId });
+      placements += 1;
+      placedSomewhere = true;
+    }
+    if (!placedSomewhere) unplaced += 1;
+  }
+  return { created, placements, unplaced };
+}
+
+export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors };
