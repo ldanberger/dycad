@@ -3200,6 +3200,29 @@ function computeLayerAssignment(vms, connVms) {
   return layer;
 }
 
+/** Reported directly: "remap selected places nodes over top existing. Can the
+ * results be placed starting in selected x,y?" Whenever a remap is restricted to a
+ * subset (visiblePartVmIds set — via "Only remap filtered nodes" or "Only remap
+ * selected nodes and their connectors"), every pattern below computes fresh positions
+ * from the view's own fixed origin (baseX/rowBaseY for default/none/layered,
+ * marginX/marginY for force/clusters) — appropriate for a WHOLE-view remap, but for a
+ * restricted subset that just lands the result on top of wherever OTHER, un-remapped
+ * nodes already sit near that same origin. Mutates `vms` in place, translating the
+ * whole group by ONE uniform offset (never per-node — that would distort the
+ * relative layout the pattern just computed) so its own new top-left corner lands
+ * exactly where the group's OWN top-left corner was before this remap ran, instead
+ * of at the view's default origin. No-op if nothing moved (shiftX/shiftY both 0). */
+function shiftToOriginalPosition(vms, originalPositions) {
+  if (!originalPositions || vms.length === 0) return;
+  const oldMinX = Math.min(...vms.map((vm) => originalPositions.get(vm.id)?.x ?? vm.x));
+  const oldMinY = Math.min(...vms.map((vm) => originalPositions.get(vm.id)?.y ?? vm.y));
+  const newMinX = Math.min(...vms.map((vm) => vm.x));
+  const newMinY = Math.min(...vms.map((vm) => vm.y));
+  const shiftX = oldMinX - newMinX, shiftY = oldMinY - newMinY;
+  if (!shiftX && !shiftY) return;
+  for (const vm of vms) { vm.x += shiftX; vm.y += shiftY; }
+}
+
 function applyRemapLayout(app, viewId, options = {}) {
   const { sortKeys, templateName, pattern = 'default', limitColumnsToView = false, visiblePartVmIds = null, forcePreferRight = false, forceGroupRows = false, edgeAssignment = null, minimizeCrossings = false, minimizeConnectorLength = false } = options;
   const { store } = app;
@@ -3227,6 +3250,11 @@ function applyRemapLayout(app, viewId, options = {}) {
   // to wherever the algorithm would otherwise have placed it.
   const partVms = store.viewMembersForView(viewId).filter((vm) => vm.objectType === 'part' && (!visiblePartVmIds || visiblePartVmIds.has(vm.id)));
   const connVms = store.viewMembersForView(viewId).filter((vm) => vm.objectType === 'connector');
+  // Snapshot BEFORE any pattern below mutates x/y — see shiftToOriginalPosition's own
+  // doc comment. Only taken when this remap is actually restricted to a subset (a
+  // whole-view remap keeps its existing "start at the view's own fixed origin"
+  // behavior, unchanged).
+  const originalPartPositions = visiblePartVmIds ? new Map(partVms.map((vm) => [vm.id, { x: vm.x, y: vm.y }])) : null;
 
   // Section-based views (viewType !== 'ff') lay out via a fixed section grid, not the
   // freeform row/column chain below — reuse the same sort-key logic but place each node
@@ -3272,6 +3300,7 @@ function applyRemapLayout(app, viewId, options = {}) {
       const p = positions.get(vm.id);
       if (p) { vm.x = p.x; vm.y = p.y; }
     }
+    shiftToOriginalPosition(partVms, originalPartPositions);
     return { view, template, maxCols: partVms.length };
   }
 
@@ -3301,6 +3330,7 @@ function applyRemapLayout(app, viewId, options = {}) {
       const p = positions.get(vm.id);
       if (p) { vm.x = p.x; vm.y = p.y; }
     }
+    shiftToOriginalPosition(partVms, originalPartPositions);
     return { view, template, maxCols: partVms.length };
   }
 
@@ -3592,6 +3622,7 @@ function applyRemapLayout(app, viewId, options = {}) {
     }
   }
 
+  shiftToOriginalPosition(partVms, originalPartPositions);
   return { view, template, maxCols: resultMaxCols };
 }
 
@@ -3609,6 +3640,7 @@ function remap(app, tab, options = {}) {
     pattern: options.pattern || 'default',
     limitColumnsToView: !!options.limitColumnsToView,
     filteredOnly: !!options.filteredOnly,
+    selectedOnly: !!options.selectedOnly,
     forcePreferRight: !!options.forcePreferRight,
     forceGroupRows: !!options.forceGroupRows,
     edgeAssignment: options.edgeAssignment || {},

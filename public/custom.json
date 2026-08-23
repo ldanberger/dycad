@@ -379,6 +379,11 @@
           "access": "w",
           "label": "Spacing"
         },
+        "spacingAxis": {
+          "show": "s",
+          "access": "w",
+          "label": "Spacing Direction"
+        },
         "chkShowConnectorType": {
           "show": "y",
           "access": "w",

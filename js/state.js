@@ -298,7 +298,7 @@ class Store {
       industryTemplateName: 'SFCCE',
       models: [{ modelName: 'Reference' }, { modelName: 'As-is' }, { modelName: 'To-be' }, { modelName: 'Gap' }],
       views: [
-        { id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1 },
+        { id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1, spacingAxis: 'both' },
       ],
       parts: [],
       connectors: [],
@@ -411,7 +411,7 @@ class Store {
   addView(viewName, viewType = 'ff') {
     const id = viewName;
     if (this.findView(id)) return this.findView(id);
-    const view = { id, viewName, viewType, chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(this.nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1 };
+    const view = { id, viewName, viewType, chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(this.nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1, spacingAxis: 'both' };
     this.doc.views.push(view);
     this.ensureViewSections(view);
     return view;
@@ -640,6 +640,52 @@ class Store {
     view.spacingScale = clamped;
   }
 
+  /** The "Spacing" command's selection-scoped counterpart, reported directly: "if
+   * multiple nodes selected, apply 'Spacing' command increase or decrease only to
+   * selected nodes and update their x,y without changing view spacing value." Scales
+   * just the given viewMembers' own x/y relative to THEIR OWN centroid (not the whole
+   * view's) by a plain ratio (>1 spreads apart, <1 draws together) — and, unlike
+   * applySpacingScale, never touches view.spacingScale at all, since this is a one-off
+   * nudge to a specific selection, not a change to the view's persisted layout
+   * setting. There's no persisted "current selection scale" to compute a ratio-
+   * between-old-and-new from the way the whole-view case has view.spacingScale to
+   * read back, so each call is a flat multiplicative step applied directly to the
+   * CURRENT positions — repeated +/- clicks compound naturally, same as any other
+   * stepper control. Same negative-position guard as applySpacingScale: computes
+   * every scaled position first, then shifts the whole affected group by one uniform
+   * amount if anything went negative, rather than clamping each node individually
+   * (which would visibly compress the gap to whichever node happens to sit nearest
+   * the edge). No-op with fewer than 2 real part viewMembers among vmIds — nothing
+   * meaningful to scale "around" with just one (or zero).
+   *
+   * axis ('both'|'horizontal'|'vertical'), reported directly as a follow-up: "Update
+   * spacing for vertical, horizontal, or both, when used with selected nodes."
+   * 'horizontal' scales only x (y untouched), 'vertical' only y — implemented as
+   * simply substituting 1 (no-op ratio) for the OTHER axis rather than a separate code
+   * path, so the negative-position guard below still runs identically regardless of
+   * which axis (or both) actually moved. */
+  applySpacingRatioToVms(vmIds, ratio, axis = 'both') {
+    const vms = vmIds.map((id) => this.findViewMember(id)).filter((vm) => vm && vm.objectType === 'part');
+    if (vms.length < 2) return;
+    const cx = vms.reduce((s, vm) => s + vm.x, 0) / vms.length;
+    const cy = vms.reduce((s, vm) => s + vm.y, 0) / vms.length;
+    const ratioX = axis === 'vertical' ? 1 : ratio;
+    const ratioY = axis === 'horizontal' ? 1 : ratio;
+    const scaled = vms.map((vm) => ({
+      vm,
+      x: Math.round(cx + (vm.x - cx) * ratioX),
+      y: Math.round(cy + (vm.y - cy) * ratioY),
+    }));
+    const minX = Math.min(...scaled.map((p) => p.x));
+    const minY = Math.min(...scaled.map((p) => p.y));
+    const shiftX = minX < 0 ? -minX : 0;
+    const shiftY = minY < 0 ? -minY : 0;
+    for (const { vm, x, y } of scaled) {
+      vm.x = x + shiftX;
+      vm.y = y + shiftY;
+    }
+  }
+
   normalizeViewCoordinates(viewId) {
     const partVms = this.viewMembersForView(viewId).filter((vm) => vm.objectType === 'part');
     if (partVms.length === 0) return;
@@ -825,7 +871,7 @@ function migrateDoc(obj, nodeSizeMultiplier = 1.2) {
     industryTree: obj.industryTree ?? [],
     industryTemplateName: obj.industryTemplateName || 'SFCCE',
     models: obj.models && obj.models.length ? obj.models : [{ modelName: 'Reference' }],
-    views: obj.views && obj.views.length ? obj.views.map((v) => ({ ...v, viewType: v.viewType || 'ff', sections: v.sections ?? [], nodeWidth: v.nodeWidth ?? defaultNodeSize(nodeSizeMultiplier).nodeWidth, nodeHeight: v.nodeHeight ?? defaultNodeSize(nodeSizeMultiplier).nodeHeight, remapSortKeys: v.remapSortKeys ?? null, remapLastOptions: v.remapLastOptions ?? null, chkShowConnectorType: v.chkShowConnectorType ?? (v.chkShowConnectors ?? true), chkShowStreamType: v.chkShowStreamType ?? (v.chkShowConnectors ?? true), chkShowDataType: v.chkShowDataType ?? true, chkShowDescription: v.chkShowDescription ?? true, chkShowAttributes: v.chkShowAttributes ?? true, chkShowSimValues: v.chkShowSimValues ?? false, chkShowScriptBadge: v.chkShowScriptBadge ?? false, routingStyle: v.routingStyle ?? 'default', routingStyleStream: v.routingStyleStream ?? 'default', spacingScale: v.spacingScale ?? 1 })) : [{ id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1 }],
+    views: obj.views && obj.views.length ? obj.views.map((v) => ({ ...v, viewType: v.viewType || 'ff', sections: v.sections ?? [], nodeWidth: v.nodeWidth ?? defaultNodeSize(nodeSizeMultiplier).nodeWidth, nodeHeight: v.nodeHeight ?? defaultNodeSize(nodeSizeMultiplier).nodeHeight, remapSortKeys: v.remapSortKeys ?? null, remapLastOptions: v.remapLastOptions ?? null, chkShowConnectorType: v.chkShowConnectorType ?? (v.chkShowConnectors ?? true), chkShowStreamType: v.chkShowStreamType ?? (v.chkShowConnectors ?? true), chkShowDataType: v.chkShowDataType ?? true, chkShowDescription: v.chkShowDescription ?? true, chkShowAttributes: v.chkShowAttributes ?? true, chkShowSimValues: v.chkShowSimValues ?? false, chkShowScriptBadge: v.chkShowScriptBadge ?? false, routingStyle: v.routingStyle ?? 'default', routingStyleStream: v.routingStyleStream ?? 'default', spacingScale: v.spacingScale ?? 1, spacingAxis: v.spacingAxis ?? 'both' })) : [{ id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1, spacingAxis: 'both' }],
     parts: (obj.parts || []).map((p) => ({
       id: p.id, type: p.type, label: p.label ?? p.id, rawLabel: p.rawLabel ?? p.label ?? p.id,
       model: p.model ?? (obj.defaultModel || 'Reference'),

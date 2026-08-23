@@ -409,6 +409,108 @@ clusters</option>`, its own explanatory note (`#rm-clusters-note`, parallel to
 'none', 'layered', 'force', 'clusters']`) so the dialog's default-pattern resolution
 and preset-load guard can never drift out of sync with which patterns actually exist.
 
+### 6.1d Scoping Remap and Spacing to the current selection
+
+Two related requests, reported together: *"Update remap (any view) with a new
+checkbox 'selected' to apply remaping only to selected items and related connectors;
+valid for any pattern selected. If multiple nodes selected, apply 'Spacing' command
+increase or decrease only to selected nodes and update their x,y without changing
+view spacing value."*
+
+**Remap's "Only remap selected nodes and their connectors"** (`#rm-selected-only`,
+`promptRemap`) is a sibling checkbox to the pre-existing "Only remap filtered nodes"
+(`filteredOnly`) — and deliberately reuses that SAME `visiblePartVmIds` parameter
+`applyRemapLayout` already threads uniformly through every pattern branch (default/
+none/layered/force/clusters all independently filter `partVms` down to this set
+before doing anything else, and a part NOT in the set simply keeps its current x/y
+completely untouched — see §6.1's `force` branch and §6.1c's `clusters` branch for two
+concrete examples of the identical mechanism). This is why "valid for any pattern" was
+free: no pattern-specific code was needed, only the SET fed into the existing
+parameter needed to also be able to come from the current selection instead of only
+the active Stream/Type filter. The submit handler computes the selected part
+viewMember ids the same way `copyNodes` already does (`[...tab.selection].filter(id =>
+findViewMember(id)?.objectType === 'part')`), then INTERSECTS it with whatever
+`filteredOnly` already produced if both checkboxes are checked (a part must pass the
+filter AND be selected) rather than one silently overriding the other. Silently a
+no-op with nothing selected, the same "no filter active" precedent `filteredOnly`
+already set. Not extended to section-based views' own dialog-free quick-Remap path
+(`promptRemap`'s early return when `isSectionViewType`) — that path has no options at
+all today, "pattern" doesn't apply there in the first place (fixed grid/section-placer
+logic, not one of the five row/grid patterns), and the request's own "valid for any
+pattern selected" phrasing is specifically about the pattern-having dialog.
+
+**Spacing +/- scoped to a 2+-node selection** (`js/canvas.js`'s `buildZoomControls`)
+is a DIFFERENT mechanism from the whole-view case, not a scoped call to the same
+function — `state.js`'s existing `applySpacingScale(viewId, newScale)` always writes
+`view.spacingScale`, by contract, so it couldn't be reused for "without changing view
+spacing value" no matter how it was scoped. New `applySpacingRatioToVms(vmIds, ratio)`
+(`state.js`) is a standalone sibling: same centroid-then-scale-then-shift-if-negative
+math as `applySpacingScale` (compute every node's new position around the group's OWN
+centroid first, allowing negative values, THEN shift the whole affected group by one
+uniform translation if anything went negative — never clamp a node individually,
+which would visibly compress its gap to whichever neighbor happens to sit nearest the
+edge), but computed over just the given viewMembers' own centroid and NEVER touching
+`view.spacingScale` at all. Since there's no persisted "current selection scale" the
+way `view.spacingScale` persists for the whole-view case, there's nothing to compute
+an old-vs-new RATIO from between calls — each click is instead a flat multiplicative
+step (`SELECTION_SPACING_STEP_RATIO = 1.2`, chosen to feel comparable to the whole-
+view stepper's own +0.2/-0.2 off a base of 1) applied directly to whatever the current
+positions already are, compounding naturally across repeated clicks the same way any
+other +/- stepper does. `buildZoomControls`'s `.spacing-in`/`.spacing-out` handlers
+branch on `ciEq(view.viewType, 'ff') && selectedVmIds.length >= 2`: true routes to the
+new selection-scoped path (plus a toast naming how many nodes were affected); false
+(fewer than 2 selected, OR a section-based view, whose node positions come from live
+row/col grid math driven by `spacingScale` itself rather than independent x/y a subset
+could sensibly be pulled apart from) falls through completely unchanged to the
+original whole-view `applySpacingScale` call.
+
+**Follow-up: anchoring a restricted remap at its own original position.** Reported
+directly: *"remap selected places nodes over top existing. Can the results be placed
+starting in selected x,y?"* Every pattern above computes fresh positions from the
+view's own FIXED origin (`baseX`/`rowBaseY` for default/none/layered, `marginX`/
+`marginY` for force/clusters) — correct for a whole-view remap, but for a restricted
+subset (`visiblePartVmIds` set, whether via "Only remap filtered nodes" or "Only remap
+selected nodes and their connectors") that just lands the freshly-computed result
+directly on top of wherever OTHER, un-remapped content already happens to sit near
+that same origin. Fixed with a new `shiftToOriginalPosition(vms, originalPositions)`
+(`commands.js`), called right before each of `applyRemapLayout`'s three return points
+(the `force` branch, the `clusters` branch, and the default/none/layered/Edge-
+Assignment path's own final return) whenever `visiblePartVmIds` was actually set: a
+snapshot of `partVms`' own x/y is taken BEFORE any pattern mutates them, then after
+the pattern computes its (origin-relative) result, the WHOLE restricted group is
+translated by one uniform offset so its own new top-left corner lands exactly where
+the group's own top-left corner was BEFORE this remap ran — never a per-node
+adjustment, which would distort the relative layout the pattern just computed. A
+no-op (and thus a no-behavior-change) for an unrestricted whole-view remap
+(`visiblePartVmIds: null`), and not extended to section-based views (`
+applyRemapLayoutSectioned` returns earlier, before this snapshot/shift logic runs at
+all — a section's node positions come from its own fixed grid cell, not a free origin
+this fix could meaningfully anchor).
+
+**Follow-up: Spacing direction (horizontal/vertical/both).** Reported directly:
+*"Update spacing for vertical, horizontal, or both, when used with selected nodes;
+perhaps change existing <-> symbol to be toggle between vertical, horizonal, and
+both."* The static `↔` that used to sit inside `.spacing-pct`'s own text is now a
+separate, clickable `.spacing-axis-toggle` button, cycling `view.spacingAxis`
+(`'both'` → `'horizontal'` → `'vertical'` → `'both'`, `SPACING_AXIS_CYCLE` in
+`canvas.js`) through three icons (`SPACING_AXIS_ICONS`: `'↔↕'`/`'↔'`/`'↕'` — "both"
+deliberately shown as the two individual glyphs concatenated rather than inventing a
+new combined-arrow character, guaranteed to render identically everywhere the two
+individual glyphs already do). Persisted on `view.spacingAxis` — a view-level display
+setting, the same precedent `view.spacingScale` itself already set, including its own
+`showFields.view` entry (`custom.json`, `show:'s'`, options wired into `render.js`'s
+`selectOptionsFor`) so it's ALSO reachable from the property panel, not just the
+toolbar toggle. `applySpacingRatioToVms` (`state.js`) gained a third `axis` parameter
+(default `'both'`, backward compatible with every existing caller): implemented by
+substituting `1` (a no-op ratio) for whichever axis isn't selected, rather than a
+separate code path per axis, so the shared negative-position guard still runs
+identically regardless of which axis (or both) actually moved. Deliberately scoped to
+ONLY the 2+-node-selected path, per the report's own "when used with selected nodes"
+— the whole-view fallback (fewer than 2 selected) still always scales both x and y via
+the single `spacingScale` value, which has no separate per-axis concept to select
+between; the toggle button is still visible and clickable regardless, it simply has no
+effect on that fallback path.
+
 ### 6.2 Connector routing (`routing.js`, dispatched from `canvas.js`)
 
 `view.routingStyle` governs `'c'`-type connectors, `view.routingStyleStream` governs

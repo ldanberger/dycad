@@ -3540,4 +3540,91 @@
 // the capture-timing risk it's meant to, not just that the code path runs.
 // DESIGN_DOCUMENT.md SS9, tests/README.md, and public/instructions.html updated.
 // Full suite 122/122.
-export const APP_VERSION = '0.873';
+//
+// v0.874: two related requests handled together: "Update remap (any view) with a new
+// checkbox 'selected' to apply remaping only to selected items and related
+// connectors; valid for any pattern selected. If multiple nodes selected, apply
+// 'Spacing' command increase or decrease only to selected nodes and update their
+// x,y without changing view spacing value."
+// (1) Remap dialog gained "Only remap selected nodes and their connectors"
+// (#rm-selected-only, main.js's promptRemap) -- a sibling to the pre-existing "Only
+// remap filtered nodes" (filteredOnly), reusing the exact same visiblePartVmIds
+// parameter applyRemapLayout already threads uniformly through every pattern branch
+// (default/none/layered/force/clusters all independently filter partVms down to
+// this set, leaving anything excluded at its current x/y untouched), so "valid for
+// any pattern" needed no pattern-specific code at all -- only the set itself needed
+// to also be computable from tab.selection instead of only the active filter.
+// Selected part viewMember ids are pulled the same way copyNodes already does, then
+// INTERSECTED with whatever filteredOnly already produced when both are checked (a
+// part must pass the filter AND be selected), not one replacing the other. Silently
+// a no-op with nothing selected, same "no filter active" precedent filteredOnly
+// already set. Not extended to section-based views' dialog-free quick-Remap path --
+// that path has no options at all today and no "pattern" concept in the first
+// place.
+// (2) Spacing +/- (js/canvas.js's buildZoomControls) now branches on 2+ selected
+// nodes (freeform views only): new state.js applySpacingRatioToVms(vmIds, ratio) is
+// a standalone sibling to applySpacingScale, NOT a scoped call to it, since
+// applySpacingScale always writes view.spacingScale by contract -- couldn't satisfy
+// "without changing view spacing value" no matter how it was scoped. Same centroid-
+// then-scale-then-shift-if-negative math, just computed over the given viewMembers'
+// own centroid, and view.spacingScale is never touched. No persisted "current
+// selection scale" exists to compute an old-vs-new ratio from (unlike the whole-view
+// case), so each click is a flat multiplicative step (SELECTION_SPACING_STEP_RATIO =
+// 1.2, chosen to feel comparable to the whole-view stepper's own +0.2/-0.2 off a base
+// of 1) applied directly to the current positions, compounding naturally across
+// repeated clicks. Fewer than 2 selected, or a section-based view (node positions
+// come from live row/col grid math driven by spacingScale itself, not independent
+// x/y), falls through unchanged to the original whole-view behavior.
+// New check_remap_selected_only (real dialog UI, pattern deliberately 'clusters' to
+// prove no pattern-specific wiring was needed) and
+// check_spacing_command_selected_nodes_only (real .spacing-in button: selected nodes
+// move, unselected node and view.spacingScale both stay untouched; fallback path
+// with <2 selected still changes view.spacingScale as before), both proven to catch
+// a reintroduced regression and reverted. DESIGN_DOCUMENT.md SS6.1d, tests/README.md,
+// and public/instructions.html updated. Full suite 124/124.
+//
+// v0.875: two direct follow-ups on v0.874's Remap/Spacing selection features.
+// (1) "remap selected places nodes over top existing. Can the results be placed
+// starting in selected x,y?" Every Remap pattern computes fresh positions from the
+// view's own FIXED origin -- fine for a whole-view remap, but a restricted subset
+// (visiblePartVmIds set, via filteredOnly or the new selectedOnly) landed its result
+// directly on top of wherever OTHER, un-remapped content already sat near that
+// origin. New commands.js shiftToOriginalPosition(vms, originalPositions): a
+// snapshot of the restricted partVms' own x/y is taken BEFORE any pattern mutates
+// them; called right before each of applyRemapLayout's three return points (force,
+// clusters, and the default/none/layered/Edge-Assignment path) whenever
+// visiblePartVmIds was actually set, it translates the WHOLE restricted result by
+// one uniform offset so its new top-left lands exactly where the group's own
+// top-left was before this remap ran -- never per-node, which would distort the
+// relative layout the pattern just computed. Proven a no-op for an unrestricted
+// whole-view remap, and not extended to section-based views (fixed grid cells, no
+// free origin to anchor against).
+// (2) "Update spacing for vertical, horizontal, or both, when used with selected
+// nodes; perhaps change existing <-> symbol to be toggle between vertical,
+// horizonal, and both." The static '↔' inside .spacing-pct is now its own clickable
+// .spacing-axis-toggle button, cycling view.spacingAxis ('both'/'horizontal'/
+// 'vertical', SPACING_AXIS_CYCLE in canvas.js) through three icons ('↔↕'/'↔'/'↕' --
+// "both" shown as the two individual glyphs concatenated, guaranteed to render
+// identically everywhere the two already do). Persisted on view.spacingAxis, same
+// view-level-display-setting precedent as view.spacingScale itself, including its
+// own showFields.view entry (custom.json, render.js's selectOptionsFor) so it's also
+// reachable from the property panel. applySpacingRatioToVms (state.js) gained a
+// third `axis` parameter (default 'both', backward compatible), implemented by
+// substituting a no-op ratio of 1 for whichever axis isn't selected rather than a
+// separate code path, so the shared negative-position guard runs identically either
+// way. Deliberately scoped to ONLY the 2+-selected path per the report's own "when
+// used with selected nodes" -- the whole-view fallback still always scales both x
+// and y, since a single spacingScale has no per-axis concept to select between; the
+// toggle stays visible there, it just has no effect.
+// New check_remap_selected_only_anchors_at_original_position (applyRemapLayout
+// directly: a restricted remap lands exactly at its own original top-left, not the
+// view's origin where two other untouched parts sit; an unrestricted remap is
+// unaffected) and check_spacing_axis_toggle (real .spacing-axis-toggle/.spacing-in
+// buttons: three clicks cycle the axis correctly; horizontal/vertical each leave the
+// other axis's coordinate untouched), both proven to catch a reintroduced regression
+// and reverted. Verified visually too: a 3-node selected group placed far from an
+// existing pair anchored back at its own original position after a real
+// dialog-driven "Only remap selected nodes" run, confirmed via direct position
+// readback (not just a screenshot). DESIGN_DOCUMENT.md SS6.1d, tests/README.md, and
+// public/instructions.html updated. Full suite 126/126.
+export const APP_VERSION = '0.875';

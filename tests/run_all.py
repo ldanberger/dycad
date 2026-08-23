@@ -3978,6 +3978,282 @@ def check_remap_view_remembers_own_settings(page):
     return True, "Remap remembers every dialog field (not just sort order) per-view via view.remapLastOptions, pre-filling them on reopen while a fresh view still falls back to the cross-view cache, and this state correctly round-trips through the Save JSON document as genuine per-view data"
 
 
+def check_remap_selected_only(page):
+    """Regression guard/new-feature check for the Remap dialog's new "Only remap
+    selected nodes and their connectors" checkbox, reported directly: "Update remap
+    (any view) with a new checkbox 'selected' to apply remaping only to selected items
+    and related connectors; valid for any pattern selected." Drives the REAL dialog UI
+    (not a direct applyRemapLayout call), deliberately using the 'clusters' pattern
+    (the newest/least-battle-tested one) to prove the checkbox genuinely plugs into
+    the SAME visiblePartVmIds parameter every pattern already respects uniformly
+    (proven earlier for 'force'/'clusters'/'default' via the filteredOnly checkbox),
+    rather than needing pattern-specific wiring. Fixture: two connected "selected"
+    parts placed far from where 'clusters' would ever naturally put them (so any real
+    repositioning is unambiguous, not a coincidence) and two connected "unselected"
+    parts. Covers: with only the two selected parts in tab.selection and the checkbox
+    checked, submitting Remap moves at least one of the selected parts (proving the
+    pattern actually ran against them) while leaving BOTH unselected parts at their
+    exact original x/y (proving they were excluded from the layout algorithm
+    entirely, not just left alone by coincidence)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const view = store.addView('RegrSelOnly_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const mk = (label) => store.createPart({ type: 'Unknown', label, model, streams: [] });
+      const p1 = mk('Sel1'), p2 = mk('Sel2'), p3 = mk('Unsel3'), p4 = mk('Unsel4');
+      const vm1 = store.createViewMember({ view: view.id, objectType: 'part', objectId: p1.id, x: 9000, y: 9000 });
+      const vm2 = store.createViewMember({ view: view.id, objectType: 'part', objectId: p2.id, x: 9100, y: 9000 });
+      const vm3 = store.createViewMember({ view: view.id, objectType: 'part', objectId: p3.id, x: 500, y: 500 });
+      const vm4 = store.createViewMember({ view: view.id, objectType: 'part', objectId: p4.id, x: 600, y: 500 });
+      const wire = (a, b, fromVm, toVm) => {
+        const c = store.createConnector({ from: a.id, to: b.id, model, connectorType: 'c', relationship: 'Association', streams: [] });
+        store.createViewMember({ view: view.id, objectType: 'connector', objectId: c.id, fromVmId: fromVm.id, toVmId: toVm.id });
+      };
+      wire(p1, p2, vm1, vm2);
+      wire(p3, p4, vm3, vm4);
+
+      const p1Before = { x: vm1.x, y: vm1.y };
+      const p3Before = { x: vm3.x, y: vm3.y };
+      const p4Before = { x: vm4.x, y: vm4.y };
+
+      tab.selection = new Set([vm1.id, vm2.id]);
+      app.render();
+
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 30));
+      document.getElementById('rm-pattern').value = 'clusters';
+      document.getElementById('rm-pattern').dispatchEvent(new Event('change', { bubbles: true }));
+      document.getElementById('rm-selected-only').checked = true;
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 80));
+
+      return {
+        p1Moved: vm1.x !== p1Before.x || vm1.y !== p1Before.y,
+        p3Unchanged: vm3.x === p3Before.x && vm3.y === p3Before.y,
+        p4Unchanged: vm4.x === p4Before.x && vm4.y === p4Before.y,
+      };
+    }
+    """)
+    problems = []
+    if not result["p1Moved"]:
+        problems.append("expected at least one of the SELECTED parts to actually move (proving 'clusters' ran against the selected subset)")
+    if not result["p3Unchanged"] or not result["p4Unchanged"]:
+        problems.append(f"expected both UNSELECTED parts to stay at their exact original x/y, got p3Unchanged={result['p3Unchanged']} p4Unchanged={result['p4Unchanged']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Remap's 'Only remap selected nodes and their connectors' checkbox restricts even a non-default pattern ('clusters') to the current selection, leaving every unselected node's position completely untouched"
+
+
+def check_spacing_command_selected_nodes_only(page):
+    """Regression guard/new-feature check for the Spacing +/- toolbar command, reported
+    directly: "If multiple nodes selected, apply 'Spacing' command increase or
+    decrease only to selected nodes and update their x,y without changing view
+    spacing value." Drives the REAL .spacing-in button (js/canvas.js's
+    buildZoomControls), not a direct store call. Covers: with 2+ nodes selected on a
+    freeform view, clicking Spacing + moves the selected nodes' x/y (scaled apart
+    around their OWN centroid, via state.js's new applySpacingRatioToVms) while
+    leaving an UNSELECTED third node's x/y completely untouched AND leaving
+    view.spacingScale completely unchanged (the explicit "without changing view
+    spacing value" requirement); and the pre-existing fallback still works correctly
+    with fewer than 2 nodes selected (clearing the selection and clicking again DOES
+    change view.spacingScale, exactly like before this feature existed)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const view = store.addView('RegrSpacingSel_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const mk = (label) => store.createPart({ type: 'Unknown', label, model, streams: [] });
+      const p1 = mk('S1'), p2 = mk('S2'), p3 = mk('S3');
+      const vm1 = store.createViewMember({ view: view.id, objectType: 'part', objectId: p1.id, x: 100, y: 100 });
+      const vm2 = store.createViewMember({ view: view.id, objectType: 'part', objectId: p2.id, x: 300, y: 100 });
+      const vm3 = store.createViewMember({ view: view.id, objectType: 'part', objectId: p3.id, x: 700, y: 700 });
+      app.recordAndRender();
+
+      const scaleBefore = view.spacingScale || 1;
+      const p1Before = { x: vm1.x, y: vm1.y };
+      const p3Before = { x: vm3.x, y: vm3.y };
+
+      tab.selection = new Set([vm1.id, vm2.id]);
+      app.render();
+      document.querySelector('.spacing-in').click();
+      await new Promise(r => setTimeout(r, 30));
+
+      const scaleAfterSelected = view.spacingScale || 1;
+      const p1MovedSelected = vm1.x !== p1Before.x || vm1.y !== p1Before.y;
+      const p3UnchangedAfterSelected = vm3.x === p3Before.x && vm3.y === p3Before.y;
+
+      // fallback: fewer than 2 selected -> the pre-existing whole-view behavior,
+      // which DOES change view.spacingScale (proving the fallback path wasn't broken)
+      tab.selection = new Set();
+      app.render();
+      document.querySelector('.spacing-in').click();
+      await new Promise(r => setTimeout(r, 30));
+      const scaleAfterGlobal = view.spacingScale || 1;
+
+      return { scaleBefore, scaleAfterSelected, p1MovedSelected, p3UnchangedAfterSelected, scaleAfterGlobal };
+    }
+    """)
+    problems = []
+    if result["scaleAfterSelected"] != result["scaleBefore"]:
+        problems.append(f"expected view.spacingScale to stay EXACTLY unchanged while 2+ nodes are selected, got {result['scaleBefore']} -> {result['scaleAfterSelected']}")
+    if not result["p1MovedSelected"]:
+        problems.append("expected the selected nodes' x/y to actually change when Spacing + is clicked with 2+ selected")
+    if not result["p3UnchangedAfterSelected"]:
+        problems.append("expected the UNSELECTED node's x/y to stay completely untouched")
+    if result["scaleAfterGlobal"] <= result["scaleBefore"]:
+        problems.append(f"expected the pre-existing fallback (fewer than 2 selected) to still increase view.spacingScale, got {result['scaleBefore']} -> {result['scaleAfterGlobal']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Spacing +/- applies only to selected nodes' own x/y (scaled around their own centroid) without touching view.spacingScale when 2+ nodes are selected, and falls back to the original whole-view behavior otherwise"
+
+
+def check_remap_selected_only_anchors_at_original_position(page):
+    """Regression guard for a direct follow-up report: "remap selected places nodes
+    over top existing. Can the results be placed starting in selected x,y?" A restricted
+    remap (visiblePartVmIds set, via either "Only remap filtered nodes" or "Only remap
+    selected nodes and their connectors") used to compute fresh positions from the
+    view's own fixed origin (baseX=60/rowBaseY=40 for default/none/layered) regardless
+    of where the restricted subset actually started — landing the result directly on
+    top of whatever OTHER, un-remapped content already sits near that origin. Fixed by
+    commands.js's new shiftToOriginalPosition: after a restricted remap computes its
+    (origin-relative) positions, the whole result is translated by ONE uniform offset
+    so its own new top-left lands exactly where the restricted group's OWN top-left
+    was before this remap ran.
+
+    Exercises applyRemapLayout directly (pure logic, not the dialog). Covers: two
+    parts placed far from the view's origin (2000,2000) with visiblePartVmIds
+    restricting the remap to just them — after a 'default' pattern remap, their new
+    bounding box's minimum x/y is EXACTLY 2000/2000 (their original position), not
+    60/40 (the view's fixed origin, where two other UNSELECTED parts already sit,
+    confirmed untouched); and, as a negative control, an UNRESTRICTED remap
+    (visiblePartVmIds: null) on a separate far-placed pair still lands at the
+    original 60/40 origin, completely unaffected by this fix — proving the shift only
+    ever engages for a genuinely restricted remap."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+
+      // restricted case: two far-placed "selected" parts, plus two UNSELECTED parts
+      // already sitting right where the view's fixed origin would otherwise land the result
+      const viewA = store.addView('RegrShiftOriginA_' + Date.now(), 'ff');
+      const p1 = store.createPart({ type: 'Unknown', label: 'Far1', model, streams: [] });
+      const p2 = store.createPart({ type: 'Unknown', label: 'Far2', model, streams: [] });
+      const p3 = store.createPart({ type: 'Unknown', label: 'Near1', model, streams: [] });
+      const p4 = store.createPart({ type: 'Unknown', label: 'Near2', model, streams: [] });
+      const vm1 = store.createViewMember({ view: viewA.id, objectType: 'part', objectId: p1.id, x: 2000, y: 2000 });
+      const vm2 = store.createViewMember({ view: viewA.id, objectType: 'part', objectId: p2.id, x: 2200, y: 2000 });
+      const vm3 = store.createViewMember({ view: viewA.id, objectType: 'part', objectId: p3.id, x: 60, y: 40 });
+      const vm4 = store.createViewMember({ view: viewA.id, objectType: 'part', objectId: p4.id, x: 230, y: 40 });
+
+      commands.applyRemapLayout(app, viewA.id, { pattern: 'default', visiblePartVmIds: new Set([vm1.id, vm2.id]) });
+
+      const restrictedMinX = Math.min(vm1.x, vm2.x);
+      const restrictedMinY = Math.min(vm1.y, vm2.y);
+
+      // negative control: an UNRESTRICTED remap on a separate far-placed pair should
+      // still behave exactly as before -- lands at the view's own fixed origin.
+      const viewB = store.addView('RegrShiftOriginB_' + Date.now(), 'ff');
+      const p5 = store.createPart({ type: 'Unknown', label: 'Far5', model, streams: [] });
+      const p6 = store.createPart({ type: 'Unknown', label: 'Far6', model, streams: [] });
+      const vm5 = store.createViewMember({ view: viewB.id, objectType: 'part', objectId: p5.id, x: 5000, y: 5000 });
+      const vm6 = store.createViewMember({ view: viewB.id, objectType: 'part', objectId: p6.id, x: 5200, y: 5000 });
+      commands.applyRemapLayout(app, viewB.id, { pattern: 'none', visiblePartVmIds: null });
+      const unrestrictedMinX = Math.min(vm5.x, vm6.x);
+      const unrestrictedMinY = Math.min(vm5.y, vm6.y);
+
+      return {
+        restrictedMinX, restrictedMinY,
+        p3Unchanged: vm3.x === 60 && vm3.y === 40, p4Unchanged: vm4.x === 230 && vm4.y === 40,
+        unrestrictedMinX, unrestrictedMinY,
+      };
+    }
+    """)
+    problems = []
+    if result["restrictedMinX"] != 2000 or result["restrictedMinY"] != 2000:
+        problems.append(f"expected the restricted remap's result to anchor exactly at the selection's own original top-left (2000,2000), got ({result['restrictedMinX']},{result['restrictedMinY']})")
+    if not result["p3Unchanged"] or not result["p4Unchanged"]:
+        problems.append("expected the two UNSELECTED parts (sitting at the view's fixed origin) to stay completely untouched")
+    if result["unrestrictedMinX"] != 60 or result["unrestrictedMinY"] != 40:
+        problems.append(f"expected an UNRESTRICTED remap to still land at the view's own fixed origin (60,40), unaffected by this fix, got ({result['unrestrictedMinX']},{result['unrestrictedMinY']})")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "a restricted remap (selected/filtered subset) now anchors its result at the subset's own original top-left position instead of the view's fixed origin, avoiding overlap with un-remapped content there, while an unrestricted whole-view remap is completely unaffected"
+
+
+def check_spacing_axis_toggle(page):
+    """Regression guard/new-feature check for the Spacing direction toggle, reported
+    directly as a follow-up: "Update spacing for vertical, horizontal, or both, when
+    used with selected nodes; perhaps change existing <-> symbol to be toggle between
+    vertical, horizonal, and both." Drives the real .spacing-axis-toggle button
+    (js/canvas.js's buildZoomControls) and the real .spacing-in button together.
+    Covers: clicking the toggle three times cycles view.spacingAxis through
+    'both' -> 'horizontal' -> 'vertical' -> 'both' in that exact order; with 2+ nodes
+    selected and the axis set to 'horizontal', Spacing + changes x but leaves y
+    completely untouched; and with the axis set to 'vertical', Spacing + changes y
+    but leaves x completely untouched."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const view = store.addView('RegrSpacingAxis_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const p1 = store.createPart({ type: 'Unknown', label: 'AxA', model, streams: [] });
+      const p2 = store.createPart({ type: 'Unknown', label: 'AxB', model, streams: [] });
+      const vm1 = store.createViewMember({ view: view.id, objectType: 'part', objectId: p1.id, x: 100, y: 100 });
+      const vm2 = store.createViewMember({ view: view.id, objectType: 'part', objectId: p2.id, x: 300, y: 300 });
+      tab.selection = new Set([vm1.id, vm2.id]);
+      app.render();
+
+      document.querySelector('.spacing-axis-toggle').click();
+      const axisAfterFirstToggle = view.spacingAxis;
+      const beforeH = { x: vm1.x, y: vm1.y };
+      document.querySelector('.spacing-in').click();
+      const xChangedHorizontal = vm1.x !== beforeH.x;
+      const yUnchangedHorizontal = vm1.y === beforeH.y && vm2.y === 300;
+
+      document.querySelector('.spacing-axis-toggle').click();
+      const axisAfterSecondToggle = view.spacingAxis;
+      const beforeV = { x: vm1.x, y: vm1.y };
+      document.querySelector('.spacing-in').click();
+      const yChangedVertical = vm1.y !== beforeV.y;
+      const xUnchangedVertical = vm1.x === beforeV.x;
+
+      document.querySelector('.spacing-axis-toggle').click();
+      const axisAfterThirdToggle = view.spacingAxis;
+
+      return {
+        axisAfterFirstToggle, axisAfterSecondToggle, axisAfterThirdToggle,
+        xChangedHorizontal, yUnchangedHorizontal, yChangedVertical, xUnchangedVertical,
+      };
+    }
+    """)
+    problems = []
+    if result["axisAfterFirstToggle"] != "horizontal":
+        problems.append(f"expected the first toggle click to set 'horizontal', got {result['axisAfterFirstToggle']!r}")
+    if result["axisAfterSecondToggle"] != "vertical":
+        problems.append(f"expected the second toggle click to set 'vertical', got {result['axisAfterSecondToggle']!r}")
+    if result["axisAfterThirdToggle"] != "both":
+        problems.append(f"expected the third toggle click to cycle back to 'both', got {result['axisAfterThirdToggle']!r}")
+    if not result["xChangedHorizontal"] or not result["yUnchangedHorizontal"]:
+        problems.append(f"expected 'horizontal' axis to change x but leave y untouched, got xChanged={result['xChangedHorizontal']} yUnchanged={result['yUnchangedHorizontal']}")
+    if not result["yChangedVertical"] or not result["xUnchangedVertical"]:
+        problems.append(f"expected 'vertical' axis to change y but leave x untouched, got yChanged={result['yChangedVertical']} xUnchanged={result['xUnchangedVertical']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "the Spacing direction toggle cycles view.spacingAxis through both/horizontal/vertical, and Spacing +/- on a 2+-node selection actually respects the chosen axis (leaving the other axis's coordinate untouched)"
+
+
 def check_remap_copy_call_on_right_click(page):
     """Regression guard for main.js's wireCopyCallOnRightClick, wired onto the Remap
     dialog's submit button — reported directly: "Can right click be added to the remap
@@ -9205,6 +9481,10 @@ CHECKS = [
     check_remap_edge_assignment_and_layout_optimization,
     check_remap_preset_dialog_and_local_persistence,
     check_remap_view_remembers_own_settings,
+    check_remap_selected_only,
+    check_spacing_command_selected_nodes_only,
+    check_remap_selected_only_anchors_at_original_position,
+    check_spacing_axis_toggle,
     check_remap_copy_call_on_right_click,
     check_generate_stream_prepopulates_from_existing,
     check_node_size_multiplier,

@@ -124,7 +124,15 @@ no meaningful vector serialization of a rendered 3D scene).</p>
   tradeoff Force-directed already makes for cycles.</li>
 </ul>
 <p>Remap also has an "only remap filtered nodes" option — combine it with the Stream, Type, or Section filter
-to reorganize just a subset of a busy view without disturbing everything else.</p>
+to reorganize just a subset of a busy view without disturbing everything else. A sibling "only remap selected
+nodes and their connectors" option does the same thing keyed off whatever's currently selected on the canvas
+instead of a filter — check it before running Remap and only the selected nodes (and the connectors between
+them) move; everything else stays exactly where it was. Works with every pattern, and combines with "only
+remap filtered nodes" too (a node has to satisfy both when both are checked). Either restricted option's
+result is anchored back at the moved nodes' own original position, not the view's usual top-left starting
+point — so a small remapped group lands where you had it, instead of landing on top of whatever else already
+occupies that corner of the view. A full, unrestricted Remap (neither box checked) is unaffected and still
+starts from the view's normal origin as always.</p>
 <p><strong>Edge Assignment</strong> (Default/None/Layered patterns only) pins an element type — scoped to the types
 actually placed on the current view — to a single row or column along the Top, Bottom, Left, or Right edge
 of the whole layout instead of its normal stream/element-group position, e.g. Business Actors on the left,
@@ -181,6 +189,19 @@ This is separate from node <em>size</em>: a new view's nodes default to 156x55 (
 the node size multiplier below) — bigger than a stretched gap between small boxes, so labels are less likely
 to get clipped in the first place. The <strong>Redraw</strong> command (see Commands below) still auto-fits an
 existing view's node size to its actual content on demand.</p>
+<p>With <strong>2 or more nodes selected</strong> on a freeform view, Spacing +/- switches targets entirely:
+instead of scaling the whole view's spacing (and instead of touching the view's own remembered Spacing value
+at all), it scales just the selected nodes apart from or together toward their own center — handy for spreading
+out or tightening up one crowded cluster without disturbing anything else on the canvas. Clear the selection
+(or select fewer than two nodes) and Spacing +/- goes back to its normal whole-view behavior. Not available on
+section-based views, where node positions come from the section grid itself rather than free x/y.</p>
+<p>The small icon between the Spacing − and + buttons (↔ / ↕ / ↔↕) is a direction toggle — click it to cycle
+between <strong>Horizontal only</strong>, <strong>Vertical only</strong>, and <strong>Both</strong>. It only
+changes anything while 2 or more nodes are selected: with Horizontal only picked, Spacing +/- moves selected
+nodes apart/together left-right and leaves their vertical position alone; Vertical only does the reverse. The
+whole-view fallback (fewer than 2 selected) always adjusts both directions together, same as before this
+toggle existed. Also available as the "Spacing Direction" field in the view's own property panel (nothing
+selected on the canvas), alongside Spacing itself.</p>
 <p>The node size multiplier (default 1.2) is configurable via File &gt; Load Local Settings, alongside Max
 Script Entities — see <a href="#simulation">Simulation Scripting</a> below for how that file and its
 localStorage caching work. It only affects views created <em>after</em> it's set; it doesn't resize anything

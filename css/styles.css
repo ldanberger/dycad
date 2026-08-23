@@ -361,8 +361,9 @@ button, select, input { font-family: inherit; font-size: inherit; color: inherit
 }
 .zoom-controls .zoom-divider { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
 .zoom-controls .spacing-pct {
-  font-size: 11px; color: var(--text-muted); width: 52px; text-align: center; user-select: none;
+  font-size: 11px; color: var(--text-muted); width: 40px; text-align: center; user-select: none;
 }
+.zoom-controls .spacing-axis-toggle { width: 30px; font-size: 12px; }
 
 .lasso-rect {
   position: absolute; border: 1px dashed var(--accent); background: rgba(59,91,253,0.08);

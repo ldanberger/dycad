@@ -516,6 +516,14 @@ function selectOptionsFor(app, entityKey, fieldName, currentValue, ctx) {
     ];
     return options.map((o) => `<option value="${o.value}" ${o.value === currentValue ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
   }
+  if (entityKey === 'view' && fieldName === 'spacingAxis') {
+    const options = [
+      { value: 'both', label: 'Both' },
+      { value: 'horizontal', label: 'Horizontal only' },
+      { value: 'vertical', label: 'Vertical only' },
+    ];
+    return options.map((o) => `<option value="${o.value}" ${o.value === currentValue ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+  }
   if ((entityKey === 'part' || entityKey === 'viewMember') && fieldName === 'type') {
     return [...(app.store.settings.elements || [])]
       .sort((a, b) => (a.tkDisplayOrder ?? 999) - (b.tkDisplayOrder ?? 999))
@@ -1042,6 +1050,7 @@ function renderViewProperties(app, tab) {
     viewType: { get: () => view.viewType, set: (v) => { if (v) view.viewType = v; } },
     margin: { get: () => view.margin ?? 50, set: (v) => { view.margin = Number(v) || 0; } },
     spacingScale: { get: () => view.spacingScale ?? 1, set: (v) => { const oldScale = view.spacingScale || 1; app.store.applySpacingScale(view.id, Number(v) || 1); if (isSectionViewType(view.viewType)) rescaleSectionPositions(app.store, view, { spacingScale: oldScale }); } },
+    spacingAxis: { get: () => view.spacingAxis || 'both', set: (v) => { view.spacingAxis = v; } },
     chkShowConnectorType: { get: () => view.chkShowConnectorType, set: (v) => { view.chkShowConnectorType = v; } },
     chkShowStreamType: { get: () => view.chkShowStreamType, set: (v) => { view.chkShowStreamType = v; } },
     chkShowDataType: { get: () => view.chkShowDataType, set: (v) => { view.chkShowDataType = v; } },
@@ -1261,6 +1270,7 @@ function renderViewOnlyProperties(app, view) {
     viewType: { get: () => view.viewType, set: () => {} },
     margin: { get: () => view.margin ?? 50, set: (v) => { view.margin = Number(v) || 0; } },
     spacingScale: { get: () => view.spacingScale ?? 1, set: (v) => { const oldScale = view.spacingScale || 1; app.store.applySpacingScale(view.id, Number(v) || 1); if (isSectionViewType(view.viewType)) rescaleSectionPositions(app.store, view, { spacingScale: oldScale }); } },
+    spacingAxis: { get: () => view.spacingAxis || 'both', set: (v) => { view.spacingAxis = v; } },
     chkShowConnectorType: { get: () => view.chkShowConnectorType, set: (v) => { view.chkShowConnectorType = v; } },
     chkShowStreamType: { get: () => view.chkShowStreamType, set: (v) => { view.chkShowStreamType = v; } },
     chkShowDataType: { get: () => view.chkShowDataType, set: (v) => { view.chkShowDataType = v; } },

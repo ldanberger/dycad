@@ -1978,6 +1978,7 @@ class App {
           <div class="prop-row"><label>Pattern</label><select id="rm-pattern"><option value="default" ${defaultPattern === 'default' ? 'selected' : ''}>default</option><option value="none" ${defaultPattern === 'none' ? 'selected' : ''}>none</option><option value="layered" ${defaultPattern === 'layered' ? 'selected' : ''}>layered</option><option value="force" ${defaultPattern === 'force' ? 'selected' : ''}>force-directed</option><option value="clusters" ${defaultPattern === 'clusters' ? 'selected' : ''}>centralize in clusters</option></select></div>
           <div class="prop-row checkbox" id="rm-limit-row"><input type="checkbox" id="rm-limit" ${rOpt('limitColumnsToView') ? 'checked' : ''} /><label for="rm-limit">Limit columns to view</label></div>
           <div class="prop-row checkbox"><input type="checkbox" id="rm-filtered-only" ${rOpt('filteredOnly') ? 'checked' : ''} /><label for="rm-filtered-only">Only remap filtered nodes</label></div>
+          <div class="prop-row checkbox"><input type="checkbox" id="rm-selected-only" ${rOpt('selectedOnly') ? 'checked' : ''} /><label for="rm-selected-only">Only remap selected nodes and their connectors</label></div>
           <div class="prop-row checkbox" id="rm-minimize-crossings-row"><input type="checkbox" id="rm-minimize-crossings" ${rOpt('minimizeCrossings') ? 'checked' : ''} /><label for="rm-minimize-crossings">Minimize connector crossings</label></div>
           <div class="prop-row checkbox" id="rm-minimize-length-row"><input type="checkbox" id="rm-minimize-length" ${rOpt('minimizeConnectorLength') ? 'checked' : ''} /><label for="rm-minimize-length">Minimize connector length</label></div>
           <div id="rm-force-note" class="hidden" style="margin-top:10px; font-size:12px; color:var(--text-muted);">Force-directed placement clusters connected nodes together and reduces total edge length — it doesn't use sort order, column limits, Edge Assignment, or crossing/length minimization, so those are hidden while this pattern is selected.</div>
@@ -2073,6 +2074,7 @@ class App {
       box.querySelector('#rm-pattern').value = 'default';
       box.querySelector('#rm-limit').checked = false;
       box.querySelector('#rm-filtered-only').checked = false;
+      box.querySelector('#rm-selected-only').checked = false;
       box.querySelector('#rm-minimize-crossings').checked = false;
       box.querySelector('#rm-minimize-length').checked = false;
       box.querySelector('#rm-force-prefer-right').checked = false;
@@ -2093,6 +2095,7 @@ class App {
       box.querySelector('#rm-pattern').value = REMAP_PATTERNS.includes(preset.pattern) ? preset.pattern : 'default';
       box.querySelector('#rm-limit').checked = !!preset.limitColumnsToView;
       box.querySelector('#rm-filtered-only').checked = !!preset.filteredOnly;
+      box.querySelector('#rm-selected-only').checked = !!preset.selectedOnly;
       box.querySelector('#rm-minimize-crossings').checked = !!preset.minimizeCrossings;
       box.querySelector('#rm-minimize-length').checked = !!preset.minimizeConnectorLength;
       box.querySelector('#rm-force-prefer-right').checked = !!preset.forcePreferRight;
@@ -2119,6 +2122,7 @@ class App {
             sortKeys: [...orderedKeys],
             limitColumnsToView: box.querySelector('#rm-limit').checked,
             filteredOnly: box.querySelector('#rm-filtered-only').checked,
+            selectedOnly: box.querySelector('#rm-selected-only').checked,
             forcePreferRight: box.querySelector('#rm-force-prefer-right').checked,
             forceGroupRows: box.querySelector('#rm-force-group-rows').checked,
             edgeAssignment: collectEdgeAssignment(),
@@ -2145,6 +2149,7 @@ class App {
       pattern: box.querySelector('#rm-pattern').value,
       limitColumnsToView: box.querySelector('#rm-limit').checked,
       filteredOnly: box.querySelector('#rm-filtered-only').checked,
+      selectedOnly: box.querySelector('#rm-selected-only').checked,
       minimizeCrossings: box.querySelector('#rm-minimize-crossings').checked,
       minimizeConnectorLength: box.querySelector('#rm-minimize-length').checked,
       forcePreferRight: box.querySelector('#rm-force-prefer-right').checked,
@@ -2156,11 +2161,11 @@ class App {
     box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
     wireCopyCallOnRightClick(this, box.querySelector('.submit'), () => `remap(app, tab, ${JSON.stringify(collectRemapOptions(), null, 2)});`);
     box.querySelector('.submit').addEventListener('click', () => {
-      const { templateName, pattern, limitColumnsToView, filteredOnly, minimizeCrossings, minimizeConnectorLength, forcePreferRight, forceGroupRows, edgeAssignment, sortKeys } = collectRemapOptions();
+      const { templateName, pattern, limitColumnsToView, filteredOnly, selectedOnly, minimizeCrossings, minimizeConnectorLength, forcePreferRight, forceGroupRows, edgeAssignment, sortKeys } = collectRemapOptions();
       overlay.remove();
 
       setCachedStreamTemplate(templateName);
-      setCachedRemapOptions({ pattern, limitColumnsToView, filteredOnly, forcePreferRight, forceGroupRows, sortKeys, minimizeCrossings, minimizeConnectorLength });
+      setCachedRemapOptions({ pattern, limitColumnsToView, filteredOnly, selectedOnly, forcePreferRight, forceGroupRows, sortKeys, minimizeCrossings, minimizeConnectorLength });
 
       let visiblePartVmIds = null;
       if (filteredOnly && isAnyVisibilityFilterActive(tab)) {
@@ -2173,7 +2178,19 @@ class App {
         }
         visiblePartVmIds = expandVisiblePartVmIdsByLevel(seedVmIds, allConnVms, tab.connectorLevels);
       }
-      remap(this, tab, { sortKeys, templateName, pattern, limitColumnsToView, filteredOnly, visiblePartVmIds, forcePreferRight, forceGroupRows, edgeAssignment, minimizeCrossings, minimizeConnectorLength });
+      // "Only remap selected nodes and their connectors" -- reported directly, valid
+      // for every pattern (default/none/layered/force/clusters) since it plugs into
+      // the SAME visiblePartVmIds param every pattern branch of applyRemapLayout
+      // already respects uniformly (excluded parts just keep their current x/y).
+      // Combines with filteredOnly above by INTERSECTION when both are checked (a
+      // part must pass the filter AND be selected), not by replacing one with the
+      // other. Silently a no-op with nothing selected, same precedent filteredOnly
+      // already sets for "no filter active."
+      if (selectedOnly && tab.selection.size > 0) {
+        const selectedPartVmIds = new Set([...tab.selection].filter((id) => this.store.findViewMember(id)?.objectType === 'part'));
+        visiblePartVmIds = visiblePartVmIds ? new Set([...visiblePartVmIds].filter((id) => selectedPartVmIds.has(id))) : selectedPartVmIds;
+      }
+      remap(this, tab, { sortKeys, templateName, pattern, limitColumnsToView, filteredOnly, selectedOnly, visiblePartVmIds, forcePreferRight, forceGroupRows, edgeAssignment, minimizeCrossings, minimizeConnectorLength });
     });
   }
 

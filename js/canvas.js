@@ -240,18 +240,43 @@ function renderCanvasPage(app, tab, container) {
   buildZoomControls(app, tab, container, scroll, surface);
 }
 
+// One click of Spacing +/- on a 2+-node selection multiplies the selection's own
+// spread by this ratio (or its reciprocal, for -) around the selection's own
+// centroid — chosen to feel comparable to the whole-view stepper's own +0.2/-0.2 step
+// off a base scale of 1 (roughly a 20% change per click), even though the two use
+// different math (additive on a persisted scale vs. a flat multiplicative step with
+// no persisted state of its own — see applySpacingRatioToVms's doc comment, state.js).
+const SELECTION_SPACING_STEP_RATIO = 1.2;
+
+// Reported directly as a follow-up: "Update spacing for vertical, horizontal, or
+// both, when used with selected nodes; perhaps change existing <-> symbol to be
+// toggle between vertical, horizonal, and both." The '↔' that used to be a static
+// label inside .spacing-pct is now its own clickable button (.spacing-axis-toggle)
+// cycling through these three — persisted on view.spacingAxis (a view-level display
+// setting, same precedent as view.spacingScale itself) so it survives a reload the
+// same way every other Remap/Spacing preference does. Only actually changes Spacing
+// +/-'s BEHAVIOR while 2+ nodes are selected (applySpacingRatioToVms's own axis
+// param) — the whole-view fallback (fewer than 2 selected) still always scales both
+// x and y via the single spacingScale value, which has no separate per-axis concept
+// to select between.
+const SPACING_AXIS_ICONS = { both: '↔↕', horizontal: '↔', vertical: '↕' };
+const SPACING_AXIS_LABELS = { both: 'Both', horizontal: 'Horizontal only', vertical: 'Vertical only' };
+const SPACING_AXIS_CYCLE = { both: 'horizontal', horizontal: 'vertical', vertical: 'both' };
+
 function buildZoomControls(app, tab, container, scroll, surface) {
   const wrap = document.createElement('div');
   wrap.className = 'zoom-controls';
   const view = app.store.findView(tab.viewId);
   const spacingPct = Math.round((view?.spacingScale ?? 1) * 100);
+  const spacingAxis = view?.spacingAxis || 'both';
   wrap.innerHTML = `
     <button class="zoom-out" title="Zoom out">−</button>
     <span class="zoom-pct" title="Reset to 100%">${Math.round(tab.viewport.zoom * 100)}%</span>
     <button class="zoom-in" title="Zoom in">+</button>
     <span class="zoom-divider"></span>
     <button class="spacing-out" title="Decrease spacing between nodes">−</button>
-    <span class="spacing-pct" title="Spacing between nodes">↔ ${spacingPct}%</span>
+    <button class="spacing-axis-toggle" title="Spacing direction (when 2+ nodes selected): ${SPACING_AXIS_LABELS[spacingAxis]} — click to cycle">${SPACING_AXIS_ICONS[spacingAxis]}</button>
+    <span class="spacing-pct" title="Spacing between nodes">${spacingPct}%</span>
     <button class="spacing-in" title="Increase spacing between nodes">+</button>
   `;
   const applyZoom = (newZoom) => {
@@ -273,18 +298,47 @@ function buildZoomControls(app, tab, container, scroll, surface) {
   wrap.querySelector('.zoom-out').addEventListener('click', () => applyZoom(tab.viewport.zoom - 0.1));
   wrap.querySelector('.zoom-pct').addEventListener('click', () => applyZoom(1));
 
+  // Reported directly: "if multiple nodes selected, apply 'Spacing' command increase
+  // or decrease only to selected nodes and update their x,y without changing view
+  // spacing value." Only meaningful for freeform views — a section-based view's node
+  // positions come from row/col grid math driven by view.spacingScale itself (see
+  // applySpacingScale's own doc comment), not independent x/y a subset could be
+  // scaled apart from the rest without conflicting with that grid on the next
+  // section-layout pass. With fewer than 2 nodes selected (or a section view), the
+  // button keeps its original whole-view behavior unchanged.
+  const selectedPartVmIdsForSpacing = () => [...tab.selection].filter((id) => app.store.findViewMember(id)?.objectType === 'part');
+  const axisPhraseFor = (axis) => (axis === 'horizontal' ? 'horizontal spacing for' : axis === 'vertical' ? 'vertical spacing for' : 'spacing for');
+  wrap.querySelector('.spacing-axis-toggle').addEventListener('click', () => {
+    const v = app.store.findView(tab.viewId);
+    v.spacingAxis = SPACING_AXIS_CYCLE[v.spacingAxis || 'both'];
+    app.recordAndRender();
+  });
   wrap.querySelector('.spacing-in').addEventListener('click', () => {
     const v = app.store.findView(tab.viewId);
-    const oldScale = v.spacingScale || 1;
-    app.store.applySpacingScale(tab.viewId, oldScale + 0.2);
-    if (isSectionViewType(v.viewType)) rescaleSectionPositions(app.store, v, { spacingScale: oldScale });
+    const selectedVmIds = selectedPartVmIdsForSpacing();
+    if (ciEq(v.viewType, 'ff') && selectedVmIds.length >= 2) {
+      const axis = v.spacingAxis || 'both';
+      app.store.applySpacingRatioToVms(selectedVmIds, SELECTION_SPACING_STEP_RATIO, axis);
+      app.toast(`Increased ${axisPhraseFor(axis)} ${selectedVmIds.length} selected nodes.`);
+    } else {
+      const oldScale = v.spacingScale || 1;
+      app.store.applySpacingScale(tab.viewId, oldScale + 0.2);
+      if (isSectionViewType(v.viewType)) rescaleSectionPositions(app.store, v, { spacingScale: oldScale });
+    }
     app.recordAndRender();
   });
   wrap.querySelector('.spacing-out').addEventListener('click', () => {
     const v = app.store.findView(tab.viewId);
-    const oldScale = v.spacingScale || 1;
-    app.store.applySpacingScale(tab.viewId, oldScale - 0.2);
-    if (isSectionViewType(v.viewType)) rescaleSectionPositions(app.store, v, { spacingScale: oldScale });
+    const selectedVmIds = selectedPartVmIdsForSpacing();
+    if (ciEq(v.viewType, 'ff') && selectedVmIds.length >= 2) {
+      const axis = v.spacingAxis || 'both';
+      app.store.applySpacingRatioToVms(selectedVmIds, 1 / SELECTION_SPACING_STEP_RATIO, axis);
+      app.toast(`Decreased ${axisPhraseFor(axis)} ${selectedVmIds.length} selected nodes.`);
+    } else {
+      const oldScale = v.spacingScale || 1;
+      app.store.applySpacingScale(tab.viewId, oldScale - 0.2);
+      if (isSectionViewType(v.viewType)) rescaleSectionPositions(app.store, v, { spacingScale: oldScale });
+    }
     app.recordAndRender();
   });
 
