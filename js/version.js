@@ -3408,4 +3408,95 @@
 // dialog (real menu/DOM wiring), both proven via deliberate revert-then-restore.
 // DESIGN_DOCUMENT.md SS7a, tests/README.md, and public/instructions.html updated.
 // Full suite 117/117.
-export const APP_VERSION = '0.870';
+//
+// v0.871: "need a better remap for erd that puts popular nodes central to single
+// children around them, repeat this pattern in clusters. perhaps a 'centralize in
+// clusters' option that could work on any view." New 5th Remap pattern,
+// 'clusters'/"Centralize in Clusters". The existing 'force' pattern (SS6.1) already
+// centers the single highest-degree node -- but only ONCE per connected component,
+// and a real ERD schema is often one giant connected component end to end, so 'force'
+// gives exactly one hub for the whole diagram. 'clusters' decomposes a component into
+// SEVERAL hub-and-leaves stars instead, tiling them together the same way 'force'
+// tiles separate components.
+// layout.js gained computeHubClusterDecomposition(nodeIds, edges) -- pure graph logic,
+// no coordinates, exported separately for direct unit testing. A node's "primary hub"
+// is whichever neighbor has STRICTLY higher degree than its own (ties broken by input
+// order); every node with degree >= 2 is a hub candidate, processed highest-degree-
+// first, absorbing every still-unclaimed node whose primary hub it is -- true leaves
+// (degree 1) always join their one neighbor's ring, and a lower-degree NON-leaf also
+// joins a hub's ring when that hub is its one clearly-more-connected neighbor (the
+// specific "leans toward one hub" choice made for this feature, over "only literal
+// leaves cluster"). Absorption is NOT transitive -- an absorbed node's OWN further
+// edges become cross-cluster bridges, same category as 'force''s own unplaceable
+// cycle edges. Two EQUAL-degree hubs connected to each other stay separate clusters
+// (neither outranks the other) rather than merging. Any node still unclaimed after
+// the hub pass (isolated node, or an isolated pair/chain where neither side ever
+// reaches degree 2) becomes its own small hub, so every node lands in exactly one
+// cluster.
+// computeHubClusterGridLayout places each star's ring in the 8 cells around its hub,
+// then shelf-packs the stars via the existing packClustersOnGrid unchanged. The
+// 8-neighbor/expanding-ring placement mechanic itself (makeRingPlacer) was factored
+// out of computeAdjacentGridLayout into code both layouts now share, so 'force' and
+// 'clusters' can never silently disagree on how a crowded hub's neighbors get packed.
+// commands.js's applyRemapLayout gained a pattern==='clusters' branch mirroring
+// 'force''s own (same stepX/stepY convention, same early return before Edge
+// Assignment/minimizeCrossings/minimizeConnectorLength, reusing forcePreferRight for
+// the ring's own placement bias but not forceGroupRows, which has nothing to apply to
+// on a one-level-deep ring). main.js's Remap dialog gained the new option, its own
+// explanatory note, and a shared REMAP_PATTERNS constant (replacing two independently-
+// hand-maintained allow-lists) so the dialog's default-pattern resolution and
+// preset-load guard can never drift out of sync with which patterns actually exist.
+// New check_remap_clusters_decomposition (pure logic: star/leaning-absorption/
+// equal-degree-bridge/isolated-pair/isolated-singleton fixtures) and
+// check_remap_clusters_grid_placement (applyRemapLayout end to end: hub-ring
+// adjacency, non-overlapping shelf-packed clusters, forcePreferRight), both proven via
+// deliberate revert-then-restore; check_remap_patterns extended to cover the new
+// pattern too. DESIGN_DOCUMENT.md SS6.1c, tests/README.md, and public/instructions.html
+// updated. Full suite 119/119.
+//
+// v0.872: direct follow-up on the new 'clusters' Remap pattern: "is it possible to add
+// the existing 'minimize connector crossing' or something similar, to avoid placing
+// nodes directly on unrelated connectors after 'centralize in clusters' is applied?"
+// The existing minimizeCrossings/minimizeConnectorLength options are Sugiyama
+// row-reordering passes with no meaning on a 2D grid-packed cluster layout, so this
+// needed two genuinely new, 'clusters'-specific mechanisms instead -- both always-on,
+// no new dialog checkbox, since this fixes an intrinsic layout defect, not a
+// stylistic preference.
+// (1) packClustersOnGrid (layout.js, still shared with 'force') is now connectivity-
+// aware via a new optional `edges` third argument: root cause of the underlying
+// defect was that clusters got ordered purely by area, oblivious to which clusters
+// share a cross-cluster "bridge" edge, so a bridge-connected pair could land on
+// opposite ends of the shelf-packed sequence with an unrelated cluster between them --
+// stretching that bridge's straight line across (and often through) unrelated
+// territory. Fixed packing order: largest cluster first (unchanged default), then
+// greedily whichever remaining cluster shares the most bridge edges with what's
+// ALREADY placed, tie-broken by area. For 'force' (whole connected COMPONENTS as
+// clusters -- no edge ever crosses between two components, by definition) this is a
+// proven no-op: zero cross-cluster weight ever exists there, so packing falls
+// straight back to the original pure-area order, unchanged.
+// (2) New avoidNodeOnConnectorOverlap (layout.js, exported) -- a best-effort cleanup
+// pass run after packing, for whatever a bridge edge still crosses despite (1): for
+// every edge, checks whether its straight-line path (center to center, small pixel
+// padding) passes through any OTHER node's rectangle, and if so relocates that node.
+// Deliberately conservative about what it's allowed to move: only a RING MEMBER is
+// ever eligible (never a hub -- moving a hub would cascade and disturb its entire
+// ring), and only to a still-free cell among its OWN hub's 8 immediate neighbor cells
+// (never farther) -- so a relocated node is always exactly as hub-adjacent afterward
+// as before. A bystander with no free alternative slot, or a hub itself sitting in an
+// unrelated edge's path, is left exactly where it was -- heuristic, not a guaranteed-
+// collision-free solver, same honest-limitation category as 'force''s own unplaceable
+// cycle edges. Runs up to 3 bounded passes (relocating one node can occasionally free
+// up, or create, a different collision elsewhere), same convention
+// resolveResidualOverlaps already uses. Plain, self-contained segment-vs-rectangle
+// geometry (segmentIntersectsRect/segmentsIntersect/cross2D) -- no external library,
+// per this project's no-npm-packages constraint.
+// New check_remap_clusters_connectivity_aware_packing (a hand-built P/Q/R cluster
+// fixture proving the fixed ordering pulls a bridge-connected cluster ahead of a
+// same-sized but unconnected one) and check_remap_clusters_avoid_node_on_connector_
+// overlap (all three of avoidNodeOnConnectorOverlap's own safety guarantees: relocates
+// a genuine bystander, never moves a hub, leaves a node with no free slot in place),
+// both proven via deliberate revert-then-restore against the real algorithm (not just
+// hand-derived expectations -- traced and empirically verified via a standalone node
+// script before writing the assertions). DESIGN_DOCUMENT.md SS6.1c, tests/README.md,
+// and public/instructions.html updated. Full suite 121/121.
+export const APP_VERSION = '0.872';

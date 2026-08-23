@@ -3,7 +3,7 @@ import { ciEq, newId } from './state.js';
 import { elementByType, findRelationshipPair } from './rules.js';
 import { isSectionViewType, createSectionPlacer, computeSectionLayout, isTypeAllowedInSection, findFreeCellInSection, findFreeCellOrGrowSection, duplicateSectionDefinition, BASE_X, BASE_Y, SECTION_GAP, NODE_INSET_X, NODE_INSET_Y } from './sections.js';
 import { redrawNodeSizes, redrawAndResolveLayout, getNodeSize } from './canvas.js';
-import { computeClusteredGridLayout } from './layout.js';
+import { computeClusteredGridLayout, computeHubClusterGridLayout } from './layout.js';
 import { pushMessageLog } from './simulation.js';
 import { parseDDL, generateDDL } from './ddl.js';
 
@@ -3275,7 +3275,37 @@ function applyRemapLayout(app, viewId, options = {}) {
     return { view, template, maxCols: partVms.length };
   }
 
-  // Edge Assignment (default/none patterns only — force above already returned, and
+  if (pattern === 'clusters') {
+    // "Centralize in Clusters", reported directly: "need a better remap for erd that
+    // puts popular nodes central to single children around them, repeat this pattern
+    // in clusters." Like 'force' above, driven entirely by connectivity (no sort keys,
+    // column wrapping, or Edge Assignment) — but where 'force' centers the single
+    // highest-degree node of each whole connected COMPONENT, this decomposes each
+    // component into several hub-and-leaves stars (layout.js's
+    // computeHubClusterDecomposition) and tiles those stars together instead, since a
+    // real ERD schema is often one giant connected component end to end.
+    const spacingClusters = view.spacingScale || 1;
+    const nodesForLayout = partVms.map((vm) => ({ id: vm.id, x: vm.x, y: vm.y, w: nodeW, h: nodeH }));
+    const vmIdSet = new Set(partVms.map((vm) => vm.id));
+    const edgesForLayout = [];
+    for (const cv of connVms) {
+      if (!vmIdSet.has(cv.fromVmId) || !vmIdSet.has(cv.toVmId)) continue; // connector touches a node excluded by the current filter
+      edgesForLayout.push({ from: cv.fromVmId, to: cv.toVmId });
+    }
+    const stepXClusters = (nodeW + 40) * spacingClusters, stepYClusters = (nodeH + 44) * spacingClusters;
+    const positions = computeHubClusterGridLayout(nodesForLayout, edgesForLayout, {
+      stepX: stepXClusters, stepY: stepYClusters,
+      preferRightPlacement: forcePreferRight, // reuses 'force''s own option: place a ring member to the right of its hub when free, instead of the default direction
+    });
+    for (const vm of partVms) {
+      const p = positions.get(vm.id);
+      if (p) { vm.x = p.x; vm.y = p.y; }
+    }
+    return { view, template, maxCols: partVms.length };
+  }
+
+  // Edge Assignment (default/none patterns only — force/clusters above already
+  // returned, and
   // section-based views returned even earlier via applyRemapLayoutSectioned): a part
   // whose TYPE has an entry in edgeAssignment is pulled OUT of the normal stream/
   // element-group grid entirely and placed instead in a single row/column band along

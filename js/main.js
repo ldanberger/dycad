@@ -263,6 +263,11 @@ function addRecentFile(name, content) {
   }
 }
 
+/** Every valid Remap `pattern` value (promptRemap's #rm-pattern <option>s below) — a
+ * single shared list so the dialog's own default-pattern resolution and preset-load
+ * guard can never drift out of sync with which patterns actually exist. */
+const REMAP_PATTERNS = ['default', 'none', 'layered', 'force', 'clusters'];
+
 class App {
   constructor(store) {
     this.store = store;
@@ -1948,8 +1953,8 @@ class App {
     const defaultTemplate = (viewLast.templateName && templateNames.includes(viewLast.templateName)) ? viewLast.templateName
       : (cachedTemplate && templateNames.includes(cachedTemplate)) ? cachedTemplate
       : (templateNames.includes('Enterprise') ? 'Enterprise' : templateNames[0]);
-    const defaultPattern = ['default', 'none', 'layered', 'force'].includes(viewLast.pattern) ? viewLast.pattern
-      : ['default', 'none', 'layered', 'force'].includes(cachedRemap.pattern) ? cachedRemap.pattern : 'default';
+    const defaultPattern = REMAP_PATTERNS.includes(viewLast.pattern) ? viewLast.pattern
+      : REMAP_PATTERNS.includes(cachedRemap.pattern) ? cachedRemap.pattern : 'default';
 
     const store = this.store;
     const typesInView = [...new Set(store.viewMembersForView(tab.viewId).filter((vm) => vm.objectType === 'part').map((vm) => store.findPart(vm.objectId)?.type).filter(Boolean))]
@@ -1970,12 +1975,13 @@ class App {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;">
         <div>
           <div class="prop-row"><label>Stream Template</label><select id="rm-template">${templateNames.map((n) => `<option value="${escapeHtml(n)}" ${n === defaultTemplate ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></div>
-          <div class="prop-row"><label>Pattern</label><select id="rm-pattern"><option value="default" ${defaultPattern === 'default' ? 'selected' : ''}>default</option><option value="none" ${defaultPattern === 'none' ? 'selected' : ''}>none</option><option value="layered" ${defaultPattern === 'layered' ? 'selected' : ''}>layered</option><option value="force" ${defaultPattern === 'force' ? 'selected' : ''}>force-directed</option></select></div>
+          <div class="prop-row"><label>Pattern</label><select id="rm-pattern"><option value="default" ${defaultPattern === 'default' ? 'selected' : ''}>default</option><option value="none" ${defaultPattern === 'none' ? 'selected' : ''}>none</option><option value="layered" ${defaultPattern === 'layered' ? 'selected' : ''}>layered</option><option value="force" ${defaultPattern === 'force' ? 'selected' : ''}>force-directed</option><option value="clusters" ${defaultPattern === 'clusters' ? 'selected' : ''}>centralize in clusters</option></select></div>
           <div class="prop-row checkbox" id="rm-limit-row"><input type="checkbox" id="rm-limit" ${rOpt('limitColumnsToView') ? 'checked' : ''} /><label for="rm-limit">Limit columns to view</label></div>
           <div class="prop-row checkbox"><input type="checkbox" id="rm-filtered-only" ${rOpt('filteredOnly') ? 'checked' : ''} /><label for="rm-filtered-only">Only remap filtered nodes</label></div>
           <div class="prop-row checkbox" id="rm-minimize-crossings-row"><input type="checkbox" id="rm-minimize-crossings" ${rOpt('minimizeCrossings') ? 'checked' : ''} /><label for="rm-minimize-crossings">Minimize connector crossings</label></div>
           <div class="prop-row checkbox" id="rm-minimize-length-row"><input type="checkbox" id="rm-minimize-length" ${rOpt('minimizeConnectorLength') ? 'checked' : ''} /><label for="rm-minimize-length">Minimize connector length</label></div>
           <div id="rm-force-note" class="hidden" style="margin-top:10px; font-size:12px; color:var(--text-muted);">Force-directed placement clusters connected nodes together and reduces total edge length — it doesn't use sort order, column limits, Edge Assignment, or crossing/length minimization, so those are hidden while this pattern is selected.</div>
+          <div id="rm-clusters-note" class="hidden" style="margin-top:10px; font-size:12px; color:var(--text-muted);">Centralize in Clusters repeatedly centers each locally most-connected node with its own single-connection neighbors around it, tiling the resulting clusters together — like force-directed, it doesn't use sort order, column limits, Edge Assignment, or crossing/length minimization. A node that connects to more than one cluster (a "bridge") can't be guaranteed adjacent to every cluster it touches — an inherent limit of any 2D grid layout, same as force-directed's own cycle-edge case.</div>
           <div class="prop-row checkbox hidden" id="rm-force-prefer-right-row"><input type="checkbox" id="rm-force-prefer-right" ${rOpt('forcePreferRight') ? 'checked' : ''} /><label for="rm-force-prefer-right">Prefer placing connected nodes to the right when a cell is available</label></div>
           <div class="prop-row checkbox hidden" id="rm-force-group-rows-row"><input type="checkbox" id="rm-force-group-rows" ${rOpt('forceGroupRows') ? 'checked' : ''} /><label for="rm-force-group-rows">Only start a new row when a node is a new hop away (keep same-hop nodes on one row)</label></div>
         </div>
@@ -2023,18 +2029,24 @@ class App {
     const patternSelect = box.querySelector('#rm-pattern');
     const updatePatternVisibility = () => {
       const isForce = patternSelect.value === 'force';
+      const isClusters = patternSelect.value === 'clusters';
+      const isForceOrClusters = isForce || isClusters;
       const isLayered = patternSelect.value === 'layered';
-      box.querySelector('#rm-priority-section').classList.toggle('hidden', isForce);
+      box.querySelector('#rm-priority-section').classList.toggle('hidden', isForceOrClusters);
       // Column-wrapping (maxCols) has no meaning for 'layered' -- every row is exactly
-      // one hierarchy layer, however wide -- so it's hidden for both 'force' and
-      // 'layered', but Edge Assignment/Minimize Crossings/Minimize Connector Length
-      // all still apply to 'layered' same as 'default'/'none'.
-      box.querySelector('#rm-limit-row').classList.toggle('hidden', isForce || isLayered);
-      box.querySelector('#rm-edge-section').classList.toggle('hidden', isForce);
-      box.querySelector('#rm-minimize-crossings-row').classList.toggle('hidden', isForce);
-      box.querySelector('#rm-minimize-length-row').classList.toggle('hidden', isForce);
+      // one hierarchy layer, however wide -- so it's hidden for 'force'/'clusters' and
+      // 'layered' alike, but Edge Assignment/Minimize Crossings/Minimize Connector
+      // Length all still apply to 'layered' same as 'default'/'none'.
+      box.querySelector('#rm-limit-row').classList.toggle('hidden', isForceOrClusters || isLayered);
+      box.querySelector('#rm-edge-section').classList.toggle('hidden', isForceOrClusters);
+      box.querySelector('#rm-minimize-crossings-row').classList.toggle('hidden', isForceOrClusters);
+      box.querySelector('#rm-minimize-length-row').classList.toggle('hidden', isForceOrClusters);
       box.querySelector('#rm-force-note').classList.toggle('hidden', !isForce);
-      box.querySelector('#rm-force-prefer-right-row').classList.toggle('hidden', !isForce);
+      box.querySelector('#rm-clusters-note').classList.toggle('hidden', !isClusters);
+      // 'clusters' reuses 'force''s own "prefer right" option (same ring-placement
+      // mechanic), but NOT "group rows" -- a hub's ring is always exactly one level
+      // deep, so BFS-depth-based row grouping has nothing to do here.
+      box.querySelector('#rm-force-prefer-right-row').classList.toggle('hidden', !isForceOrClusters);
       box.querySelector('#rm-force-group-rows-row').classList.toggle('hidden', !isForce);
     };
     patternSelect.addEventListener('change', updatePatternVisibility);
@@ -2078,7 +2090,7 @@ class App {
       if (!preset) { this.toast(`Preset "${name}" not found.`, true); return; }
 
       if (templateNames.includes(preset.templateName)) box.querySelector('#rm-template').value = preset.templateName;
-      box.querySelector('#rm-pattern').value = ['default', 'none', 'layered', 'force'].includes(preset.pattern) ? preset.pattern : 'default';
+      box.querySelector('#rm-pattern').value = REMAP_PATTERNS.includes(preset.pattern) ? preset.pattern : 'default';
       box.querySelector('#rm-limit').checked = !!preset.limitColumnsToView;
       box.querySelector('#rm-filtered-only').checked = !!preset.filteredOnly;
       box.querySelector('#rm-minimize-crossings').checked = !!preset.minimizeCrossings;

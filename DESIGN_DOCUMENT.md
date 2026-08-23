@@ -303,6 +303,112 @@ middle set, passive or not, is placed purely by its own layer). `BatchScript_Rem
 Function/Consumer parts land on row 0 as true graph roots for free, directly satisfying
 the original report's own "turning off the requirement of general actor" phrasing.
 
+### 6.1c The `'clusters'` Remap pattern — "Centralize in Clusters" (`layout.js`, `commands.js`)
+
+A fifth pattern, reported directly: *"need a better remap for erd that puts popular
+nodes central to single children around them, repeat this pattern in clusters. perhaps
+a 'centralize in clusters' option that could work on any view."* §6.1's `'force'`
+pattern already centers the single highest-degree node — but only ONCE per connected
+component (Union-Find), and a real ERD schema is often one giant connected component
+end to end (everything FKs to everything transitively), so `'force'` gives exactly one
+hub for the whole diagram. `'clusters'` decomposes a component into SEVERAL
+hub-and-leaves stars instead, tiling the results together the same way `'force'` tiles
+separate components — reusing `packClustersOnGrid`, since a hub-cluster here and a
+connected-component cluster there are the same `{grid, minCol, maxCol, minRow, maxRow}`
+shape as far as shelf-packing cares (that function itself gained new connectivity-aware
+behavior for this pattern specifically — see below).
+
+`computeHubClusterDecomposition(nodeIds, edges)` (`layout.js`) is pure graph logic (no
+coordinates), exported separately from the pixel-producing pipeline so it's directly
+unit-testable. A node's **primary hub** is whichever neighbor has STRICTLY higher
+degree than the node's own (ties among equally-connected neighbors broken by the
+input's own node order, for determinism) — a node with no such neighbor (a local
+degree maximum, or isolated) has no primary hub and must become a hub itself. Every
+node with degree ≥ 2 is a hub CANDIDATE, processed highest-degree-first: a candidate
+becomes a real hub unless it was already claimed as some earlier (bigger-or-equal-
+degree) hub's ring member, then absorbs every still-unclaimed node whose primary hub
+it is. This directly implements "popular nodes central, single children around them"
+for true leaves (degree 1, whose only neighbor IS their primary hub by construction)
+while ALSO pulling in a lower-degree NON-leaf if its one clearly-more-connected
+neighbor outranks it (the specific design choice made for this feature over "only
+literal leaves cluster") — a degree-2 node straddling two hubs of EQUAL standing (no
+neighbor outranks the other) becomes its own hub instead of arbitrarily picking a
+side, so two equally-popular hubs connected to each other stay two separate clusters,
+bridged by that one edge, rather than merging into one. Absorption is NOT transitive —
+a node absorbed into a hub's ring doesn't pull ITS OWN further neighbors in too; those
+become bridge edges into other clusters, exactly like a ring member's other edges. Any
+node still unclaimed after the hub-candidate pass (an isolated node, or an isolated
+pair/chain where no node ever reaches degree 2) becomes its own small hub, absorbing
+whatever of its own neighbors are still unclaimed — so every node ends up placed in
+EXACTLY one cluster.
+
+`computeHubClusterGridLayout(nodes, edges, options)` places each star's ring in the 8
+cells around its hub (expanding outward past 8, same crowded-hub fallback as `'force'`)
+then shelf-packs the stars — mirroring `computeClusteredGridLayout`'s own shape with
+`computeHubClusterDecomposition` + a one-level ring placement standing in for
+`findConnectedComponents` + `computeAdjacentGridLayout`. The actual 8-neighbor/
+expanding-ring placement mechanic (`makeRingPlacer`) was factored out of
+`computeAdjacentGridLayout` into a function BOTH layouts now share — not a speculative
+abstraction, a real second caller needing byte-identical behavior, so the two
+placement strategies can never silently drift apart. Same honest limitation as
+`'force'`'s own cycle edges, reached by a different route: a bridge edge (hub-to-hub,
+or a ring member's OTHER connection to a different hub) isn't guaranteed adjacent
+cells — inherent to any 2D grid embedding, not an implementation gap.
+
+**Reducing (not eliminating) that bridge-edge problem** — a direct follow-up report:
+*"is it possible to add the existing 'minimize connector crossing' or something
+similar, to avoid placing nodes directly on unrelated connectors after 'centralize in
+clusters' is applied?"* The existing `minimizeCrossings`/`minimizeConnectorLength`
+options (§6.1a) are Sugiyama row-reordering passes with no meaning on a 2D grid-packed
+cluster layout, so this needed two genuinely new, `'clusters'`-specific mechanisms
+instead — both always-on (no new dialog checkbox; this fixes an intrinsic layout
+defect, not a stylistic preference):
+- **`packClustersOnGrid` is now connectivity-aware** (still shared with `'force'`,
+  still exported unchanged in signature terms — `edges` is a new, optional third
+  argument). Root cause: the function used to order clusters purely by area, with zero
+  awareness of which clusters are bridge-connected — so a bridge-connected pair could
+  easily land on opposite ends of the shelf-packed sequence with an unrelated cluster
+  between them, forcing that bridge's straight line to stretch across (and often
+  visually through) unrelated territory. Fixed packing order: the largest cluster
+  first (unchanged default), then greedily, whichever NOT-YET-PLACED cluster shares
+  the most bridge edges with whatever's ALREADY placed goes next (tie-broken by area)
+  — so bridge-connected clusters end up shelf-adjacent, or close to it, instead of
+  scattered by size alone. For `'force'` (whole connected COMPONENTS as clusters — no
+  edge ever crosses between two components, by definition), this is a proven no-op:
+  zero cross-cluster weight ever exists there, so packing falls straight back to the
+  original pure-area order, unchanged.
+- **`avoidNodeOnConnectorOverlap`** (`layout.js`, new, exported) is a best-effort
+  cleanup pass run after packing: for every edge, checks whether its straight-line
+  path (center to center) passes through any OTHER node's rectangle (small pixel
+  padding included, so a near-miss still counts), and if so, relocates that node.
+  Deliberately conservative about what it's allowed to move, so it can never undo any
+  of `computeHubClusterGridLayout`'s own placement guarantees: only a RING MEMBER is
+  ever eligible (never a hub — moving a hub would cascade and disturb its entire ring),
+  and only to a still-free cell among its OWN hub's 8 immediate neighbor cells (never
+  farther) — so a relocated node is always exactly as hub-adjacent afterward as
+  before, just possibly a different one of the (up to) 8 equally-valid slots. A
+  bystander with no free alternative slot, or a hub itself sitting in an unrelated
+  edge's path, is left exactly where it was — a heuristic, not a guaranteed-collision-
+  free solver, the same honest-limitation category as `'force'`'s own unplaceable
+  cycle edges. Runs up to 3 full scans (relocating one node can occasionally free up,
+  or create, a different collision elsewhere), stopping as soon as a scan moves
+  nothing — same bounded-passes convention `resolveResidualOverlaps` (§6.1) already
+  uses. Segment-vs-rectangle intersection (`segmentIntersectsRect`/`segmentsIntersect`/
+  `cross2D`) is plain, self-contained 2D geometry — no external library, consistent
+  with this project's no-npm-packages constraint.
+
+`applyRemapLayout`'s `pattern === 'clusters'` branch (`commands.js`) mirrors `'force'`'s
+own branch exactly (same `stepX`/`stepY` convention, same early return before Edge
+Assignment/`minimizeCrossings`/`minimizeConnectorLength`, none of which have meaning
+here either) and reuses `'force'`'s own `forcePreferRight` option for the ring's own
+placement bias — but NOT `forceGroupRows`, since a hub's ring is always exactly one
+level deep, so BFS-depth-based row grouping has nothing to apply to. The Remap dialog
+(`main.js`'s `promptRemap`) gained a `<option value="clusters">centralize in
+clusters</option>`, its own explanatory note (`#rm-clusters-note`, parallel to
+`#rm-force-note`), and a shared `REMAP_PATTERNS` module-level constant (`['default',
+'none', 'layered', 'force', 'clusters']`) so the dialog's default-pattern resolution
+and preset-load guard can never drift out of sync with which patterns actually exist.
+
 ### 6.2 Connector routing (`routing.js`, dispatched from `canvas.js`)
 
 `view.routingStyle` governs `'c'`-type connectors, `view.routingStyleStream` governs

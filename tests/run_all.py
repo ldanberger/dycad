@@ -99,7 +99,7 @@ def check_remap_patterns(page):
         modelName: store.defaultModel, viewName: view.id, silent: true,
       });
       const results = {};
-      for (const pattern of ['default', 'none', 'layered', 'force']) {
+      for (const pattern of ['default', 'none', 'layered', 'force', 'clusters']) {
         results[pattern] = !!commands.applyRemapLayout(app, view.id, { pattern });
       }
       return results;
@@ -108,7 +108,7 @@ def check_remap_patterns(page):
     failed = [p for p, ok in result.items() if not ok]
     if failed:
         return False, f"patterns failed: {failed}"
-    return True, "default/none/layered/force Remap patterns all completed"
+    return True, "default/none/layered/force/clusters Remap patterns all completed"
 
 
 def check_remap_layered_pattern(page):
@@ -401,6 +401,329 @@ def check_force_directed_adjacent_cells(page):
     if not result["adjacent"]:
         return False, f"connected nodes not in adjacent cells: {result['cellA']} vs {result['cellB']}"
     return True, "connected pair landed in truly adjacent grid cells"
+
+
+def check_remap_clusters_decomposition(page):
+    """Regression guard for the new Remap 'clusters' ("Centralize in Clusters") pattern,
+    reported directly: "need a better remap for erd that puts popular nodes central to
+    single children around them, repeat this pattern in clusters. perhaps a 'centralize
+    in clusters' option that could work on any view." Exercises
+    layout.js's computeHubClusterDecomposition directly -- pure graph logic, no
+    coordinates, no store -- covering the specific design choices made for this
+    feature (any node with degree >= 2 is a hub candidate; a lower-degree non-leaf
+    joins a hub's ring when that hub is its ONE strictly-more-connected neighbor,
+    rather than only true degree-1 leaves being pulled in):
+    - a star (one hub, three leaves) collapses to one cluster with all three leaves in
+      the ring;
+    - a degree-2 node ("D") whose sole more-connected neighbor is a hub joins that
+      hub's ring instead of becoming its own hub, even though its own degree is 2, not
+      1 -- the "leans toward one hub" behavior specifically chosen for this feature;
+    - a node ("E") whose only neighbor is that same absorbed D (not the hub itself)
+      does NOT transitively join the hub's cluster -- D's own further edges aren't
+      inherited by the hub, so E becomes its own separate singleton cluster (its edge
+      to D becomes a cross-cluster "bridge", the same category of limitation as a
+      force-directed pattern's own unplaceable cycle edge);
+    - two EQUAL-degree hubs connected to each other stay two separate clusters (neither
+      outranks the other, so neither absorbs the other) instead of merging into one;
+    - an isolated pair (two nodes connected only to each other, both degree 1) becomes
+      its own hub+ring-of-one cluster rather than being dropped;
+    - a fully isolated node (no edges at all) becomes its own hub with an empty ring.
+    Every node must appear in EXACTLY one cluster (no node lost, no node duplicated)."""
+    result = js(page, """
+    async () => {
+      const layout = await import('./js/layout.js');
+
+      // star: H1 + 3 leaves
+      const starEdges = [{ from: 'H1', to: 'L1' }, { from: 'H1', to: 'L2' }, { from: 'H1', to: 'L3' }];
+      const starClusters = layout.computeHubClusterDecomposition(['H1', 'L1', 'L2', 'L3'], starEdges);
+
+      // hub H3 (3 leaves + D), D (degree 2: H3 + E), E (degree 1: D only)
+      const leanEdges = [
+        { from: 'H3', to: 'F1' }, { from: 'H3', to: 'F2' }, { from: 'H3', to: 'F3' },
+        { from: 'H3', to: 'D' }, { from: 'D', to: 'E' },
+      ];
+      const leanClusters = layout.computeHubClusterDecomposition(['H3', 'F1', 'F2', 'F3', 'D', 'E'], leanEdges);
+
+      // two equal-degree hubs (4 each, bridged to each other)
+      const bridgeEdges = [
+        { from: 'H1b', to: 'A1' }, { from: 'H1b', to: 'A2' }, { from: 'H1b', to: 'A3' }, { from: 'H1b', to: 'H2b' },
+        { from: 'H2b', to: 'B1' }, { from: 'H2b', to: 'B2' }, { from: 'H2b', to: 'B3' },
+      ];
+      const bridgeClusters = layout.computeHubClusterDecomposition(['H1b', 'A1', 'A2', 'A3', 'H2b', 'B1', 'B2', 'B3'], bridgeEdges);
+
+      // isolated pair + isolated singleton
+      const miscClusters = layout.computeHubClusterDecomposition(['P', 'Q', 'Z'], [{ from: 'P', to: 'Q' }]);
+
+      const findCluster = (clusters, hub) => clusters.find(c => c.hub === hub);
+      const allNodesCovered = (clusters, expectedIds) => {
+        const seen = new Set();
+        for (const c of clusters) { seen.add(c.hub); for (const r of c.ring) seen.add(r); }
+        return expectedIds.every(id => seen.has(id)) && [...seen].length === expectedIds.length;
+      };
+
+      return {
+        starClusterCount: starClusters.length,
+        starRing: findCluster(starClusters, 'H1')?.ring.slice().sort(),
+        leanClusterCount: leanClusters.length,
+        h3Ring: findCluster(leanClusters, 'H3')?.ring.slice().sort(),
+        eIsOwnHub: !!findCluster(leanClusters, 'E'),
+        eRing: findCluster(leanClusters, 'E')?.ring,
+        leanNodesCovered: allNodesCovered(leanClusters, ['H3', 'F1', 'F2', 'F3', 'D', 'E']),
+        bridgeClusterCount: bridgeClusters.length,
+        h1bIsHub: !!findCluster(bridgeClusters, 'H1b'),
+        h2bIsHub: !!findCluster(bridgeClusters, 'H2b'),
+        bridgeNodesCovered: allNodesCovered(bridgeClusters, ['H1b', 'A1', 'A2', 'A3', 'H2b', 'B1', 'B2', 'B3']),
+        miscClusterCount: miscClusters.length,
+        pRing: findCluster(miscClusters, 'P')?.ring,
+        zRing: findCluster(miscClusters, 'Z')?.ring,
+      };
+    }
+    """)
+    problems = []
+    if result["starClusterCount"] != 1 or result["starRing"] != ["L1", "L2", "L3"]:
+        problems.append(f"expected a star to collapse to one cluster with all 3 leaves in the hub's ring, got count={result['starClusterCount']} ring={result['starRing']}")
+    if result["leanClusterCount"] != 2:
+        problems.append(f"expected the 'leaning' fixture to produce exactly 2 clusters (H3's star + E's own singleton), got {result['leanClusterCount']}")
+    if result["h3Ring"] != ["D", "F1", "F2", "F3"]:
+        problems.append(f"expected D (degree-2, leaning toward H3) to join H3's ring alongside the 3 true leaves, got {result['h3Ring']}")
+    if not result["eIsOwnHub"] or result["eRing"] != []:
+        problems.append(f"expected E to become its own singleton cluster (D was already claimed by H3, so E's edge to D is a bridge, not inherited) eIsOwnHub={result['eIsOwnHub']} eRing={result['eRing']}")
+    if not result["leanNodesCovered"]:
+        problems.append("expected every node in the 'leaning' fixture to appear in exactly one cluster")
+    if result["bridgeClusterCount"] != 2 or not result["h1bIsHub"] or not result["h2bIsHub"]:
+        problems.append(f"expected two EQUAL-degree hubs connected to each other to stay two separate clusters (neither absorbs the other), got count={result['bridgeClusterCount']} h1bIsHub={result['h1bIsHub']} h2bIsHub={result['h2bIsHub']}")
+    if not result["bridgeNodesCovered"]:
+        problems.append("expected every node in the equal-degree-bridge fixture to appear in exactly one cluster")
+    if result["miscClusterCount"] != 2:
+        problems.append(f"expected an isolated pair (1 cluster) + an isolated singleton (1 cluster) = 2 clusters, got {result['miscClusterCount']}")
+    if result["pRing"] != ["Q"]:
+        problems.append(f"expected the isolated pair to become one hub+ring-of-one cluster, got P's ring={result['pRing']}")
+    if result["zRing"] != []:
+        problems.append(f"expected the fully isolated node to become its own hub with an empty ring, got {result['zRing']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "computeHubClusterDecomposition centers popular (degree>=2) nodes with their single-connection leaves around them, pulls in a lower-degree non-leaf that leans toward one hub, keeps equal-degree hubs as separate clusters instead of merging, and never loses or duplicates a node including isolated pairs/singletons"
+
+
+def check_remap_clusters_grid_placement(page):
+    """Integration regression guard for Remap's 'clusters' pattern end to end (commands.js's
+    applyRemapLayout, pattern:'clusters' -- see check_remap_clusters_decomposition for the
+    underlying pure-logic decomposition), proving the shared makeRingPlacer refactor
+    (layout.js, factored out of computeAdjacentGridLayout so 'force' and 'clusters' share
+    identical ring-placement code) didn't break either consumer. Covers: every ring member
+    lands in a grid cell truly ADJACENT to its own hub (same assertion style as
+    check_force_directed_adjacent_cells, just per-cluster instead of per-component); TWO
+    separate hub clusters on the same view end up in DIFFERENT, non-overlapping grid
+    regions (the packClustersOnGrid tail actually ran, not just one cluster's own
+    placement); no two nodes anywhere in the final layout land on the exact same pixel
+    position; and forcePreferRight biases a ring member to the hub's own EAST cell when
+    that cell is free, same as it already does for 'force'."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const mk = (label) => store.createPart({ type: 'Unknown', label, model, streams: [] });
+      const conn = (fromPart, toPart) => store.createConnector({ from: fromPart.id, to: toPart.id, model, connectorType: 'c', relationship: 'Association', streams: [] });
+      const place = (view, part, x, y) => store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x, y });
+      const wire = (view, c, fromVm, toVm) => store.createViewMember({ view: view.id, objectType: 'connector', objectId: c.id, fromVmId: fromVm.id, toVmId: toVm.id });
+
+      const view = store.addView('RegrClusters_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      // cluster 1: hub H with 3 leaves
+      const H = mk('H'), L1 = mk('L1'), L2 = mk('L2'), L3 = mk('L3');
+      const hVm = place(view, H, 0, 0), l1Vm = place(view, L1, 500, 500), l2Vm = place(view, L2, 600, 500), l3Vm = place(view, L3, 700, 500);
+      wire(view, conn(H, L1), hVm, l1Vm); wire(view, conn(H, L2), hVm, l2Vm); wire(view, conn(H, L3), hVm, l3Vm);
+
+      // cluster 2: separate hub K with 2 leaves, no connection at all to cluster 1
+      const K = mk('K'), M1 = mk('M1'), M2 = mk('M2');
+      const kVm = place(view, K, 2000, 2000), m1Vm = place(view, M1, 2100, 2000), m2Vm = place(view, M2, 2200, 2000);
+      wire(view, conn(K, M1), kVm, m1Vm); wire(view, conn(K, M2), kVm, m2Vm);
+
+      commands.applyRemapLayout(app, view.id, { pattern: 'clusters' });
+
+      const stepX = 170, stepY = 90;
+      const cellOf = (vm) => ({ col: Math.round(vm.x / stepX), row: Math.round(vm.y / stepY) });
+      const isAdjacent = (a, b) => Math.abs(a.col - b.col) <= 1 && Math.abs(a.row - b.row) <= 1 && !(a.col === b.col && a.row === b.row);
+      const hCell = cellOf(hVm);
+      const leafCells = [l1Vm, l2Vm, l3Vm].map(cellOf);
+      const allLeafAdjacentToH = leafCells.every(c => isAdjacent(hCell, c));
+
+      // packClustersOnGrid's job is to keep each cluster's own cells in a DISTINCT
+      // region -- not to space clusters far apart (a tight shelf-pack with a 1-cell gap
+      // is the intended, space-efficient behavior) -- so the real assertion is that the
+      // two clusters' bounding boxes don't overlap, not that they're far apart.
+      const boundsOf = (cells) => ({
+        minCol: Math.min(...cells.map(c => c.col)), maxCol: Math.max(...cells.map(c => c.col)),
+        minRow: Math.min(...cells.map(c => c.row)), maxRow: Math.max(...cells.map(c => c.row)),
+      });
+      const rectsOverlap = (a, b) => a.minCol <= b.maxCol && b.minCol <= a.maxCol && a.minRow <= b.maxRow && b.minRow <= a.maxRow;
+      const kCell = cellOf(kVm), m1Cell = cellOf(m1Vm), m2Cell = cellOf(m2Vm);
+      const hClusterBounds = boundsOf([hCell, ...leafCells]);
+      const kClusterBounds = boundsOf([kCell, m1Cell, m2Cell]);
+      const clustersOverlap = rectsOverlap(hClusterBounds, kClusterBounds);
+
+      const allVms = [hVm, l1Vm, l2Vm, l3Vm, kVm, m1Vm, m2Vm];
+      const positions = allVms.map(vm => `${Math.round(vm.x)},${Math.round(vm.y)}`);
+      const noOverlap = new Set(positions).size === positions.length;
+
+      // forcePreferRight: re-run on a fresh single hub+leaf pair, confirm the leaf lands directly EAST of the hub
+      const view2 = store.addView('RegrClustersRight_' + Date.now(), 'ff');
+      const H2 = mk('H2'), R1 = mk('R1');
+      const h2Vm = place(view2, H2, 0, 0), r1Vm = place(view2, R1, 500, 0);
+      wire(view2, conn(H2, R1), h2Vm, r1Vm);
+      commands.applyRemapLayout(app, view2.id, { pattern: 'clusters', forcePreferRight: true });
+      const h2Cell = cellOf(h2Vm), r1Cell = cellOf(r1Vm);
+      const leafIsEastOfHub = r1Cell.col === h2Cell.col + 1 && r1Cell.row === h2Cell.row;
+
+      return { allLeafAdjacentToH, clustersOverlap, noOverlap, leafIsEastOfHub, hCell, leafCells, kCell };
+    }
+    """)
+    problems = []
+    if not result["allLeafAdjacentToH"]:
+        problems.append(f"expected all 3 leaves adjacent to hub H, got hCell={result['hCell']} leafCells={result['leafCells']}")
+    if result["clustersOverlap"]:
+        problems.append(f"expected the two separate hub clusters' bounding boxes to never overlap, got hCell={result['hCell']} kCell={result['kCell']}")
+    if not result["noOverlap"]:
+        problems.append("expected no two nodes anywhere in the final layout to land on the exact same pixel position")
+    if not result["leafIsEastOfHub"]:
+        problems.append("expected forcePreferRight to place a free ring member directly EAST of its hub")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "applyRemapLayout(pattern:'clusters') places every ring member in a grid cell truly adjacent to its own hub, shelf-packs separate hub clusters well apart with no overlapping positions anywhere, and honors forcePreferRight the same way 'force' does"
+
+
+def check_remap_clusters_connectivity_aware_packing(page):
+    """Regression guard for a direct follow-up report on the 'clusters' pattern: "is it
+    possible to add the existing 'minimize connector crossing' or something similar, to
+    avoid placing nodes directly on unrelated connectors after 'centralize in clusters'
+    is applied?" Root cause of the underlying defect: packClustersOnGrid (layout.js)
+    used to order clusters purely by AREA, with zero awareness of which clusters are
+    connected to each other by a cross-cluster "bridge" edge -- so a bridge-connected
+    pair could easily end up on opposite ends of the shelf-packed sequence with an
+    unrelated cluster sitting between them, forcing the bridge's straight-line connector
+    to stretch across (and often visually through) that unrelated territory. Fixed by
+    making the packing order connectivity-aware: after the largest cluster, whichever
+    remaining cluster shares the most bridge edges with what's ALREADY placed goes next
+    (tie-broken by area), not just whichever is biggest.
+
+    Exercises layout.js's computeHubClusterGridLayout directly (pure logic, no store).
+    Fixture: cluster P (hub + 5 leaves, clearly largest, the unambiguous first pick),
+    cluster Q (hub + 3 leaves, same size as R, NOT connected to anything else), cluster
+    R (hub + 3 leaves, one of which bridges to one of P's own leaves). Old pure-area
+    ordering would place P first, then Q and R tied for second (stable sort keeps their
+    original relative order, Q first) -- producing the sequence [P, Q, R], with the
+    bridge-connected pair P/R NOT adjacent. Asserts the FIXED ordering instead places R
+    right after P (ahead of the same-sized, unconnected Q) by checking each cluster's
+    own leftmost column in the final packed grid: R's minimum column must be smaller
+    than Q's (R was packed earlier/closer), and P's smaller than R's (P still goes
+    first, being unambiguously largest)."""
+    result = js(page, """
+    async () => {
+      const layout = await import('./js/layout.js');
+      const w = 130, h = 46;
+      const mkNode = (id) => ({ id, x: 0, y: 0, w, h });
+
+      const HP = 'HP', LP = ['LP1', 'LP2', 'LP3', 'LP4', 'LP5'];
+      const HQ = 'HQ', LQ = ['LQ1', 'LQ2', 'LQ3'];
+      const HR = 'HR', LR = ['LR1', 'LR2', 'LR3'];
+      const nodeIds = [HP, ...LP, HQ, ...LQ, HR, ...LR];
+      const nodes = nodeIds.map(mkNode);
+      const edges = [
+        ...LP.map(l => ({ from: HP, to: l })),
+        ...LQ.map(l => ({ from: HQ, to: l })),
+        ...LR.map(l => ({ from: HR, to: l })),
+        { from: LP[0], to: LR[0] }, // the bridge: a leaf of P connects to a leaf of R
+      ];
+
+      const stepX = 170;
+      const positions = layout.computeHubClusterGridLayout(nodes, edges, { stepX, stepY: 90, maxShelfWidthCells: 30 });
+      const colOf = (id) => Math.round(positions.get(id).x / stepX);
+      const minColOf = (ids) => Math.min(...ids.map(colOf));
+
+      return {
+        minColP: minColOf([HP, ...LP]),
+        minColQ: minColOf([HQ, ...LQ]),
+        minColR: minColOf([HR, ...LR]),
+      };
+    }
+    """)
+    if not (result["minColP"] < result["minColR"] < result["minColQ"]):
+        return False, f"expected packing order P, R, Q (bridge-connected R pulled ahead of same-sized, unconnected Q) by leftmost column, got minColP={result['minColP']} minColR={result['minColR']} minColQ={result['minColQ']}"
+    return True, "packClustersOnGrid places a bridge-connected cluster (R) shelf-adjacent to what's already placed (P) ahead of a same-sized but unconnected cluster (Q), instead of ordering purely by area"
+
+
+def check_remap_clusters_avoid_node_on_connector_overlap(page):
+    """Regression guard for layout.js's avoidNodeOnConnectorOverlap -- the direct fix for
+    "is it possible to ... avoid placing nodes directly on unrelated connectors after
+    'centralize in clusters' is applied?" once a bridge edge still ends up crossing
+    through a bystander node's cell despite the connectivity-aware packing above.
+    Exercises the function directly (pure logic: hand-built finalGrid/nodeSizes/
+    ringMemberToHub/edges, no store), covering the three design guarantees documented
+    on the function itself:
+    - a genuine bystander (a RING member, not an endpoint of the offending connector)
+      sitting exactly on a connector's straight-line path gets relocated to a different
+      cell -- one of its own hub's other 8 immediate neighbor cells, so it's still
+      exactly as hub-adjacent afterward;
+    - a HUB sitting on a connector's path is NEVER moved (moving a hub would disturb
+      its entire ring) -- confirmed left in place;
+    - a ring member on the path but with NO free alternative cell around its own hub
+      (every other neighbor already occupied) is also left in place -- best-effort, not
+      a crash or an invalid relocation.
+    In every case the connector's own two endpoints are themselves never touched."""
+    result = js(page, """
+    async () => {
+      const layout = await import('./js/layout.js');
+      const offsets = [[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1]];
+
+      // Case 1: ring member Z sits on the X-Y connector path -- should relocate around its own hub H.
+      const grid1 = new Map([['X', {col:0,row:0}], ['Y', {col:4,row:0}], ['H', {col:2,row:-1}], ['Z', {col:2,row:0}]]);
+      const sizes1 = new Map([['X',{w:100,h:40}], ['Y',{w:100,h:40}], ['H',{w:100,h:40}], ['Z',{w:100,h:40}]]);
+      layout.avoidNodeOnConnectorOverlap(grid1, sizes1, new Map([['Z','H']]), [{from:'X',to:'Y'}], 100, 100);
+      const zMoved = grid1.get('Z').col !== 2 || grid1.get('Z').row !== 0;
+      const zStillHubAdjacent = Math.abs(grid1.get('Z').col - grid1.get('H').col) <= 1 && Math.abs(grid1.get('Z').row - grid1.get('H').row) <= 1;
+      const endpointsUntouched1 = grid1.get('X').col === 0 && grid1.get('X').row === 0 && grid1.get('Y').col === 4 && grid1.get('Y').row === 0;
+      const hubUntouched1 = grid1.get('H').col === 2 && grid1.get('H').row === -1;
+
+      // Case 2: a HUB (not a ring member) sits on the path -- must NEVER move.
+      const grid2 = new Map([['X', {col:0,row:0}], ['Y', {col:4,row:0}], ['HubOnPath', {col:2,row:0}]]);
+      const sizes2 = new Map([['X',{w:100,h:40}], ['Y',{w:100,h:40}], ['HubOnPath',{w:100,h:40}]]);
+      layout.avoidNodeOnConnectorOverlap(grid2, sizes2, new Map(), [{from:'X',to:'Y'}], 100, 100);
+      const hubNeverMoved = grid2.get('HubOnPath').col === 2 && grid2.get('HubOnPath').row === 0;
+
+      // Case 3: ring member on the path, but every one of its hub's 8 neighbor cells is
+      // already occupied -- best-effort, must stay put (not crash, not relocate invalidly).
+      const grid3 = new Map([['X', {col:0,row:0}], ['Y', {col:4,row:0}], ['H2', {col:2,row:-1}], ['Z2', {col:2,row:0}]]);
+      const sizes3 = new Map([['X',{w:100,h:40}], ['Y',{w:100,h:40}], ['H2',{w:100,h:40}], ['Z2',{w:100,h:40}]]);
+      let n = 0;
+      for (const [dc, dr] of offsets) {
+        const c = 2 + dc, r = -1 + dr;
+        if (c === 2 && r === 0) continue; // Z2's own cell
+        grid3.set('Filler' + (n++), { col: c, row: r });
+      }
+      for (let i = 0; i < n; i++) sizes3.set('Filler' + i, { w: 100, h: 40 });
+      layout.avoidNodeOnConnectorOverlap(grid3, sizes3, new Map([['Z2','H2']]), [{from:'X',to:'Y'}], 100, 100);
+      const z2StayedPut = grid3.get('Z2').col === 2 && grid3.get('Z2').row === 0;
+
+      return { zMoved, zStillHubAdjacent, endpointsUntouched1, hubUntouched1, hubNeverMoved, z2StayedPut };
+    }
+    """)
+    problems = []
+    if not result["zMoved"]:
+        problems.append("expected the bystander ring member sitting on the connector's path to be relocated")
+    if not result["zStillHubAdjacent"]:
+        problems.append("expected the relocated ring member to still be adjacent to its own hub")
+    if not result["endpointsUntouched1"] or not result["hubUntouched1"]:
+        problems.append("expected the connector's own endpoints and the bystander's hub to never move")
+    if not result["hubNeverMoved"]:
+        problems.append("expected a HUB sitting on an unrelated connector's path to never be moved")
+    if not result["z2StayedPut"]:
+        problems.append("expected a ring member with no free alternative cell around its hub to stay put (best-effort, not an invalid relocation)")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "avoidNodeOnConnectorOverlap relocates a bystander ring member off an unrelated connector's path (staying adjacent to its own hub, endpoints/hub untouched), never moves a hub, and leaves a node with no free slot in place"
 
 
 def check_smart_check_view(page):
@@ -8734,6 +9057,10 @@ CHECKS = [
     check_remap_crossing_minimization_finds_global_optimum,
     check_force_directed_no_runaway_drift,
     check_force_directed_adjacent_cells,
+    check_remap_clusters_decomposition,
+    check_remap_clusters_grid_placement,
+    check_remap_clusters_connectivity_aware_packing,
+    check_remap_clusters_avoid_node_on_connector_overlap,
     check_smart_check_view,
     check_property_panel_field_split,
     check_multiselect_shows_entity_level_fields,

@@ -92,7 +92,7 @@ capability flow, you generate the whole pattern from a template and a few names.
 section boxes and their header labels for a section-based view — not just the nodes and connectors inside them.</p>
 
 <h3>Remap</h3>
-<p>Reorganizes a view's layout. Four patterns:</p>
+<p>Reorganizes a view's layout. Five patterns:</p>
 <ul>
   <li><strong>Default</strong> — groups nodes by stream into rows, following the stream template's own
   ordering.</li>
@@ -109,6 +109,16 @@ section boxes and their header labels for a section-based view — not just the 
   and placed in directly adjacent grid cells; unconnected clusters are packed into their own separate regions.
   Good for "just show me how this is actually connected" rather than a prescribed row order. Doesn't use sort
   order or column limits, since the layout is driven by connectivity instead.</li>
+  <li><strong>Centralize in Clusters</strong> — like Force-directed, but instead of finding just ONE central
+  hub for a whole connected diagram, it repeats the pattern: every locally most-connected node gets centered
+  with its own single-connection neighbors placed directly around it, and this repeats across the diagram,
+  tiling the resulting hub clusters together. Especially useful for an ERD, which is often one single
+  connected web of tables end to end — Force-directed would give it exactly one hub for everything, while
+  Centralize in Clusters breaks it into several readable table-and-its-related-tables groupings instead.
+  Clusters that connect to each other are automatically packed near one another, and any node that still ends
+  up sitting on top of an unrelated connector line gets nudged aside — but a table that connects to more than
+  one cluster can't always land adjacent to every cluster it touches, the same kind of unavoidable 2D-layout
+  tradeoff Force-directed already makes for cycles.</li>
 </ul>
 <p>Remap also has an "only remap filtered nodes" option — combine it with the Stream, Type, or Section filter
 to reorganize just a subset of a busy view without disturbing everything else.</p>
@@ -131,8 +141,8 @@ pinned to Top/Bottom/Left/Right can get reordered within its band and slides alo
 with whatever it's connected to in the middle grid, not just the plain, evenly-spaced band position it'd
 otherwise get. Both are heuristics, not guaranteed-optimal, but they noticeably clean up busy
 views — and combine well, since crossing reduction decides ordering first and length minimization then
-tightens the actual spacing. None of the three options do anything on the Force-directed pattern or a
-section-based view, since both lack a free row/column to bias.</p>
+tightens the actual spacing. None of the three options do anything on the Force-directed or Centralize in
+Clusters patterns, or a section-based view, since none of them have a free row/column to bias.</p>
 <p>Remap's own choices (pattern, options, sort priority order) are remembered as your defaults the next
 time you open it on any view — and reopening it on the SAME view you last ran it on brings back that view's
 own settings specifically (pattern, both minimize checkboxes, Edge Assignment, template — not just sort
