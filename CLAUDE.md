@@ -4,8 +4,8 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-DyCAD (formerly "FlowRun" — some internal history and comments still say FlowRun; see
-"Rebrand" below) is a single-page, browser-based enterprise architecture modeling and
+DyCAD (formerly "FlowRun" — the historical build log still records that under its old
+name; see "Rebrand" below) is a single-page, browser-based enterprise architecture modeling and
 simulation tool built around ArchiMate concepts, with a "Streams" tagging/pattern-
 generation layer on top. Audience is enterprise architects and business analysts, not
 developers — keep that in mind for anything user-facing (toasts, labels, the
@@ -135,9 +135,13 @@ dependency direction. Quick orientation:
 ## Rebrand note
 
 The product was renamed from "FlowRun" to "DyCAD" partway through this project's
-history. A few things deliberately still reference the old name: historical changelog
-entries in `js/version.js` describing past work (accurate record, not rewritten), and
-simulation-snapshot file loading, which accepts both the old and new internal format
-tag so previously-saved files keep working. If you're doing a rename-adjacent change,
-search case-insensitively for the old name across the whole repo before assuming a
-grep for the new one is sufficient.
+history. As of the cleanup pass that removed the name from live documentation and code,
+only two things still deliberately reference the old name, both genuine historical
+record rather than something to rewrite: `js/version.js`'s changelog entries describing
+past work under the old name, and `RECREATION_PROMPT.md`'s own "Phase 13 — Rebrand"
+section, which documents the rename itself as a build phase. Simulation-snapshot file
+loading no longer accepts the pre-rebrand format tag — since there were never any real
+users, that backward-compat path was removed rather than kept as a safety net; a
+snapshot file saved under the old tag is now rejected like any other unrecognized file.
+If you're doing a rename-adjacent change, search case-insensitively for the old name
+across the whole repo before assuming a grep for the new one is sufficient.

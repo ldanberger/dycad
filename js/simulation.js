@@ -530,9 +530,7 @@ async function loadSimSnapshot(app, modelName, file) {
   try {
     const text = await file.text();
     const snap = JSON.parse(text);
-    // Accepts the pre-rebrand 'flowrun-sim-snapshot' kind too, so snapshots saved
-    // before the DyCAD rename still load correctly rather than being rejected outright.
-    if (snap.kind !== 'dycad-sim-snapshot' && snap.kind !== 'flowrun-sim-snapshot') { app.toast('Not a simulation snapshot file.', true); return; }
+    if (snap.kind !== 'dycad-sim-snapshot') { app.toast('Not a simulation snapshot file.', true); return; }
     if (snap.model && snap.model !== modelName) {
       const proceed = await app.confirmModal(`This snapshot was recorded for model "${snap.model}", but "${modelName}" is currently selected. Load it into "${modelName}" anyway?`);
       if (!proceed) return;

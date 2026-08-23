@@ -1,4 +1,4 @@
-# DyCAD (formerly FlowRun)
+# DyCAD
 
 A single-page workflow designer and simulator canvas for enterprise architects. Pure vanilla
 JS/HTML/CSS — no backend, no build step, no npm packages. Open `index.html` in a browser

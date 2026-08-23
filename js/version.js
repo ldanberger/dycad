@@ -3627,4 +3627,22 @@
 // dialog-driven "Only remap selected nodes" run, confirmed via direct position
 // readback (not just a screenshot). DESIGN_DOCUMENT.md SS6.1d, tests/README.md, and
 // public/instructions.html updated. Full suite 126/126.
-export const APP_VERSION = '0.875';
+//
+// v0.876: "update documentation, remove all reference to flowrun." Repo-wide
+// case-insensitive sweep for the pre-rebrand product name. README.md's title
+// dropped its "(formerly FlowRun)" suffix. CLAUDE.md's intro and its own "Rebrand
+// note" section were reworded to describe the current, smaller set of intentional
+// exceptions accurately, rather than claiming a compat path that no longer exists.
+// js/simulation.js's loadSimSnapshot no longer accepts the pre-rebrand
+// 'flowrun-sim-snapshot' file-format tag alongside 'dycad-sim-snapshot' -- per this
+// project's own "no prior users, no backwards-compat needed for naming/terminology
+// renames" stance, confirmed directly rather than assumed, since removing it changes
+// real behavior (an old-tagged snapshot file is now rejected like any other
+// unrecognized file, the same as it would be for a genuinely foreign file). Two
+// spots deliberately kept the name unchanged, confirmed directly rather than
+// assumed: js/version.js's own changelog (this section) and RECREATION_PROMPT.md's
+// "Phase 13 — Rebrand" section, both genuine historical record of work that already
+// happened, not something to retroactively rewrite -- consistent with this
+// changelog's own established practice. Full suite 126/126 (no test referenced the
+// removed compat path).
+export const APP_VERSION = '0.876';

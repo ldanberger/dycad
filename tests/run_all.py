@@ -84,6 +84,56 @@ def check_example_simulates(page):
     return True, "bundled example loaded and simulated 3 ticks with no errors"
 
 
+def check_sim_snapshot_rejects_pre_rebrand_tag(page):
+    """Regression guard for a deliberate behavior change, reported directly: "update
+    documentation, remove all reference to flowrun" (confirmed explicitly, not
+    assumed, that this should extend to dropping the pre-rebrand compat path in
+    js/simulation.js's loadSimSnapshot, since the project has no prior users to keep
+    backward-compatible). loadSimSnapshot used to accept EITHER 'dycad-sim-snapshot'
+    or the pre-rebrand 'flowrun-sim-snapshot' as a valid snapshot file `kind` tag; it
+    now accepts only 'dycad-sim-snapshot' — a file saved under the old tag is
+    rejected exactly like any other unrecognized file, with the same specific "Not a
+    simulation snapshot file" toast. Exercises loadSimSnapshot directly with two
+    synthetic File objects, otherwise identical, differing only in `kind`: covers
+    that the old-tagged file is rejected (no store.simRuntime entry created, specific
+    toast shown) while the current-tagged file still loads correctly (real
+    store.simRuntime entry with the snapshot's own tick count, success toast) —
+    proving the rejection is specific to the removed tag, not a general regression in
+    snapshot loading itself."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+      const modelName = store.defaultModel;
+      const lastToast = () => { const all = document.querySelectorAll('.toast'); return all.length ? all[all.length - 1].textContent : null; };
+      const mkFile = (kind, tick) => new File([JSON.stringify({ kind, version: 2, tick, model: modelName, values: {}, log: [] })], 'snap.json', { type: 'application/json' });
+
+      store.simRuntime.delete(modelName);
+      await sim.loadSimSnapshot(app, modelName, mkFile('flowrun-sim-snapshot', 99));
+      const oldTagRejectedToast = lastToast();
+      const oldTagRuntimeCreated = store.simRuntime.has(modelName);
+
+      await sim.loadSimSnapshot(app, modelName, mkFile('dycad-sim-snapshot', 7));
+      const newTagToast = lastToast();
+      const newTagTick = store.simRuntime.get(modelName)?.tick;
+
+      return { oldTagRejectedToast, oldTagRuntimeCreated, newTagToast, newTagTick };
+    }
+    """)
+    problems = []
+    if not result["oldTagRejectedToast"] or "not a simulation snapshot" not in result["oldTagRejectedToast"].lower():
+        problems.append(f"expected the pre-rebrand 'flowrun-sim-snapshot' tag to be rejected with a specific 'Not a simulation snapshot file' toast, got {result['oldTagRejectedToast']!r}")
+    if result["oldTagRuntimeCreated"]:
+        problems.append("expected the rejected old-tagged file to create NO simRuntime entry")
+    if not result["newTagToast"] or "loaded" not in result["newTagToast"].lower():
+        problems.append(f"expected the current 'dycad-sim-snapshot' tag to still load successfully, got toast {result['newTagToast']!r}")
+    if result["newTagTick"] != 7:
+        problems.append(f"expected the successfully-loaded snapshot's own tick count (7) to land in store.simRuntime, got {result['newTagTick']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "loadSimSnapshot now rejects the pre-rebrand 'flowrun-sim-snapshot' tag with a specific toast and creates no runtime entry, while the current 'dycad-sim-snapshot' tag still loads correctly"
+
+
 def check_remap_patterns(page):
     result = js(page, """
     async () => {
@@ -9413,6 +9463,7 @@ def check_load_sfcce_dialog_ux_and_generate_unique_id(page):
 CHECKS = [
     check_boots_clean,
     check_example_simulates,
+    check_sim_snapshot_rejects_pre_rebrand_tag,
     check_remap_patterns,
     check_remap_layered_pattern,
     check_remap_crossing_minimization_finds_global_optimum,
