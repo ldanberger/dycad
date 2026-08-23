@@ -3277,4 +3277,32 @@
 // check_sfce_catalog_page's exact-column-list assertion for the new column (an
 // expected, documented side effect, not a regression). DESIGN_DOCUMENT.md SS7.5 and
 // tests/README.md updated. Full suite 112/112.
-export const APP_VERSION = '0.866';
+//
+// v0.867: replaced instructions.html's "Industry_to_SFCCE" AI-prompt template
+// (public/instructions.html, "AI-Assisted Capability Data Generation" section) after a
+// multi-round review at the user's request. Function now carries functionDescription/
+// functionId; a fixed baseline of ~29 generic enterprise-support Functions (Accounting,
+// Audit, Procurement, Human Resourcing, ...) is included verbatim, matching
+// custom.json's own "Enterprise Functions" populate-from-template data, so a generated
+// file's Functions line up with that template's functionId/Section assignments out of
+// the box. Section moved back to (and stayed at) the Application Capability level as
+// "sections" (a string array, supporting genuine cross-section sharing via the
+// wizard's existing shared-Section detection) -- an earlier draft during review moved
+// it to the Function level as a single scalar, which was simpler to wire but lost
+// multi-section sharing; corrected per direct feedback: "cross-section sharing is
+// needed... section is currently supported under applicationCapabilities... it should
+// stay to support existing input structure." A parallel per-value "sectionId" array
+// was also considered and rejected -- buildRowsFromRecords only reads ONE scalar
+// Section-Id field per record (resolveMappedId), so a plural sectionId array can never
+// correctly line up with a plural sections array; kept as a single OPTIONAL scalar
+// instead, filled in only when "sections" names exactly one of 7 known Sections,
+// otherwise left blank ("SectionId can be blank or a lookup from the values provided"
+// -- an unrecognized or multi-valued section still imports fine, auto-deriving its own
+// id, same as any other unmapped Section Id). Sections are no longer a closed set of 7
+// ("Sections will not just be one of the 7, others need to be accepted") -- reworded to
+// "prefer... wherever it genuinely fits" rather than a hard constraint. All numeric
+// target ranges (Function/Capability/Entity counts) removed per direct request ("Should
+// not have count limits on any type of data, please remove"). No code changes; no new
+// test (nothing in run_all.py asserts this section's content). Full suite 112/112
+// (unaffected, run as a sanity check).
+export const APP_VERSION = '0.867';

@@ -342,36 +342,88 @@ Output ONLY a JSON array in this exact shape, one entry per input domain:
 Save the result as capabilities_merged.json.</pre>
 
 <p><strong>Industry_to_SFCCE</strong> — generates a capability map for an industry from scratch, no source
-file needed. Fill in the <code>{{INDUSTRY}}</code> placeholder before running it. Leaving out the
-Application Capability level (as the prompt itself notes) produces the simpler 3-level Function/Capability/Entity
-shape instead, for a plain <strong>Load SFCE</strong>-style import. Entities are the concrete data
-records/objects a Capability or Application Capability manages — e.g. "Sales Order," "Customer Profile,"
-"Bill of Materials," the same kind you'll see if you look at DyCAD's own built-in default industry dataset
-(<strong>Catalogs &gt; SFCCE</strong>) — not systems, processes, or documents.</p>
+file needed. Fill in the <code>{{INDUSTRY}}</code> placeholder before running it. Every Function also
+carries its own description and id, and a fixed baseline of ~29 generic enterprise-support Functions
+(Accounting, Audit, Procurement, Human Resourcing, and so on) is included verbatim, matching DyCAD's own
+built-in <strong>Populate From Template &gt; Enterprise Functions</strong> template — a generated file's
+Functions line up with that template's own <code>functionId</code>/Section assignments out of the box.
+Sections are listed per Application Capability, not per Function — an Application Capability can (and
+often does) span several Sections, which the wizard's own shared-Section detection step handles on import.
+Entities are the concrete data records/objects a Capability or Application Capability manages — e.g. "Sales
+Order," "Customer Profile," "Bill of Materials," the same kind you'll see if you look at DyCAD's own
+built-in default industry dataset (<strong>Catalogs &gt; SFCCE</strong>) — not systems, processes, or
+documents.</p>
 <pre class="docs-code">Generate a capability map for the {{INDUSTRY}} industry, suitable for import into
 DyCAD via File > Load SFCCE.
 
-Structure it as a JSON array of top-level business Functions, each containing
-Capabilities, each containing Application Capabilities (omit this level entirely for a
-simpler 3-level Function/Capability/Entity map instead). Each Capability/Application
-Capability is tagged with the Section(s) -- business units, departments, or lines of
-business -- that rely on it, and lists the concrete data Entities it manages (records
-or objects like "Sales Order" or "Customer Profile," not systems or processes):
+Structure it as a JSON array of top-level business Functions, each with a description
+and its Business Capabilities; each Business Capability contains Application
+Capabilities. Each Application Capability is tagged with the Section(s) -- business
+units, departments, or lines of business -- that rely on it, and lists the concrete
+data Entities it manages (records or objects like "Sales Order" or "Customer Profile,"
+not systems or processes):
 
-  [{ "function": string,
-     "capabilities": [{ "name": string, "description": string,
+  [{ "function": string, "functionDescription": string, "functionId": string,
+     "businessCapabilities": [{ "name": string, "description": string,
        "applicationCapabilities": [{ "name": string, "description": string,
-         "sections": string[],
+         "sections": string[], "sectionId": string,
          "entities": [{ "name": string, "description": string }, ...] }, ...] }, ...] }, ...]
 
-Cover the industry's full breadth: aim for 8-15 Functions, 3-8 Capabilities per
-Function, 2-6 Application Capabilities per Capability (skip Application Capabilities
-entirely for a flatter map), and 2-5 Entities per Application Capability (or per
-Capability, if Application Capabilities are omitted). Every name should be specific to
-{{INDUSTRY}}, not generic boilerplate. Descriptions are one concise sentence.
-"sections" should list 1-4 realistic organizational units per Application Capability
-(or per Capability, if Application Capabilities are omitted) -- reusing the same
-section names across many entries is expected and normal.
+Cover the industry's full breadth -- as many Functions, Business Capabilities,
+Application Capabilities, and Entities as genuinely apply, with no target count or
+upper limit. Every name should be specific to {{INDUSTRY}}, not generic boilerplate
+(the baseline Functions below are the one deliberate exception -- include them as-is).
+Descriptions are one concise sentence. "sections" should list every realistic
+organizational unit that relies on an Application Capability -- reusing the same
+section names across many entries is expected and normal, and a capability spanning
+several sections should list all of them, not just one.
+
+Prefer reusing one of these known Sections by name wherever it genuinely fits, but
+they are not a closed set -- add industry-specific sections freely wherever the
+known ones don't apply:
+
+  Centralized Operational Functions (Economies of Scale), Continuous Improvement
+  Functions, Enterprise Scope Functions, Finance Control Functions, Mainstream
+  Operational Functions, Resources Sustainment Functions, Staff Specialist Functions
+
+"sectionId" is optional: set it ONLY when "sections" lists exactly one value AND it
+exactly matches one of the known Section names above (using its id: cof, cif, esf,
+fcf, mof, rsf, ssf respectively). Leave it blank whenever "sections" lists more than
+one value, or names anything outside this list -- DyCAD generates a new id
+automatically for any section it doesn't already recognize.
+
+Include ALL of the following baseline Functions verbatim (function/functionId) --
+these are generic enterprise-support functions common to any organization; the
+Section hint after each is guidance for which known Section(s) that function's own
+capabilities typically belong under, not a JSON field:
+
+  Accounting/accounting (Resources Sustainment Functions), Ad hoc/Enhancement
+  Projects/projects (Continuous Improvement Functions), Audit/audit (Enterprise Scope
+  Functions), Budgeting/budget (Finance Control Functions), Controller/controller
+  (Finance Control Functions), Customer Relations/customerrelations (Mainstream
+  Operational Functions), Data Admin/datadmin (Centralized Operational Functions),
+  Data Governance/datagovernance (Resources Sustainment Functions), Data
+  Management/datamgmt (Mainstream Operational Functions), Data Support (Analytics,
+  Support, Policies)/datasupport (Staff Specialist Functions), Delivery/delivery
+  (Mainstream Operational Functions), Digital Transformation, Modernization,
+  Refresh/dt (Continuous Improvement Functions), EHS/ehs (Enterprise Scope
+  Functions), ESG/esg (Enterprise Scope Functions), Finance/finance (Finance Control
+  Functions), Financial Support (Policies and Priorities)/financesupport (Staff
+  Specialist Functions), GRC/grc (Enterprise Scope Functions), Human
+  Resourcing/hr (Staff Specialist Functions), IT/S Work Methods (Technology,
+  Systems)/its (Staff Specialist Functions), Legal Policies/legal (Staff Specialist
+  Functions), Marketing/marketing (Mainstream Operational Functions), New Bus.
+  Development/busdev (Enterprise Scope Functions), Op Support (Priorities in Flows:
+  Scheduling, Resourcing, Business Analysis)/opsupport (Staff Specialist Functions),
+  Personnel/personnel (Resources Sustainment Functions), Procurement/procurement
+  (Centralized Operational Functions), Product Improvement &amp;
+  Development/proddev (Mainstream Operational Functions), Production/prod
+  (Mainstream Operational Functions), Public Affairs/publicaffairs (Staff Specialist
+  Functions), Selling/selling (Mainstream Operational Functions)
+
+Then add as many additional Functions as are genuinely specific to {{INDUSTRY}} on
+top of that baseline, with a new functionId in the same lowercase, no-spaces-or-
+punctuation style as the baseline ids.
 
 Output ONLY the JSON array, valid and complete -- no commentary.</pre>
 

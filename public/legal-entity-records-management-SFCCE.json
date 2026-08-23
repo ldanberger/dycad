@@ -1,0 +1,1871 @@
+[
+  {
+    "function": "Accounting",
+    "functionDescription": "Manages the company's financial records, ledgers, and reporting.",
+    "functionId": "accounting",
+    "businessCapabilities": [
+      {
+        "name": "General Ledger & Financial Reporting",
+        "description": "Maintains the general ledger and produces periodic financial statements.",
+        "applicationCapabilities": [
+          {
+            "name": "Financial Close Management",
+            "description": "Runs the month-end and year-end close process.",
+            "sections": ["Resources Sustainment Functions"],
+            "sectionId": "rsf",
+            "entities": [
+              { "name": "General Ledger Entry", "description": "A single posted accounting transaction." },
+              { "name": "Trial Balance", "description": "A summary of all ledger account balances at a point in time." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Accounts Payable & Receivable",
+        "description": "Manages client billing and vendor payment cycles.",
+        "applicationCapabilities": [
+          {
+            "name": "Client Billing & Invoicing",
+            "description": "Generates and tracks client invoices for entity management services.",
+            "sections": ["Resources Sustainment Functions", "Mainstream Operational Functions"],
+            "sectionId": "",
+            "entities": [
+              { "name": "Invoice", "description": "A billing document issued to a client." },
+              { "name": "Payment Record", "description": "A record of a payment received or made." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Ad hoc/ Enhancement Projects",
+    "functionDescription": "Runs one-off initiatives and system enhancements outside standard operations.",
+    "functionId": "projects",
+    "businessCapabilities": [
+      {
+        "name": "Project Intake & Prioritization",
+        "description": "Collects and ranks requests for enhancements and one-off initiatives.",
+        "applicationCapabilities": [
+          {
+            "name": "Enhancement Request Tracking",
+            "description": "Logs and triages requested improvements to systems and processes.",
+            "sections": ["Continuous Improvement Functions"],
+            "sectionId": "cif",
+            "entities": [
+              { "name": "Project Request", "description": "A submitted request for a new initiative or enhancement." },
+              { "name": "Prioritization Score", "description": "A ranking value used to sequence competing requests." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Project Delivery",
+        "description": "Executes approved initiatives from kickoff through completion.",
+        "applicationCapabilities": [
+          {
+            "name": "Initiative Execution Tracking",
+            "description": "Tracks the progress and status of active projects.",
+            "sections": ["Continuous Improvement Functions"],
+            "sectionId": "cif",
+            "entities": [
+              { "name": "Project Plan", "description": "The scope, timeline, and milestones for an initiative." },
+              { "name": "Status Report", "description": "A periodic update on project progress." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Audit",
+    "functionDescription": "Independently reviews internal controls, filings, and operational compliance.",
+    "functionId": "audit",
+    "businessCapabilities": [
+      {
+        "name": "Internal Audit",
+        "description": "Evaluates internal controls and operational effectiveness.",
+        "applicationCapabilities": [
+          {
+            "name": "Audit Planning & Fieldwork",
+            "description": "Plans and executes internal audit engagements.",
+            "sections": ["Enterprise Scope Functions"],
+            "sectionId": "esf",
+            "entities": [
+              { "name": "Audit Finding", "description": "An identified control gap or issue." },
+              { "name": "Audit Workpaper", "description": "Supporting documentation for an audit finding." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Regulatory Audit Support",
+        "description": "Coordinates the company's response to external and regulatory audits.",
+        "applicationCapabilities": [
+          {
+            "name": "External Audit Coordination",
+            "description": "Manages requests and evidence gathering for outside auditors.",
+            "sections": ["Enterprise Scope Functions"],
+            "sectionId": "esf",
+            "entities": [
+              { "name": "Audit Request", "description": "A document or information request from an external auditor." },
+              { "name": "Evidence Package", "description": "A compiled set of records responding to an audit request." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Budgeting",
+    "functionDescription": "Plans and tracks the company's annual and departmental budgets.",
+    "functionId": "budget",
+    "businessCapabilities": [
+      {
+        "name": "Annual Budget Planning",
+        "description": "Builds the company's annual operating budget.",
+        "applicationCapabilities": [
+          {
+            "name": "Budget Preparation",
+            "description": "Collects and consolidates departmental budget inputs.",
+            "sections": ["Finance Control Functions"],
+            "sectionId": "fcf",
+            "entities": [
+              { "name": "Budget Line Item", "description": "A single planned expense or revenue amount." },
+              { "name": "Budget Version", "description": "A saved draft or approved iteration of the budget." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Budget Variance Monitoring",
+        "description": "Tracks actual spending against the approved budget.",
+        "applicationCapabilities": [
+          {
+            "name": "Forecast vs. Actual Tracking",
+            "description": "Compares forecasted and actual financial performance.",
+            "sections": ["Finance Control Functions"],
+            "sectionId": "fcf",
+            "entities": [
+              { "name": "Variance Report", "description": "A report showing deviation between budget and actuals." },
+              { "name": "Forecast Adjustment", "description": "A revision made to a prior financial forecast." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Controller",
+    "functionDescription": "Oversees accounting policy, internal controls, and financial statement accuracy.",
+    "functionId": "controller",
+    "businessCapabilities": [
+      {
+        "name": "Financial Controls",
+        "description": "Designs and monitors internal financial controls.",
+        "applicationCapabilities": [
+          {
+            "name": "Internal Control Monitoring",
+            "description": "Tests and evaluates the operation of financial controls.",
+            "sections": ["Finance Control Functions"],
+            "sectionId": "fcf",
+            "entities": [
+              { "name": "Control Test Result", "description": "The outcome of a control effectiveness test." },
+              { "name": "Control Deficiency", "description": "An identified weakness in a financial control." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Statutory Reporting",
+        "description": "Prepares the company's own statutory financial statements.",
+        "applicationCapabilities": [
+          {
+            "name": "Financial Statement Preparation",
+            "description": "Compiles the company's own periodic financial statements.",
+            "sections": ["Finance Control Functions"],
+            "sectionId": "fcf",
+            "entities": [
+              { "name": "Financial Statement", "description": "A formal statement of financial position or performance." },
+              { "name": "Disclosure Note", "description": "Supplementary explanatory text accompanying a financial statement." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Customer Relations",
+    "functionDescription": "Manages client communication, satisfaction, and account relationships.",
+    "functionId": "customerrelations",
+    "businessCapabilities": [
+      {
+        "name": "Client Account Management",
+        "description": "Maintains ongoing relationships with client accounts.",
+        "applicationCapabilities": [
+          {
+            "name": "Relationship Management",
+            "description": "Tracks client contacts and relationship health.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Client Account", "description": "A company or individual the firm provides services to." },
+              { "name": "Account Contact", "description": "A named contact person at a client account." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Client Support",
+        "description": "Handles inbound client questions and issues.",
+        "applicationCapabilities": [
+          {
+            "name": "Support Case Handling",
+            "description": "Logs and resolves client support inquiries.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Support Ticket", "description": "A logged client inquiry or issue." },
+              { "name": "Resolution Note", "description": "A record of how a support ticket was resolved." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Data Admin",
+    "functionDescription": "Administers shared data infrastructure and access across the organization.",
+    "functionId": "datadmin",
+    "businessCapabilities": [
+      {
+        "name": "Database Administration",
+        "description": "Manages the technical administration of shared data systems.",
+        "applicationCapabilities": [
+          {
+            "name": "Data Access Provisioning",
+            "description": "Grants and revokes user access to shared data systems.",
+            "sections": ["Centralized Operational Functions (Economies of Scale)"],
+            "sectionId": "cof",
+            "entities": [
+              { "name": "Access Request", "description": "A request to grant or change a user's data access." },
+              { "name": "System Account", "description": "A user account provisioned on a data system." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Data Maintenance",
+        "description": "Performs routine upkeep of shared data stores.",
+        "applicationCapabilities": [
+          {
+            "name": "Data Quality Housekeeping",
+            "description": "Cleans up stale, duplicate, or malformed data.",
+            "sections": ["Centralized Operational Functions (Economies of Scale)"],
+            "sectionId": "cof",
+            "entities": [
+              { "name": "Data Cleanup Job", "description": "A scheduled task that corrects or removes bad data." },
+              { "name": "Duplicate Record", "description": "A record identified as a duplicate of another." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Data Governance",
+    "functionDescription": "Defines policies and standards for how enterprise data is managed and protected.",
+    "functionId": "datagovernance",
+    "businessCapabilities": [
+      {
+        "name": "Data Policy Management",
+        "description": "Establishes standards for how data is classified and retained.",
+        "applicationCapabilities": [
+          {
+            "name": "Data Standards & Classification",
+            "description": "Defines classification levels and handling rules for enterprise data.",
+            "sections": ["Resources Sustainment Functions"],
+            "sectionId": "rsf",
+            "entities": [
+              { "name": "Data Classification", "description": "A sensitivity or handling category assigned to a dataset." },
+              { "name": "Retention Policy", "description": "A rule governing how long a category of data is kept." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Data Stewardship",
+        "description": "Assigns and tracks accountability for data quality.",
+        "applicationCapabilities": [
+          {
+            "name": "Data Quality Governance",
+            "description": "Monitors adherence to data quality standards across the business.",
+            "sections": ["Resources Sustainment Functions"],
+            "sectionId": "rsf",
+            "entities": [
+              { "name": "Data Steward Assignment", "description": "A designation of accountability for a dataset." },
+              { "name": "Quality Metric", "description": "A measured indicator of data quality." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Data Management",
+    "functionDescription": "Manages the ingestion, storage, and integration of operational data.",
+    "functionId": "datamgmt",
+    "businessCapabilities": [
+      {
+        "name": "Data Integration",
+        "description": "Moves and synchronizes data between operational systems.",
+        "applicationCapabilities": [
+          {
+            "name": "System-to-System Data Sync",
+            "description": "Keeps data consistent across integrated systems.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Integration Job", "description": "A scheduled or triggered data synchronization run." },
+              { "name": "Sync Log", "description": "A record of what an integration job transferred and when." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Master Data Management",
+        "description": "Maintains a single authoritative record for key business entities.",
+        "applicationCapabilities": [
+          {
+            "name": "Golden Record Maintenance",
+            "description": "Consolidates duplicate records into one authoritative version.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Master Entity Record", "description": "The authoritative version of a business entity's data." },
+              { "name": "Merge Rule", "description": "A rule used to decide how duplicate records are consolidated." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Data Support (Analytics, Support, Policies)",
+    "functionDescription": "Provides analytics and policy support for data-driven decision making.",
+    "functionId": "datasupport",
+    "businessCapabilities": [
+      {
+        "name": "Business Analytics",
+        "description": "Produces reporting and insight from operational data.",
+        "applicationCapabilities": [
+          {
+            "name": "Reporting & Dashboards",
+            "description": "Builds and maintains business reports and dashboards.",
+            "sections": ["Staff Specialist Functions"],
+            "sectionId": "ssf",
+            "entities": [
+              { "name": "Report Definition", "description": "The configuration behind a recurring business report." },
+              { "name": "Dashboard", "description": "A visual summary view of key operational metrics." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Data Policy Advisory",
+        "description": "Advises departments on how to interpret and apply data policy.",
+        "applicationCapabilities": [
+          {
+            "name": "Policy Interpretation Support",
+            "description": "Answers questions on how data policy applies to a specific situation.",
+            "sections": ["Staff Specialist Functions"],
+            "sectionId": "ssf",
+            "entities": [
+              { "name": "Policy Memo", "description": "A written interpretation of how a policy applies." },
+              { "name": "Advisory Request", "description": "A submitted question seeking policy guidance." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Delivery",
+    "functionDescription": "Ensures client deliverables and filings are completed and delivered on time.",
+    "functionId": "delivery",
+    "businessCapabilities": [
+      {
+        "name": "Deliverable Scheduling",
+        "description": "Plans the timing of client deliverables against deadlines.",
+        "applicationCapabilities": [
+          {
+            "name": "Filing Deadline Tracking",
+            "description": "Tracks upcoming statutory and client filing deadlines.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Delivery Schedule", "description": "A planned timeline for completing a deliverable." },
+              { "name": "Deadline Reminder", "description": "An automated notice of an approaching deadline." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Deliverable Fulfillment",
+        "description": "Completes and dispatches finished deliverables to clients.",
+        "applicationCapabilities": [
+          {
+            "name": "Document Dispatch",
+            "description": "Sends completed documents to clients or authorities.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Delivery Confirmation", "description": "Proof that a deliverable was successfully sent." },
+              { "name": "Shipment Record", "description": "A record of a physical or electronic document shipment." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Digital Transformation, Modernization, Refresh",
+    "functionDescription": "Leads modernization of platforms, workflows, and technology used across the business.",
+    "functionId": "dt",
+    "businessCapabilities": [
+      {
+        "name": "Platform Modernization",
+        "description": "Migrates the business off legacy systems onto modern platforms.",
+        "applicationCapabilities": [
+          {
+            "name": "Legacy System Migration",
+            "description": "Plans and executes the retirement of legacy systems.",
+            "sections": ["Continuous Improvement Functions"],
+            "sectionId": "cif",
+            "entities": [
+              { "name": "Migration Plan", "description": "The plan for moving off a legacy system." },
+              { "name": "Cutover Checklist", "description": "The steps required to complete a system cutover." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Process Automation",
+        "description": "Automates manual, repetitive operational workflows.",
+        "applicationCapabilities": [
+          {
+            "name": "Workflow Automation Rollout",
+            "description": "Deploys automation to replace manual process steps.",
+            "sections": ["Continuous Improvement Functions"],
+            "sectionId": "cif",
+            "entities": [
+              { "name": "Automation Rule", "description": "A configured rule that triggers an automated action." },
+              { "name": "Rollout Milestone", "description": "A tracked step in an automation deployment plan." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "EHS",
+    "functionDescription": "Oversees environmental, health, and safety compliance across facilities.",
+    "functionId": "ehs",
+    "businessCapabilities": [
+      {
+        "name": "Workplace Safety",
+        "description": "Manages workplace safety incidents and corrective actions.",
+        "applicationCapabilities": [
+          {
+            "name": "Incident Reporting",
+            "description": "Logs and tracks workplace safety incidents.",
+            "sections": ["Enterprise Scope Functions"],
+            "sectionId": "esf",
+            "entities": [
+              { "name": "Safety Incident", "description": "A recorded workplace safety event." },
+              { "name": "Corrective Action", "description": "A remediation step taken in response to an incident." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Environmental Compliance",
+        "description": "Ensures facilities meet environmental regulatory requirements.",
+        "applicationCapabilities": [
+          {
+            "name": "Environmental Reporting",
+            "description": "Files required environmental compliance reports.",
+            "sections": ["Enterprise Scope Functions"],
+            "sectionId": "esf",
+            "entities": [
+              { "name": "Environmental Filing", "description": "A submitted environmental compliance report." },
+              { "name": "Compliance Certificate", "description": "A certificate confirming environmental compliance." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "ESG",
+    "functionDescription": "Tracks and reports on environmental, social, and governance performance.",
+    "functionId": "esg",
+    "businessCapabilities": [
+      {
+        "name": "ESG Reporting",
+        "description": "Publishes the company's own sustainability and governance disclosures.",
+        "applicationCapabilities": [
+          {
+            "name": "Sustainability Disclosure",
+            "description": "Prepares public ESG performance disclosures.",
+            "sections": ["Enterprise Scope Functions"],
+            "sectionId": "esf",
+            "entities": [
+              { "name": "ESG Metric", "description": "A measured indicator of ESG performance." },
+              { "name": "Sustainability Report", "description": "A published report on ESG performance." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "ESG Program Management",
+        "description": "Runs internal initiatives that improve ESG performance.",
+        "applicationCapabilities": [
+          {
+            "name": "Initiative Tracking",
+            "description": "Tracks the progress of ESG-related initiatives.",
+            "sections": ["Enterprise Scope Functions"],
+            "sectionId": "esf",
+            "entities": [
+              { "name": "ESG Initiative", "description": "A planned program aimed at improving ESG performance." },
+              { "name": "Progress Update", "description": "A periodic status update on an ESG initiative." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Finance",
+    "functionDescription": "Manages corporate finance, treasury, and financial planning.",
+    "functionId": "finance",
+    "businessCapabilities": [
+      {
+        "name": "Treasury Management",
+        "description": "Manages the company's cash position and banking relationships.",
+        "applicationCapabilities": [
+          {
+            "name": "Cash & Liquidity Management",
+            "description": "Monitors and manages available cash across accounts.",
+            "sections": ["Finance Control Functions"],
+            "sectionId": "fcf",
+            "entities": [
+              { "name": "Cash Position", "description": "A snapshot of cash balances across accounts." },
+              { "name": "Bank Account", "description": "A company bank account tracked for treasury purposes." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Financial Planning & Analysis",
+        "description": "Builds financial models and forward-looking scenarios.",
+        "applicationCapabilities": [
+          {
+            "name": "Financial Modeling",
+            "description": "Builds models projecting future financial performance.",
+            "sections": ["Finance Control Functions"],
+            "sectionId": "fcf",
+            "entities": [
+              { "name": "Financial Model", "description": "A structured projection of future financial results." },
+              { "name": "Scenario Plan", "description": "An alternative financial projection under different assumptions." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Financial Support (Policies and Priorities)",
+    "functionDescription": "Sets financial policy guidance and priorities supporting departmental finance work.",
+    "functionId": "financesupport",
+    "businessCapabilities": [
+      {
+        "name": "Financial Policy",
+        "description": "Develops the company's internal financial policies.",
+        "applicationCapabilities": [
+          {
+            "name": "Policy Development",
+            "description": "Drafts and revises internal financial policy.",
+            "sections": ["Staff Specialist Functions"],
+            "sectionId": "ssf",
+            "entities": [
+              { "name": "Financial Policy", "description": "A documented internal financial rule or standard." },
+              { "name": "Policy Revision", "description": "A tracked change made to a financial policy." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Spend Prioritization",
+        "description": "Ranks competing spending requests against available budget.",
+        "applicationCapabilities": [
+          {
+            "name": "Investment Prioritization",
+            "description": "Evaluates and ranks proposed spending initiatives.",
+            "sections": ["Staff Specialist Functions"],
+            "sectionId": "ssf",
+            "entities": [
+              { "name": "Spend Request", "description": "A submitted request for discretionary spending." },
+              { "name": "Priority Ranking", "description": "The assigned priority order of a spend request." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "GRC",
+    "functionDescription": "Manages governance, risk, and compliance frameworks across the enterprise.",
+    "functionId": "grc",
+    "businessCapabilities": [
+      {
+        "name": "Risk Management",
+        "description": "Identifies and tracks enterprise risk exposure.",
+        "applicationCapabilities": [
+          {
+            "name": "Enterprise Risk Assessment",
+            "description": "Assesses and scores enterprise-level risks.",
+            "sections": ["Enterprise Scope Functions"],
+            "sectionId": "esf",
+            "entities": [
+              { "name": "Risk Register Entry", "description": "A tracked entry describing an identified risk." },
+              { "name": "Risk Mitigation Plan", "description": "A plan describing how a risk will be reduced." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Compliance Management",
+        "description": "Tracks the company's own regulatory compliance obligations.",
+        "applicationCapabilities": [
+          {
+            "name": "Regulatory Compliance Tracking",
+            "description": "Monitors adherence to applicable regulatory requirements.",
+            "sections": ["Enterprise Scope Functions"],
+            "sectionId": "esf",
+            "entities": [
+              { "name": "Compliance Requirement", "description": "A specific regulatory obligation the company must meet." },
+              { "name": "Compliance Attestation", "description": "A recorded confirmation that a requirement was met." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Human Resourcing",
+    "functionDescription": "Manages recruitment, employee records, and workforce development.",
+    "functionId": "hr",
+    "businessCapabilities": [
+      {
+        "name": "Recruitment",
+        "description": "Manages hiring processes and candidate evaluation.",
+        "applicationCapabilities": [
+          {
+            "name": "Candidate Management",
+            "description": "Tracks candidates through the hiring pipeline.",
+            "sections": ["Staff Specialist Functions"],
+            "sectionId": "ssf",
+            "entities": [
+              { "name": "Candidate Profile", "description": "Information describing a job applicant." },
+              { "name": "Job Requisition", "description": "An approved request to fill an open role." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Employee Management",
+        "description": "Maintains employee records and performance history.",
+        "applicationCapabilities": [
+          {
+            "name": "Employee Records",
+            "description": "Maintains core employee record data.",
+            "sections": ["Staff Specialist Functions"],
+            "sectionId": "ssf",
+            "entities": [
+              { "name": "Employee Record", "description": "Core information describing an employee." },
+              { "name": "Performance Review", "description": "A documented evaluation of employee performance." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "IT/S Work Methods (Technology, Systems)",
+    "functionDescription": "Defines and supports the technology systems and working methods used across IT.",
+    "functionId": "its",
+    "businessCapabilities": [
+      {
+        "name": "IT Service Management",
+        "description": "Handles day-to-day IT service requests and changes.",
+        "applicationCapabilities": [
+          {
+            "name": "Service Desk Operations",
+            "description": "Fields and resolves IT support requests.",
+            "sections": ["Staff Specialist Functions"],
+            "sectionId": "ssf",
+            "entities": [
+              { "name": "IT Ticket", "description": "A logged IT support request." },
+              { "name": "Change Request", "description": "A request to change a production system." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Systems Support",
+        "description": "Maintains and supports internal software applications.",
+        "applicationCapabilities": [
+          {
+            "name": "Application Support",
+            "description": "Diagnoses and resolves application-level issues.",
+            "sections": ["Staff Specialist Functions"],
+            "sectionId": "ssf",
+            "entities": [
+              { "name": "System Incident", "description": "A logged disruption to a supported system." },
+              { "name": "Configuration Item", "description": "A tracked component of the IT environment." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Legal Policies",
+    "functionDescription": "Develops internal legal policy and provides general counsel support to the business.",
+    "functionId": "legal",
+    "businessCapabilities": [
+      {
+        "name": "Policy Development",
+        "description": "Drafts and maintains internal legal policy.",
+        "applicationCapabilities": [
+          {
+            "name": "Internal Policy Drafting",
+            "description": "Writes and updates internal legal policies.",
+            "sections": ["Staff Specialist Functions"],
+            "sectionId": "ssf",
+            "entities": [
+              { "name": "Legal Policy", "description": "A documented internal legal standard or rule." },
+              { "name": "Policy Approval", "description": "A recorded sign-off on a legal policy." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "General Legal Advisory",
+        "description": "Provides legal review and advice to internal teams.",
+        "applicationCapabilities": [
+          {
+            "name": "Contract Review",
+            "description": "Reviews contracts for legal risk before signature.",
+            "sections": ["Staff Specialist Functions"],
+            "sectionId": "ssf",
+            "entities": [
+              { "name": "Contract", "description": "An agreement under legal review." },
+              { "name": "Legal Opinion", "description": "A formal written legal assessment." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Marketing",
+    "functionDescription": "Promotes the company's services and manages brand and demand generation.",
+    "functionId": "marketing",
+    "businessCapabilities": [
+      {
+        "name": "Brand & Campaigns",
+        "description": "Plans and executes marketing campaigns.",
+        "applicationCapabilities": [
+          {
+            "name": "Campaign Management",
+            "description": "Runs marketing campaigns across channels.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Marketing Campaign", "description": "A planned and executed marketing effort." },
+              { "name": "Creative Asset", "description": "A piece of content used in a marketing campaign." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Demand Generation",
+        "description": "Generates and qualifies prospective client leads.",
+        "applicationCapabilities": [
+          {
+            "name": "Lead Generation",
+            "description": "Captures and qualifies inbound prospect leads.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Marketing Lead", "description": "A prospective client captured through marketing." },
+              { "name": "Lead Source", "description": "The channel or campaign a lead originated from." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "New Bus. Development",
+    "functionDescription": "Identifies and pursues new business opportunities and strategic partnerships.",
+    "functionId": "busdev",
+    "businessCapabilities": [
+      {
+        "name": "Opportunity Development",
+        "description": "Identifies and develops new strategic partnerships.",
+        "applicationCapabilities": [
+          {
+            "name": "Partnership Development",
+            "description": "Negotiates and manages strategic partnerships.",
+            "sections": ["Enterprise Scope Functions"],
+            "sectionId": "esf",
+            "entities": [
+              { "name": "Business Opportunity", "description": "A potential new line of business or partnership." },
+              { "name": "Partner Agreement", "description": "A signed agreement with a strategic partner." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Strategic Planning",
+        "description": "Plans expansion into new markets and service lines.",
+        "applicationCapabilities": [
+          {
+            "name": "Market Expansion Planning",
+            "description": "Evaluates and plans entry into new markets.",
+            "sections": ["Enterprise Scope Functions"],
+            "sectionId": "esf",
+            "entities": [
+              { "name": "Expansion Plan", "description": "A plan for entering a new market or jurisdiction." },
+              { "name": "Market Assessment", "description": "An analysis of a potential new market." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Op Support (Priorities in Flows: Scheduling, Resourcing, Business Analysis)",
+    "functionDescription": "Supports operational planning through scheduling, resourcing, and analysis.",
+    "functionId": "opsupport",
+    "businessCapabilities": [
+      {
+        "name": "Resource Scheduling",
+        "description": "Plans staff and resource allocation across operations.",
+        "applicationCapabilities": [
+          {
+            "name": "Workload Scheduling",
+            "description": "Assigns work capacity across operational teams.",
+            "sections": ["Staff Specialist Functions"],
+            "sectionId": "ssf",
+            "entities": [
+              { "name": "Resource Schedule", "description": "A plan allocating staff time to work." },
+              { "name": "Capacity Plan", "description": "A projection of available versus required capacity." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Business Analysis",
+        "description": "Analyzes operational processes for improvement opportunities.",
+        "applicationCapabilities": [
+          {
+            "name": "Process Analysis",
+            "description": "Studies and documents operational process flows.",
+            "sections": ["Staff Specialist Functions"],
+            "sectionId": "ssf",
+            "entities": [
+              { "name": "Process Map", "description": "A documented view of an operational process." },
+              { "name": "Analysis Finding", "description": "An identified improvement opportunity from analysis." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Personnel",
+    "functionDescription": "Administers personnel records, benefits, and staffing logistics.",
+    "functionId": "personnel",
+    "businessCapabilities": [
+      {
+        "name": "Personnel Administration",
+        "description": "Administers employee benefits and personnel files.",
+        "applicationCapabilities": [
+          {
+            "name": "Benefits Administration",
+            "description": "Manages employee benefit enrollments and changes.",
+            "sections": ["Resources Sustainment Functions"],
+            "sectionId": "rsf",
+            "entities": [
+              { "name": "Benefits Enrollment", "description": "A record of an employee's benefit elections." },
+              { "name": "Personnel File", "description": "The core administrative file for an employee." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Staffing Logistics",
+        "description": "Coordinates staffing levels and shift assignments.",
+        "applicationCapabilities": [
+          {
+            "name": "Staffing Coordination",
+            "description": "Plans staffing levels to meet operational demand.",
+            "sections": ["Resources Sustainment Functions"],
+            "sectionId": "rsf",
+            "entities": [
+              { "name": "Staffing Plan", "description": "A plan describing required staffing levels." },
+              { "name": "Shift Assignment", "description": "An assigned work shift for an employee." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Procurement",
+    "functionDescription": "Sources and purchases goods and services needed to run the business.",
+    "functionId": "procurement",
+    "businessCapabilities": [
+      {
+        "name": "Supplier Management",
+        "description": "Manages relationships and performance of vendors.",
+        "applicationCapabilities": [
+          {
+            "name": "Vendor Onboarding",
+            "description": "Qualifies and onboards new suppliers.",
+            "sections": ["Centralized Operational Functions (Economies of Scale)"],
+            "sectionId": "cof",
+            "entities": [
+              { "name": "Supplier Profile", "description": "Information describing an approved supplier." },
+              { "name": "Vendor Contract", "description": "An agreement governing terms with a supplier." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Purchasing",
+        "description": "Executes purchase requests against approved suppliers.",
+        "applicationCapabilities": [
+          {
+            "name": "Purchase Order Management",
+            "description": "Issues and tracks purchase orders.",
+            "sections": ["Centralized Operational Functions (Economies of Scale)"],
+            "sectionId": "cof",
+            "entities": [
+              { "name": "Purchase Order", "description": "A formal order for goods or services." },
+              { "name": "Purchase Requisition", "description": "An internal request to initiate a purchase." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Product Improvement & Development",
+    "functionDescription": "Enhances and develops the company's service offerings and platform features.",
+    "functionId": "proddev",
+    "businessCapabilities": [
+      {
+        "name": "Product Roadmap",
+        "description": "Plans upcoming features and service enhancements.",
+        "applicationCapabilities": [
+          {
+            "name": "Feature Planning",
+            "description": "Evaluates and sequences upcoming product features.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Feature Request", "description": "A requested new product capability." },
+              { "name": "Product Roadmap Item", "description": "A planned feature on the product roadmap." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Product Development",
+        "description": "Builds and ships new product features.",
+        "applicationCapabilities": [
+          {
+            "name": "Release Management",
+            "description": "Plans and coordinates product releases.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Release Plan", "description": "The scope and schedule for a product release." },
+              { "name": "Product Backlog Item", "description": "A unit of planned development work." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Production",
+    "functionDescription": "Executes the core day-to-day production of client entity management services.",
+    "functionId": "prod",
+    "businessCapabilities": [
+      {
+        "name": "Service Production",
+        "description": "Processes the ongoing work items that fulfill client services.",
+        "applicationCapabilities": [
+          {
+            "name": "Case Processing",
+            "description": "Processes individual client service cases through completion.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Production Case", "description": "A unit of client work being processed." },
+              { "name": "Work Queue Item", "description": "A pending task assigned to a production queue." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Quality Control",
+        "description": "Reviews completed work for accuracy before delivery.",
+        "applicationCapabilities": [
+          {
+            "name": "Output Quality Review",
+            "description": "Checks finished work against quality standards.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Quality Check", "description": "A recorded review of completed work." },
+              { "name": "Rework Item", "description": "A work item returned for correction." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Public Affairs",
+    "functionDescription": "Manages external communications, regulatory relations, and public messaging.",
+    "functionId": "publicaffairs",
+    "businessCapabilities": [
+      {
+        "name": "External Communications",
+        "description": "Manages the company's public and media messaging.",
+        "applicationCapabilities": [
+          {
+            "name": "Media & Public Relations",
+            "description": "Handles press inquiries and public messaging.",
+            "sections": ["Staff Specialist Functions"],
+            "sectionId": "ssf",
+            "entities": [
+              { "name": "Press Release", "description": "A public announcement issued by the company." },
+              { "name": "Media Inquiry", "description": "A question received from a media outlet." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Regulatory Relations",
+        "description": "Maintains relationships with regulatory bodies.",
+        "applicationCapabilities": [
+          {
+            "name": "Regulator Engagement",
+            "description": "Tracks communication with regulatory agencies.",
+            "sections": ["Staff Specialist Functions"],
+            "sectionId": "ssf",
+            "entities": [
+              { "name": "Regulatory Contact", "description": "A contact person at a regulatory agency." },
+              { "name": "Engagement Log", "description": "A record of communication with a regulator." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Selling",
+    "functionDescription": "Sells the company's entity management and compliance services to clients.",
+    "functionId": "selling",
+    "businessCapabilities": [
+      {
+        "name": "Sales Management",
+        "description": "Manages the sales pipeline and opportunity tracking.",
+        "applicationCapabilities": [
+          {
+            "name": "Opportunity & Pipeline Management",
+            "description": "Tracks prospective deals through the sales pipeline.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Sales Opportunity", "description": "A prospective deal being pursued." },
+              { "name": "Sales Quote", "description": "A priced proposal sent to a prospect." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Client Onboarding Sales",
+        "description": "Converts closed deals into signed client engagements.",
+        "applicationCapabilities": [
+          {
+            "name": "New Client Contracting",
+            "description": "Finalizes contracts for newly won clients.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Sales Contract", "description": "A signed agreement with a new client." },
+              { "name": "Client Order", "description": "An order confirming the services a client purchased." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Entity Formation & Registration",
+    "functionDescription": "Forms new legal entities and registers them with the appropriate government authorities.",
+    "functionId": "entityformation",
+    "businessCapabilities": [
+      {
+        "name": "New Entity Formation",
+        "description": "Prepares and files the documents required to form a new legal entity.",
+        "applicationCapabilities": [
+          {
+            "name": "Formation Filing Preparation",
+            "description": "Prepares articles of incorporation or organization for filing.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Articles of Incorporation", "description": "The founding filing document for a corporation." },
+              { "name": "Formation Filing", "description": "A submitted filing that creates a new legal entity." }
+            ]
+          },
+          {
+            "name": "Entity Name Reservation",
+            "description": "Reserves an entity's chosen legal name with the state.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Name Reservation Request", "description": "A request to reserve a proposed entity name." },
+              { "name": "Name Availability Result", "description": "The outcome of a name availability check." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Foreign Qualification",
+        "description": "Registers an existing entity to do business in additional states.",
+        "applicationCapabilities": [
+          {
+            "name": "Multi-State Qualification Filing",
+            "description": "Files the paperwork needed to qualify an entity in a new state.",
+            "sections": ["Mainstream Operational Functions", "Centralized Operational Functions (Economies of Scale)"],
+            "sectionId": "",
+            "entities": [
+              { "name": "Certificate of Authority", "description": "The document authorizing an entity to operate in a state." },
+              { "name": "Qualification Application", "description": "The application submitted to qualify in a new state." }
+            ]
+          },
+          {
+            "name": "Registered Agent Assignment",
+            "description": "Assigns a registered agent as part of a new qualification.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Agent Designation", "description": "A record naming the registered agent for a jurisdiction." },
+              { "name": "Service of Process Address", "description": "The address designated to receive legal notices." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Formation Document Management",
+        "description": "Archives official documents produced during entity formation.",
+        "applicationCapabilities": [
+          {
+            "name": "Formation Document Archival",
+            "description": "Stores filed formation documents for future reference.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Formation Certificate", "description": "The state-issued certificate confirming formation." },
+              { "name": "Filed Document Copy", "description": "A retained copy of a document as filed with the state." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Entity Governance & Records Management",
+    "functionDescription": "Maintains the official corporate records and governance history of client legal entities.",
+    "functionId": "entitygovernance",
+    "businessCapabilities": [
+      {
+        "name": "Corporate Record Keeping",
+        "description": "Maintains the core registry of entity and officer/director data.",
+        "applicationCapabilities": [
+          {
+            "name": "Entity Registry Maintenance",
+            "description": "Keeps core entity identification data current.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Entity Master Record", "description": "The authoritative record of a client legal entity." },
+              { "name": "Registered Office Address", "description": "The official registered address of an entity." }
+            ]
+          },
+          {
+            "name": "Officer & Director Records",
+            "description": "Tracks the current officers and directors of each entity.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Director Record", "description": "A record identifying an entity's director." },
+              { "name": "Officer Appointment", "description": "A record of an officer's appointment to a role." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Governance Document Management",
+        "description": "Maintains the foundational governance documents of each entity.",
+        "applicationCapabilities": [
+          {
+            "name": "Bylaws & Operating Agreement Tracking",
+            "description": "Tracks the current version of each entity's governing document.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Bylaws Document", "description": "The internal governance rules of a corporation." },
+              { "name": "Operating Agreement", "description": "The internal governance agreement of an LLC." }
+            ]
+          },
+          {
+            "name": "Amendment Management",
+            "description": "Tracks amendments made to entity governance documents.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Certificate of Amendment", "description": "A filing that amends an entity's charter." },
+              { "name": "Amendment History", "description": "A chronological record of amendments made to an entity." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Entity Structure Visualization",
+        "description": "Visualizes an entity's ownership and organizational structure.",
+        "applicationCapabilities": [
+          {
+            "name": "Organizational Chart Maintenance",
+            "description": "Maintains an up-to-date chart of entity relationships.",
+            "sections": ["Mainstream Operational Functions", "Enterprise Scope Functions"],
+            "sectionId": "",
+            "entities": [
+              { "name": "Entity Org Chart", "description": "A visual diagram of related entity structures." },
+              { "name": "Ownership Structure Diagram", "description": "A diagram depicting ownership relationships." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Registered Agent Services",
+    "functionDescription": "Serves as registered agent for client entities and manages service-of-process handling.",
+    "functionId": "registeredagent",
+    "businessCapabilities": [
+      {
+        "name": "Agent of Record Management",
+        "description": "Manages appointments of the firm as registered agent.",
+        "applicationCapabilities": [
+          {
+            "name": "Registered Agent Appointment",
+            "description": "Files the paperwork appointing the firm as registered agent.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Agent Appointment Record", "description": "A record of the firm's appointment as agent." },
+              { "name": "State Agent Filing", "description": "The state filing designating the registered agent." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Service of Process Handling",
+        "description": "Receives and routes legal notices delivered to the registered agent.",
+        "applicationCapabilities": [
+          {
+            "name": "SOP Receipt & Routing",
+            "description": "Logs and routes service-of-process documents as they arrive.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Service of Process Notice", "description": "A legal notice received on behalf of a client entity." },
+              { "name": "Routing Log", "description": "A record of how a received notice was routed." }
+            ]
+          },
+          {
+            "name": "Legal Notice Forwarding",
+            "description": "Forwards received legal notices to the client entity.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Forwarded Notice", "description": "A copy of a notice sent on to the client." },
+              { "name": "Delivery Confirmation", "description": "Proof that a forwarded notice reached the client." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Agent Coverage Monitoring",
+        "description": "Monitors which jurisdictions have active registered agent coverage.",
+        "applicationCapabilities": [
+          {
+            "name": "Jurisdictional Coverage Tracking",
+            "description": "Tracks which states have active agent coverage for each entity.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Coverage Map", "description": "A summary of agent coverage across jurisdictions." },
+              { "name": "Gap Alert", "description": "An alert flagging a jurisdiction with missing coverage." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Subsidiary & Affiliate Management",
+    "functionDescription": "Tracks and manages the relationships and structures among a client's subsidiary and affiliate entities.",
+    "functionId": "subsidiarymgmt",
+    "businessCapabilities": [
+      {
+        "name": "Corporate Family Tracking",
+        "description": "Maps the ownership relationships within a client's corporate family.",
+        "applicationCapabilities": [
+          {
+            "name": "Parent-Subsidiary Mapping",
+            "description": "Tracks ownership links between parent and subsidiary entities.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Subsidiary Relationship", "description": "A tracked ownership link between two entities." },
+              { "name": "Ownership Percentage", "description": "The percentage of ownership one entity holds in another." }
+            ]
+          },
+          {
+            "name": "Affiliate Registry",
+            "description": "Maintains a registry of an entity's known affiliates.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Affiliate Record", "description": "A record identifying a related affiliate entity." },
+              { "name": "Intercompany Relationship", "description": "A tracked relationship between affiliated entities." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Intercompany Transaction Tracking",
+        "description": "Tracks agreements and transactions between related entities.",
+        "applicationCapabilities": [
+          {
+            "name": "Intercompany Agreement Management",
+            "description": "Tracks agreements governing intercompany dealings.",
+            "sections": ["Mainstream Operational Functions", "Finance Control Functions"],
+            "sectionId": "",
+            "entities": [
+              { "name": "Intercompany Agreement", "description": "An agreement governing dealings between related entities." },
+              { "name": "Transfer Pricing Record", "description": "A record supporting intercompany pricing terms." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Corporate Restructuring Support",
+        "description": "Supports the reorganization of a client's corporate structure.",
+        "applicationCapabilities": [
+          {
+            "name": "Restructuring Plan Tracking",
+            "description": "Tracks the planned steps of a corporate restructuring.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Restructuring Plan", "description": "A plan describing a corporate reorganization." },
+              { "name": "Entity Transfer Record", "description": "A record of an entity moving within a corporate structure." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Corporate Compliance & Filings",
+    "functionDescription": "Tracks statutory compliance obligations and manages recurring regulatory filings for client entities.",
+    "functionId": "corpcompliance",
+    "businessCapabilities": [
+      {
+        "name": "Annual Report Compliance",
+        "description": "Manages recurring annual report and franchise tax obligations.",
+        "applicationCapabilities": [
+          {
+            "name": "Annual Report Filing",
+            "description": "Prepares and files an entity's required annual report.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Annual Report Filing", "description": "A recurring statutory filing required to maintain good standing." },
+              { "name": "Filing Receipt", "description": "Confirmation that a filing was accepted by the state." }
+            ]
+          },
+          {
+            "name": "Franchise Tax Compliance",
+            "description": "Tracks and pays state franchise tax obligations.",
+            "sections": ["Mainstream Operational Functions", "Finance Control Functions"],
+            "sectionId": "",
+            "entities": [
+              { "name": "Franchise Tax Return", "description": "A filed return reporting franchise tax owed." },
+              { "name": "Tax Payment Record", "description": "A record of a franchise tax payment made." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Compliance Calendar Management",
+        "description": "Tracks upcoming compliance deadlines across all client entities.",
+        "applicationCapabilities": [
+          {
+            "name": "Deadline & Reminder Tracking",
+            "description": "Maintains a master calendar of compliance deadlines.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Compliance Deadline", "description": "A tracked date by which a filing must be completed." },
+              { "name": "Reminder Notice", "description": "An automated alert of an approaching compliance deadline." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Good Standing Management",
+        "description": "Confirms and certifies an entity's good standing status.",
+        "applicationCapabilities": [
+          {
+            "name": "Certificate of Good Standing Issuance",
+            "description": "Requests and delivers certificates confirming good standing.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Certificate of Good Standing", "description": "A state-issued document confirming compliant status." },
+              { "name": "Standing Status Record", "description": "A tracked record of an entity's current standing status." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Entity Lifecycle Management",
+    "functionDescription": "Manages legal entities through mergers, conversions, and dissolutions across their full lifecycle.",
+    "functionId": "entitylifecycle",
+    "businessCapabilities": [
+      {
+        "name": "Merger & Acquisition Support",
+        "description": "Files the documents required to complete an entity merger.",
+        "applicationCapabilities": [
+          {
+            "name": "Merger Filing Management",
+            "description": "Prepares and files certificates of merger.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Certificate of Merger", "description": "The state filing completing a legal merger." },
+              { "name": "Merger Agreement", "description": "The agreement setting out the terms of a merger." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Entity Conversion",
+        "description": "Converts an entity from one legal type or jurisdiction to another.",
+        "applicationCapabilities": [
+          {
+            "name": "Entity Type Conversion Filing",
+            "description": "Files the paperwork to convert an entity's legal type.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Certificate of Conversion", "description": "The filing that completes an entity type conversion." },
+              { "name": "Conversion Plan", "description": "A plan describing the terms of an entity conversion." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Dissolution & Withdrawal",
+        "description": "Winds down and formally closes out an entity.",
+        "applicationCapabilities": [
+          {
+            "name": "Voluntary Dissolution Filing",
+            "description": "Files the paperwork to voluntarily dissolve an entity.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Certificate of Dissolution", "description": "The filing that formally dissolves an entity." },
+              { "name": "Dissolution Plan", "description": "A plan describing how an entity will be wound down." }
+            ]
+          },
+          {
+            "name": "Foreign Withdrawal Filing",
+            "description": "Withdraws an entity's qualification from a foreign state.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Certificate of Withdrawal", "description": "The filing that ends an entity's foreign qualification." },
+              { "name": "Final Tax Clearance", "description": "Confirmation that outstanding state taxes are settled." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Minute Book & Document Management",
+    "functionDescription": "Maintains the official minute books and corporate document repositories for client entities.",
+    "functionId": "minutebook",
+    "businessCapabilities": [
+      {
+        "name": "Minute Book Maintenance",
+        "description": "Maintains each entity's official digital minute book.",
+        "applicationCapabilities": [
+          {
+            "name": "Digital Minute Book Management",
+            "description": "Keeps an entity's minute book current and organized.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Minute Book", "description": "The official repository of an entity's governance records." },
+              { "name": "Corporate Seal Record", "description": "A record tracking an entity's corporate seal." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Meeting Records Management",
+        "description": "Records and archives board and shareholder meeting activity.",
+        "applicationCapabilities": [
+          {
+            "name": "Board & Shareholder Minutes",
+            "description": "Drafts and archives minutes of board and shareholder meetings.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Meeting Minutes", "description": "The official written record of a meeting." },
+              { "name": "Meeting Agenda", "description": "The planned topics for an upcoming meeting." }
+            ]
+          },
+          {
+            "name": "Written Consent Tracking",
+            "description": "Tracks actions taken by written consent in lieu of a meeting.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Unanimous Written Consent", "description": "A document recording action taken without a meeting." },
+              { "name": "Consent Signature Record", "description": "A record of who signed a written consent." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Document Repository Services",
+        "description": "Provides secure storage for entity governance documents.",
+        "applicationCapabilities": [
+          {
+            "name": "Secure Document Vault",
+            "description": "Stores and controls access to sensitive entity documents.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Document Vault Entry", "description": "A stored document within the secure vault." },
+              { "name": "Access Log", "description": "A record of who accessed a stored document and when." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Board & Officer Management",
+    "functionDescription": "Tracks board composition, officer appointments, and governance obligations for client entities.",
+    "functionId": "boardmgmt",
+    "businessCapabilities": [
+      {
+        "name": "Board Composition Tracking",
+        "description": "Tracks who currently serves on each entity's board.",
+        "applicationCapabilities": [
+          {
+            "name": "Director Appointment & Resignation",
+            "description": "Records director appointments and resignations as they occur.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Director Appointment Record", "description": "A record of a director's appointment to the board." },
+              { "name": "Director Resignation", "description": "A record of a director's resignation from the board." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Officer Records",
+        "description": "Tracks who holds signing and officer authority for each entity.",
+        "applicationCapabilities": [
+          {
+            "name": "Officer Appointment Tracking",
+            "description": "Tracks current officer roles and signing authority.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Officer Certificate", "description": "A certificate confirming an individual's officer role." },
+              { "name": "Signing Authority Record", "description": "A record of who is authorized to sign on the entity's behalf." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Resolutions Management",
+        "description": "Drafts and tracks formal board resolutions.",
+        "applicationCapabilities": [
+          {
+            "name": "Board Resolution Drafting",
+            "description": "Drafts formal resolutions for board approval.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Board Resolution", "description": "A formal decision adopted by the board." },
+              { "name": "Resolution Approval", "description": "A recorded approval of a board resolution." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Equity & Cap Table Management",
+    "functionDescription": "Tracks equity ownership, share issuances, and capitalization tables for client entities.",
+    "functionId": "captable",
+    "businessCapabilities": [
+      {
+        "name": "Cap Table Maintenance",
+        "description": "Maintains each entity's capitalization table.",
+        "applicationCapabilities": [
+          {
+            "name": "Share Issuance Tracking",
+            "description": "Tracks the issuance of new shares or units.",
+            "sections": ["Mainstream Operational Functions", "Finance Control Functions"],
+            "sectionId": "",
+            "entities": [
+              { "name": "Share Certificate", "description": "A document certifying ownership of shares." },
+              { "name": "Cap Table Entry", "description": "A single ownership line item on the cap table." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Equity Transactions",
+        "description": "Processes transfers of ownership between parties.",
+        "applicationCapabilities": [
+          {
+            "name": "Share Transfer Processing",
+            "description": "Records the transfer of shares between owners.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Share Transfer Record", "description": "A record of shares moving from one owner to another." },
+              { "name": "Stock Ledger Entry", "description": "An entry in the entity's official stock ledger." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Ownership Reporting",
+        "description": "Reports on beneficial ownership as required by law.",
+        "applicationCapabilities": [
+          {
+            "name": "Beneficial Ownership Reporting",
+            "description": "Prepares and files required beneficial ownership disclosures.",
+            "sections": ["Mainstream Operational Functions", "Enterprise Scope Functions"],
+            "sectionId": "",
+            "entities": [
+              { "name": "Beneficial Ownership Report", "description": "A filed report disclosing an entity's beneficial owners." },
+              { "name": "UBO Declaration", "description": "A declaration identifying an ultimate beneficial owner." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Jurisdictional Licensing & Qualification",
+    "functionDescription": "Manages business licenses and jurisdictional qualifications required for client entities to operate.",
+    "functionId": "jurisdictional",
+    "businessCapabilities": [
+      {
+        "name": "Business Licensing",
+        "description": "Obtains and renews required business licenses.",
+        "applicationCapabilities": [
+          {
+            "name": "License Application Management",
+            "description": "Applies for and renews business licenses on clients' behalf.",
+            "sections": ["Centralized Operational Functions (Economies of Scale)"],
+            "sectionId": "cof",
+            "entities": [
+              { "name": "Business License", "description": "A license authorizing a specific business activity." },
+              { "name": "License Renewal", "description": "A tracked renewal cycle for a business license." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Jurisdictional Tracking",
+        "description": "Monitors an entity's registration status across jurisdictions.",
+        "applicationCapabilities": [
+          {
+            "name": "Multi-Jurisdiction Status Monitoring",
+            "description": "Tracks registration and license status across every active jurisdiction.",
+            "sections": ["Centralized Operational Functions (Economies of Scale)"],
+            "sectionId": "cof",
+            "entities": [
+              { "name": "Jurisdiction Status Record", "description": "The current registration status in one jurisdiction." },
+              { "name": "Registration Map", "description": "A summary view of registration status across jurisdictions." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "UCC & Lien Management",
+    "functionDescription": "Files and tracks UCC financing statements and lien records on behalf of client entities.",
+    "functionId": "ucclien",
+    "businessCapabilities": [
+      {
+        "name": "UCC Filing",
+        "description": "Files UCC financing statements securing collateral interests.",
+        "applicationCapabilities": [
+          {
+            "name": "Financing Statement Filing",
+            "description": "Files and amends UCC financing statements.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "UCC-1 Financing Statement", "description": "The initial filing that perfects a security interest." },
+              { "name": "UCC Amendment", "description": "A filed change to an existing financing statement." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Lien Search & Monitoring",
+        "description": "Searches for and monitors liens against client entities.",
+        "applicationCapabilities": [
+          {
+            "name": "Lien Search Services",
+            "description": "Performs lien searches on behalf of clients and lenders.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Lien Search Result", "description": "The results of a requested lien search." },
+              { "name": "Lien Record", "description": "A record of an active lien against an entity." }
+            ]
+          },
+          {
+            "name": "Continuation & Termination Tracking",
+            "description": "Tracks required continuation and termination filings for existing liens.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "UCC Continuation Statement", "description": "A filing that extends an existing financing statement." },
+              { "name": "UCC Termination Statement", "description": "A filing that releases a security interest." }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Client Relationship & Portfolio Management",
+    "functionDescription": "Manages the portfolio of client entities and the overall client relationship for entity management services.",
+    "functionId": "clientportfolio",
+    "businessCapabilities": [
+      {
+        "name": "Client Portfolio Tracking",
+        "description": "Tracks the full set of entities managed on behalf of each client.",
+        "applicationCapabilities": [
+          {
+            "name": "Entity Portfolio Dashboard",
+            "description": "Summarizes all entities under management for a client.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Client Portfolio Record", "description": "A record listing entities managed for one client." },
+              { "name": "Portfolio Summary", "description": "A summarized status view of a client's portfolio." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Client Onboarding & Transitions",
+        "description": "Handles the transfer of client entities into and out of management.",
+        "applicationCapabilities": [
+          {
+            "name": "New Client Entity Onboarding",
+            "description": "Onboards newly won client entities into active management.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Onboarding Checklist", "description": "The steps required to onboard a new client entity." },
+              { "name": "Entity Transfer-In Record", "description": "A record of an entity transferring in from another provider." }
+            ]
+          },
+          {
+            "name": "Client Offboarding",
+            "description": "Transfers client entities out when a relationship ends.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Offboarding Request", "description": "A request to end management of a client's entities." },
+              { "name": "Entity Transfer-Out Record", "description": "A record of an entity transferring to another provider." }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Service Level Management",
+        "description": "Tracks performance against client service commitments.",
+        "applicationCapabilities": [
+          {
+            "name": "SLA Tracking & Reporting",
+            "description": "Monitors and reports on service level commitments.",
+            "sections": ["Mainstream Operational Functions"],
+            "sectionId": "mof",
+            "entities": [
+              { "name": "Service Level Agreement", "description": "A documented commitment on service performance." },
+              { "name": "SLA Performance Report", "description": "A report showing actual performance against SLA commitments." }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]
