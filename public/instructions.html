@@ -270,8 +270,11 @@ canvas. Availability depends on what's selected — greyed out means the current
     relationship already has. When one or more hidden (unchecked) element types sit between two shown parts —
     e.g. Business Function shown, Application Capability shown, but Business Process hidden in between — a
     genuine new "derived" connector is added directly linking the two, so the relationship isn't lost just
-    because the type in the middle is hidden; its Note field records which hidden type(s) it stands in for. No
-    derived connector is added where a real, direct one already exists, and re-running the same trace never
+    because the type in the middle is hidden; its Note field records which hidden type(s) it stands in for. A
+    derived link is created as <strong>both</strong> a Connector ('c') and a Stream ('s') version — but only the
+    one matching this trace's own Connector Type setting is actually placed on the view being built here; the
+    other still exists in the model (e.g. for the 3D View's own Connector Type filter, or a later Smart Check).
+    No derived connector is added where a real, direct one already exists, and re-running the same trace never
     creates a duplicate. Also callable directly from a batch script — see <a href="#simulation">Script
     Console</a> below. A Preset row at the top of the dialog can save the current field values as a named,
     reusable preset (<strong>Save As…</strong>) or load one back in (<strong>Load</strong>) — presets remember
@@ -300,7 +303,14 @@ canvas. Availability depends on what's selected — greyed out means the current
     own original crossing connector, or one Smart Check itself created — and updates the view's copy to match
     wherever they differ. This only runs when checked; nothing about relationship/type/streams is kept in sync
     automatically otherwise. To push a change the OTHER way — from a view connector back up to its inventory
-    connector — see the prompt described under <a href="#properties">Property Panels</a> below.</td></tr>
+    connector — see the prompt described under <a href="#properties">Property Panels</a> below. A fifth option,
+    <strong>Derive hidden connections</strong> (off by default; uses the same Levels setting as the second
+    option, above), runs last: for any two nodes already on this view that are only linked through a chain of
+    one or more parts NOT on this view, it adds a real Connector directly between them — the same "derived"
+    concept Insert Smart Stream uses (see above), creating both a Connector ('c') and a Stream ('s') version and
+    noting which off-view type(s) it stands in for. Since it runs after the other options' own additions, a node
+    that Missing connectors and nodes just pulled in this same run no longer counts as "hidden" and won't get
+    bridged.</td></tr>
     <tr><td><strong>Smart Check Node</strong></td><td>(Advanced menu, or right-click a single node) The
     single-node version of Smart Check View — same "missing connectors" / "missing connectors and nodes, N
     levels" idea (including the same Composition-awareness described above), but starting from just the node
@@ -736,7 +746,9 @@ needs one, e.g. via <code>app.createCanvasTab(view)</code> / <code>app.switchToT
     <code>minimizeConnectorLength</code> (both boolean, Default/None/Layered only); all optional, same defaults
     as the Remap dialog.</td></tr>
     <tr><td><code>smartCheckView(app, tab, options)</code></td><td>options: <code>missingConnectors</code>,
-    <code>missingConnectorsAndNodes</code>, <code>levels</code>, <code>syncWithInventory</code>.</td></tr>
+    <code>missingConnectorsAndNodes</code>, <code>levels</code>, <code>syncWithInventory</code>,
+    <code>deriveConnectors</code> (links two on-view nodes directly when only connected via a chain of
+    not-shown parts; creates both a 'c' and an 's' connector; also uses <code>levels</code>).</td></tr>
     <tr><td><code>smartCheckNode(app, tab, partId, options)</code></td><td>same options as smartCheckView, plus
     <code>upstream</code>, <code>downstream</code>, <code>byStream</code>, <code>streams</code>.</td></tr>
     <tr><td><code>insertSmartStream(app, tab, options)</code></td><td>freeform views only; options:

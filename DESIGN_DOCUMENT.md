@@ -177,6 +177,61 @@ Rejection messages are written to name the *specific rule* that fired — e.g. w
 section, what it actually allows, what the rejected item's type is — not a generic
 failure string.
 
+### 5.5 Derived connectors (`insertSmartStream`, `smartCheckView` — `commands.js`)
+
+A "derived" connector is a genuine, persisted `Connector` synthesized to stand in for a
+relationship that would otherwise be silently lost because something in the middle of
+it isn't showing on this particular view — not a view-only decoration, so it gets full
+rendering/export/inventory treatment like any hand-drawn one. Its `note` field always
+records which hidden element type(s)/part(s) it passes through
+(`Derived — implied via <Type1, Type2, ...> (not shown)`), and it's styled after the
+*first* real hop's relationship (the "topmost parent" convention used elsewhere in this
+codebase, e.g. `mirrorCompositionChildConnectorsUp`).
+
+Two shared helpers do the work, both used by both commands below:
+- **`findDerivedPairsForType(store, connectorType, presentPartIdSet, levels)`** —
+  discovery. Walks exactly one `connectorType`'s own graph (called once per type),
+  directionally (`c.from -> c.to` only), up to `levels` hops (`null` = unlimited),
+  looking for pairs of `presentPartIdSet` members linked only through one or more
+  NOT-present parts. Returns a `Map` of `"from|to" -> {from, to, relationship,
+  viaTypes}`, excluding any pair already linked by a real direct connector of that same
+  type (present or not — a real one already existing anywhere in the model is enough
+  to skip it).
+- **`createDerivedConnectorPairs(store, derivedPairs, log?, describePart?)`** —
+  creation. Reported directly: *"when creating derived connectors, create both 's' and
+  'c' versions."* For every pair, creates **both** a `'c'` and an `'s'` `Connector`,
+  regardless of which connectorType's graph the pair was actually discovered through —
+  a derived/implied relationship is a structural fact worth showing under either lens
+  (e.g. the 3D View's own Connector Type filter). Model is taken from the pair's own
+  `from` part. Skips whichever type(s) already exist for that exact from/to/model, so
+  it stays idempotent no matter how many times — or how many different discovery
+  passes — call it for the same pair.
+
+**`insertSmartStream`**'s own discovery predates the shared helper and keeps its
+original, narrower scope on purpose: it only derives across parts already inside
+`collectedPartIds` (this trace's own already-BFS'd-and-`levels`-bounded neighborhood
+from the seeds), not the whole model — so it does NOT call `findDerivedPairsForType`,
+only `createDerivedConnectorPairs` for the creation step. Of the two connectors that
+step creates, only the one matching *this trace's own* `connectorType` (the dialog's
+Connector Type radio) gets pushed into `finalConnIds`/`connsByPart` and thus actually
+placed as a viewMember on the view being built — the other type still exists in the
+model, just not shown here.
+
+**`smartCheckView`**'s **"Derive hidden connections"** checkbox (`deriveConnectors`
+option, off by default) is the direct follow-up that added this same concept to Smart
+Check View: *"Add creation of derived (same logic) to a new checkbox in 'Smart Check
+View' command."* Here "hidden" simply means "not placed on this view" (there's no
+`showTypes`-style filter at this scope) — `presentPartIdSet` is every part currently on
+the view (`partIdToVmId.keys()`), and the walk runs once for `'c'`, once for `'s'`, up
+to the SAME `levels` field the "missing connectors and nodes" checkbox above already
+uses (so the dialog doesn't need a second hop-count input — the Levels row's
+visibility toggles on either checkbox). It runs **last**, after every other checkbox's
+own additions, so a node "missing connectors and nodes" just pulled in this same run no
+longer counts as hidden and won't get spuriously bridged. Every created connector IS
+placed as a viewMember here (unlike `mirrorCompositionChildConnectorsUp`, which mirrors
+onto a *different*, parent view and so never places anything) — both endpoints are, by
+definition, already on this view.
+
 ## 6. Layout and rendering algorithms
 
 ### 6.1 Force-directed Remap (`layout.js`)

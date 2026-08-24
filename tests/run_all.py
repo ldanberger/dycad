@@ -2175,6 +2175,68 @@ def check_smart_check_view_default_levels_unlimited(page):
     return True, "Smart Check View's Levels field defaults to blank (unlimited)"
 
 
+def check_smart_check_view_dialog_derive_checkbox_wiring(page):
+    """Regression guard for the real Smart Check View DIALOG's new "Derive hidden
+    connections" checkbox (#scv-derive-connectors, main.js) -- confirms it's genuinely
+    wired end to end through the actual UI, not just the underlying commands.js
+    function (covered separately by check_smart_check_view_derive_connectors). Checks:
+    (1) unchecked by default; (2) checking it (with 'Missing connectors and nodes'
+    left OFF) alone reveals the Levels row -- proving Levels' visibility now depends on
+    EITHER checkbox, not just missingConnectorsAndNodes; (3) submitting with only this
+    checkbox checked genuinely creates the derived connector on the view via the real
+    Check button, not just via a direct function call."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const fn = store.createPart({ type: 'BusinessFunction', label: 'RegrSCVDlg_Fn', model, streams: [] });
+      const proc = store.createPart({ type: 'BusinessProcess', label: 'RegrSCVDlg_Proc', model, streams: [] }); // left off the view
+      const cap = store.createPart({ type: 'ApplicationCapability', label: 'RegrSCVDlg_Cap', model, streams: [] });
+      store.createConnector({ from: fn.id, to: proc.id, connectorType: 'c', model, relationship: 'Association' });
+      store.createConnector({ from: proc.id, to: cap.id, connectorType: 'c', model, relationship: 'Association' });
+      const view = store.addView('RegrSCVDlg_view', 'ff');
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: fn.id, x: 40, y: 40 });
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: cap.id, x: 300, y: 40 });
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      app.promptSmartCheckView();
+      await new Promise(r => setTimeout(r, 30));
+      const deriveCb = document.getElementById('scv-derive-connectors');
+      const levelsRow = document.getElementById('scv-levels-row');
+      const out = { checkedByDefault: deriveCb.checked, levelsHiddenBefore: levelsRow.classList.contains('hidden') };
+
+      deriveCb.checked = true;
+      deriveCb.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 30));
+      out.levelsVisibleAfterCheckingDerive = !levelsRow.classList.contains('hidden');
+
+      document.getElementById('scv-missing-connectors').checked = false; // isolate to JUST the derive checkbox
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      const connVms = store.viewMembersForView(view.id).filter(v => v.objectType === 'connector');
+      out.derivedPlacedOnView = connVms.some(v => {
+        const c = store.findConnector(v.objectId);
+        return c && c.from === fn.id && c.to === cap.id && (c.note || '').includes('Derived');
+      });
+      return out;
+    }
+    """)
+    problems = []
+    if result["checkedByDefault"]:
+        problems.append("expected #scv-derive-connectors unchecked by default")
+    if not result["levelsHiddenBefore"]:
+        problems.append("expected the Levels row hidden before either checkbox is checked")
+    if not result["levelsVisibleAfterCheckingDerive"]:
+        problems.append("expected checking Derive hidden connections (alone) to reveal the Levels row")
+    if not result["derivedPlacedOnView"]:
+        problems.append("expected submitting with ONLY Derive hidden connections checked to actually place a derived connector on the view via the real dialog")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Smart Check View's real dialog wires up the new Derive hidden connections checkbox correctly: unchecked by default, reveals the shared Levels row on its own, and submitting with only it checked genuinely creates and places the derived connector"
+
+
 def check_force_directed_options(page):
     """Regression guard for the two new force-directed Remap options: preferRightPlacement
     (place connected nodes to the right when a cell is free) and onlyNewRowForNewGroup
@@ -8967,7 +9029,11 @@ def check_insert_smart_stream_derived_connections(page):
     same pair; (4) re-running the identical trace is idempotent -- no duplicate derived
     connector, because once created it becomes a normal directly-discoverable edge on
     the next pass; (5) a real connector this command placed (not derived) has an empty
-    note, so the note field alone distinguishes the two."""
+    note, so the note field alone distinguishes the two; (6) direct follow-up, "when
+    creating derived connectors, create both 's' and 'c' versions" -- the derived pair
+    also gets a genuine 's'-type Connector created in the model (not just the 'c' one
+    this 'c'-typed trace actually places on the view), and re-running the same trace
+    doesn't duplicate that 's' sibling either."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -9003,6 +9069,9 @@ def check_insert_smart_stream_derived_connections(page):
       let { view: v1, tab: t1 } = freshView('RegrDC_singleHop');
       commands.insertSmartStream(app, t1, { connectorType: 'c', startPartIds: [fn.id], direction: 'downstream', endType: null, levels: null, showTypes: showFnCap });
       out.singleHop = state(v1);
+      const streamSiblings = () => store.doc.connectors.filter(c => c.connectorType === 's' && c.from === fn.id && c.to === cap.id && (c.note || '').startsWith('Derived'));
+      out.streamSiblingCountAfterFirstRun = streamSiblings().length;
+      out.streamSiblingNote = streamSiblings()[0]?.note || null;
 
       // 2) two consecutive hidden types collapse into one derived edge naming both, in order
       const fn2 = mkPart('BusinessFunction', 'RegrDC_Fn2');
@@ -9026,6 +9095,7 @@ def check_insert_smart_stream_derived_connections(page):
       // 4) idempotent re-run on the single-hop view -> no duplicate derived connector
       commands.insertSmartStream(app, t1, { connectorType: 'c', startPartIds: [fn.id], direction: 'downstream', endType: null, levels: null, showTypes: showFnCap });
       out.rerun = state(v1);
+      out.streamSiblingCountAfterRerun = streamSiblings().length;
 
       return out;
     }
@@ -9043,9 +9113,126 @@ def check_insert_smart_stream_derived_connections(page):
     rr = result["rerun"]
     if rr["partCount"] != 2 or rr["connCount"] != 1:
         problems.append(f"re-running the same trace must not create a duplicate derived connector, got {rr}")
+    if result["streamSiblingCountAfterFirstRun"] != 1 or result["streamSiblingNote"] != "Derived — implied via Business Process (not shown)":
+        problems.append(f"expected creating a 'c'-typed derived connector to ALSO create a genuine 's'-typed sibling in the model (not placed on this 'c'-scoped view, but real), got streamSiblingCountAfterFirstRun={result['streamSiblingCountAfterFirstRun']} note={result['streamSiblingNote']!r}")
+    if result["streamSiblingCountAfterRerun"] != 1:
+        problems.append(f"re-running the same trace must not duplicate the 's'-typed derived sibling either, got {result['streamSiblingCountAfterRerun']}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "insertSmartStream creates a real, persisted derived Connector (noting which hidden type(s) it collapses) when excluded-type parts sit between two shown parts, collapses arbitrarily long hidden chains into one edge, skips it when a real direct connector already exists, and is idempotent on re-run"
+    return True, "insertSmartStream creates a real, persisted derived Connector (noting which hidden type(s) it collapses) when excluded-type parts sit between two shown parts, collapses arbitrarily long hidden chains into one edge, skips it when a real direct connector already exists, is idempotent on re-run, and also creates a genuine 's'-typed sibling Connector in the model for every derived pair (placing only the trace's own connectorType on the view)"
+
+
+def check_smart_check_view_derive_connectors(page):
+    """Regression guard for Smart Check View's new "Derive hidden connections" checkbox
+    (deriveConnectors option, commands.js). Direct follow-up to insertSmartStream's own
+    derived-connector concept: "Add creation of derived (same logic) to a new checkbox
+    in 'Smart Check View' command" -- here "hidden" means "not placed on this view"
+    (no showTypes filter at this scope). Covers: (1) off by default -- a chain through
+    an off-view part produces nothing when the checkbox isn't set; (2) checked, it adds
+    BOTH a real 'c' Connector and a real 's' Connector directly between the two
+    on-view parts, and places BOTH on the view -- unlike insertSmartStream (which is
+    scoped to one connectorType by its own dialog and only places the matching one),
+    Smart Check View has no such single-type scope, and its other checkboxes (e.g.
+    Missing connectors) already add either type without discriminating, so both
+    derived connectors belong on the view same as any other missing connector would;
+    (3) it's hop-limited by the SAME
+    `levels` field the "missing connectors and nodes" checkbox already uses (levels:1
+    is one hop too short to reach through the hidden part, levels:2 reaches it); (4)
+    ordering: run together with missingConnectorsAndNodes in ONE call, the hidden part
+    gets pulled onto the view FIRST, so it's no longer "hidden" and derive finds
+    nothing to bridge; (5) idempotent on re-run."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const mkPart = (type, label) => store.createPart({ type, label, model, streams: [] });
+      const mkConn = (from, to, connectorType) => store.createConnector({ from: from.id, to: to.id, connectorType, model, relationship: 'Association' });
+      const freshView = (name) => {
+        const view = store.addView(name, 'ff');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        return { view, tab };
+      };
+      const placeOnly = (view, ...parts) => {
+        for (const p of parts) store.createViewMember({ view: view.id, objectType: 'part', objectId: p.id, x: 40 + Math.random() * 400, y: 40 + Math.random() * 400 });
+      };
+      const viewConnCount = (view) => store.viewMembersForView(view.id).filter(v => v.objectType === 'connector').length;
+      const modelConnCount = (from, to, connectorType) => store.doc.connectors.filter(c => c.connectorType === connectorType && c.from === from.id && c.to === to.id).length;
+
+      const out = {};
+
+      // 1) off by default -- deriveConnectors not set at all
+      const fn1 = mkPart('BusinessFunction', 'RegrSCVD_Fn1');
+      const proc1 = mkPart('BusinessProcess', 'RegrSCVD_Proc1'); // deliberately left off the view
+      const cap1 = mkPart('ApplicationCapability', 'RegrSCVD_Cap1');
+      mkConn(fn1, proc1, 'c'); mkConn(proc1, cap1, 'c');
+      const { view: v1, tab: t1 } = freshView('RegrSCVD_off');
+      placeOnly(v1, fn1, cap1);
+      commands.smartCheckView(app, t1, { missingConnectors: false, missingConnectorsAndNodes: false, syncWithInventory: false, deriveConnectors: false });
+      out.offByDefault = { viewConnCount: viewConnCount(v1), modelHasC: modelConnCount(fn1, cap1, 'c') > 0, modelHasS: modelConnCount(fn1, cap1, 's') > 0 };
+
+      // 2) checked -- derives, places the 'c' one, and creates a genuine 's' sibling
+      const result2 = commands.smartCheckView(app, t1, { missingConnectors: false, missingConnectorsAndNodes: false, syncWithInventory: false, deriveConnectors: true, levels: null });
+      out.checked = {
+        viewConnCount: viewConnCount(v1), result: { connectorsAdded: result2.connectorsAdded, derivedConnectorsAdded: result2.derivedConnectorsAdded },
+        modelCCount: modelConnCount(fn1, cap1, 'c'), modelSCount: modelConnCount(fn1, cap1, 's'),
+        cNote: store.doc.connectors.find(c => c.connectorType === 'c' && c.from === fn1.id && c.to === cap1.id)?.note,
+      };
+
+      // 3) hop-limited by `levels` -- fresh pair, one hidden hop away needs levels >= 2
+      const fn3 = mkPart('BusinessFunction', 'RegrSCVD_Fn3');
+      const proc3 = mkPart('BusinessProcess', 'RegrSCVD_Proc3');
+      const cap3 = mkPart('ApplicationCapability', 'RegrSCVD_Cap3');
+      mkConn(fn3, proc3, 'c'); mkConn(proc3, cap3, 'c');
+      const { view: v3, tab: t3 } = freshView('RegrSCVD_levels');
+      placeOnly(v3, fn3, cap3);
+      commands.smartCheckView(app, t3, { missingConnectors: false, missingConnectorsAndNodes: false, syncWithInventory: false, deriveConnectors: true, levels: 1 });
+      out.levelsTooShort = { viewConnCount: viewConnCount(v3) };
+      commands.smartCheckView(app, t3, { missingConnectors: false, missingConnectorsAndNodes: false, syncWithInventory: false, deriveConnectors: true, levels: 2 });
+      out.levelsEnough = { viewConnCount: viewConnCount(v3) };
+
+      // 4) ordering: missingConnectorsAndNodes pulls the hidden part in FIRST (same call),
+      // so derive finds nothing left to bridge
+      const fn4 = mkPart('BusinessFunction', 'RegrSCVD_Fn4');
+      const proc4 = mkPart('BusinessProcess', 'RegrSCVD_Proc4');
+      const cap4 = mkPart('ApplicationCapability', 'RegrSCVD_Cap4');
+      mkConn(fn4, proc4, 'c'); mkConn(proc4, cap4, 'c');
+      const { view: v4, tab: t4 } = freshView('RegrSCVD_ordering');
+      placeOnly(v4, fn4, cap4);
+      const result4 = commands.smartCheckView(app, t4, { missingConnectors: true, missingConnectorsAndNodes: true, levels: null, syncWithInventory: false, deriveConnectors: true });
+      out.ordering = { derivedConnectorsAdded: result4.derivedConnectorsAdded, modelHasDirectDerived: modelConnCount(fn4, cap4, 'c') > 0 };
+
+      // 5) idempotent re-run
+      commands.smartCheckView(app, t1, { missingConnectors: false, missingConnectorsAndNodes: false, syncWithInventory: false, deriveConnectors: true, levels: null });
+      out.rerun = { modelCCount: modelConnCount(fn1, cap1, 'c'), modelSCount: modelConnCount(fn1, cap1, 's') };
+
+      return out;
+    }
+    """)
+    problems = []
+    off = result["offByDefault"]
+    if off["viewConnCount"] != 0 or off["modelHasC"] or off["modelHasS"]:
+        problems.append(f"expected NO derived connector (either type, anywhere) when deriveConnectors is false, got {off}")
+    ck = result["checked"]
+    if ck["viewConnCount"] != 2 or ck["modelCCount"] != 1 or ck["modelSCount"] != 1:
+        problems.append(f"expected deriveConnectors:true to place BOTH the 'c' and 's' connector on the view (Smart Check View has no single-connectorType scope) and create exactly one of each in the model, got {ck}")
+    if ck["cNote"] != "Derived — implied via Business Process (not shown)":
+        problems.append(f"expected the derived connector's note to name the hidden Business Process, got {ck['cNote']!r}")
+    if ck["result"]["derivedConnectorsAdded"] != 2 or ck["result"]["connectorsAdded"] != 2:
+        problems.append(f"expected smartCheckView's own return value to report derivedConnectorsAdded:2 (one 'c', one 's', rolled into connectorsAdded:2), got {ck['result']}")
+    if result["levelsTooShort"]["viewConnCount"] != 0:
+        problems.append(f"levels:1 is one hop too short to reach through the single hidden Business Process -- expected no derived connector yet, got {result['levelsTooShort']}")
+    if result["levelsEnough"]["viewConnCount"] != 2:
+        problems.append(f"levels:2 should be enough to bridge through the single hidden Business Process (both 'c' and 's'), got {result['levelsEnough']}")
+    ordering = result["ordering"]
+    if ordering["derivedConnectorsAdded"] != 0 or ordering["modelHasDirectDerived"]:
+        problems.append(f"expected missingConnectorsAndNodes (same call) to pull the hidden part onto the view FIRST, leaving nothing for deriveConnectors to bridge, got {ordering}")
+    if result["rerun"]["modelCCount"] != 1 or result["rerun"]["modelSCount"] != 1:
+        problems.append(f"re-running deriveConnectors on an unchanged view must not duplicate either sibling, got {result['rerun']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Smart Check View's 'Derive hidden connections' checkbox is off by default, bridges two on-view parts linked only through an off-view chain by creating and placing both a 'c' and 's' Connector, respects the shared Levels hop limit, correctly runs after missingConnectorsAndNodes so a newly-pulled-in part is no longer treated as hidden, and is idempotent on re-run"
 
 
 def check_load_sfcce(page):
@@ -9695,6 +9882,7 @@ CHECKS = [
     check_section_rowcount_realigns_nodes,
     check_new_content_sized_and_non_overlapping,
     check_smart_check_view_default_levels_unlimited,
+    check_smart_check_view_dialog_derive_checkbox_wiring,
     check_force_directed_options,
     check_sfce_import_and_generate,
     check_generate_industry_no_collapse_keeps_functions_separate,
@@ -9786,6 +9974,7 @@ CHECKS = [
     check_insert_smart_stream_traversal,
     check_insert_smart_stream_dialog,
     check_insert_smart_stream_derived_connections,
+    check_smart_check_view_derive_connectors,
 ]
 
 

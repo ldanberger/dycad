@@ -1808,8 +1808,102 @@ function syncViewConnectorsWithInventory(store, connIds, log, describePart) {
   return synced;
 }
 
+/**
+ * Discovery half of "derived" connectors, shared between insertSmartStream's own
+ * derived-connector trace (below, unchanged scope-wise) and Smart Check View's
+ * "Derive hidden connections" checkbox: finds every pair of PRESENT parts (in
+ * `presentPartIdSet`) linked only through a run of one or more NOT-present parts,
+ * walking exactly one connectorType's own graph (call once per type) up to `levels`
+ * hops (null = unlimited). Directional (follows `c.from -> c.to` only, matching the
+ * underlying connectors' own direction), and doesn't filter by model — matching every
+ * other Smart Check View helper above, none of which filter by model either (a
+ * connector's endpoints already pin it to a model via their own `.model`). Returns a
+ * Map "from|to" -> { from, to, relationship, viaTypes } — relationship is copied from
+ * the FIRST real hop out of `from` (same "topmost parent" styling convention used
+ * elsewhere), viaTypes lists which hidden element type(s) it passes through. A pair
+ * already linked by a DIRECT connector of this same connectorType (placed on this view
+ * or not — either way a real one already exists) is excluded.
+ */
+function findDerivedPairsForType(store, connectorType, presentPartIdSet, levels) {
+  const connsByPart = new Map();
+  for (const c of store.doc.connectors) {
+    if (!ciEq(c.connectorType, connectorType)) continue;
+    if (!connsByPart.has(c.from)) connsByPart.set(c.from, []);
+    connsByPart.get(c.from).push(c);
+  }
+  const existingDirectPairs = new Set(
+    store.doc.connectors
+      .filter((c) => ciEq(c.connectorType, connectorType) && presentPartIdSet.has(c.from) && presentPartIdSet.has(c.to))
+      .map((c) => `${c.from}|${c.to}`)
+  );
+  const derivedPairs = new Map();
+  for (const survivorId of presentPartIdSet) {
+    const visited = new Set([survivorId]);
+    let frontier = [{ partId: survivorId, firstHopRelationship: null, viaTypes: [], hop: 0 }];
+    while (frontier.length > 0) {
+      const next = [];
+      for (const { partId: cur, firstHopRelationship, viaTypes, hop } of frontier) {
+        if (levels != null && hop >= levels) continue;
+        for (const c of connsByPart.get(cur) || []) {
+          if (visited.has(c.to)) continue;
+          visited.add(c.to);
+          const hopRelationship = firstHopRelationship ?? c.relationship;
+          if (presentPartIdSet.has(c.to)) {
+            if (c.to !== survivorId) {
+              const key = `${survivorId}|${c.to}`;
+              if (!existingDirectPairs.has(key) && !derivedPairs.has(key)) {
+                derivedPairs.set(key, { from: survivorId, to: c.to, relationship: hopRelationship, viaTypes });
+              }
+            }
+          } else {
+            const viaPart = store.findPart(c.to);
+            if (!viaPart) continue;
+            const viaTitle = elementByType(store, viaPart.type)?.title || viaPart.type;
+            next.push({ partId: c.to, firstHopRelationship: hopRelationship, viaTypes: [...viaTypes, viaTitle], hop: hop + 1 });
+          }
+        }
+      }
+      frontier = next;
+    }
+  }
+  return derivedPairs;
+}
+
+/**
+ * Creation half of "derived" connectors — reported directly: "when creating derived
+ * connectors, create both 's' and 'c' versions." Materializes each pair from
+ * findDerivedPairsForType (or insertSmartStream's own inline discovery, below) as BOTH
+ * a 'c' Connector and an 's' Connector, regardless of which connectorType's graph the
+ * pair was actually discovered through — a derived/implied relationship is a
+ * structural fact worth showing under either lens. Model is taken from the pair's own
+ * `from` part (matches the convention that a connector's model matches its
+ * endpoints'). Skips whichever type(s) already exist for that exact from/to/model, so
+ * this stays idempotent no matter how many times it runs (including once per
+ * connectorType's own discovery pass, which can rediscover the same pair from the
+ * other side). `log`/`describePart` are optional — smartCheckView's own Message Log
+ * closures when called from there, omitted when called from insertSmartStream (which
+ * has its own single summary toast instead). Returns the newly created connectors.
+ */
+function createDerivedConnectorPairs(store, derivedPairs, log, describePart) {
+  const created = [];
+  for (const { from, to, relationship, viaTypes } of derivedPairs.values()) {
+    const modelName = store.findPart(from)?.model;
+    if (!modelName) continue;
+    const viaText = [...new Set(viaTypes)].join(', ');
+    const note = `Derived — implied via ${viaText} (not shown)`;
+    for (const connectorType of ['c', 's']) {
+      const exists = store.doc.connectors.some((c) => c.from === from && c.to === to && ciEq(c.connectorType, connectorType) && ciEq(c.model, modelName));
+      if (exists) continue;
+      const conn = store.createConnector({ from, to, model: modelName, connectorType, relationship, note });
+      created.push(conn);
+      if (log) log(`Derived connector: ${describePart(from)} -> ${describePart(to)} (${connectorType === 'c' ? 'Connector' : 'Stream'}), implied via ${viaText}.`);
+    }
+  }
+  return created;
+}
+
 function smartCheckView(app, tab, options = {}) {
-  const { missingConnectors = true, missingConnectorsAndNodes = false, levels = null, syncWithInventory = false } = options;
+  const { missingConnectors = true, missingConnectorsAndNodes = false, levels = null, syncWithInventory = false, deriveConnectors = false } = options;
   const { store } = app;
   const viewId = tab.viewId;
   const view = store.findView(viewId);
@@ -1937,6 +2031,37 @@ function smartCheckView(app, tab, options = {}) {
     parentConnectorsUpdated += mirroredUp.updated;
   }
 
+  // "Derive hidden connections" — direct follow-up to Insert Smart Stream's own
+  // derived-connector concept: "Add creation of derived (same logic) to a new checkbox
+  // in 'Smart Check View' command." Where insertSmartStream derives across parts it
+  // just traced-and-filtered-out (showTypes), here "hidden" simply means "not placed
+  // on this view" — for every pair of parts already on this view that are ONLY linked
+  // through a run of one or more off-view parts, add a real Connector directly between
+  // them (both a 'c' and an 's' version — createDerivedConnectorPairs, above),
+  // documenting which type(s) it passes through. Walked separately per connectorType
+  // (each type's own graph implies its own notion of "connected"), up to `levels` hops
+  // — same field the missing-connectors-and-nodes checkbox above already uses, so the
+  // dialog doesn't need a second hop-count input. Runs LAST, after every other
+  // checkbox's own additions, so a node that missingConnectorsAndNodes just pulled in
+  // this same run is no longer "hidden" and won't spuriously get bridged.
+  let derivedConnectorsAdded = 0;
+  if (deriveConnectors) {
+    const presentPartIdSet = new Set(partIdToVmId.keys());
+    for (const connectorType of ['c', 's']) {
+      const pairs = findDerivedPairsForType(store, connectorType, presentPartIdSet, levels);
+      const createdConns = createDerivedConnectorPairs(store, pairs, log, describePart);
+      for (const conn of createdConns) {
+        store.createViewMember({
+          view: viewId, objectType: 'connector', objectId: conn.id,
+          fromVmId: partIdToVmId.get(conn.from), toVmId: partIdToVmId.get(conn.to),
+        });
+        placedConnectorIds.add(conn.id);
+        derivedConnectorsAdded += 1;
+      }
+    }
+    connectorsAdded += derivedConnectorsAdded;
+  }
+
   let inventorySynced = 0;
   if (syncWithInventory) {
     inventorySynced = syncViewConnectorsWithInventory(store, placedConnectorIds, log, describePart);
@@ -1944,9 +2069,9 @@ function smartCheckView(app, tab, options = {}) {
 
   const totalUpdated = connectorsUpdated + parentConnectorsUpdated + inventorySynced;
   if (connectorsAdded === 0 && nodesAdded === 0 && parentConnectorsAdded === 0 && totalUpdated === 0) log('No missing connectors or nodes found.');
-  else log(`Done: ${connectorsAdded} connector${connectorsAdded === 1 ? '' : 's'} added, ${nodesAdded} node${nodesAdded === 1 ? '' : 's'} added${parentConnectorsAdded ? `, ${parentConnectorsAdded} mirrored up to a parent view` : ''}${totalUpdated ? `, ${totalUpdated} resynced` : ''}.`);
+  else log(`Done: ${connectorsAdded} connector${connectorsAdded === 1 ? '' : 's'} added${derivedConnectorsAdded ? ` (${derivedConnectorsAdded} derived)` : ''}, ${nodesAdded} node${nodesAdded === 1 ? '' : 's'} added${parentConnectorsAdded ? `, ${parentConnectorsAdded} mirrored up to a parent view` : ''}${totalUpdated ? `, ${totalUpdated} resynced` : ''}.`);
 
-  return { connectorsAdded, nodesAdded, parentConnectorsAdded, connectorsUpdated: totalUpdated };
+  return { connectorsAdded, nodesAdded, parentConnectorsAdded, connectorsUpdated: totalUpdated, derivedConnectorsAdded };
 }
 
 /**
@@ -2630,7 +2755,11 @@ function insertSmartStream(app, tab, options) {
   // (the same "topmost parent" styling convention the rest of this command already
   // follows). Naturally idempotent on re-run: once created, it's a normal
   // directly-discoverable edge the next time connsByPart is built, so this loop finds
-  // it already satisfied and skips it via existingPairs.
+  // it already satisfied and skips it via existingPairs. Discovery here stays scoped
+  // to THIS trace's own already-collected neighborhood (collectedPartIds) — unlike
+  // Smart Check View's own "Derive hidden connections" checkbox (findDerivedPairsForType,
+  // above), which has no such pre-collected neighborhood to bound it and uses `levels`
+  // instead.
   const existingPairs = new Set(finalConnIds.map((id) => { const c = store.findConnector(id); return `${c.from}|${c.to}`; }));
   const derivedPairs = new Map(); // "from|to" -> { from, to, relationship, viaTypes: string[] }
   for (const survivorId of finalPartIdSet) {
@@ -2660,11 +2789,14 @@ function insertSmartStream(app, tab, options) {
       frontier = next;
     }
   }
-  for (const { from, to, relationship, viaTypes } of derivedPairs.values()) {
-    const conn = store.createConnector({
-      from, to, model: modelName, connectorType, relationship,
-      note: `Derived — implied via ${[...new Set(viaTypes)].join(', ')} (not shown)`,
-    });
+  // Reported directly: "when creating derived connectors, create both 's' and 'c'
+  // versions" — createDerivedConnectorPairs (above, shared with Smart Check View)
+  // always creates both; only the ONE matching this trace's own connectorType gets
+  // placed as a viewMember on the view actually being built here (the other type still
+  // exists in the model, just not shown on this particular connectorType-scoped view).
+  const createdDerived = createDerivedConnectorPairs(store, derivedPairs);
+  for (const conn of createdDerived) {
+    if (!ciEq(conn.connectorType, connectorType)) continue;
     finalConnIds.push(conn.id);
     // Register in connsByPart too so the placement hop-distance BFS just below can
     // walk this brand-new edge like any other — it was built before this connector existed.

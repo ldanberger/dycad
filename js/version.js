@@ -3728,4 +3728,33 @@
 // regression (temporarily made the Output Copy button grab the Script pane's text
 // instead) and reverted. DESIGN_DOCUMENT.md SS5.3 and tests/README.md updated. Full
 // suite 130/130.
-export const APP_VERSION = '0.880';
+// v0.881: direct follow-up: "when creating derived connectors, create both 's' and
+// 'c' versions. Add creation of derived (same logic) to a new checkbox in 'Smart
+// Check View' command." Two new shared helpers in commands.js: findDerivedPairsForType
+// (discovery -- walks one connectorType's own graph, directionally, up to `levels`
+// hops, for pairs of "present" parts linked only through NOT-present ones) and
+// createDerivedConnectorPairs (creation -- always materializes BOTH a 'c' and an 's'
+// Connector per pair, regardless of which type's graph found it, skipping whichever
+// already exists). insertSmartStream's own discovery is unchanged (still scoped to
+// its own hop-limited, showTypes-filtered collectedPartIds), but its creation step now
+// goes through createDerivedConnectorPairs too -- only the ONE type matching the
+// trace's own connectorType gets placed on the view being built, the other still
+// exists in the model. smartCheckView gained a new "Derive hidden connections"
+// checkbox (deriveConnectors option, off by default, #scv-derive-connectors in
+// promptSmartCheckView/main.js): here "hidden" means "not placed on this view" (no
+// showTypes filter at this scope); walks findDerivedPairsForType once per type up to
+// the SAME `levels` field "missing connectors and nodes" already uses (Levels row now
+// shows for either checkbox); runs LAST so a part missingConnectorsAndNodes just
+// pulled onto the view in the same call no longer counts as hidden; places BOTH
+// created types on the view (Smart Check View has no single-connectorType scope,
+// unlike Insert Smart Stream -- its other checkboxes already add either type without
+// discriminating). New check_smart_check_view_derive_connectors and
+// check_smart_check_view_dialog_derive_checkbox_wiring, plus a "both versions" +
+// idempotency extension to check_insert_smart_stream_derived_connections -- all proven
+// to catch a reintroduced regression (temporarily limited createDerivedConnectorPairs
+// to 'c' only, and separately broke the Levels-row visibility toggle) and reverted.
+// DESIGN_DOCUMENT.md SS5.5 (new) and tests/README.md updated; public/instructions.html's
+// Insert Smart Stream and Smart Check View sections, plus the Script Console
+// Reference table (main.js + instructions.html), updated for the new behavior/option.
+// Full suite 132/132.
+export const APP_VERSION = '0.881';

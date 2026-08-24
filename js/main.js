@@ -775,7 +775,9 @@ class App {
               Default/None/Layered patterns only), <code>minimizeCrossings, minimizeConnectorLength</code>
               (both boolean, Default/None/Layered only) — all optional, same defaults as the Remap dialog.</td></tr>
             <tr><td><code>smartCheckView(app, tab, options)</code></td><td>options: <code>missingConnectors,
-              missingConnectorsAndNodes, levels, syncWithInventory</code>.</td></tr>
+              missingConnectorsAndNodes, levels, syncWithInventory, deriveConnectors</code> (links two
+              on-view nodes directly when only connected via a chain of not-shown parts; creates both a
+              'c' and an 's' connector; uses <code>levels</code> too).</td></tr>
             <tr><td><code>smartCheckNode(app, tab, partId, options)</code></td><td>options: same as
               smartCheckView, plus <code>upstream, downstream, byStream, streams</code>.</td></tr>
             <tr><td><code>insertSmartStream(app, tab, options)</code></td><td>freeform views only; options:
@@ -1755,14 +1757,17 @@ class App {
       <div class="prop-row checkbox"><input type="checkbox" id="scv-autocomplete" /><label for="scv-autocomplete">Auto-complete streams in model — find existing stream names and fill in any missing parts/nodes for them, following a stream template</label></div>
       <div class="prop-row" id="scv-autocomplete-template-row" style="margin-left:22px;"><label>Stream Template</label><select id="scv-autocomplete-template">${templateNames.map((n) => `<option value="${escapeHtml(n)}" ${n === defaultTemplate ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></div>
       <div class="prop-row checkbox"><input type="checkbox" id="scv-sync-inventory" /><label for="scv-sync-inventory">Sync existing connectors with inventory — update this view's connectors to match their related part-to-part connector where they differ</label></div>
+      <div class="prop-row checkbox"><input type="checkbox" id="scv-derive-connectors" /><label for="scv-derive-connectors">Derive hidden connections — link two nodes on this view directly when they're only connected through a chain of not-shown parts (creates both a Connector and a Stream version; uses Levels above)</label></div>
       <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Check</button></div>`;
     overlay.appendChild(box);
     root.appendChild(overlay);
 
     const nodesCheckbox = box.querySelector('#scv-missing-connectors-nodes');
+    const deriveCheckbox = box.querySelector('#scv-derive-connectors');
     const levelsRow = box.querySelector('#scv-levels-row');
-    const updateLevelsVisibility = () => levelsRow.classList.toggle('hidden', !nodesCheckbox.checked);
+    const updateLevelsVisibility = () => levelsRow.classList.toggle('hidden', !nodesCheckbox.checked && !deriveCheckbox.checked);
     nodesCheckbox.addEventListener('change', updateLevelsVisibility);
+    deriveCheckbox.addEventListener('change', updateLevelsVisibility);
     updateLevelsVisibility();
 
     const autoCompleteCheckbox = box.querySelector('#scv-autocomplete');
@@ -1780,16 +1785,17 @@ class App {
       const doAutoComplete = autoCompleteCheckbox.checked;
       const autoCompleteTemplate = box.querySelector('#scv-autocomplete-template').value;
       const syncWithInventory = box.querySelector('#scv-sync-inventory').checked;
+      const deriveConnectors = deriveCheckbox.checked;
       overlay.remove();
 
-      if (!missingConnectors && !missingConnectorsAndNodes && !doAutoComplete && !syncWithInventory) { this.toast('Nothing selected to check.'); return; }
+      if (!missingConnectors && !missingConnectorsAndNodes && !doAutoComplete && !syncWithInventory && !deriveConnectors) { this.toast('Nothing selected to check.'); return; }
 
-      if (missingConnectors || missingConnectorsAndNodes || syncWithInventory) {
-        const result = smartCheckView(this, tab, { missingConnectors, missingConnectorsAndNodes, levels, syncWithInventory });
+      if (missingConnectors || missingConnectorsAndNodes || syncWithInventory || deriveConnectors) {
+        const result = smartCheckView(this, tab, { missingConnectors, missingConnectorsAndNodes, levels, syncWithInventory, deriveConnectors });
         if (!result) { this.toast('Smart Check failed — view not found.', true); return; }
         this.recordAndRender();
         const parts = [];
-        if (result.connectorsAdded) parts.push(`${result.connectorsAdded} connector${result.connectorsAdded === 1 ? '' : 's'}`);
+        if (result.connectorsAdded) parts.push(`${result.connectorsAdded} connector${result.connectorsAdded === 1 ? '' : 's'}${result.derivedConnectorsAdded ? ` (${result.derivedConnectorsAdded} derived)` : ''}`);
         if (result.nodesAdded) parts.push(`${result.nodesAdded} node${result.nodesAdded === 1 ? '' : 's'}`);
         if (result.parentConnectorsAdded) parts.push(`${result.parentConnectorsAdded} mirrored to a parent view`);
         if (result.connectorsUpdated) parts.push(`${result.connectorsUpdated} resynced`);
