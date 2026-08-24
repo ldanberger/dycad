@@ -1634,6 +1634,24 @@ class App {
       }
     }
     tab.tableRows = flattenIndustryTree(this.store.doc.industryTree || []);
+    // Reported directly: "when I open catalog SFCCE I don't see these section
+    // descriptions." Each row's own sectionDescription comes straight from the
+    // imported/generated SFCCE data (nodeSectionDescription, sfce.js) -- populated
+    // only when a Load SFCCE field mapping supplies a sectionDescriptionField. The
+    // BUILT-IN default dataset's own mapping (GENERAL_SFCCE_MAPPING, data.js) never
+    // has, so this column was always blank for the data most people are actually
+    // looking at here. Fill in the gap (never override a row that already has its
+    // own real description) from custom.json's own org-viewType section definitions
+    // -- the same known-Section descriptions the Industry_to_SFCCE AI prompt
+    // (Instructions tab) already gives an AI, by matching this row's own sectionId
+    // against theirs, the identical sectionId->name lookup pattern already used for
+    // Load SFCCE's own shared-section dialog (promptSFCCEMapping, below).
+    const orgSectionDefs = this.store.settings.sections || [];
+    for (const row of tab.tableRows) {
+      if (row.sectionDescription || !row.sectionId) continue;
+      const def = orgSectionDefs.find((s) => ciEq(s.viewType, 'org') && s.sectionId === row.sectionId);
+      if (def?.description) row.sectionDescription = def.description;
+    }
     tab.tableCols = ['section', 'sectionId', 'sectionDescription', 'sectionOrder', 'functionId', 'functionName', 'functionDescription', 'capabilityId', 'capabilityName', 'capabilityDescription', 'applicationCapabilityId', 'applicationCapabilityName', 'applicationCapabilityDescription', 'entityId', 'entityName', 'entityDescription'];
     this.switchToTab(tab.id);
     return tab;

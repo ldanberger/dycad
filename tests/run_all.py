@@ -2724,6 +2724,61 @@ def check_sfce_catalog_page(page):
     return True, f"SFCE Catalog opened with {result['rowCount']} rows and all {len(expectedCols)} id/description columns"
 
 
+def check_sfce_catalog_section_description_fallback(page):
+    """Regression guard/new-feature check, reported directly: "when I open catalog
+    SFCCE I don't see these section descriptions. please add." Each row's own
+    sectionDescription (sfce.js's makeRow) comes from the imported/generated SFCCE
+    data's own nodeSectionDescription, populated only when a Load SFCCE field mapping
+    supplies a sectionDescriptionField -- the BUILT-IN default dataset's own mapping
+    (GENERAL_SFCCE_MAPPING, data.js) never has, so this column was always blank for
+    the data most people actually see here. Fixed in openOrSwitchSfceCatalog
+    (main.js): after flattenIndustryTree builds tableRows, any row with a blank
+    sectionDescription (but a real sectionId) gets filled in from
+    store.settings.sections' own org-viewType section definitions (public/
+    custom.json, matched by sectionId) -- the same 7 known-Section descriptions the
+    Industry_to_SFCCE AI prompt (Instructions tab) already gives an AI. Covers: every
+    row of the built-in default dataset (which has no descriptions of its own) ends
+    up with a real, non-empty sectionDescription; a sampled 'mof' row's description
+    matches custom.json's own org-viewType 'mof' section definition EXACTLY (proving
+    it's a genuine lookup, not a hardcoded string); and a row whose underlying SFCCE
+    data DOES supply its own real sectionDescription is left completely untouched,
+    not overwritten by the fallback."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+
+      const tab1 = app.openOrSwitchSfceCatalog();
+      const allSectionedRowsHaveDescriptions = tab1.tableRows.every(r => !r.sectionId || !!r.sectionDescription);
+      const mofRow = tab1.tableRows.find(r => r.sectionId === 'mof');
+      const mofCustomJsonDescription = (store.settings.sections || []).find(s => s.viewType === 'org' && s.sectionId === 'mof')?.description;
+      const mofDescriptionMatches = !!mofCustomJsonDescription && mofRow?.sectionDescription === mofCustomJsonDescription;
+
+      // a row whose data already carries its OWN real sectionDescription must be left alone
+      const origTree = store.doc.industryTree;
+      store.doc.industryTree = [{
+        nodeElementType: 'BusinessFunction', nodeId: 'regr-f1', nodeName: 'RegrF1', nodeDescription: '',
+        nodeSection: 'Regr Custom Section', nodeSectionId: 'mof', nodeSectionOrder: '1',
+        nodeSectionDescription: 'MY OWN REAL DESCRIPTION', nodeChildren: [],
+      }];
+      const tab2 = app.openOrSwitchSfceCatalog();
+      const ownDescriptionPreserved = tab2.tableRows[0]?.sectionDescription === 'MY OWN REAL DESCRIPTION';
+      store.doc.industryTree = origTree;
+
+      return { allSectionedRowsHaveDescriptions, mofDescriptionMatches, ownDescriptionPreserved, mofCustomJsonDescription };
+    }
+    """)
+    problems = []
+    if not result["allSectionedRowsHaveDescriptions"]:
+        problems.append("expected every sectioned row of the built-in default dataset to end up with a non-empty sectionDescription")
+    if not result["mofDescriptionMatches"]:
+        problems.append(f"expected a sampled 'mof' row's sectionDescription to exactly match custom.json's own org-viewType 'mof' section description ({result['mofCustomJsonDescription']!r}), mismatch")
+    if not result["ownDescriptionPreserved"]:
+        problems.append("expected a row whose underlying SFCCE data already supplies its own real sectionDescription to be left untouched by the fallback, not overwritten")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "SFCE Catalog fills in a blank sectionDescription from custom.json's own org-viewType section definitions (exact match, not overriding a row's own real description)"
+
+
 def check_boot_loader_wires_section_id_and_order(page):
     """Regression guard/new-feature check, reported directly: "wire sectionId and order
     into the boot loader." public/capabilities-general-SFCCE.json's own per-function
@@ -9512,6 +9567,7 @@ CHECKS = [
     check_generate_industry_place_on_view_defaults_unchecked,
     check_dropdown_scrollable,
     check_sfce_catalog_page,
+    check_sfce_catalog_section_description_fallback,
     check_boot_loader_wires_section_id_and_order,
     check_routing_style_per_connector_type,
     check_auto_complete_streams_ui,

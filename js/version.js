@@ -3645,4 +3645,48 @@
 // happened, not something to retroactively rewrite -- consistent with this
 // changelog's own established practice. Full suite 126/126 (no test referenced the
 // removed compat path).
-export const APP_VERSION = '0.876';
+//
+// v0.877: reported directly, "please add these section definitions to the source
+// file" -- FUNCTIONS (Enterprise Scope, Mainstream Operational, Staff Specialist,
+// Continuous Improvement, Resources Sustainment, Financial/Finance Control) and DATA
+// MANAGEMENT ROLES definitions, given verbatim. Identified "the source file" as
+// public/instructions.html's Industry_to_SFCCE AI-prompt template (the one place in
+// the repo that already lists these exact 7 known-Section names, per v0.867's own
+// entry) rather than public/custom.json's org-viewType section rows (which have no
+// description field at all, and aren't consumed as an AI prompt) -- the pasted
+// FUNCTIONS text is a definition for each of the 7 known Sections the prompt already
+// tells the AI to prefer reusing, and the DATA MANAGEMENT ROLES text explains, using
+// data-function examples, exactly the Mainstream-vs-Centralized ("economies of
+// scale") distinction the prompt's own baseline Function list already encodes
+// (Data Admin tagged Centralized Operational, Data Management tagged Mainstream
+// Operational) but never spelled out as a rule. Inserted both, lightly normalized
+// (e.g. "Finance Control Functions" to match the section name already used
+// verbatim elsewhere in this same prompt, a duplicated "Functions Functions" word
+// fixed) but not reworded, right after the known-Sections list and before the
+// existing "sectionId is optional" paragraph -- exactly where an AI reading the
+// prompt needs the definitions to correctly apply "prefer reusing... wherever it
+// genuinely fits." Pure content addition to a static documentation string; no code
+// changed, no new test (nothing in run_all.py asserts this prompt's prose content,
+// consistent with v0.867's own "no code changes; no new test" precedent for the
+// same file). Full suite sanity-checked via check_boots_clean only, per that same
+// precedent, rather than the full run.
+//
+// v0.878: direct follow-up: "when I open catalog SFCCE I don't see these section
+// descriptions. please add." Root cause: Catalogs > SFCCE's sectionDescription
+// column (openOrSwitchSfceCatalog, main.js; sfce.js's makeRow) reads a row's own
+// nodeSectionDescription, populated only when a Load SFCCE field mapping supplies a
+// sectionDescriptionField -- the BUILT-IN default dataset's own mapping
+// (GENERAL_SFCCE_MAPPING, data.js) never has one, so this column was always blank
+// for the data most people actually see there. public/custom.json's org/org4lob-
+// viewType section rows (esf/mof/cof/ssf/cif/rsf/fcf, plus org4lob's mof2/mof3/mof4)
+// gained a real `description` field each -- the same v0.877 definitions, now living
+// as actual data, not just AI-prompt prose. openOrSwitchSfceCatalog now fills in any
+// row's blank sectionDescription from this same custom.json data by matching
+// sectionId (the identical sectionId->name lookup pattern Load SFCCE's own shared-
+// section dialog already uses), leaving a row that DOES carry its own real
+// description from the imported data completely untouched. Verified in a real
+// browser: all 40 rows of the built-in default dataset went from 40 blank to 0 blank
+// sectionDescription cells. New check_sfce_catalog_section_description_fallback,
+// proven to catch a reintroduced regression and reverted. DESIGN_DOCUMENT.md SS7.1
+// and tests/README.md updated. Full suite 128/128.
+export const APP_VERSION = '0.878';

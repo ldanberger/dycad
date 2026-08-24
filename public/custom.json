@@ -3002,6 +3002,7 @@
       "sectionId": "esf",
       "order": 1,
       "name": "Enterprise Scope Functions",
+      "description": "Functions at CEO/COO level encompassing the whole organization.",
       "rowCount": 1,
       "columnCount": 20,
       "elementTypes": [
@@ -3013,6 +3014,7 @@
       "sectionId": "mof",
       "order": 2,
       "name": "Mainstream Operational Functions",
+      "description": "Customer-focused Functions meeting the needs that define what the organization is about, delivered within a single Core Program.",
       "rowCount": 2,
       "columnCount": 20,
       "elementTypes": [
@@ -3024,6 +3026,7 @@
       "sectionId": "cof",
       "order": 3,
       "name": "Centralized Operational Functions (Economies of Scale)",
+      "description": "Functions consolidated across multiple Core Programs for economies of scale -- the shared/corporate-service counterpart to Mainstream Operational Functions.",
       "rowCount": 1,
       "columnCount": 20,
       "elementTypes": [
@@ -3035,6 +3038,7 @@
       "sectionId": "ssf",
       "order": 4,
       "name": "Staff Specialist Functions",
+      "description": "Functions assisting operational managers in the major dimensions of their work.",
       "rowCount": 2,
       "columnCount": 5,
       "elementTypes": [
@@ -3046,6 +3050,7 @@
       "sectionId": "cif",
       "order": 5,
       "name": "Continuous Improvement Functions",
+      "description": "Functions addressing improving any other Function.",
       "rowCount": 1,
       "columnCount": 20,
       "elementTypes": [
@@ -3057,6 +3062,7 @@
       "sectionId": "rsf",
       "order": 6,
       "name": "Resources Sustainment Functions",
+      "description": "Functions concerned with ensuring that human, financial, capital, and technical resources are well maintained and not allowed to deteriorate.",
       "rowCount": 1,
       "columnCount": 20,
       "elementTypes": [
@@ -3068,6 +3074,7 @@
       "sectionId": "fcf",
       "order": 7,
       "name": "Finance Control Functions",
+      "description": "Functions that measure and control resources within the organization.",
       "rowCount": 1,
       "columnCount": 20,
       "elementTypes": [
@@ -3088,6 +3095,7 @@
       "sectionId": "esf",
       "order": 1,
       "name": "Enterprise Scope Functions",
+      "description": "Functions at CEO/COO level encompassing the whole organization.",
       "rowCount": 1,
       "columnCount": 20,
       "elementTypes": [
@@ -3099,6 +3107,7 @@
       "sectionId": "mof",
       "order": 2,
       "name": "Mainstream Operational Functions - LOB1",
+      "description": "Customer-focused Functions meeting the needs that define what the organization is about, delivered within a single Core Program (line of business 1).",
       "rowCount": 1,
       "columnCount": 20,
       "elementTypes": [
@@ -3110,6 +3119,7 @@
       "sectionId": "mof2",
       "order": 3,
       "name": "Mainstream Operational Functions - LOB2",
+      "description": "Customer-focused Functions meeting the needs that define what the organization is about, delivered within a single Core Program (line of business 2).",
       "rowCount": 1,
       "columnCount": 20,
       "elementTypes": [
@@ -3121,6 +3131,7 @@
       "sectionId": "mof3",
       "order": 4,
       "name": "Mainstream Operational Functions - LOB3",
+      "description": "Customer-focused Functions meeting the needs that define what the organization is about, delivered within a single Core Program (line of business 3).",
       "rowCount": 1,
       "columnCount": 20,
       "elementTypes": [
@@ -3132,6 +3143,7 @@
       "sectionId": "mof4",
       "order": 5,
       "name": "Mainstream Operational Functions - LOB4",
+      "description": "Customer-focused Functions meeting the needs that define what the organization is about, delivered within a single Core Program (line of business 4).",
       "rowCount": 1,
       "columnCount": 20,
       "elementTypes": [
@@ -3143,6 +3155,7 @@
       "sectionId": "cof",
       "order": 6,
       "name": "Centralized Operational Functions (Economies of Scale)",
+      "description": "Functions consolidated across multiple Core Programs for economies of scale -- the shared/corporate-service counterpart to Mainstream Operational Functions.",
       "rowCount": 1,
       "columnCount": 20,
       "elementTypes": [
@@ -3154,6 +3167,7 @@
       "sectionId": "ssf",
       "order": 7,
       "name": "Staff Specialist Functions",
+      "description": "Functions assisting operational managers in the major dimensions of their work.",
       "rowCount": 2,
       "columnCount": 20,
       "elementTypes": [
@@ -3165,6 +3179,7 @@
       "sectionId": "cif",
       "order": 8,
       "name": "Continuous Improvement Functions",
+      "description": "Functions addressing improving any other Function.",
       "rowCount": 1,
       "columnCount": 20,
       "elementTypes": [
@@ -3176,6 +3191,7 @@
       "sectionId": "rsf",
       "order": 9,
       "name": "Resources Sustainment Functions",
+      "description": "Functions concerned with ensuring that human, financial, capital, and technical resources are well maintained and not allowed to deteriorate.",
       "rowCount": 1,
       "columnCount": 20,
       "elementTypes": [
@@ -3187,6 +3203,7 @@
       "sectionId": "fcf",
       "order": 10,
       "name": "Finance Control Functions",
+      "description": "Functions that measure and control resources within the organization.",
       "rowCount": 1,
       "columnCount": 20,
       "elementTypes": [

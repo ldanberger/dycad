@@ -641,6 +641,20 @@ surfaced in the SFCE Catalog page (`flattenIndustryTree`'s `makeRow`) as new
 `sectionId`/`sectionDescription` columns for full parity with every other level's own
 id/description columns.
 
+**`sectionDescription` fallback to `custom.json`** — reported directly: *"when I open
+catalog SFCCE I don't see these section descriptions. please add."* `sectionDescription`
+above is populated only when a Load SFCCE field mapping actually supplies a
+`sectionDescriptionField` — the BUILT-IN default dataset's own mapping
+(`GENERAL_SFCCE_MAPPING`, `data.js`) never has one, so this column was always blank for
+the data most people actually see. `public/custom.json`'s `org`/`org4lob`-viewType
+section rows (`esf`/`mof`/`cof`/`ssf`/`cif`/`rsf`/`fcf`, plus `org4lob`'s own
+`mof2`/`mof3`/`mof4`) gained a real `description` field each. `openOrSwitchSfceCatalog`
+(`main.js`) now fills in any row's blank `sectionDescription` from this data by matching
+`sectionId` — the identical `sectionId → name` lookup pattern Load SFCCE's own
+shared-section dialog (`promptSFCCEMapping`) already uses for its own dropdown — leaving
+a row that DOES carry its own real description from the imported data (a mapping that
+supplies `sectionDescriptionField`) completely untouched.
+
 The wizard's per-field auto-suggestion (keyword search) needed one real fix while
 building this: a bare `'id'` keyword is too generic for Capability Id/Application
 Capability Id specifically — it happily matched an unrelated SHALLOWER field (e.g. a
