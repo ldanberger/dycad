@@ -207,6 +207,23 @@ Two shared helpers do the work, both used by both commands below:
   it stays idempotent no matter how many times — or how many different discovery
   passes — call it for the same pair.
 
+  The pair's own traced `relationship` (the first real hop's relationship name) is used
+  as-is for the `'s'` version — matching how every genuine `'s'` connector already gets
+  `relationship: 'Stream'` (`findOrCreateStreamConnector`). Direct follow-up: *"when a
+  derived connector is created, if a default relationship or valid relationship is not
+  available, use 'o' Association not the current 's' Stream for relationship for
+  connectors of type 'c'."* A pair discovered by walking `'s'` edges traces back the
+  literal word `"Stream"`, which isn't a real `'c'`-type relation at all — so for the
+  `'c'` version only, the traced relationship is kept **only if it's genuinely valid**
+  for this specific `fromType->toType` pair (`isRelationValid`, `rules.js` — the same
+  validity rules the property panel's own relationship dropdown enforces); otherwise it
+  falls back to that pair's own data-defined default relation
+  (`findRelationshipPair(...).default`) when one exists, else plain `'Association'`
+  (key `'o'`) — the exact same "default, else Association" fallback
+  `createCompanionConnector` already used elsewhere in this file. A genuinely valid
+  traced relationship (typically from a `'c'`-typed hidden chain) always wins over the
+  pair's own default, not just over the generic `'Association'` fallback.
+
 **`insertSmartStream`**'s own discovery predates the shared helper and keeps its
 original, narrower scope on purpose: it only derives across parts already inside
 `collectedPartIds` (this trace's own already-BFS'd-and-`levels`-bounded neighborhood

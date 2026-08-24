@@ -9235,6 +9235,99 @@ def check_smart_check_view_derive_connectors(page):
     return True, "Smart Check View's 'Derive hidden connections' checkbox is off by default, bridges two on-view parts linked only through an off-view chain by creating and placing both a 'c' and 's' Connector, respects the shared Levels hop limit, correctly runs after missingConnectorsAndNodes so a newly-pulled-in part is no longer treated as hidden, and is idempotent on re-run"
 
 
+def check_derived_connector_relationship_fallback(page):
+    """Regression guard, direct follow-up: "when a derived connector is created, if a
+    default relationship or valid relationship is not available, use 'o' Association
+    not the current 's' Stream for relationship for connectors of type 'c'."
+    createDerivedConnectorPairs (commands.js) always creates BOTH a 'c' and an 's'
+    version of a derived pair, reusing whichever relationship the discovery walk
+    traced -- but a chain discovered by walking 's' (Stream) edges traces back the
+    literal word "Stream" (the same relationship every real 's' connector gets --
+    findOrCreateStreamConnector), which is nonsensical as a 'c' connector's
+    relationship. Uses Smart Check View's "Derive hidden connections" checkbox (an
+    's'-typed hidden chain) to force that scenario directly. Covers: (1) the type
+    pair HAS a genuine data-defined default relation (BusinessFunction->BusinessProcess:
+    default key 'r', Realization) -- the 'c' version should get that pair-specific
+    default, not the generic 'Association' fallback; (2) the type pair has NO rule at
+    all (BusinessFunction->ApplicationCapability) -- the 'c' version falls all the way
+    back to 'Association'; (3) in both cases the 's' version keeps the traced "Stream"
+    relationship unchanged (this fallback is 'c'-only, per the report); (4) a 'c'-typed
+    hidden chain whose OWN first-hop relationship ("Association") IS already valid for
+    the resulting pair is kept as-is, NOT overridden to that pair's own different
+    default ("Realization") -- proving a genuinely valid traced relationship always
+    wins over the pair's own default, not just over the plain 'Association' fallback."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const mkPart = (type, label) => store.createPart({ type, label, model, streams: [] });
+      const mkConn = (from, to, connectorType, relationship) => store.createConnector({ from: from.id, to: to.id, connectorType, model, relationship });
+      const freshView = (name) => {
+        const view = store.addView(name, 'ff');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        return { view, tab };
+      };
+      const placeOnly = (view, ...parts) => {
+        for (const p of parts) store.createViewMember({ view: view.id, objectType: 'part', objectId: p.id, x: 40 + Math.random() * 400, y: 40 + Math.random() * 400 });
+      };
+      const relOf = (from, to, connectorType) => store.doc.connectors.find(c => c.connectorType === connectorType && c.from === from.id && c.to === to.id)?.relationship;
+
+      const out = {};
+
+      // 1) type pair HAS its own default (BusinessFunction->BusinessProcess: default 'r' Realization)
+      const fn1 = mkPart('BusinessFunction', 'RegrRelFn1');
+      const hidden1 = mkPart('ApplicationCapability', 'RegrRelHidden1'); // left off the view
+      const proc1 = mkPart('BusinessProcess', 'RegrRelProc1');
+      mkConn(fn1, hidden1, 's', 'Stream'); mkConn(hidden1, proc1, 's', 'Stream');
+      const { view: v1 } = freshView('RegrRel_hasDefault');
+      placeOnly(v1, fn1, proc1);
+      commands.smartCheckView(app, { viewId: v1.id }, { missingConnectors: false, missingConnectorsAndNodes: false, syncWithInventory: false, deriveConnectors: true, levels: null });
+      out.hasDefault = { c: relOf(fn1, proc1, 'c'), s: relOf(fn1, proc1, 's') };
+
+      // 2) type pair has NO rule at all (BusinessFunction->ApplicationCapability)
+      const fn2 = mkPart('BusinessFunction', 'RegrRelFn2');
+      const hidden2 = mkPart('BusinessProcess', 'RegrRelHidden2'); // left off the view
+      const cap2 = mkPart('ApplicationCapability', 'RegrRelCap2');
+      mkConn(fn2, hidden2, 's', 'Stream'); mkConn(hidden2, cap2, 's', 'Stream');
+      const { view: v2 } = freshView('RegrRel_noRule');
+      placeOnly(v2, fn2, cap2);
+      commands.smartCheckView(app, { viewId: v2.id }, { missingConnectors: false, missingConnectorsAndNodes: false, syncWithInventory: false, deriveConnectors: true, levels: null });
+      out.noRule = { c: relOf(fn2, cap2, 'c'), s: relOf(fn2, cap2, 's') };
+
+      // 3) a 'c'-typed hidden chain whose own traced relationship IS valid -- kept as-is,
+      // not overridden to the pair's own (different) default
+      const fn3 = mkPart('BusinessFunction', 'RegrRelFn3');
+      const hidden3 = mkPart('ApplicationCapability', 'RegrRelHidden3'); // left off the view
+      const proc3 = mkPart('BusinessProcess', 'RegrRelProc3');
+      mkConn(fn3, hidden3, 'c', 'Association'); mkConn(hidden3, proc3, 'c', 'Association');
+      const { view: v3 } = freshView('RegrRel_tracedValid');
+      placeOnly(v3, fn3, proc3);
+      commands.smartCheckView(app, { viewId: v3.id }, { missingConnectors: false, missingConnectorsAndNodes: false, syncWithInventory: false, deriveConnectors: true, levels: null });
+      out.tracedValid = { c: relOf(fn3, proc3, 'c') };
+
+      return out;
+    }
+    """)
+    problems = []
+    hd = result["hasDefault"]
+    if hd["c"] != "Realization":
+        problems.append(f"expected the 'c' version, for a pair with its own data-defined default (BusinessFunction->BusinessProcess: 'r' Realization), to use THAT default instead of the traced 'Stream' or the generic 'Association', got {hd['c']!r}")
+    if hd["s"] != "Stream":
+        problems.append(f"expected the 's' version to keep the traced 'Stream' relationship unchanged (this fallback is 'c'-only), got {hd['s']!r}")
+    nr = result["noRule"]
+    if nr["c"] != "Association":
+        problems.append(f"expected the 'c' version, for a pair with NO rule/default at all (BusinessFunction->ApplicationCapability), to fall all the way back to 'Association', got {nr['c']!r}")
+    if nr["s"] != "Stream":
+        problems.append(f"expected the 's' version to keep the traced 'Stream' relationship unchanged, got {nr['s']!r}")
+    if result["tracedValid"]["c"] != "Association":
+        problems.append(f"expected a 'c'-typed hidden chain's own traced relationship ('Association', already valid for this exact pair) to be kept as-is rather than overridden to the pair's own different default ('Realization'), got {result['tracedValid']['c']!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "A derived 'c' connector's relationship falls back correctly when the traced value (e.g. the literal 'Stream' from an 's'-typed hidden chain) isn't valid for the resulting pair: the pair's own data-defined default when one exists, else 'Association' -- while a genuinely valid traced relationship (from a 'c'-typed hidden chain) is always kept as-is, and the 's' version is never affected by any of this"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
@@ -9975,6 +10068,7 @@ CHECKS = [
     check_insert_smart_stream_dialog,
     check_insert_smart_stream_derived_connections,
     check_smart_check_view_derive_connectors,
+    check_derived_connector_relationship_fallback,
 ]
 
 

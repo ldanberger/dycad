@@ -3757,4 +3757,28 @@
 // Insert Smart Stream and Smart Check View sections, plus the Script Console
 // Reference table (main.js + instructions.html), updated for the new behavior/option.
 // Full suite 132/132.
-export const APP_VERSION = '0.881';
+// v0.882: direct follow-up: "when a derived connector is created, if a default
+// relationship or valid relationship is not available, use 'o' 'Association' not the
+// current 's' 'Stream' for relationship for connectors of type 'c'." A derived pair's
+// 'c' version was reusing whatever relationship the discovery walk traced verbatim --
+// fine from a 'c'-typed hidden chain, but a chain discovered by walking 's' edges
+// traces back the literal word "Stream" (findOrCreateStreamConnector's own convention
+// for every real 's' connector), which isn't a real 'c'-type relation at all.
+// createDerivedConnectorPairs (commands.js) now keeps the traced relationship for the
+// 'c' version only when it's genuinely valid for that specific fromType->toType pair
+// (isRelationValid, rules.js -- the same rules the property panel's own relationship
+// dropdown enforces); otherwise falls back to that pair's own data-defined default
+// relation (findRelationshipPair(...).default) when one exists, else plain
+// 'Association' (key 'o') -- the same "default, else Association" fallback
+// createCompanionConnector already used elsewhere in this file. relationCodeFor
+// (state.js) and isRelationValid (rules.js) newly imported into commands.js. The 's'
+// version is never affected -- "Stream" stays exactly right for it. New
+// check_derived_connector_relationship_fallback, covering both a pair WITH its own
+// default (BusinessFunction->BusinessProcess: 'r' Realization) and one with no rule at
+// all (falls to 'Association'), confirming the 's' sibling is untouched in both cases,
+// and confirming a genuinely-valid traced relationship from a 'c'-typed chain is kept
+// as-is rather than overridden to the pair's own different default -- proven to catch
+// a reintroduced regression and reverted. DESIGN_DOCUMENT.md SS5.5, tests/README.md,
+// and public/instructions.html's Insert Smart Stream section updated. Full suite
+// 133/133.
+export const APP_VERSION = '0.882';

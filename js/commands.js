@@ -1,6 +1,6 @@
 // commands.js — Duplicate Stream, Split Node, Level Up, Level Down, Generate (createStream)
-import { ciEq, newId } from './state.js';
-import { elementByType, findRelationshipPair } from './rules.js';
+import { ciEq, newId, relationCodeFor } from './state.js';
+import { elementByType, findRelationshipPair, isRelationValid } from './rules.js';
 import { isSectionViewType, createSectionPlacer, computeSectionLayout, isTypeAllowedInSection, findFreeCellInSection, findFreeCellOrGrowSection, duplicateSectionDefinition, BASE_X, BASE_Y, SECTION_GAP, NODE_INSET_X, NODE_INSET_Y } from './sections.js';
 import { redrawNodeSizes, redrawAndResolveLayout, getNodeSize } from './canvas.js';
 import { computeClusteredGridLayout, computeHubClusterGridLayout } from './layout.js';
@@ -1883,18 +1883,45 @@ function findDerivedPairsForType(store, connectorType, presentPartIdSet, levels)
  * other side). `log`/`describePart` are optional — smartCheckView's own Message Log
  * closures when called from there, omitted when called from insertSmartStream (which
  * has its own single summary toast instead). Returns the newly created connectors.
+ *
+ * The traced `relationship` (the FIRST real hop's own relationship name, e.g.
+ * "Composition" from a 'c'-type chain or the literal "Stream" from an 's'-type one —
+ * see findOrCreateStreamConnector's own convention) is used as-is for the 's' version,
+ * matching how every genuine 's' connector already gets `relationship: 'Stream'`
+ * (Duplicate Stream, populateFromTemplate, ...). Reported directly: "when a derived
+ * connector is created, if a default relationship or valid relationship is not
+ * available, use 'o' Association not the current 's' Stream for relationship for
+ * connectors of type 'c'." The traced value can be flatly wrong for a 'c' connector
+ * (a hidden chain discovered by walking 's' edges hands back the literal word
+ * "Stream", which isn't a real 'c'-type relation at all) — so the 'c' version instead
+ * keeps the traced relationship only if it's genuinely VALID for this specific
+ * fromType->toType pair (isRelationValid, rules.js — same validity rules the property
+ * panel's own relationship dropdown enforces), else falls back to that pair's own
+ * data-defined default relation, else 'Association' (key 'o') — the exact same
+ * "default, else Association" fallback createCompanionConnector already uses (above).
  */
 function createDerivedConnectorPairs(store, derivedPairs, log, describePart) {
   const created = [];
   for (const { from, to, relationship, viaTypes } of derivedPairs.values()) {
-    const modelName = store.findPart(from)?.model;
+    const fromPart = store.findPart(from);
+    const modelName = fromPart?.model;
     if (!modelName) continue;
+    const toPart = store.findPart(to);
     const viaText = [...new Set(viaTypes)].join(', ');
     const note = `Derived — implied via ${viaText} (not shown)`;
     for (const connectorType of ['c', 's']) {
       const exists = store.doc.connectors.some((c) => c.from === from && c.to === to && ciEq(c.connectorType, connectorType) && ciEq(c.model, modelName));
       if (exists) continue;
-      const conn = store.createConnector({ from, to, model: modelName, connectorType, relationship, note });
+      let connRelationship = relationship;
+      if (connectorType === 'c') {
+        const relationKey = relationCodeFor(relationship, store.settings);
+        if (!isRelationValid(store, fromPart?.type, toPart?.type, relationKey)) {
+          const pair = findRelationshipPair(store, fromPart?.type, toPart?.type);
+          const defaultRel = pair?.default ? (store.settings.relations || []).find((r) => r.key === pair.default) : null;
+          connRelationship = defaultRel?.name || 'Association';
+        }
+      }
+      const conn = store.createConnector({ from, to, model: modelName, connectorType, relationship: connRelationship, note });
       created.push(conn);
       if (log) log(`Derived connector: ${describePart(from)} -> ${describePart(to)} (${connectorType === 'c' ? 'Connector' : 'Stream'}), implied via ${viaText}.`);
     }

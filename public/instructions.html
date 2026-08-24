@@ -274,7 +274,11 @@ canvas. Availability depends on what's selected — greyed out means the current
     derived link is created as <strong>both</strong> a Connector ('c') and a Stream ('s') version — but only the
     one matching this trace's own Connector Type setting is actually placed on the view being built here; the
     other still exists in the model (e.g. for the 3D View's own Connector Type filter, or a later Smart Check).
-    No derived connector is added where a real, direct one already exists, and re-running the same trace never
+    The Connector ('c') version's own relationship is normally whatever the first real hop's own relationship
+    was, but falls back instead — to that element-type pair's own default relationship where one is defined, else
+    plain Association — whenever that traced value isn't actually a valid relationship for the pair (e.g. a chain
+    discovered by tracing Streams would otherwise leave a Connector labeled "Stream"); the Stream ('s') version's
+    relationship is never affected by this. No derived connector is added where a real, direct one already exists, and re-running the same trace never
     creates a duplicate. Also callable directly from a batch script — see <a href="#simulation">Script
     Console</a> below. A Preset row at the top of the dialog can save the current field values as a named,
     reusable preset (<strong>Save As…</strong>) or load one back in (<strong>Load</strong>) — presets remember
