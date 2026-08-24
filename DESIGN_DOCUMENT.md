@@ -382,7 +382,13 @@ just the cross-view `getCachedRemapOptions` default. `wireCopyCallOnRightClick`
 (main.js) is a small, deliberately generic helper wired onto the Remap dialog's submit
 button: right-clicking copies a ready-to-paste `remap(app, tab, {...})` Script Console
 call reflecting the form's current values, instead of opening the browser's own context
-menu — any other dialog's submit button could adopt the same helper the same way.
+menu — any other dialog's submit button could adopt the same helper the same way (Load
+SFCCE's own mapping dialog and, direct follow-up, Smart Check View's Check button both
+do — `collectSmartCheckViewOptions` in `promptSmartCheckView`, main.js, shared by both
+the right-click handler and the real submit handler so they can never drift out of
+sync, matching exactly the fields `smartCheckView(app, tab, {...})` itself takes and
+deliberately excluding the dialog's separate Auto-complete streams fields, which
+trigger a different action entirely).
 
 ### 6.1b The `'layered'` Remap pattern (`computeLayerAssignment`, `commands.js`)
 

@@ -3,16 +3,18 @@
 /** Store.batchScriptCode's out-of-the-box default — the Script Console's Run button
  * calls whatever top-level `main()` this text defines (see App.promptScriptConsole,
  * main.js), which can in turn call any number of other functions defined alongside it.
- * This one gives a working starting point: main() calling three starter batch scripts
+ * This one gives a working starting point: main() calling four starter batch scripts
  * in sequence — BatchScript_QuickStart(), which builds a basic Business Functions
  * organization view from the built-in default industry data end to end (ending with
  * the 3D View); BatchScript_InsertSmartStreamExample(), which traces a Smart Stream
- * from data QuickStart itself just generated; then BatchScript_RemapExample(), which
- * remaps that same Smart Stream view with Edge Assignment and both layout-optimization
- * checkboxes. Naming convention for future additions: `BatchScript_<Name>`, so main()
- * can pick and choose which one(s) to run without renaming anything.
+ * from data QuickStart itself just generated; BatchScript_SmartCheckViewExample(),
+ * which runs Smart Check View on that same view with "Missing connectors" and
+ * "Derive hidden connections" checked; then BatchScript_RemapExample(), which remaps
+ * that same Smart Stream view with both layout-optimization checkboxes. Naming
+ * convention for future additions: `BatchScript_<Name>`, so main() can pick and choose
+ * which one(s) to run without renaming anything.
  *
- * `dataAutoFill()` (below, after the three BatchScript_* functions) is a different
+ * `dataAutoFill()` (below, after the BatchScript_* functions) is a different
  * kind of entry point: it's invoked directly by the Data Modeling > Autofill menu item
  * (App.promptAutofill, main.js) by name, NOT through main() — main() unconditionally
  * chaining it would break on a fresh document with no Data Entity Details tables yet.
@@ -24,6 +26,7 @@ async function main() {
   await BatchScript_QuickStart();
   // Runs after BatchScript_QuickStart's own 3D View step above.
   await BatchScript_InsertSmartStreamExample();
+  await BatchScript_SmartCheckViewExample();
   return BatchScript_RemapExample();
 }
 
@@ -95,6 +98,30 @@ async function BatchScript_InsertSmartStreamExample() {
 
   app.recordAndRender();
   messageLog('Insert Smart Stream example done');
+}
+
+// Example: Smart Check View called directly with explicit options (same shape the
+// dialog builds from the user's picks -- see promptSmartCheckView in main.js). Called
+// by main() above, after BatchScript_InsertSmartStreamExample -- runs on the same
+// "Smart Stream Example" view that script just built (reusing its active tab, same
+// pattern BatchScript_RemapExample below uses), checking "Missing connectors" (any
+// connector already in the model between two nodes already on this view, not yet
+// placed here) and "Derive hidden connections" (bridges two on-view nodes only linked
+// through a chain of off-view parts, creating both a Connector and a Stream version --
+// see smartCheckView's deriveConnectors option, commands.js).
+async function BatchScript_SmartCheckViewExample() {
+  const view = store.findView('Smart Stream Example');
+  if (!view) { log('No "Smart Stream Example" view found -- run BatchScript_InsertSmartStreamExample first.'); return; }
+  let tab = store.activeTab();
+  if (!tab || tab.viewId !== view.id) {
+    tab = app.createCanvasTab(view);
+    app.switchToTab(tab.id);
+  }
+
+  smartCheckView(app, tab, { missingConnectors: true, deriveConnectors: true });
+
+  app.recordAndRender();
+  messageLog('Smart Check View example done');
 }
 
 // Example: Remap called directly with explicit options (same shape the dialog builds

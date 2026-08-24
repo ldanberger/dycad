@@ -769,19 +769,21 @@ localStorage and, if you edit it, alongside File &gt; Save Local Settings — se
 afterward. Run (or Ctrl+Enter) defines everything currently in the box — so any <code>function foo() {...}</code>
 you write becomes callable — then calls exactly one predetermined entry point, a top-level <code>main()</code>,
 which is free to call whatever other functions you've defined alongside it (they all share the same bindings
-automatically, without needing them passed in). The default script's <code>main()</code> runs three starter
+automatically, without needing them passed in). The default script's <code>main()</code> runs four starter
 batch scripts in sequence — the convention for adding your own is <code>BatchScript_&lt;Name&gt;</code>, with
 <code>main()</code> picking which one(s) to run, in whatever order. First,
 <code>BatchScript_QuickStart()</code> builds the "Business Functions" view end to end, ending with the 3D View.
 Then <code>BatchScript_InsertSmartStreamExample()</code> runs — a full <code>insertSmartStream</code> call
-(Connectors, both directions, starting from a Business Function named "Production" out to Data Entity, several
+(Streams, both directions, starting from a Business Function named "Production" out to Data Entity, several
 element types shown) against the very data <code>BatchScript_QuickStart</code> just generated, landing on a new
 "Smart Stream Example" view. It's the same trace as the "StreamSet1" preset that ships with the Insert Smart
-Stream dialog (see Commands above) — one usable both as a script and as a ready-made dialog preset. Finally
+Stream dialog (see Commands above) — one usable both as a script and as a ready-made dialog preset. Next
+<code>BatchScript_SmartCheckViewExample()</code> runs Smart Check View on that same view with
+<strong>Missing connectors</strong> and <strong>Derive hidden connections</strong> checked. Finally
 <code>BatchScript_RemapExample()</code> remaps that same "Smart Stream Example" view using the
 <strong>Layered</strong> pattern (both Minimize Crossings and Minimize Connector Length enabled, no Edge
 Assignment needed — Business Function and General Actor land on the top row for free, as true graph roots)
-— reusing the existing tab rather than opening a new one.</p>
+— every one of these steps reuses the same tab rather than opening a new one.</p>
 <p>Not every function in the script is meant to be reached through <code>main()</code>, though — the default
 script also defines <code>dataAutoFill()</code>, which <strong>Data Modeling &gt; Autofill</strong> (see above)
 calls directly by name instead, since it only makes sense to run against a view that already has Data Entity

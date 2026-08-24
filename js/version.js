@@ -3811,4 +3811,28 @@
 // default -- a weaker assertion didn't actually catch the rule being removed) -- both
 // proven to catch a reintroduced regression and reverted. DESIGN_DOCUMENT.md SS5.4 and
 // tests/README.md updated. Full suite 135/135.
-export const APP_VERSION = '0.883';
+// v0.884: two direct follow-ups. (1) "add smart view check: missing connectors and
+// derive hidden connections to example script main() after await
+// BatchScript_InsertSmartStreamExample()" -- new BatchScript_SmartCheckViewExample
+// (state.js) calls smartCheckView(app, tab, {missingConnectors: true,
+// deriveConnectors: true}) on the same "Smart Stream Example" view/tab
+// BatchScript_InsertSmartStreamExample just built, logging "Smart Check View example
+// done"; main() now awaits it between InsertSmartStreamExample and RemapExample. A
+// genuine no-op on the shipped default topology (nothing off-view to bridge, no
+// not-yet-placed same-pair connector), verified NOT to disturb anything
+// BatchScript_RemapExample later asserts. (2) "updated smart view check 'check' button
+// right-click to copy function with parameter call matching options set, same
+// behaviour as in other dialogs" -- promptSmartCheckView (main.js) now uses
+// wireCopyCallOnRightClick (the same helper Remap's and Load SFCCE's own submit
+// buttons already use) via a new collectSmartCheckViewOptions() closure shared by both
+// the right-click handler and the real submit handler, matching exactly
+// smartCheckView's own option keys and deliberately excluding the dialog's separate
+// Auto-complete streams fields (a different action). check_batch_script_quickstart
+// extended with a "Smart Check View example done" log assertion; new
+// check_smart_check_view_copy_call_on_right_click -- both proven to catch a
+// reintroduced regression and reverted. DESIGN_DOCUMENT.md SS6.1a, tests/README.md,
+// and public/instructions.html's Script Console section updated (also fixed a
+// pre-existing staleness there: it said the Insert Smart Stream example traces via
+// "Connectors" when the actual code, and its own comment, explicitly uses 's' Streams).
+// Full suite 136/136.
+export const APP_VERSION = '0.884';

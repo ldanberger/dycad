@@ -1784,16 +1784,33 @@ class App {
     autoCompleteCheckbox.addEventListener('change', updateAutoCompleteVisibility);
     updateAutoCompleteVisibility();
 
-    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
-    box.querySelector('.submit').addEventListener('click', () => {
-      const missingConnectors = box.querySelector('#scv-missing-connectors').checked;
-      const missingConnectorsAndNodes = nodesCheckbox.checked;
+    // Shared by the submit handler and the right-click "copy call" handler below, so
+    // both read the form the same way and can never drift out of sync with each other
+    // — same pattern promptRemap's own collectRemapOptions established. Deliberately
+    // matches exactly what's passed to smartCheckView(app, tab, {...}) below, not the
+    // dialog's other fields (doAutoComplete/autoCompleteTemplate trigger a SEPARATE
+    // action, promptAutoCompleteStreams, not part of smartCheckView's own call).
+    const collectSmartCheckViewOptions = () => {
       const rawLevels = box.querySelector('#scv-levels-input').value.trim();
-      const levels = rawLevels === '' ? null : Math.max(0, Math.floor(Number(rawLevels)) || 0);
+      return {
+        missingConnectors: box.querySelector('#scv-missing-connectors').checked,
+        missingConnectorsAndNodes: nodesCheckbox.checked,
+        levels: rawLevels === '' ? null : Math.max(0, Math.floor(Number(rawLevels)) || 0),
+        syncWithInventory: box.querySelector('#scv-sync-inventory').checked,
+        deriveConnectors: deriveCheckbox.checked,
+      };
+    };
+
+    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+    // Reported directly: "updated smart view check 'check' button right-click to copy
+    // function with parameter call matching options set, same behaviour as in other
+    // dialogs" (Remap/Load SFCCE already have this — see wireCopyCallOnRightClick,
+    // above).
+    wireCopyCallOnRightClick(this, box.querySelector('.submit'), () => `smartCheckView(app, tab, ${JSON.stringify(collectSmartCheckViewOptions(), null, 2)});`);
+    box.querySelector('.submit').addEventListener('click', () => {
+      const { missingConnectors, missingConnectorsAndNodes, levels, syncWithInventory, deriveConnectors } = collectSmartCheckViewOptions();
       const doAutoComplete = autoCompleteCheckbox.checked;
       const autoCompleteTemplate = box.querySelector('#scv-autocomplete-template').value;
-      const syncWithInventory = box.querySelector('#scv-sync-inventory').checked;
-      const deriveConnectors = deriveCheckbox.checked;
       overlay.remove();
 
       if (!missingConnectors && !missingConnectorsAndNodes && !doAutoComplete && !syncWithInventory && !deriveConnectors) { this.toast('Nothing selected to check.'); return; }

@@ -1177,8 +1177,8 @@ def check_script_console_runs_main_function(page):
 def check_batch_script_quickstart(page):
     """Regression guard/new-feature check for the built-in default batch script
     (store.batchScriptCode's out-of-the-box default, DEFAULT_BATCH_SCRIPT_CODE in
-    state.js) — verifies main() actually runs BOTH starter scripts in sequence, via the
-    real Script Console UI. BatchScript_QuickStart: (1) Generate Industry with the
+    state.js) — verifies main() actually runs all four starter scripts in sequence, via
+    the real Script Console UI. BatchScript_QuickStart: (1) Generate Industry with the
     built-in default industry data, not placed on any view; (2) a new View "Business
     Functions" of type "org" (Business Function Organization); (3) Populate From
     Template using "Enterprise Functions" inside that view; (4) the "mof" (Mainstream
@@ -1199,7 +1199,17 @@ def check_batch_script_quickstart(page):
     Assignment edges, and since the default dataset now genuinely tags every function
     with a real Section, walking 'c' from Production would fan out into every OTHER
     function sharing its Section instead of staying scoped to Production's own chain.
-    Then, reported directly (this
+    Then, reported directly (a follow-up in the same session): "add smart view check:
+    missing connectors and derive hidden connections to example script main() after
+    await BatchScript_InsertSmartStreamExample()" — BatchScript_SmartCheckViewExample
+    runs next, calling smartCheckView(app, tab, {missingConnectors: true,
+    deriveConnectors: true}) on that same "Smart Stream Example" tab (reusing it, same
+    as BatchScript_RemapExample does below), logging "Smart Check View example done" —
+    verified this doesn't disturb anything BatchScript_RemapExample later asserts (same
+    part labels, same row grouping): on this exact topology it has nothing new to add
+    (no off-view parts to bridge, no not-yet-placed same-pair connector), so it's a
+    genuine no-op here, proven to actually run rather than just proven harmless. Then,
+    reported directly (this
     session's own layout report): "The cleanest result of drawing the script resulting
     data 'Smart Stream Example' ... would be (in a 4 x 4 grid): General Actor
     Manufacturing Operation Consumer; Business Function Production; empty; General
@@ -1266,6 +1276,7 @@ def check_batch_script_quickstart(page):
         industryGenerated: !!genActor,
         messageLogHasDone: store.messageLog.some(e => JSON.stringify(e).includes('Done')),
         messageLogHasRemapDone: store.messageLog.some(e => JSON.stringify(e).includes('Remap example done')),
+        messageLogHasSmartCheckDone: store.messageLog.some(e => JSON.stringify(e).includes('Smart Check View example done')),
         consoleOutput,
         view3dOpened: !!view3dTab,
         streamExampleViewCreated: !!streamView,
@@ -1308,6 +1319,8 @@ def check_batch_script_quickstart(page):
         problems.append("expected the 'Smart Stream Example' tab to be the ACTIVE tab once main() finishes -- proving the later scripts genuinely ran afterward, not that main() stopped early")
     if not result["streamExampleSingleTab"]:
         problems.append("expected exactly ONE tab open on the 'Smart Stream Example' view -- BatchScript_RemapExample should reuse InsertSmartStreamExample's own tab, not open a redundant second one")
+    if not result["messageLogHasSmartCheckDone"]:
+        problems.append("expected 'Smart Check View example done' written to the persistent Message Log -- BatchScript_SmartCheckViewExample should have run between InsertSmartStreamExample and RemapExample")
     if not result["messageLogHasRemapDone"]:
         problems.append("expected 'Remap example done' written to the persistent Message Log -- BatchScript_RemapExample should have run")
     # pattern:'layered' row structure: Function+Actors (roots, layer 0), then Capability
@@ -1327,7 +1340,7 @@ def check_batch_script_quickstart(page):
         problems.append(f"expected row type groupings {expected_row_type_sets} (Business Capability and Business Process sharing row 2), got {result['rowTypeSets']}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "main() (run via the real Script Console UI) runs BatchScript_QuickStart, BatchScript_InsertSmartStreamExample, then BatchScript_RemapExample in sequence, ending with the Smart Stream Example tab (reused, not duplicated) active and pattern:'layered' correctly grouping Business Capability with Business Process on one shared row"
+    return True, "main() (run via the real Script Console UI) runs BatchScript_QuickStart, BatchScript_InsertSmartStreamExample, BatchScript_SmartCheckViewExample, then BatchScript_RemapExample in sequence, ending with the Smart Stream Example tab (reused throughout, not duplicated) active and pattern:'layered' correctly grouping Business Capability with Business Process on one shared row"
 
 
 def check_script_console_remap_and_smart_check_bindings(page):
@@ -2419,6 +2432,77 @@ def check_smart_check_view_dialog_derive_checkbox_wiring(page):
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
     return True, "Smart Check View's real dialog wires up the new Derive hidden connections checkbox correctly: unchecked by default, reveals the shared Levels row on its own, and submitting with only it checked genuinely creates and places the derived connector"
+
+
+def check_smart_check_view_copy_call_on_right_click(page):
+    """Regression guard, direct follow-up: "updated smart view check 'check' button
+    right-click to copy function with parameter call matching options set, same
+    behaviour as in other dialogs" — Smart Check View's Check button now uses the same
+    wireCopyCallOnRightClick helper Remap's own submit button already does (see
+    check_remap_copy_call_on_right_click). Covers: right-clicking Check copies a
+    `smartCheckView(app, tab, {...})` snippet reflecting the CURRENT form values (not
+    stale ones from open time); the snippet includes every one of smartCheckView's own
+    option keys but NOT the dialog's other, unrelated fields (Auto-complete streams'
+    own checkbox/template select, which drive a completely separate action,
+    promptAutoCompleteStreams, never part of the smartCheckView(...) call itself); and
+    — critically — right-clicking must NOT actually submit the form (dialog stays
+    open, nothing gets checked/added), distinguishing it from a real click."""
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+
+      app.promptSmartCheckView();
+      await new Promise(r => setTimeout(r, 30));
+      const box = document.querySelector('.modal-overlay .modal-box');
+      document.getElementById('scv-missing-connectors').checked = false;
+      document.getElementById('scv-missing-connectors-nodes').checked = true;
+      document.getElementById('scv-missing-connectors-nodes').dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 30));
+      document.getElementById('scv-levels-input').value = '3';
+      document.getElementById('scv-derive-connectors').checked = true;
+      document.getElementById('scv-autocomplete').checked = true; // unrelated field -- must NOT leak into the copied call
+
+      const beforeConnCount = store.doc.connectors.length;
+      const submitBtn = box.querySelector('.submit');
+      submitBtn.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      await new Promise(r => setTimeout(r, 60));
+
+      const out = {};
+      out.dialogStillOpen = !!document.querySelector('.modal-overlay .modal-box');
+      out.nothingChecked = store.doc.connectors.length === beforeConnCount;
+      try {
+        out.clipboardText = await navigator.clipboard.readText();
+      } catch (e) {
+        out.clipboardReadFailed = e.message;
+      }
+      box.querySelector('.cancel').click();
+      return out;
+    }
+    """)
+    problems = []
+    if not result.get("dialogStillOpen"):
+        problems.append("right-clicking Check should NOT close the dialog (that's what a real left-click/submit does)")
+    if not result.get("nothingChecked"):
+        problems.append("right-clicking Check should NOT actually run Smart Check View")
+    clip = result.get("clipboardText")
+    if not clip:
+        problems.append(f"right-click should copy a snippet to the clipboard, got clipboardText={clip!r} (read error: {result.get('clipboardReadFailed')})")
+    else:
+        if not clip.startswith("smartCheckView(app, tab,"):
+            problems.append(f"copied snippet should be a smartCheckView(app, tab, {{...}}) call, got: {clip[:120]!r}")
+        for key in ["missingConnectors", "missingConnectorsAndNodes", "levels", "syncWithInventory", "deriveConnectors"]:
+            if key not in clip:
+                problems.append(f"copied snippet should include '{key}', got: {clip[:400]!r}")
+        if '"missingConnectors": false' not in clip or '"missingConnectorsAndNodes": true' not in clip or '"levels": 3' not in clip or '"deriveConnectors": true' not in clip:
+            problems.append(f"copied snippet should reflect the CURRENT form values, got: {clip[:400]!r}")
+        if "autoComplete" in clip.lower():
+            problems.append(f"copied snippet must NOT include the Auto-complete streams fields (a separate action, not part of smartCheckView's own call), got: {clip[:400]!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full result: {result})"
+    return True, "right-clicking Smart Check View's Check button copies a valid smartCheckView(app, tab, {...}) call reflecting the current form (and only smartCheckView's own options, not the unrelated Auto-complete streams fields) to the clipboard, without actually submitting"
 
 
 def check_force_directed_options(page):
@@ -10162,6 +10246,7 @@ CHECKS = [
     check_new_content_sized_and_non_overlapping,
     check_smart_check_view_default_levels_unlimited,
     check_smart_check_view_dialog_derive_checkbox_wiring,
+    check_smart_check_view_copy_call_on_right_click,
     check_force_directed_options,
     check_sfce_import_and_generate,
     check_generate_industry_no_collapse_keeps_functions_separate,
