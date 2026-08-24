@@ -2015,6 +2015,190 @@ def check_instructions_tab_on_startup(page):
     return True, "Instructions tab opens active on startup, loads real content, and closing/reopening restores the same tab"
 
 
+def check_keyboard_focus_visible(page):
+    """Regression guard for the other half of the same UI-writing audit ("do both"): a
+    global :focus-visible style (css/styles.css) — every interactive element used to
+    rely entirely on the browser's own unstyled default outline (verified fine in
+    Chromium, but unbranded and not guaranteed elsewhere). Covers: (1) a real toolbar
+    button (#file-menu-btn) gets a visible, on-brand outline (var(--accent), a real
+    non-zero width) when focused; (2) a real dialog's own submit button and a text
+    input both get it too, not just top-level chrome; (3) it does NOT collide with
+    .fnode's own .selected outline — canvas nodes have no tabindex, so they can never
+    themselves become :focus-visible, and a genuinely selected node keeps exactly its
+    own outline color (var(--node-selected)), not the generic focus one."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const styleOf = (el) => {
+        const cs = getComputedStyle(el);
+        return { outlineStyle: cs.outlineStyle, outlineWidthPx: parseFloat(cs.outlineWidth), outlineColor: cs.outlineColor, matchesFocusVisible: el.matches(':focus-visible') };
+      };
+      const out = {};
+
+      const homeTabEarly = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTabEarly.id);
+
+      const menuBtn = document.getElementById('file-menu-btn');
+      menuBtn.focus();
+      out.menuBtn = styleOf(menuBtn);
+
+      app.promptSmartCheckView();
+      await new Promise(r => setTimeout(r, 30));
+      // Levels input only renders visible (and so only becomes real-focusable) once
+      // "Missing connectors and nodes" is checked -- same real flow a user follows.
+      document.getElementById('scv-missing-connectors-nodes').checked = true;
+      document.getElementById('scv-missing-connectors-nodes').dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 30));
+      const dialogInput = document.getElementById('scv-levels-input');
+      dialogInput.focus();
+      out.dialogInput = styleOf(dialogInput);
+      const dialogSubmit = document.querySelector('.modal-overlay .submit');
+      dialogSubmit.focus();
+      out.dialogSubmit = styleOf(dialogSubmit);
+      document.querySelector('.modal-overlay .cancel').click();
+
+      // .fnode selection outline must stay its own color, unrelated to :focus-visible
+      // (no tabindex anywhere in the app -- canvas nodes are never natively focusable)
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      const focusPart = store.createPart({ type: 'BusinessFunction', label: 'RegrFocusVisibleNode', model: store.defaultModel, streams: [] });
+      const focusVm = store.createViewMember({ view: homeTab.viewId, objectType: 'part', objectId: focusPart.id, x: 40, y: 40 });
+      homeTab.selection = new Set([focusVm.id]);
+      app.render();
+      await new Promise(r => setTimeout(r, 30));
+      const fnodeEl = document.querySelector('.fnode.selected');
+      out.selectedNodeFound = !!fnodeEl;
+      if (fnodeEl) {
+        const cs = getComputedStyle(fnodeEl);
+        out.selectedNodeOutline = cs.outlineColor;
+        out.selectedNodeMatchesFocusVisible = fnodeEl.matches(':focus-visible');
+      }
+
+      return out;
+    }
+    """)
+    problems = []
+    for name in ("menuBtn", "dialogInput", "dialogSubmit"):
+        info = result[name]
+        # Distinguish OUR explicit rule from a browser's own unstyled default outline
+        # (Chromium's own default reports outlineStyle:'auto', outlineWidth:'1px' --
+        # both real/nonzero, so a weaker "just check it's nonzero" assertion would
+        # pass even with our :focus-visible rule completely missing).
+        if info["outlineStyle"] != 'solid' or info["outlineWidthPx"] != 2:
+            problems.append(f"expected {name} to have OUR explicit :focus-visible rule applied (outlineStyle:'solid', width:2px) rather than just a browser default, got {info}")
+        if not info["matchesFocusVisible"]:
+            problems.append(f"expected {name} to match :focus-visible when focus()'d programmatically, got {info}")
+    if not result.get("selectedNodeFound"):
+        problems.append("expected a selected node to render with class 'fnode selected'")
+    elif result.get("selectedNodeMatchesFocusVisible"):
+        problems.append("a canvas node must never itself match :focus-visible (no tabindex anywhere in this app) -- something changed that")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "A real toolbar button, and a real dialog's own input and submit button, all get a visible on-brand :focus-visible outline; canvas nodes stay outside the native focus system entirely, so a selected node's own outline color is never affected by this"
+
+
+def check_mutation_toasts_log_to_message_log(page):
+    """Regression guard for a UI-writing audit: "is toasts not going to the message log
+    considered appropriate?", then "do both" (extend logging + fix keyboard focus, the
+    other audit finding). app.toast(message, isError, alsoLog) (main.js) gained a third
+    parameter -- alsoLog=true writes a routine SUCCESS toast to the Message Log too
+    (isError=true already always did), used at every document-mutating command's own
+    toast that reports a real outcome/count (Remap, Merge, Duplicate Stream/Section,
+    Level Up, Import DDL, Auto-Detect Connectors, Add Existing, Populate From Template,
+    Insert Smart Stream, Generate Industry/Inventory View, Section insert/remove,
+    Delete-from-model, Sync Inventory Connector, Auto-Complete Streams). Covers: (1)
+    the toast() primitive itself -- alsoLog=true logs a plain (non-'[Warning]') entry,
+    alsoLog omitted/false does NOT log, isError=true always logs regardless of alsoLog;
+    (2) three real, separately-implemented command flows spanning both main.js and
+    commands.js (Merge Nodes and Remap, both commands.js; Insert Section, a main.js App
+    method calling this.toast directly) actually reach the Message Log end to end
+    through their own genuine call sites, not just the primitive; (3) a
+    genuinely routine toast with no lasting value (a no-op "Nothing selected" toast)
+    still does NOT log, proving this wasn't turned into "log everything.\""""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const out = {};
+
+      // 1) the toast() primitive directly
+      const before1 = store.messageLog.length;
+      app.toast('RegrToastLog plain success, no log.');
+      out.plainNotLogged = store.messageLog.length === before1;
+
+      const before2 = store.messageLog.length;
+      app.toast('RegrToastLog alsoLog success.', false, true);
+      out.alsoLogLogged = store.messageLog.length === before2 + 1 && store.messageLog[store.messageLog.length - 1].message === 'RegrToastLog alsoLog success.';
+
+      const before3 = store.messageLog.length;
+      app.toast('RegrToastLog error, alsoLog false.', true, false);
+      out.errorAlwaysLogged = store.messageLog.length === before3 + 1 && store.messageLog[store.messageLog.length - 1].message === '[Warning] RegrToastLog error, alsoLog false.';
+
+      // 2a) Merge Nodes (main.js/commands.js real flow)
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      const view = store.addView('RegrToastLog_merge', 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const a = store.createPart({ type: 'BusinessFunction', label: 'RegrToastLogA', model, streams: [] });
+      const b = store.createPart({ type: 'BusinessFunction', label: 'RegrToastLogB', model, streams: [] });
+      const vmA = store.createViewMember({ view: view.id, objectType: 'part', objectId: a.id, x: 40, y: 40 });
+      const vmB = store.createViewMember({ view: view.id, objectType: 'part', objectId: b.id, x: 200, y: 40 });
+      const beforeMerge = store.messageLog.length;
+      commands.mergePartsAndView(app, tab, [vmA.id, vmB.id], 'RegrToastLogMerged');
+      out.mergeLogged = store.messageLog.slice(beforeMerge).some(e => e.message.includes('Merged') && e.message.includes('RegrToastLogMerged'));
+
+      // 2b) Remap (real flow)
+      const c = store.createPart({ type: 'BusinessFunction', label: 'RegrToastLogC', model, streams: [] });
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: c.id, x: 40, y: 40 });
+      const beforeRemap = store.messageLog.length;
+      commands.remap(app, tab, { pattern: 'none' });
+      out.remapLogged = store.messageLog.slice(beforeRemap).some(e => e.message.startsWith('Remapped'));
+
+      // 2c) Insert Section -- a main.js App method calling this.toast directly (not
+      // wrapped in a commands.js function), so this covers a genuinely different call
+      // path than 2a/2b above
+      const orgView = store.addView('RegrToastLog_org', 'org');
+      const orgTab = app.createCanvasTab(orgView);
+      app.switchToTab(orgTab.id);
+      const beforeInsertSection = store.messageLog.length;
+      app.insertSection(orgTab, null);
+      out.insertSectionLogged = store.messageLog.slice(beforeInsertSection).some(e => e.message === 'Section inserted.');
+
+      // 3) a genuinely routine no-op toast must NOT log
+      app.switchToTab(tab.id);
+      const beforeNoop = store.messageLog.length;
+      app.promptSmartCheckView();
+      await new Promise(r => setTimeout(r, 30));
+      document.getElementById('scv-missing-connectors').checked = false;
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 30));
+      out.noopNotLogged = store.messageLog.length === beforeNoop;
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["plainNotLogged"]:
+        problems.append("a plain success toast (no third arg) must NOT write to the Message Log")
+    if not result["alsoLogLogged"]:
+        problems.append(f"app.toast(msg, false, true) must write exactly that message (no '[Warning]' prefix) to the Message Log, got {result}")
+    if not result["errorAlwaysLogged"]:
+        problems.append(f"an error toast must always log with its '[Warning]' prefix regardless of alsoLog, got {result}")
+    if not result["mergeLogged"]:
+        problems.append("Merge Nodes' own real toast did not reach the Message Log")
+    if not result["remapLogged"]:
+        problems.append("Remap's own real toast did not reach the Message Log")
+    if not result["insertSectionLogged"]:
+        problems.append("Insert Section's own real toast (a main.js App method calling this.toast directly) did not reach the Message Log")
+    if not result["noopNotLogged"]:
+        problems.append("a genuinely routine no-op toast ('Nothing selected to check') must NOT write to the Message Log -- this wasn't meant to become log-everything")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "app.toast's new alsoLog parameter logs exactly the right thing (plain success toasts stay silent, alsoLog=true logs the exact message, errors always log with their prefix), and three real, independently-implemented command flows (Merge Nodes, Remap, Insert Section) genuinely reach the Message Log through their own call sites -- while a routine no-op toast still doesn't log"
+
+
 def check_import_logs_to_message_log(page):
     """Regression guard: ArchiMate import's summary toast wasn't reaching the Message
     Log (only error-style toasts auto-log; the import success message needs explicit
@@ -9972,6 +10156,8 @@ CHECKS = [
     check_connector_popover_matches_panel,
     check_instructions_tab_on_startup,
     check_import_logs_to_message_log,
+    check_mutation_toasts_log_to_message_log,
+    check_keyboard_focus_visible,
     check_section_rowcount_realigns_nodes,
     check_new_content_sized_and_non_overlapping,
     check_smart_check_view_default_levels_unlimited,

@@ -3781,4 +3781,34 @@
 // a reintroduced regression and reverted. DESIGN_DOCUMENT.md SS5.5, tests/README.md,
 // and public/instructions.html's Insert Smart Stream section updated. Full suite
 // 133/133.
-export const APP_VERSION = '0.882';
+// v0.883: direct follow-up to a UI-writing audit ("are there any UI changes
+// recommended?", answered by loading the frontend-design skill and reviewing toast/
+// dialog copy against it): "is toasts not going to the message log considered
+// appropriate?", then "do both" (also fix the audit's other finding, no explicit
+// keyboard-focus style).
+// Part 1 -- app.toast(message, isError, alsoLog) (main.js) gained a third parameter:
+// alsoLog=true writes a routine SUCCESS toast to the Message Log too (isError=true
+// already always did). Most document-mutating commands reported a real outcome/count
+// in their toast but left zero persistent trace once it faded -- an accident of which
+// features happened to already have a log() closure threaded through, not a
+// deliberate policy. Added alsoLog=true at ~20 call sites: Auto-Detect Connectors,
+// Section insert/remove, Delete-from-model, Auto-Complete Streams, Sync Inventory
+// Connector (main.js); Create/Duplicate Stream, Level Up (both variants), Generate
+// Industry/Inventory View, Add Existing, Populate From Template, Insert Smart Stream,
+// Remap, Merge (both variants), Duplicate Section, Import DDL (commands.js). Left
+// alone: routine no-op toasts ("Nothing selected"), exports (no document mutation),
+// Smart Check View/Node summaries (already covered by their own per-change log()
+// trail), and Import Data (already separately logged).
+// Part 2 -- css/styles.css gained one global :focus-visible rule (outline: 2px solid
+// var(--accent)) -- verified in a real browser first that native default outlines
+// WERE rendering (not actually invisible), but unbranded and not guaranteed
+// consistent; canvas nodes have no tabindex anywhere in this app, so this can never
+// collide with .fnode.selected's own outline.
+// New check_mutation_toasts_log_to_message_log (the toast() primitive directly, plus
+// three real command flows spanning main.js and commands.js) and
+// check_keyboard_focus_visible (a real toolbar button and real dialog controls,
+// distinguishing OUR rule's exact outline-style/width from Chromium's own nonzero
+// default -- a weaker assertion didn't actually catch the rule being removed) -- both
+// proven to catch a reintroduced regression and reverted. DESIGN_DOCUMENT.md SS5.4 and
+// tests/README.md updated. Full suite 135/135.
+export const APP_VERSION = '0.883';

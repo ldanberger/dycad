@@ -168,14 +168,36 @@ text unique to each pane, checked against the real clipboard).
 
 ### 5.4 Feedback channels
 
-`app.toast(message, isError)` is the single entry point for user-facing feedback.
-`isError=true` toasts automatically also write to the persistent Message Log side panel
-(Copy/Clear buttons); routine success toasts don't, to avoid flooding it, but a
-handful of call sites (import summaries, Smart Check View's per-change trail) log
-explicitly regardless of error status because the information has lasting value.
-Rejection messages are written to name the *specific rule* that fired — e.g. which
-section, what it actually allows, what the rejected item's type is — not a generic
-failure string.
+`app.toast(message, isError, alsoLog)` is the single entry point for user-facing
+feedback. `isError=true` toasts always also write to the persistent Message Log side
+panel (Copy/Clear buttons). `alsoLog=true` opts a routine SUCCESS toast into the log
+too — a UI-writing audit (*"are there any UI changes recommended?"*, then *"is toasts
+not going to the message log considered appropriate?"*, then *"do both"*) found most
+document-mutating commands (Remap, Merge, Duplicate Stream/Section, Level Up, Import
+DDL, Auto-Detect Connectors, Add Existing, Populate From Template, Insert Smart
+Stream, Generate Industry/Inventory View, Section insert/remove, Delete-from-model,
+Sync Inventory Connector, Auto-Complete Streams) reported a real outcome/count in
+their toast but left zero persistent trace once it faded — while Smart Check View's
+own per-change trail (and a couple of import paths) did, an accident of which
+features happened to already have a `log()` closure threaded through, not a
+deliberate policy. `alsoLog=true` now marks every genuine-mutation-with-an-outcome
+toast explicitly; a routine confirmation with no lasting value (clipboard copy, export
+success, a "nothing to do" no-op) stays plain so the log doesn't fill with noise —
+same rationale as before, just now an explicit per-call-site choice. Rejection
+messages are written to name the *specific rule* that fired — e.g. which section, what
+it actually allows, what the rejected item's type is — not a generic failure string.
+
+**Keyboard focus** — the same audit found no explicit `:focus-visible` style anywhere
+in `css/styles.css`; every interactive element relied entirely on the browser's own
+unstyled default outline. Verified in a real browser (Playwright, tabbing through the
+toolbar/menus/a dialog) that this was NOT actually invisible — Chromium's default was
+rendering — but it's unbranded (doesn't use the app's own `--accent`/dark-theme
+tokens) and not guaranteed consistent elsewhere. Added one global rule,
+`:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }` — deliberately
+`:focus-visible` rather than `:focus`, so it shows for keyboard navigation only, never
+for a mouse click. Canvas nodes (`.fnode`) have no `tabindex` anywhere in this app and
+so are never part of the native focus order at all — this can never collide with a
+selected node's own `.fnode.selected` outline (`var(--node-selected)`).
 
 ### 5.5 Derived connectors (`insertSmartStream`, `smartCheckView` — `commands.js`)
 

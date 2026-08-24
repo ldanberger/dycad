@@ -400,7 +400,7 @@ function createStream(app, {
 
   if (!silent) {
     app.recordAndRender();
-    app.toast(`Generated stream "${streamName}" from template "${templateName}".`);
+    app.toast(`Generated stream "${streamName}" from template "${templateName}".`, false, true);
   }
   return { view, createdVms };
 }
@@ -848,7 +848,7 @@ function duplicateStream(app, tab, vmId, newStreamName) {
   for (const id of newVmIds) tab.selection.add(id);
 
   app.recordAndRender();
-  app.toast(`Duplicated stream "${originalStream}" as "${newStreamName}".`);
+  app.toast(`Duplicated stream "${originalStream}" as "${newStreamName}".`, false, true);
 }
 
 function nextStreamName(originalName) {
@@ -939,7 +939,7 @@ function levelUp(app, tab, newViewName) {
 
   app.recordAndRender();
   app.switchToTab(newTab.id);
-  app.toast(`Created view "${newViewName}" (Level Up) with ${partVms.length} node${partVms.length === 1 ? '' : 's'} carried up.`);
+  app.toast(`Created view "${newViewName}" (Level Up) with ${partVms.length} node${partVms.length === 1 ? '' : 's'} carried up.`, false, true);
 }
 
 /** Data Modeling: Level Up on a single selected DataEntityDetails node is the exact
@@ -1019,7 +1019,7 @@ function levelUpEntityDetails(app, tab, vmId) {
 
   app.recordAndRender();
   app.switchToTab(newTab.id);
-  app.toast(`Created Data Entity "${parentPart.label}" (Level Up), linked to "${part.label}".`);
+  app.toast(`Created Data Entity "${parentPart.label}" (Level Up), linked to "${part.label}".`, false, true);
 }
 
 // ===================== LEVEL DOWN =====================
@@ -2444,7 +2444,7 @@ async function generateIndustry(app, onProgress, placeInView = true) {
   }
   app.recordAndRender();
   const placementNote = placeInView ? '' : ' — not placed on any view; see Catalogs > Parts or Add Existing';
-  app.toast(`Generated ${entityCount} stream${entityCount === 1 ? '' : 's'} from the loaded industry data${skippedCount ? ` (${skippedCount} already existed, skipped)` : ''}${placementNote}.`);
+  app.toast(`Generated ${entityCount} stream${entityCount === 1 ? '' : 's'} from the loaded industry data${skippedCount ? ` (${skippedCount} already existed, skipped)` : ''}${placementNote}.`, false, true);
 }
 
 // ===================== GENERATE INVENTORY VIEW =====================
@@ -2526,7 +2526,7 @@ function addExistingPartsToView(app, tab, partIds, includeConnectors, targetSect
   }
 
   app.recordAndRender();
-  app.toast(`Added ${addedCount} part${addedCount === 1 ? '' : 's'}${includeConnectors ? ` and ${connCount} connector${connCount === 1 ? '' : 's'}` : ''}.`);
+  app.toast(`Added ${addedCount} part${addedCount === 1 ? '' : 's'}${includeConnectors ? ` and ${connCount} connector${connCount === 1 ? '' : 's'}` : ''}.`, false, true);
 }
 
 // ===================== POPULATE FROM TEMPLATE =====================
@@ -2662,7 +2662,7 @@ function populateFromTemplate(app, tab, templateName) {
   // grid-realignment internally (redrawNodeSizes already does this for section views).
   if (addedCount > 0 || createdCount > 0) redrawAndResolveLayout(app, { viewId: view.id, selection: new Set() });
   app.recordAndRender();
-  app.toast(`Populated from "${templateName}": ${addedCount} added, ${createdCount} created, ${skippedCount} skipped, ${connCount} connector${connCount === 1 ? '' : 's'}.`);
+  app.toast(`Populated from "${templateName}": ${addedCount} added, ${createdCount} created, ${skippedCount} skipped, ${connCount} connector${connCount === 1 ? '' : 's'}.`, false, true);
 }
 
 /** "Insert Smart Stream" (freeform views only) — traces a chain of EXISTING parts and
@@ -2894,7 +2894,7 @@ function insertSmartStream(app, tab, options) {
   redrawAndResolveLayout(app, { viewId: view.id, selection: new Set() });
   app.recordAndRender();
   const derivedSuffix = derivedPairs.size > 0 ? ` (${derivedPairs.size} derived)` : '';
-  app.toast(`Inserted Smart Stream: ${addedParts} part${addedParts === 1 ? '' : 's'}, ${addedConns} connector${addedConns === 1 ? '' : 's'}${derivedSuffix}.`);
+  app.toast(`Inserted Smart Stream: ${addedParts} part${addedParts === 1 ? '' : 's'}, ${addedConns} connector${addedConns === 1 ? '' : 's'}${derivedSuffix}.`, false, true);
 }
 
 function generateInventoryView(app) {
@@ -2929,7 +2929,7 @@ function generateInventoryView(app) {
   // than whatever an underlying layout step happened to select.
   if (parts.length > 100) tab.selection.clear();
   app.recordAndRender();
-  app.toast(`Generated "${name}" with ${parts.length} parts, ${conns.length} connectors.`);
+  app.toast(`Generated "${name}" with ${parts.length} parts, ${conns.length} connectors.`, false, true);
   return view;
 }
 
@@ -3808,7 +3808,7 @@ function remap(app, tab, options = {}) {
   };
   app.recordAndRender();
   const detail = options.pattern === 'force' ? 'force-directed placement' : `${result.maxCols} columns`;
-  app.toast(`Remapped "${result.view.viewName}" using template "${result.template.name}" (${detail}).`);
+  app.toast(`Remapped "${result.view.viewName}" using template "${result.template.name}" (${detail}).`, false, true);
 }
 
 // ===================== MERGE =====================
@@ -3871,7 +3871,7 @@ function mergePartsAndView(app, tab, selectedVmIds, newName) {
   tab.selection.clear();
   tab.selection.add(firstVm.id);
   app.recordAndRender();
-  app.toast(`Merged ${vms.length} parts into "${newName}" across all views.`);
+  app.toast(`Merged ${vms.length} parts into "${newName}" across all views.`, false, true);
 }
 
 function mergeViewOnly(app, tab, selectedVmIds, newName) {
@@ -3936,7 +3936,7 @@ function mergeViewOnly(app, tab, selectedVmIds, newName) {
   tab.selection.clear();
   tab.selection.add(firstVm.id);
   app.recordAndRender();
-  app.toast(`Merged ${vms.length} nodes into "${newName}" in this view.`);
+  app.toast(`Merged ${vms.length} nodes into "${newName}" in this view.`, false, true);
 }
 
 /**
@@ -4035,7 +4035,7 @@ function duplicateSection(app, tab, sectionInstanceId) {
 
   tab.selectedSectionId = newSection.id;
   app.recordAndRender();
-  app.toast(`Duplicated section "${originalName}" as "${newSection.name}" (${oldVmToNewVm.size} node${oldVmToNewVm.size === 1 ? '' : 's'}, ${connDupCount} connector${connDupCount === 1 ? '' : 's'}).`);
+  app.toast(`Duplicated section "${originalName}" as "${newSection.name}" (${oldVmToNewVm.size} node${oldVmToNewVm.size === 1 ? '' : 's'}, ${connDupCount} connector${connDupCount === 1 ? '' : 's'}).`, false, true);
 }
 
 // ===================== DATA MODELING: DDL IMPORT/EXPORT =====================
@@ -4102,7 +4102,7 @@ function importDDL(app, ddlText) {
   redrawAndResolveLayout(app, { viewId: view.id, selection: new Set() });
   app.recordAndRender();
   const skippedSuffix = fkSkipped > 0 ? ` (${fkSkipped} FOREIGN KEY reference${fkSkipped === 1 ? '' : 's'} skipped — table/column not found)` : '';
-  app.toast(`Imported ${tables.length} table${tables.length === 1 ? '' : 's'}, ${fkCount} foreign key${fkCount === 1 ? '' : 's'}${skippedSuffix} onto "${viewName}".`);
+  app.toast(`Imported ${tables.length} table${tables.length === 1 ? '' : 's'}, ${fkCount} foreign key${fkCount === 1 ? '' : 's'}${skippedSuffix} onto "${viewName}".`, false, true);
 }
 
 /** Data Modeling > Export DDL: the reverse of importDDL, scoped to whatever

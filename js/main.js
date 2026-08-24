@@ -297,20 +297,28 @@ class App {
     this.render();
   }
 
-  toast(message, isError = false) {
+  toast(message, isError = false, alsoLog = false) {
     const root = document.getElementById('toast-root');
     const el = document.createElement('div');
     el.className = 'toast' + (isError ? ' error' : '');
     el.textContent = message;
     root.appendChild(el);
     setTimeout(() => el.remove(), isError ? 6000 : 3500);
-    // Error/warning/rejection-style toasts (isError=true) also go to the Message Log —
+    // Error/warning/rejection-style toasts (isError=true) always go to the Message Log —
     // toasts vanish after a few seconds and there was previously no record of a
-    // rejected action after the fact. Routine success toasts stay out of the log so it
-    // doesn't fill up with confirmations of things that worked fine. This single spot
-    // covers every existing app.toast(msg, true) call throughout the app, not just new
-    // ones — nothing else needed to change at each call site.
-    if (isError) pushMessageLog(this.store, `[Warning] ${message}`);
+    // rejected action after the fact. A specific call site can also opt a routine
+    // SUCCESS toast in via alsoLog=true — a UI-writing audit ("are there any UI changes
+    // recommended?", then "is toasts not going to the message log considered
+    // appropriate?") found most document-mutating commands (Remap, Merge, Import DDL,
+    // Level Up, Duplicate Section, ...) reported a real count/outcome in their toast but
+    // left zero persistent trace once it faded, while Smart Check View's own trail (and
+    // a couple of import paths) did — an accident of which features happened to already
+    // have a log() closure threaded through, not a deliberate line. alsoLog=true marks
+    // every such genuine-mutation-with-an-outcome toast; a routine confirmation with no
+    // lasting value (clipboard copy, export success, a "nothing to do" no-op) stays
+    // plain so the log doesn't fill with noise — same rationale as before, just now an
+    // explicit per-call-site choice instead of a side effect of unrelated plumbing.
+    if (isError || alsoLog) pushMessageLog(this.store, isError ? `[Warning] ${message}` : message);
   }
 
   // ===================== TABS =====================
@@ -565,7 +573,7 @@ class App {
       const { created, unplaced } = createDetectedConnectors(this, chosen);
       this.recordAndRender();
       const unplacedSuffix = unplaced > 0 ? ` (${unplaced} not yet placed on any view — both tables aren't shown together anywhere yet)` : '';
-      this.toast(`Created ${created} connector${created === 1 ? '' : 's'}${unplacedSuffix}.`);
+      this.toast(`Created ${created} connector${created === 1 ? '' : 's'}${unplacedSuffix}.`, false, true);
     });
   }
 
@@ -986,7 +994,7 @@ class App {
     const newSection = insertSectionAfter(view, afterSectionInstanceId);
     tab.selectedSectionId = newSection.id;
     this.recordAndRender();
-    this.toast('Section inserted.');
+    this.toast('Section inserted.', false, true);
   }
 
   removeSection(tab, sectionInstanceId) {
@@ -995,7 +1003,7 @@ class App {
     removeSectionAndMembers(this.store, view, sectionInstanceId);
     tab.selectedSectionId = null;
     this.recordAndRender();
-    this.toast('Section removed.');
+    this.toast('Section removed.', false, true);
   }
 
   duplicateSection(tab, sectionInstanceId) {
@@ -1044,7 +1052,7 @@ class App {
       for (const id of orphanedConnIds) this.store.deleteConnectorAndMembers(id);
       for (const id of orphanedPartIds) this.store.deletePart(id);
       this.recordAndRender();
-      this.toast(`Deleted ${names.length} item${names.length === 1 ? '' : 's'} from the model.`);
+      this.toast(`Deleted ${names.length} item${names.length === 1 ? '' : 's'} from the model.`, false, true);
     });
   }
 
@@ -1972,7 +1980,7 @@ class App {
       const summary = [];
       if (totalParts) summary.push(`${totalParts} part${totalParts === 1 ? '' : 's'}`);
       if (totalVms) summary.push(`${totalVms} node${totalVms === 1 ? '' : 's'}`);
-      this.toast(summary.length ? `Auto-completed ${totalStreams} stream${totalStreams === 1 ? '' : 's'}: added ${summary.join(' and ')}.` : 'No changes made.');
+      this.toast(summary.length ? `Auto-completed ${totalStreams} stream${totalStreams === 1 ? '' : 's'}: added ${summary.join(' and ')}.` : 'No changes made.', false, summary.length > 0);
     });
   }
 
@@ -2625,7 +2633,7 @@ class App {
       this.store.restyleConnector(counterpart, { from: counterpart.from, to: counterpart.to, model: counterpart.model, connectorType: conn.connectorType, relationship: conn.relationship, streams: [...(conn.streams || [])] });
       this.store.touchConnector(counterpart);
       this.recordAndRender();
-      this.toast(`Updated the inventory connector (${desc}) to match.`);
+      this.toast(`Updated the inventory connector (${desc}) to match.`, false, true);
     });
   }
 

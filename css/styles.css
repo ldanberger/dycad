@@ -55,6 +55,24 @@ body {
 button, select, input { font-family: inherit; font-size: inherit; color: inherit; }
 .hidden { display: none !important; }
 
+/* A UI-writing audit ("is toasts not going to the message log considered
+   appropriate?", then "do both") found no explicit keyboard-focus style anywhere in
+   this file -- every interactive element (menu buttons, dialog inputs/buttons,
+   dropdown items, toolbar controls) was relying entirely on each browser's own
+   unstyled default outline. Verified in a real browser (Playwright, tabbing through
+   the toolbar/menus/a dialog): Chromium's default WAS rendering, so nothing was
+   actually invisible -- but it's an unbranded, browser-default ring that doesn't
+   adapt to this app's own accent color or dark theme, and isn't guaranteed consistent
+   across browsers. This is the one deliberate, explicit replacement, using
+   :focus-visible (not :focus) so it shows for keyboard navigation only, never for a
+   mouse click -- canvas nodes (.fnode) are plain positioned elements with no
+   tabindex, never part of the native focus order, so this can never collide with
+   their own .fnode.selected outline (below). */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 #app { display: flex; flex-direction: column; height: 100vh; }
 
 /* ===================== HEADER ===================== */
