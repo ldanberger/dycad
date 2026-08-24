@@ -3689,4 +3689,43 @@
 // sectionDescription cells. New check_sfce_catalog_section_description_fallback,
 // proven to catch a reintroduced regression and reverted. DESIGN_DOCUMENT.md SS7.1
 // and tests/README.md updated. Full suite 128/128.
-export const APP_VERSION = '0.878';
+// v0.879: direct follow-up: "the script console page is too long ... Update the
+// instructions page script references to include the information from script console
+// references, put it in a table format for ease of reading. Can a tab be created in
+// script console page to only show reference details when user selects it? this
+// leaves the two main windows in script console, make these wider." promptScriptConsole
+// (main.js) used to open with a dense bindings/options paragraph running ahead of
+// #console-output/#console-input, pushing the dialog tall on every open. Split into a
+// Console tab (output + editor only, open by default) and a Reference tab (hidden
+// until clicked, holding the same bindings/options content as a docs-table instead of
+// flowing prose) via plain .tb-btn/.tb-btn.active toggle buttons. Also widened the
+// dialog itself: new modal-box-console class (min(920px, 96vw)) replacing the older,
+// narrower modal-box-textedit (min(640px, 90vw)), so Console's two panes get the freed
+// width. public/instructions.html's own Script Console section got the same table
+// (also fixing a real staleness bug in the process: neither copy previously mentioned
+// the 'clusters' remap pattern added back in v0.871). Three existing Script Console
+// tests updated for the new modal-box-console selector (check_script_console_runs_
+// main_function, check_batch_script_quickstart, check_script_console_remap_and_
+// smart_check_bindings); new check_script_console_reference_tab, proven to catch a
+// reintroduced regression (temporarily broke the tab-toggle to always show Console)
+// and reverted. DESIGN_DOCUMENT.md SS5.3 and tests/README.md updated. Full suite
+// 129/129.
+// v0.880: direct follow-up: "script console page still too long, barely fits at 80%.
+// Make output window half the length and scrollable, and make reference part
+// scrollable and have the length on open. Add 'copy' buttons to the three windows:
+// output, script, reference to allow user to easily copy individually."
+// promptScriptConsole (main.js): #console-output height halved 280px -> 140px (still
+// overflow-y:auto). The Reference tab's content now lives inside a new
+// #console-reference-scroll wrapper with its own fixed height (480px) + overflow-y:
+// auto set directly in the initial innerHTML -- fixed the moment the dialog opens, not
+// something that only appears once the tab is first clicked, so switching tabs never
+// resizes the dialog. Each of the three panes (Output, Script, Reference) got a small
+// header row with its own Copy button, wired through one shared copyPaneText(getText,
+// label, btn) handler (writes to navigator.clipboard, same pattern as the existing
+// "copy remap() call" and "copy Message Log" buttons) -- each button supplies a
+// different getter so a mixed-up wire-up is directly testable. New
+// check_script_console_sizing_and_copy_buttons, proven to catch a reintroduced
+// regression (temporarily made the Output Copy button grab the Script pane's text
+// instead) and reverted. DESIGN_DOCUMENT.md SS5.3 and tests/README.md updated. Full
+// suite 130/130.
+export const APP_VERSION = '0.880';

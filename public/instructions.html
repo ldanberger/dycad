@@ -714,31 +714,40 @@ multiplier — see <a href="#views">Views &amp; Layout</a> above.</p>
 one-shot bulk operations (generate an industry, build a whole view, ...) you trigger on demand, rather than
 per-tick simulation behavior. It has full <code>app</code>/<code>store</code> access (more powerful than a part's
 sandboxed <code>ctx</code>, since it's an explicit tool a person runs, not something a saved document executes
-unattended) via the bindings <code>app</code>, <code>store</code>, <code>model</code> (the currently-selected
-simulation model), <code>findParts</code>, <code>log(...)</code> (prints to the console's own output area),
-<code>messageLog(...)</code> (writes to the persistent Message Log instead), and the raw commands
-<code>generateIndustry(app, industryKey, onProgress, placeInView)</code>,
-<code>populateFromTemplate(app, tab, templateName)</code>,
-<code>remap(app, tab, options)</code> (options: <code>sortKeys</code>, <code>templateName</code>,
-<code>pattern</code> — <code>'default'</code>/<code>'none'</code>/<code>'layered'</code>/<code>'force'</code> —
-<code>limitColumnsToView</code>, <code>visiblePartVmIds</code>, <code>forcePreferRight</code>,
-<code>forceGroupRows</code>, <code>edgeAssignment</code> (<code>{elementType: 'top'|'bottom'|'left'|
-'right'}</code>, Default/None/Layered patterns only), <code>minimizeCrossings</code>,
-<code>minimizeConnectorLength</code> (both boolean, Default/None/Layered only); all optional, same defaults
-as the Remap dialog),
-<code>smartCheckView(app, tab, options)</code> (options: <code>missingConnectors</code>,
-<code>missingConnectorsAndNodes</code>, <code>levels</code>, <code>syncWithInventory</code>), and
-<code>smartCheckNode(app, tab, partId, options)</code> (same options as smartCheckView, plus
-<code>upstream</code>, <code>downstream</code>, <code>byStream</code>, <code>streams</code>), and
-<code>insertSmartStream(app, tab, options)</code> (freeform views only; options:
-<code>connectorType</code> — <code>'c'</code>/<code>'s'</code> — <code>startPartIds</code> (an array
-of specific part ids to seed from — use <code>findParts</code> to look them up by type/model, then
-filter to the label(s) you want), <code>direction</code> —
-<code>'both'</code>/<code>'downstream'</code>/<code>'upstream'</code> — <code>endType</code> (an
-element type, or <code>null</code>), <code>levels</code> (a number, or <code>null</code> for
-unlimited), and <code>showTypes</code> (an array of element types to keep in the result)). A
-script builds its own <code>tab</code> when it needs one, e.g. via
-<code>app.createCanvasTab(view)</code> / <code>app.switchToTab(tab.id)</code>.</p>
+unattended). Its own dialog splits into a <strong>Console</strong> tab (output + editor, open by default) and a
+<strong>Reference</strong> tab (the bindings/options table below) — switch to Reference when you need to look
+something up; Console stays the wider, taller default view. A script builds its own <code>tab</code> when it
+needs one, e.g. via <code>app.createCanvasTab(view)</code> / <code>app.switchToTab(tab.id)</code>.</p>
+<table class="docs-table">
+  <thead><tr><th>Binding</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>app</code>, <code>store</code></td><td>Full application/document access — same as any command function uses internally.</td></tr>
+    <tr><td><code>model</code></td><td>The currently-selected simulation model, or <code>null</code> if none is selected.</td></tr>
+    <tr><td><code>findParts({type, model})</code></td><td>Look up parts by type and/or model.</td></tr>
+    <tr><td><code>log(...)</code></td><td>Prints to the console's own output area (Console tab).</td></tr>
+    <tr><td><code>messageLog(...)</code></td><td>Writes to the persistent Message Log instead.</td></tr>
+    <tr><td><code>generateIndustry(app, industryKey, onProgress, placeInView)</code></td><td>Generates a full industry model.</td></tr>
+    <tr><td><code>populateFromTemplate(app, tab, templateName)</code></td><td>Populates a view from a stream template.</td></tr>
+    <tr><td><code>remap(app, tab, options)</code></td><td>options: <code>sortKeys</code>, <code>templateName</code>,
+    <code>pattern</code> — <code>'default'</code>/<code>'none'</code>/<code>'layered'</code>/<code>'force'</code>/<code>'clusters'</code> —
+    <code>limitColumnsToView</code>, <code>visiblePartVmIds</code>, <code>forcePreferRight</code>,
+    <code>forceGroupRows</code>, <code>edgeAssignment</code> (<code>{elementType: 'top'|'bottom'|'left'|
+    'right'}</code>, Default/None/Layered patterns only), <code>minimizeCrossings</code>,
+    <code>minimizeConnectorLength</code> (both boolean, Default/None/Layered only); all optional, same defaults
+    as the Remap dialog.</td></tr>
+    <tr><td><code>smartCheckView(app, tab, options)</code></td><td>options: <code>missingConnectors</code>,
+    <code>missingConnectorsAndNodes</code>, <code>levels</code>, <code>syncWithInventory</code>.</td></tr>
+    <tr><td><code>smartCheckNode(app, tab, partId, options)</code></td><td>same options as smartCheckView, plus
+    <code>upstream</code>, <code>downstream</code>, <code>byStream</code>, <code>streams</code>.</td></tr>
+    <tr><td><code>insertSmartStream(app, tab, options)</code></td><td>freeform views only; options:
+    <code>connectorType</code> — <code>'c'</code>/<code>'s'</code> — <code>startPartIds</code> (an array
+    of specific part ids to seed from — use <code>findParts</code> to look them up by type/model, then
+    filter to the label(s) you want), <code>direction</code> —
+    <code>'both'</code>/<code>'downstream'</code>/<code>'upstream'</code> — <code>endType</code> (an
+    element type, or <code>null</code>), <code>levels</code> (a number, or <code>null</code> for
+    unlimited), and <code>showTypes</code> (an array of element types to keep in the result).</td></tr>
+  </tbody>
+</table>
 <p>The editor's text is a real script FILE, not a one-off REPL entry: it's saved as you go (both to this browser's
 localStorage and, if you edit it, alongside File &gt; Save Local Settings — see below), and Run doesn't clear it
 afterward. Run (or Ctrl+Enter) defines everything currently in the box — so any <code>function foo() {...}</code>

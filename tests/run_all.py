@@ -1131,7 +1131,7 @@ def check_script_console_runs_main_function(page):
       // both close over the same `app`/`store` bindings automatically.
       app.promptScriptConsole();
       await new Promise(r => setTimeout(r, 60));
-      const box = document.querySelector('.modal-box.modal-box-textedit');
+      const box = document.querySelector('.modal-box.modal-box-console');
       const textarea = box.querySelector('#console-input');
       textarea.value = "function main() { return helper() + 1; }\\nfunction helper() { return store.doc.parts.length; }";
       const partsBefore = store.doc.parts.length;
@@ -1227,7 +1227,7 @@ def check_batch_script_quickstart(page):
       await new Promise(r => setTimeout(r, 60));
       // Each check runs on its own fresh page (see run_all.py's main()), so
       // store.batchScriptCode is still the real, unmodified default here.
-      const box = document.querySelector('.modal-box.modal-box-textedit');
+      const box = document.querySelector('.modal-box.modal-box-console');
 
       box.querySelector('.run').click();
       await new Promise(r => setTimeout(r, 2500));
@@ -1371,7 +1371,7 @@ def check_script_console_remap_and_smart_check_bindings(page):
 
       app.promptScriptConsole();
       await new Promise(r => setTimeout(r, 60));
-      const box = document.querySelector('.modal-box.modal-box-textedit');
+      const box = document.querySelector('.modal-box.modal-box-console');
       const textarea = box.querySelector('#console-input');
       textarea.value = `
         function main() {
@@ -1432,6 +1432,146 @@ def check_script_console_remap_and_smart_check_bindings(page):
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
     return True, "remap, smartCheckView, smartCheckNode, and insertSmartStream are all callable from the Script Console's main(), and their options (pattern/sortKeys, missingConnectors, direction filters, and startPartIds/showTypes) genuinely take effect"
+
+
+def check_script_console_reference_tab(page):
+    """Regression guard for the Script Console's Console/Reference tab split.
+    Reported directly: "the script console page is too long ... Update ... put [the
+    reference info] in a table format ... Can a tab be created ... to only show
+    reference details when user selects it? this leaves the two main windows ...
+    wider." promptScriptConsole (main.js) now opens with the Console tab active
+    (output+input visible, no bindings prose above them) and a separate Reference tab
+    (hidden by default) holding a docs-table of every binding. Confirms: (1) on open,
+    #console-output/#console-input are visible and the reference table is not; (2)
+    clicking Reference shows the table and hides the console panes; (3) the table
+    genuinely lists the bindings (including the 'clusters' remap pattern, which the
+    old inline prose never mentioned); (4) the dialog uses the wider modal-box-console
+    class, not the older, narrower modal-box-textedit."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp;
+      app.promptScriptConsole();
+      await new Promise(r => setTimeout(r, 60));
+      const box = document.querySelector('.modal-box.modal-box-console');
+      if (!box) return { found: false };
+
+      const consolePane = box.querySelector('#console-tab-console');
+      const referencePane = box.querySelector('#console-tab-reference');
+      const consoleVisibleInitially = consolePane.style.display !== 'none' && box.querySelector('#console-output').offsetParent !== null;
+      const referenceHiddenInitially = referencePane.style.display === 'none';
+
+      box.querySelector('.console-tabs button[data-tab="reference"]').click();
+      await new Promise(r => setTimeout(r, 30));
+      const referenceVisibleAfterClick = referencePane.style.display !== 'none';
+      const consoleHiddenAfterClick = consolePane.style.display === 'none';
+      const tableText = referencePane.querySelector('table.docs-table')?.textContent || '';
+      const mentionsRemapOptions = tableText.includes('remap(app, tab, options)') && tableText.includes('clusters') && tableText.includes('insertSmartStream');
+
+      box.querySelector('.console-tabs button[data-tab="console"]').click();
+      await new Promise(r => setTimeout(r, 30));
+      const backToConsoleVisible = consolePane.style.display !== 'none';
+      const backToReferenceHidden = referencePane.style.display === 'none';
+
+      box.querySelector('.cancel').click();
+      return {
+        found: true, consoleVisibleInitially, referenceHiddenInitially,
+        referenceVisibleAfterClick, consoleHiddenAfterClick, mentionsRemapOptions,
+        backToConsoleVisible, backToReferenceHidden,
+      };
+    }
+    """)
+    problems = []
+    if not result["found"]:
+        return False, "expected Script Console to open with class 'modal-box modal-box-console' (the wider class) -- not found"
+    if not result["consoleVisibleInitially"] or not result["referenceHiddenInitially"]:
+        problems.append("expected the Console tab (output+input) visible and Reference tab hidden on open")
+    if not result["referenceVisibleAfterClick"] or not result["consoleHiddenAfterClick"]:
+        problems.append("expected clicking the Reference tab to show the bindings table and hide the console panes")
+    if not result["mentionsRemapOptions"]:
+        problems.append("expected the Reference tab's table to document remap's options including the 'clusters' pattern, and insertSmartStream")
+    if not result["backToConsoleVisible"] or not result["backToReferenceHidden"]:
+        problems.append("expected clicking back to the Console tab to re-show the console panes and re-hide the reference table")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Script Console opens on a wider Console tab (output+input, no inline bindings prose) with bindings/options moved to a separate Reference tab that toggles visibility correctly and documents the 'clusters' remap pattern"
+
+
+def check_script_console_sizing_and_copy_buttons(page):
+    """Regression guard, direct follow-up: "script console page still too long, barely
+    fits at 80%. Make output window half the length and scrollable, and make reference
+    part scrollable and have the length on open. Add 'copy' buttons to the three
+    windows: output, script, reference to allow user to easily copy individually."
+    Confirms: (1) #console-output is half its old 280px height (140px) and still
+    scrollable (overflow-y auto); (2) #console-reference-scroll has a fixed height set
+    the moment the dialog opens (not just after the tab is first clicked -- checked
+    both before AND after clicking to Reference, same value both times) and is
+    scrollable; (3) each of the three Copy buttons (.copy-output/.copy-script/
+    .copy-reference) puts that exact pane's own text on the real clipboard, not some
+    other pane's."""
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp;
+      app.promptScriptConsole();
+      await new Promise(r => setTimeout(r, 60));
+      const box = document.querySelector('.modal-box.modal-box-console');
+      const outputEl = box.querySelector('#console-output');
+      const refScroll = box.querySelector('#console-reference-scroll');
+      const inputEl = box.querySelector('#console-input');
+
+      const outputHeightPx = parseInt(outputEl.style.height, 10);
+      const outputScrollable = getComputedStyle(outputEl).overflowY === 'auto';
+      const refHeightOnOpen = refScroll.style.height;
+      const refScrollableOnOpen = getComputedStyle(refScroll).overflowY === 'auto';
+
+      // Put known, distinguishable text in output + script BEFORE copying, so a mixed-up
+      // handler (e.g. copy-script grabbing outputEl instead of inputEl) is caught.
+      outputEl.textContent = 'OUTPUT_MARKER_TEXT';
+      inputEl.value = 'function main() { return 1; } // SCRIPT_MARKER_TEXT';
+
+      box.querySelector('.copy-output').click();
+      await new Promise(r => setTimeout(r, 30));
+      const outputClip = await navigator.clipboard.readText();
+
+      box.querySelector('.copy-script').click();
+      await new Promise(r => setTimeout(r, 30));
+      const scriptClip = await navigator.clipboard.readText();
+
+      box.querySelector('.console-tabs button[data-tab="reference"]').click();
+      await new Promise(r => setTimeout(r, 30));
+      const refHeightAfterClick = refScroll.style.height;
+
+      box.querySelector('.copy-reference').click();
+      await new Promise(r => setTimeout(r, 30));
+      const refClip = await navigator.clipboard.readText();
+
+      box.querySelector('.cancel').click();
+      return {
+        outputHeightPx, outputScrollable, refHeightOnOpen, refScrollableOnOpen,
+        outputClip, scriptClip, refHeightAfterClick, refClip,
+      };
+    }
+    """)
+    problems = []
+    if result["outputHeightPx"] != 140:
+        problems.append(f"expected #console-output height to be halved to 140px, got {result['outputHeightPx']}px")
+    if not result["outputScrollable"]:
+        problems.append("expected #console-output to stay scrollable (overflow-y: auto)")
+    if not result["refHeightOnOpen"] or result["refHeightOnOpen"] == '0px':
+        problems.append(f"expected #console-reference-scroll to have a real fixed height set immediately on open, got {result['refHeightOnOpen']!r}")
+    if not result["refScrollableOnOpen"]:
+        problems.append("expected #console-reference-scroll to be scrollable (overflow-y: auto)")
+    if result["refHeightAfterClick"] != result["refHeightOnOpen"]:
+        problems.append(f"expected the reference pane's height to stay fixed once switched to (not grow to fit content) -- on open: {result['refHeightOnOpen']!r}, after click: {result['refHeightAfterClick']!r}")
+    if result["outputClip"] != 'OUTPUT_MARKER_TEXT':
+        problems.append(f"Copy on the Output pane should copy exactly the output text, got clipboard={result['outputClip']!r}")
+    if 'SCRIPT_MARKER_TEXT' not in result["scriptClip"]:
+        problems.append(f"Copy on the Script pane should copy exactly the editor's text, got clipboard={result['scriptClip']!r}")
+    if 'remap(app, tab, options)' not in result["refClip"] or 'clusters' not in result["refClip"]:
+        problems.append(f"Copy on the Reference pane should copy the bindings table's text, got clipboard={result['refClip']!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Output pane is half-height (140px) and scrollable, the Reference pane has a real fixed height set on open (unchanged after switching to it) and is scrollable, and each of the three Copy buttons puts exactly that pane's own text on the clipboard"
 
 
 def check_catalog_multi_column_sort(page):
@@ -9538,6 +9678,8 @@ CHECKS = [
     check_script_console_runs_main_function,
     check_batch_script_quickstart,
     check_script_console_remap_and_smart_check_bindings,
+    check_script_console_reference_tab,
+    check_script_console_sizing_and_copy_buttons,
     check_catalog_multi_column_sort,
     check_sfce_table_multi_column_sort,
     check_spacing_scale_uniform,

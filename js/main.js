@@ -717,45 +717,119 @@ class App {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const box = document.createElement('div');
-    box.className = 'modal-box modal-box-textedit';
+    // Reported directly: "the script console page is too long ... put [the reference
+    // info] in a table format ... can a tab be created ... to only show reference
+    // details when user selects it? this leaves the two main windows ... wider." The
+    // bindings/options prose used to run ahead of the output+input panes on every
+    // open, pushing them (and the whole dialog) tall; it's now its own Reference tab,
+    // hidden by default, so Console opens straight to output+input -- which also get
+    // to use the modal's now-much-wider modal-box-console class (the reference text
+    // no longer needs to fit narrow enough to read as flowing paragraphs).
+    box.className = 'modal-box modal-box-console';
     box.innerHTML = `<h3>Script Console${modelName ? ` — ${escapeHtml(modelName)}` : ''}</h3>
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
-        Bindings: <code>app</code>, <code>store</code>, <code>model</code>
-        ${modelName ? '' : ' <span style="color:#c0392b;">(no simulation model selected — model will be null)</span>'},
-        <code>findParts({type, model})</code>, <code>log(...)</code> (prints below),
-        <code>messageLog(...)</code> (writes to the persistent Message Log),
-        <code>generateIndustry(app, onProgress, placeInView)</code>,
-        <code>populateFromTemplate(app, tab, templateName)</code>,
-        <code>remap(app, tab, options)</code> (options: <code>sortKeys, templateName, pattern
-        ('default'|'none'|'layered'|'force'), limitColumnsToView, visiblePartVmIds, forcePreferRight,
-        forceGroupRows, edgeAssignment</code> ({elementType: 'top'|'bottom'|'left'|'right'},
-        'default'/'none' patterns only) <code>, minimizeCrossings, minimizeConnectorLength</code>
-        (both boolean, 'default'/'none' patterns only) — all optional, same defaults as the
-        Remap dialog),
-        <code>smartCheckView(app, tab, options)</code> (options: <code>missingConnectors,
-        missingConnectorsAndNodes, levels, syncWithInventory</code>),
-        <code>smartCheckNode(app, tab, partId, options)</code> (options: same as
-        smartCheckView plus <code>upstream, downstream, byStream, streams</code>),
-        <code>insertSmartStream(app, tab, options)</code> (freeform views only; options:
-        <code>connectorType</code> ('c'|'s'), <code>startPartIds</code> (array of part
-        ids — use <code>findParts</code> to look them up), <code>direction</code>
-        ('both'|'downstream'|'upstream'), <code>endType</code> (element type or null),
-        <code>levels</code> (number or null for unlimited), <code>showTypes</code>
-        (array of element types to keep)). Run (or
-        Ctrl+Enter) defines everything below, then calls your top-level <code>main()</code> —
-        it can call any other functions you've defined alongside it. Edits are saved
-        automatically (Local Settings).
+      <div class="console-tabs" style="display:flex;gap:6px;margin-bottom:10px;">
+        <button type="button" class="tb-btn active" data-tab="console">Console</button>
+        <button type="button" class="tb-btn" data-tab="reference">Reference</button>
       </div>
-      <div id="console-output" style="height:220px;overflow-y:auto;background:var(--bg);border:1px solid var(--border-strong);border-radius:5px;padding:8px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;margin-bottom:8px;"></div>
-      <textarea id="console-input" spellcheck="false" style="width:100%;height:260px;font-family:var(--mono);font-size:12px;box-sizing:border-box;border:1px solid var(--border-strong);border-radius:5px;padding:8px;background:var(--bg);color:var(--text);resize:vertical;"></textarea>
+      <div id="console-tab-console">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
+          Ctrl+Enter or Run calls your top-level <code>main()</code>${modelName ? '' : ' — <span style="color:#c0392b;">no simulation model selected, model will be null</span>'}.
+          Bindings and <code>remap</code>/<code>smartCheckView</code>/<code>smartCheckNode</code>/<code>insertSmartStream</code> options: see the <strong>Reference</strong> tab above.
+          Edits are saved automatically (Local Settings).
+        </div>
+        <div class="console-pane-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+          <span style="font-size:11px;color:var(--text-muted);font-weight:600;">Output</span>
+          <button type="button" class="tb-btn copy-output" style="padding:2px 8px;font-size:11px;">Copy</button>
+        </div>
+        <div id="console-output" style="height:140px;overflow-y:auto;background:var(--bg);border:1px solid var(--border-strong);border-radius:5px;padding:8px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;margin-bottom:8px;"></div>
+        <div class="console-pane-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+          <span style="font-size:11px;color:var(--text-muted);font-weight:600;">Script</span>
+          <button type="button" class="tb-btn copy-script" style="padding:2px 8px;font-size:11px;">Copy</button>
+        </div>
+        <textarea id="console-input" spellcheck="false" style="width:100%;height:340px;font-family:var(--mono);font-size:12px;box-sizing:border-box;border:1px solid var(--border-strong);border-radius:5px;padding:8px;background:var(--bg);color:var(--text);resize:vertical;"></textarea>
+      </div>
+      <div id="console-tab-reference" style="display:none;font-size:12px;">
+        <div class="console-pane-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+          <span style="font-size:11px;color:var(--text-muted);font-weight:600;">Reference</span>
+          <button type="button" class="tb-btn copy-reference" style="padding:2px 8px;font-size:11px;">Copy</button>
+        </div>
+        <div id="console-reference-scroll" style="height:480px;overflow-y:auto;border:1px solid var(--border-strong);border-radius:5px;padding:10px;background:var(--bg);box-sizing:border-box;">
+        <p style="margin-top:0;">Run (or Ctrl+Enter, from the Console tab) defines everything currently in the box —
+        so a <code>function foo() {...}</code> you write becomes callable — then calls exactly one thing, your
+        top-level <code>main()</code>, which is free to call whatever else you've defined alongside it (they all
+        share the same bindings below, without needing them passed in).</p>
+        <table class="docs-table">
+          <thead><tr><th>Binding</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>app</code>, <code>store</code></td><td>Full application/document access — same as any command function uses internally.</td></tr>
+            <tr><td><code>model</code></td><td>The currently-selected simulation model, or <code>null</code> if none is selected.</td></tr>
+            <tr><td><code>findParts({type, model})</code></td><td>Look up parts by type and/or model.</td></tr>
+            <tr><td><code>log(...)</code></td><td>Prints to this console's own output area (above, Console tab).</td></tr>
+            <tr><td><code>messageLog(...)</code></td><td>Writes to the persistent Message Log instead.</td></tr>
+            <tr><td><code>generateIndustry(app, onProgress, placeInView)</code></td><td>Generates a full industry model.</td></tr>
+            <tr><td><code>populateFromTemplate(app, tab, templateName)</code></td><td>Populates a view from a stream template.</td></tr>
+            <tr><td><code>remap(app, tab, options)</code></td><td>options: <code>sortKeys, templateName</code>,
+              <code>pattern</code> (<code>'default'|'none'|'layered'|'force'|'clusters'</code>),
+              <code>limitColumnsToView, visiblePartVmIds, forcePreferRight, forceGroupRows</code>,
+              <code>edgeAssignment</code> (<code>{elementType: 'top'|'bottom'|'left'|'right'}</code>,
+              Default/None/Layered patterns only), <code>minimizeCrossings, minimizeConnectorLength</code>
+              (both boolean, Default/None/Layered only) — all optional, same defaults as the Remap dialog.</td></tr>
+            <tr><td><code>smartCheckView(app, tab, options)</code></td><td>options: <code>missingConnectors,
+              missingConnectorsAndNodes, levels, syncWithInventory</code>.</td></tr>
+            <tr><td><code>smartCheckNode(app, tab, partId, options)</code></td><td>options: same as
+              smartCheckView, plus <code>upstream, downstream, byStream, streams</code>.</td></tr>
+            <tr><td><code>insertSmartStream(app, tab, options)</code></td><td>freeform views only; options:
+              <code>connectorType</code> (<code>'c'|'s'</code>), <code>startPartIds</code> (array of part
+              ids — use <code>findParts</code> to look them up), <code>direction</code>
+              (<code>'both'|'downstream'|'upstream'</code>), <code>endType</code> (element type or
+              <code>null</code>), <code>levels</code> (number or <code>null</code> for unlimited),
+              <code>showTypes</code> (array of element types to keep).</td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
       <div class="modal-actions"><button class="cancel">Close</button><button class="primary run">Run main() (Ctrl+Enter)</button></div>`;
     overlay.appendChild(box);
     root.appendChild(overlay);
 
     const outputEl = box.querySelector('#console-output');
     const inputEl = box.querySelector('#console-input');
+    const referenceScrollEl = box.querySelector('#console-reference-scroll');
     inputEl.value = this.store.batchScriptCode || '';
     inputEl.focus();
+
+    /** Reported directly: "Add 'copy' buttons to the three windows: output, script,
+     * reference to allow user to easily copy individually." One shared handler, one
+     * button per pane, each just supplying which element's text to grab -- textContent
+     * (not innerText) so a copy works even from the Reference pane before its tab has
+     * ever been shown/laid-out (innerText depends on actual rendering). */
+    const copyPaneText = async (getText, label, btn) => {
+      const original = btn.textContent;
+      try {
+        await navigator.clipboard.writeText(getText());
+        this.toast(`Copied ${label} to clipboard.`);
+      } catch (err) {
+        this.toast(`Could not copy ${label} — clipboard access blocked.`, true);
+      }
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = original; }, 1200);
+    };
+    box.querySelector('.copy-output').addEventListener('click', (e) => copyPaneText(() => outputEl.textContent, 'output', e.currentTarget));
+    box.querySelector('.copy-script').addEventListener('click', (e) => copyPaneText(() => inputEl.value, 'script', e.currentTarget));
+    box.querySelector('.copy-reference').addEventListener('click', (e) => copyPaneText(() => referenceScrollEl.textContent, 'reference', e.currentTarget));
+
+    const tabBtns = box.querySelectorAll('.console-tabs button');
+    const tabConsole = box.querySelector('#console-tab-console');
+    const tabReference = box.querySelector('#console-tab-reference');
+    tabBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        tabBtns.forEach((b) => b.classList.toggle('active', b === btn));
+        const isConsole = btn.dataset.tab === 'console';
+        tabConsole.style.display = isConsole ? '' : 'none';
+        tabReference.style.display = isConsole ? 'none' : '';
+        if (isConsole) inputEl.focus();
+      });
+    });
 
     const appendOutput = (text, color) => {
       const line = document.createElement('div');

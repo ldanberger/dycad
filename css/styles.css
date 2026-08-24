@@ -500,6 +500,11 @@ button, select, input { font-family: inherit; font-size: inherit; color: inherit
 .modal-box .prop-row { margin-bottom: 12px; }
 .modal-box-textedit { width: min(640px, 90vw); }
 .modal-box-wide { width: min(620px, 92vw); }
+/* Script Console (promptScriptConsole, main.js): wider than modal-box-textedit since
+   the reference material moved out to its own tab (v0.879) -- the output/input panes
+   left behind are the only two things in the Console tab, so they get to use the
+   freed-up width fully instead of wrapping at the old dialog's narrower measure. */
+.modal-box-console { width: min(920px, 96vw); }
 /* Load SFCCE's mapping step: one row per level (Section/Function/Capability/
    Application Capability/Entity), each with its Field/Description/Id selects laid
    out side by side instead of one .prop-row per select — 5 compact rows instead of

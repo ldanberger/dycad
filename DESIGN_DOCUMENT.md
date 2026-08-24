@@ -135,6 +135,37 @@ see `js/version.js`'s changelog for the rationale). Every dropdown menu shares o
 CSS class capped at `max-height: 70vh; overflow-y: auto`, so a long list scrolls
 instead of running off-screen.
 
+**Script Console's Console/Reference tab split** (`promptScriptConsole`, `main.js`):
+reported directly, *"the script console page is too long ... put [the reference info]
+in a table format ... Can a tab be created ... to only show reference details when
+user selects it? this leaves the two main windows ... wider."* The dialog used to open
+straight into a dense bindings/options paragraph sitting above the output area and
+editor, pushing the whole thing tall on every open. It now opens on a **Console** tab
+(just `#console-output` + `#console-input`, no inline prose) with a separate
+**Reference** tab (hidden until clicked) holding the same bindings/options content as a
+`docs-table` — plain `.tb-btn`/`.tb-btn.active` toggle buttons swap which pane's
+`display` is set, nothing fancier. The dialog itself grew from `modal-box-textedit`
+(`min(640px, 90vw)`) to a new, wider `modal-box-console` (`min(920px, 96vw)`) — since
+the reference text no longer has to read as narrow flowing paragraphs, the two main
+panes get to use the freed-up width. `public/instructions.html`'s own Script Console
+section mirrors the same table (kept as two independently-maintained copies, same
+precedent as every other in-app help text duplicated there).
+
+Direct follow-up, since the dialog was still too tall: *"script console page still too
+long, barely fits at 80%. Make output window half the length and scrollable, and make
+reference part scrollable and have the length on open. Add 'copy' buttons to the three
+windows: output, script, reference to allow user to easily copy individually."*
+`#console-output` dropped from 280px to 140px (still `overflow-y: auto`); the
+Reference tab's content moved inside a new `#console-reference-scroll` wrapper given
+its own fixed height (`480px`) and `overflow-y: auto` set directly in the initial
+`innerHTML` — i.e. already fixed **at open**, not something that only appears/grows
+once the tab is first clicked, so switching tabs never resizes the dialog. Each of the
+three panes (Output, Script, Reference) got its own small header row with a **Copy**
+button — one shared `copyPaneText(getText, label, btn)` handler per button, each
+supplying a different getter (`outputEl.textContent` / `inputEl.value` /
+`referenceScrollEl.textContent`) so a mixed-up wire-up is directly testable (marker
+text unique to each pane, checked against the real clipboard).
+
 ### 5.4 Feedback channels
 
 `app.toast(message, isError)` is the single entry point for user-facing feedback.
