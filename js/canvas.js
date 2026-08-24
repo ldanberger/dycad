@@ -1326,4 +1326,4 @@ function renderDocsPage(app, tab, container) {
     });
 }
 
-export { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, getNodeSize, redrawAndResolveLayout, passesStreamFilter, passesElementTypeFilter, passesSectionFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule };
+export { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, getNodeSize, redrawAndResolveLayout, passesStreamFilter, passesElementTypeFilter, passesSectionFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule, formatSimValue };

@@ -1836,6 +1836,31 @@ so a future session doesn't have to re-derive it from scratch):
     choice for a rendered 3D scene — reusing the exact same `Blob` → `URL
     .createObjectURL` → synthetic `<a download>` → `revokeObjectURL` pattern
     `exportViewAsPng`/`exportViewAsSvg` already use.
+  - **`buildViewSvgString` ignored the view's own display checkboxes.** Reported
+    directly: *"when user does 'export view as image' both types of connectors appear
+    hard coded to show up in image but should only be whatever was selected by view
+    checkboxes for connectors or streams."* Then, clarifying: the view's own property
+    panel (click the view background, not a node/connector) has checkboxes for
+    **Connectors, Streams, Data, Types, Description, Attributes, Keys, Show Simulation
+    Values, and Show Script Badge** (`chkShowConnectorType`/`chkShowStreamType`/
+    `chkShowDataType`/`chkShowElementTypes`/`chkShowDescription`/`chkShowAttributes`/
+    `chkShowKeys`/`chkShowSimValues`/`chkShowScriptBadge`) — *"User selection of these
+    when in view tab should also be applied when creating print or image
+    representation of view."* Root cause: `buildViewSvgString` is a genuinely
+    SEPARATE, hand-written renderer from the real on-screen canvas (`redrawEdges`/
+    `buildNodeEl`, `canvas.js`) — Print already gets every one of these for free (it
+    clones the real, already-filtered on-screen DOM, `printViews`' own doc comment),
+    but the SVG/PNG export path builds its own image independently and had simply
+    never been taught about six of these nine toggles. `chkShowElementTypes`/
+    `chkShowDescription` already worked; the connector loop now skips a connector
+    whose type's own checkbox is off (matching `redrawEdges` exactly), and the node
+    loop now also draws attribute rows (`chkShowAttributes`, DataEntityDetails only,
+    reusing `isAttributeForeignKey`, `render.js`), the `vm:`/`obj:` debug id text
+    (`chkShowKeys`, on both nodes and connector midpoints), and the two live-simulation
+    badges (`chkShowSimValues`/`chkShowScriptBadge`, reading `store.simRuntime` — the
+    same state `buildNodeEl` reads, via a newly-exported `formatSimValue`,
+    `canvas.js`) — all gated exactly like `buildNodeEl`'s own conditions, just
+    hand-drawn as SVG `<rect>`/`<text>` instead of styled `<div>`s.
 
 ## 10. Testing strategy
 

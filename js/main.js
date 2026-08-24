@@ -1,8 +1,8 @@
 import { loadAllData } from './data.js';
 import { Store, ciEq, newId } from './state.js';
 import { parseArchimateXml } from './archimate.js';
-import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields } from './render.js';
-import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule } from './canvas.js';
+import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields, isAttributeForeignKey } from './render.js';
+import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule, formatSimValue } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
 import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors } from './commands.js';
 import { APP_VERSION } from './version.js';
@@ -3033,6 +3033,10 @@ class App {
 
     const showTypes = view?.chkShowElementTypes;
     const showDescription = view?.chkShowDescription;
+    const showAttributes = view?.chkShowAttributes;
+    const showKeys = view?.chkShowKeys;
+    const showSimValues = view?.chkShowSimValues;
+    const showScriptBadge = view?.chkShowScriptBadge;
     const xs = [...partVms.map((vm) => vm.x), ...partVms.map((vm) => vm.x + nodeW), ...sectionLayout.map((e) => e.left), ...sectionLayout.map((e) => e.left + e.width)];
     const ys = [...partVms.map((vm) => vm.y), ...partVms.map((vm) => vm.y + nodeH), ...sectionLayout.map((e) => e.top), ...sectionLayout.map((e) => e.top + e.height)];
     const minX = Math.min(...xs), maxX = Math.max(...xs);
@@ -3074,6 +3078,15 @@ class App {
       const fromVm = this.store.findViewMember(cvm.fromVmId);
       const toVm = this.store.findViewMember(cvm.toVmId);
       if (!conn || !fromVm || !toVm) continue;
+      // Reported directly: "when user does 'export view as image' both types of
+      // connectors appear hard coded to show up in image but should only be whatever
+      // was selected by view checkboxes for connectors or streams" -- the on-screen
+      // canvas (redrawEdges, canvas.js) already gates connector visibility on these
+      // three view-level toggles; this export had its own, separate connector-drawing
+      // loop that never checked them at all.
+      if (conn.connectorType === 'c' && view?.chkShowConnectorType === false) continue;
+      if (conn.connectorType === 's' && view?.chkShowStreamType === false) continue;
+      if (conn.connectorType === 'd' && view?.chkShowDataType === false) continue;
       const fCenter = { x: fromVm.x - ox + halfW, y: fromVm.y - oy + halfH };
       const tCenter = { x: toVm.x - ox + halfW, y: toVm.y - oy + halfH };
       const dx = tCenter.x - fCenter.x, dy = tCenter.y - fCenter.y;
@@ -3104,6 +3117,11 @@ class App {
       if (style?.fromLineEndSettingType && lineEnds[style.fromLineEndSettingType]?.path) pathHtml += ` marker-start="url(#marker-${style.fromLineEndSettingType}-${endSize})"`;
       pathHtml += '/>';
       parts.push(pathHtml);
+
+      if (showKeys) {
+        const midX = (fc.x + tc.x) / 2, midY = (fc.y + tc.y) / 2;
+        parts.push(`<text x="${midX}" y="${midY - 10}" text-anchor="middle" font-size="9" fill="#333" opacity="0.6">${escapeHtml(`vm:${cvm.id}`)}<tspan x="${midX}" dy="11">${escapeHtml(`obj:${conn.id}`)}</tspan></text>`);
+      }
     }
 
     for (const vm of partVms) {
@@ -3145,6 +3163,56 @@ class App {
         for (const line of descLines) {
           cursorY += 11;
           parts.push(`<text x="${x + padX}" y="${cursorY}" font-size="10" fill="#1c2128" opacity="0.8">${escapeHtml(line)}</text>`);
+        }
+      }
+      // Direct follow-up to the connector-type fix above: "view checkboxes for
+      // connectors or streams... Types, Description, Attributes, Keys, Show
+      // Simulation Values, and Show Script Badge... should also be applied when
+      // creating print or image representation of view." Types/Description already
+      // were (showTypes/showDescription, above) -- Attributes/Keys/Sim Values/Script
+      // Badge were simply never drawn here at all, matching buildNodeEl's own gating
+      // (canvas.js) content-for-content (Print already gets these for free, since it
+      // clones the real, already-filtered on-screen DOM instead of using this
+      // separate renderer).
+      if (showAttributes && ciEq(part.type, 'DataEntityDetails') && (part.attributes || []).length) {
+        cursorY += 2;
+        parts.push(`<line x1="${x + padX}" y1="${cursorY}" x2="${x + nodeW - padX}" y2="${cursorY}" stroke="rgba(0,0,0,0.15)" stroke-width="1"/>`);
+        for (const a of part.attributes) {
+          cursorY += 11.5;
+          const pk = a.isPrimaryKey ? '🔑 ' : '';
+          const fk = isAttributeForeignKey(this.store, a.id) ? ' (FK)' : '';
+          parts.push(`<text x="${x + padX}" y="${cursorY}" font-size="9.5" fill="#1c2128">${escapeHtml(`${pk}${a.name || '(unnamed)'}${fk}: ${a.dataType || ''}`)}</text>`);
+        }
+      }
+      if (showKeys) {
+        cursorY += 11;
+        parts.push(`<text x="${x + padX}" y="${cursorY}" font-size="9" fill="#1c2128" opacity="0.5">${escapeHtml(`vm:${vm.id}`)}</text>`);
+        cursorY += 11;
+        parts.push(`<text x="${x + padX}" y="${cursorY}" font-size="9" fill="#1c2128" opacity="0.5">${escapeHtml(`obj:${part.id}`)}</text>`);
+      }
+      if (showSimValues) {
+        const runtime = this.store.simRuntime.get(part.model);
+        const entry = runtime ? runtime.values.get(part.id) : null;
+        if (entry) {
+          const hasError = !!entry.lastError;
+          const display = hasError ? 'ERR' : formatSimValue(entry.value);
+          const bg = hasError ? '#c0392b' : (entry.changed ? '#2f6fed' : '#2f8f4e');
+          const bw = Math.max(24, display.length * 6 + 12);
+          const by = y + nodeH - 8;
+          parts.push(`<rect x="${x - 8}" y="${by}" width="${bw}" height="16" rx="8" fill="${bg}"/>`);
+          parts.push(`<text x="${x - 8 + bw / 2}" y="${by + 11}" font-size="9" font-family="monospace" fill="#fff" text-anchor="middle">${escapeHtml(display)}</text>`);
+        }
+      }
+      if (showScriptBadge) {
+        const runtime = this.store.simRuntime.get(part.model);
+        const entry = runtime ? runtime.values.get(part.id) : null;
+        if (entry && entry.badge) {
+          const text = entry.badge.text || '';
+          const bw = Math.max(24, text.length * 6 + 12);
+          const by = y + nodeH - 8;
+          const bx = x + nodeW - 2 - bw;
+          parts.push(`<rect x="${bx}" y="${by}" width="${bw}" height="16" rx="8" fill="${escapeHtml(entry.badge.color || '#333')}"/>`);
+          parts.push(`<text x="${bx + bw / 2}" y="${by + 11}" font-size="9" font-family="monospace" fill="#fff" text-anchor="middle">${escapeHtml(text)}</text>`);
         }
       }
     }

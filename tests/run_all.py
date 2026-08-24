@@ -6541,6 +6541,154 @@ def check_view3d_disposed_on_full_document_load(page):
     return True, "a genuine File > Load disposes the open 3D tab's WebGL instance before replacing the document, instead of leaking it"
 
 
+def check_export_svg_respects_connector_type_checkboxes(page):
+    """Regression guard, reported directly: "when user does 'export view as image' both
+    types of connectors appear hard coded to show up in image but should only be
+    whatever was selected by view checkboxes for connectors or streams." Root cause:
+    buildViewSvgString (main.js, used by both Export View as Image's SVG and PNG
+    paths) is a SEPARATE, purpose-built renderer from the real on-screen canvas
+    (redrawEdges, canvas.js) -- and unlike redrawEdges, it never checked the view's own
+    chkShowConnectorType/chkShowStreamType/chkShowDataType toggles (set via the
+    view's own property panel, clicking the view background rather than any node/
+    connector) at all, always drawing every placed connector regardless of type. Uses
+    a DOMParser + `:scope > path` selector to count only the connector paths actually
+    drawn as direct children of the root <svg> -- NOT the arrowhead/marker <path>
+    elements nested inside <defs><marker>, which are always present regardless of
+    which connector types are showing and would otherwise make a naive count wrong.
+    Covers all three connectorTypes independently, and confirms turning one off
+    doesn't affect the others."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const view = store.addView('RegrSvgConnType_' + Date.now(), 'ff');
+      view.chkShowStreamType = true; // 'ff' views default this to false -- turn on for this test
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const a = store.createPart({ type: 'BusinessFunction', label: 'RegrSvgCTa', model, streams: [] });
+      const b = store.createPart({ type: 'BusinessFunction', label: 'RegrSvgCTb', model, streams: [] });
+      const vmA = store.createViewMember({ view: view.id, objectType: 'part', objectId: a.id, x: 40, y: 40 });
+      const vmB = store.createViewMember({ view: view.id, objectType: 'part', objectId: b.id, x: 300, y: 40 });
+      const mkConn = (connectorType) => {
+        const conn = store.createConnector({ from: a.id, to: b.id, connectorType, model, relationship: 'Association' });
+        store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn.id, fromVmId: vmA.id, toVmId: vmB.id });
+      };
+      mkConn('c'); mkConn('s'); mkConn('d');
+
+      const countPaths = () => {
+        const svg = app.buildViewSvgString(view).svgString;
+        const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+        return doc.documentElement.querySelectorAll(':scope > path').length;
+      };
+
+      const out = {};
+      out.allThreeOn = countPaths();
+
+      view.chkShowConnectorType = false;
+      out.connectorOffCount = countPaths();
+      view.chkShowConnectorType = true;
+
+      view.chkShowStreamType = false;
+      out.streamOffCount = countPaths();
+      view.chkShowStreamType = true;
+
+      view.chkShowDataType = false;
+      out.dataOffCount = countPaths();
+      view.chkShowDataType = true;
+
+      view.chkShowConnectorType = false;
+      view.chkShowStreamType = false;
+      view.chkShowDataType = false;
+      out.allThreeOff = countPaths();
+
+      return out;
+    }
+    """)
+    problems = []
+    if result["allThreeOn"] != 3:
+        problems.append(f"expected 3 connector paths (one 'c', one 's', one 'd') with all three checkboxes on, got {result['allThreeOn']}")
+    if result["connectorOffCount"] != 2:
+        problems.append(f"expected unchecking chkShowConnectorType to drop exactly the 'c' path (3 -> 2), got {result['connectorOffCount']}")
+    if result["streamOffCount"] != 2:
+        problems.append(f"expected unchecking chkShowStreamType to drop exactly the 's' path (3 -> 2), got {result['streamOffCount']}")
+    if result["dataOffCount"] != 2:
+        problems.append(f"expected unchecking chkShowDataType to drop exactly the 'd' path (3 -> 2), got {result['dataOffCount']}")
+    if result["allThreeOff"] != 0:
+        problems.append(f"expected unchecking all three to leave zero connector paths, got {result['allThreeOff']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Export View as Image's SVG builder now respects the view's own chkShowConnectorType/chkShowStreamType/chkShowDataType checkboxes exactly like the real on-screen canvas does, instead of always drawing every connector type regardless"
+
+
+def check_export_svg_respects_content_checkboxes(page):
+    """Regression guard, direct follow-up clarifying the report above: the view's own
+    property panel (click the view background, not a node/connector) also has
+    Types, Description, Attributes, Keys, Show Simulation Values, and Show Script
+    Badge checkboxes -- "User selection of these when in view tab should also be
+    applied when creating print or image representation of view." Types/Description
+    were already respected by buildViewSvgString; Attributes/Keys/Sim Values/Script
+    Badge were never drawn there at all (Print already gets these for free, since it
+    clones the real, already-filtered on-screen DOM instead of using this separate
+    renderer -- see printViews' own doc comment). Covers each of the four newly-added
+    ones turning its own content on/off in the exported SVG, using a DataEntityDetails
+    part (for Attributes) and fabricated store.simRuntime data (for Sim Values/Script
+    Badge, which read live simulation state)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const view = store.addView('RegrSvgContent_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const a = store.createPart({ type: 'BusinessFunction', label: 'RegrSvgContentA', model, streams: [] });
+      const vmA = store.createViewMember({ view: view.id, objectType: 'part', objectId: a.id, x: 40, y: 40 });
+      const ded = store.createPart({ type: 'DataEntityDetails', label: 'RegrSvgContentTable', model, streams: [], attributes: [{ id: 'regrAttr1', name: 'RegrAttrName', dataType: 'numeric', isPrimaryKey: true }] });
+      const vmDed = store.createViewMember({ view: view.id, objectType: 'part', objectId: ded.id, x: 300, y: 40 });
+      store.simRuntime.set(model, { values: new Map([[a.id, { value: 'RegrSimVal', lastTick: 1, changed: false, badge: { text: 'RegrBadgeText', color: '#123456' } }]]) });
+
+      const getSvg = () => app.buildViewSvgString(view).svgString;
+      const out = {};
+
+      view.chkShowAttributes = true;
+      out.attrsOn = getSvg().includes('RegrAttrName');
+      view.chkShowAttributes = false;
+      out.attrsOff = getSvg().includes('RegrAttrName');
+      view.chkShowAttributes = true;
+
+      view.chkShowKeys = true;
+      out.keysOn = getSvg().includes(`vm:${vmA.id}`);
+      view.chkShowKeys = false;
+      out.keysOff = getSvg().includes(`vm:${vmA.id}`);
+      view.chkShowKeys = true;
+
+      view.chkShowSimValues = true;
+      out.simOn = getSvg().includes('RegrSimVal');
+      view.chkShowSimValues = false;
+      out.simOff = getSvg().includes('RegrSimVal');
+      view.chkShowSimValues = true;
+
+      view.chkShowScriptBadge = true;
+      out.badgeOn = getSvg().includes('RegrBadgeText');
+      view.chkShowScriptBadge = false;
+      out.badgeOff = getSvg().includes('RegrBadgeText');
+      view.chkShowScriptBadge = true;
+
+      return out;
+    }
+    """)
+    problems = []
+    for name, label in [("attrs", "chkShowAttributes"), ("keys", "chkShowKeys"), ("sim", "chkShowSimValues"), ("badge", "chkShowScriptBadge")]:
+        if not result[f"{name}On"]:
+            problems.append(f"expected {label}=true to include its content in the exported SVG, got {result}")
+        if result[f"{name}Off"]:
+            problems.append(f"expected {label}=false to EXCLUDE its content from the exported SVG, got {result}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Export View as Image's SVG builder now also respects chkShowAttributes/chkShowKeys/chkShowSimValues/chkShowScriptBadge, matching the real on-screen canvas content-for-content"
+
+
 def check_export_view3d_as_image(page):
     """Regression guard/new-feature check, reported directly: "enable 'export view as
     image' for 3d view." File > Export View as Image (App.promptExportViewAsImage,
@@ -10309,6 +10457,8 @@ CHECKS = [
     check_view3d_reset_pinned_positions,
     check_view3d_highlight_type_picker,
     check_view3d_disposed_on_full_document_load,
+    check_export_svg_respects_connector_type_checkboxes,
+    check_export_svg_respects_content_checkboxes,
     check_export_view3d_as_image,
     check_view3d_section_boundaries,
     check_generate_industry_propagates_section_to_whole_chain,

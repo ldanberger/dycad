@@ -3835,4 +3835,32 @@
 // pre-existing staleness there: it said the Insert Smart Stream example traces via
 // "Connectors" when the actual code, and its own comment, explicitly uses 's' Streams).
 // Full suite 136/136.
-export const APP_VERSION = '0.884';
+// v0.885: direct follow-up, reported after running the updated example script: "when
+// user does 'export view as image' both types of connectors appear hard coded to
+// show up in image but should only be whatever was selected by view checkboxes for
+// connectors or streams." Investigated and ruled out the 3D View's own Connector Type
+// filter (verified working correctly, on-screen and on export) before finding the
+// real root cause: buildViewSvgString (main.js), the separate hand-written SVG
+// renderer Export View as Image's SVG/PNG paths both use, never checked the view's
+// own chkShowConnectorType/chkShowStreamType/chkShowDataType checkboxes at all
+// (redrawEdges, canvas.js, already did, for the real on-screen canvas) -- always drew
+// every placed connector regardless of type. Clarifying follow-up broadened this to
+// all nine of the view's own display checkboxes (click the view background, not a
+// node/connector, for its property panel): chkShowElementTypes/chkShowDescription
+// were already respected; chkShowAttributes/chkShowKeys/chkShowSimValues/
+// chkShowScriptBadge were never drawn in the export at all (Print already gets these
+// for free -- it clones the real, already-filtered on-screen DOM instead of using
+// this separate renderer). All six now match buildNodeEl's own gating content-for-
+// content; formatSimValue newly exported from canvas.js, isAttributeForeignKey newly
+// imported from render.js into main.js. New check_export_svg_respects_connector_
+// type_checkboxes and check_export_svg_respects_content_checkboxes -- both proven to
+// catch a reintroduced regression and reverted (the former counts only real
+// connector <path> elements via :scope > path, since the always-present arrowhead/
+// marker <path>s inside <defs><marker> would otherwise mask a broken filter). Root-
+// caused during investigation, worth noting for future work: the batch script's new
+// BatchScript_SmartCheckViewExample step (v0.884) is what makes the Smart Stream
+// Example view's own 'c'-type companion connectors visible for the first time (via
+// missingConnectors) -- genuine content the user can now choose to hide per-view via
+// these same checkboxes, not a bug in that step itself. DESIGN_DOCUMENT.md SS9 and
+// tests/README.md updated. Full suite 138/138.
+export const APP_VERSION = '0.885';
