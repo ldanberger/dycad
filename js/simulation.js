@@ -22,7 +22,19 @@ import { isSectionViewType, createSectionPlacer } from './sections.js';
 // loadSimSnapshot below).
 //
 // Script contract: a Part's `script` field is the BODY of a function, invoked as
-// `new Function('ctx', part.script)`, where:
+// `new Function('ctx', store.batchScriptCode + '\n' + part.script)` (runTick, below) —
+// reported directly: "Create a common script in script console example that can be
+// called from any part script." Prepending store.batchScriptCode (the Script Console's
+// own editable text, state.js's DEFAULT_BATCH_SCRIPT_CODE by default) means every
+// function/const it defines is in scope for every part script too, so a part's own
+// script can call any of them by name using its own `ctx` — see
+// CommonScript_Example(ctx) (state.js), a ready-made example that logs "called by
+// <type> <label> <model>" via ctx.log/ctx.part. batchScriptCode's OTHER top-level
+// functions (main, BatchScript_*, dataAutoFill) reference free variables (app, store,
+// ...) that aren't in scope here — calling one of THOSE from a part script would throw
+// (caught by the same per-part try/catch below, same as any other script error); they
+// simply sit defined-but-unused otherwise, same as in the Script Console's own
+// execution. `ctx` below is the ONLY parameter a part script itself receives:
 //   ctx = { part, inputs, responses, state, tick, log, secrets, setState, loadedFileName, findParts, currentView, defaultModel, createPart, createConnector, createNode, createNodeConnector }
 //     - part: the Part record itself (id, type, label, ...)
 //     - inputs: one entry per incoming connector (within this part's model) this tick —
@@ -370,7 +382,12 @@ function runTick(app, modelName) {
 
     if (part.scriptEnabled && part.script) {
       try {
-        const fn = new Function('ctx', part.script);
+        // Prepend the Script Console's own text (store.batchScriptCode) so every
+        // function/const it defines -- CommonScript_Example, and anything else a
+        // person adds alongside it -- is directly callable by name from this part's
+        // own script below, using the exact same `ctx` this call already builds. See
+        // this file's own top-of-file script-contract comment for the full rationale.
+        const fn = new Function('ctx', `${store.batchScriptCode || ''}\n${part.script}`);
         const out = fn({
           part, inputs, responses, state: prevState, tick: runtime.tick,
           log: (message) => pushMessageLog(store, `[${part.label}] ${message}`),

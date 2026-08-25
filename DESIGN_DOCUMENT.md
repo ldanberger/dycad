@@ -1669,6 +1669,33 @@ acknowledgement/feedback flows running opposite the connector direction. A Part 
 script and exactly one input passes it through unchanged. Full contract documented for
 end users in `public/instructions.html`.
 
+**Common scripts callable from any part script**: reported directly — *"Create a common
+script in script console example that can be called from any part script. Within the
+new script I want to take action based on calling part type, label, and model. As an
+example have the script send to message log something like 'called by ' part type,
+label, and model."* `runTick` now compiles a Part's script as `new Function('ctx',
+store.batchScriptCode + '\n' + part.script)` instead of just `new Function('ctx',
+part.script)` — every function/const the Script Console's own text
+(`store.batchScriptCode`) defines is therefore in scope inside EVERY part script too, so
+a part's script can call any of them by name, using its own `ctx`. This is the THIRD
+kind of entry point `DEFAULT_BATCH_SCRIPT_CODE` (state.js) hosts, alongside `main()`'s
+own `BatchScript_*` chain and `dataAutoFill()` (§7a) — `CommonScript_Example(ctx)` ships
+as the reported example (`ctx.log('called by ' + ctx.part.type + ' ' + ctx.part.label +
+' ' + ctx.part.model)`), and `CommonScript_<Name>` is the naming convention for future
+additions meant to be called this way. `batchScriptCode`'s OTHER top-level functions
+(`main`, `BatchScript_*`, `dataAutoFill`) reference free variables (`app`, `store`, ...)
+that aren't in scope for a part script — calling one of THOSE from a part script throws
+(caught by the same per-part try/catch as any other script error); they simply sit
+defined-but-unused otherwise, exactly as they already do inside each other's own
+executions today (e.g. `dataAutoFill` is equally inert from inside `main()`, and vice
+versa, unless explicitly called). New `check_common_script_callable_from_part_script`
+(`tests/run_all.py`): the shipped default logs the exact reported message; a person's
+own CUSTOM function added to `store.batchScriptCode` is equally callable (proving this
+is a general mechanism, not special-cased to the one shipped example); an ORDINARY part
+script with no `batchScriptCode` dependency at all behaves exactly as before (purely
+additive) — proven via TEMP BREAK reverting the prepend, which fails with
+"CommonScript_Example is not defined".
+
 ## 9. The 3D View subsystem (`view3d.js`)
 
 A rotatable/zoomable WebGL scene over `store.doc.parts`/`connectors` directly —

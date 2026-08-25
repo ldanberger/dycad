@@ -24,7 +24,17 @@
  * (App.promptAutofill, main.js) by name, NOT through main() — main() unconditionally
  * chaining it would break on a fresh document with no Data Entity Details tables yet.
  * It's still edited/persisted exactly like everything else here (Script Console,
- * store.batchScriptCode, Local Settings). */
+ * store.batchScriptCode, Local Settings).
+ *
+ * `CommonScript_Example()` (below, after dataAutoFill) is a THIRD kind of entry point,
+ * reported directly: "Create a common script in script console example that can be
+ * called from any part script." Every function/const defined ANYWHERE in this text is
+ * automatically in scope inside every PART's own script too (a Part's Script property
+ * field, run once per simulation tick) — runTick (simulation.js) prepends this whole
+ * text ahead of a part's script before compiling it, so CommonScript_Example is
+ * callable BY NAME from any part's own script, using that script's own `ctx`. Naming
+ * convention for future additions meant to be called this way:
+ * `CommonScript_<Name>`. */
 const DEFAULT_BATCH_SCRIPT_CODE = `// main() is what the Script Console's Run button actually calls. Define whatever
 // batch scripts you like below, and have main() call whichever one(s) you want to run.
 async function main() {
@@ -263,6 +273,28 @@ function dataAutoFill() {
   app.recordAndRender();
   const skipSuffix = connectorsSkippedNoPk > 0 ? (', ' + connectorsSkippedNoPk + ' connector(s) skipped (source table has no primary key yet)') : '';
   return 'Autofill: ' + tablesScaffolded + ' table(s) scaffolded, ' + connectorsWired + ' connector(s) wired' + skipSuffix + '.';
+}
+
+// Common script: a THIRD kind of entry point (alongside main()'s own BatchScript_*
+// chain above and dataAutoFill above) — NOT called from main(), and not extracted by
+// name from any menu item either. Instead, every function/const defined anywhere in
+// this text is automatically in scope inside every PART's own script (the Script
+// field on a Part, run once per simulation tick — see simulation.js's own
+// script-contract comment for the full ctx shape) — runTick (simulation.js) compiles
+// each part's script as new Function('ctx', store.batchScriptCode + newline +
+// part.script), so this whole file is effectively prepended ahead of every part
+// script before it runs, making CommonScript_Example (and anything else defined
+// alongside it here) directly callable BY NAME from any part's own script, using the
+// exact same ctx that script's own body already receives. Naming convention for
+// future additions meant to be called this way, from a part script rather than from
+// main() or a menu item: CommonScript_<Name>, kept visually distinct from
+// BatchScript_<Name> (main()) and dataAutoFill (Data Modeling > Autofill).
+//
+// A part's own script can use this like:
+//   CommonScript_Example(ctx);
+//   return { value: ctx.inputs[0]?.value };
+function CommonScript_Example(ctx) {
+  ctx.log('called by ' + ctx.part.type + ' ' + ctx.part.label + ' ' + ctx.part.model);
 }
 `;
 

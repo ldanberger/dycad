@@ -3813,6 +3813,102 @@ def check_batch_script_code_persists_with_local_settings(page):
     return True, "batchScriptCode loads from a Local Settings file, caches to localStorage, and auto-applies on the next page load with no file re-selection"
 
 
+def check_common_script_callable_from_part_script(page):
+    """Regression guard/new-feature check, reported directly: "Create a common script
+    in script console example that can be called from any part script. Within the new
+    script I want to take action based on calling part type, label, and model. As an
+    example have the script send to message log something like 'called by ' part type,
+    label, and model." runTick (simulation.js) now compiles a part's own script as
+    `new Function('ctx', store.batchScriptCode + '\\n' + part.script)` instead of just
+    `new Function('ctx', part.script)` — every function/const store.batchScriptCode
+    defines (the Script Console's own editable text) is therefore in scope inside every
+    part script too. DEFAULT_BATCH_SCRIPT_CODE (state.js) ships a ready-made
+    CommonScript_Example(ctx) doing exactly the reported example: `ctx.log('called by '
+    + ctx.part.type + ' ' + ctx.part.label + ' ' + ctx.part.model)`. Covers: (1) the
+    shipped default — a part with no edits to store.batchScriptCode at all, whose own
+    script just calls CommonScript_Example(ctx), produces the exact expected message in
+    the persistent Message Log after one tick, and the tick itself reports no error
+    (proving the function is genuinely callable, not just present as dead text); (2) the
+    GENERAL mechanism, not just the shipped example — a person's own CUSTOM function
+    added to store.batchScriptCode (simulating an edit via the Script Console) is
+    equally callable from a part script, using that function's own return value to
+    influence the part's `value` output, not just logging; (3) an ORDINARY part script
+    that never references any batchScriptCode function at all still behaves exactly as
+    before (a plain `return { value: ... }` with no dependency on the new prefix) --
+    proving this is additive, not a breaking change to the existing script contract."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+      const model = store.defaultModel;
+
+      // (1) shipped default CommonScript_Example, unmodified store.batchScriptCode.
+      const callerPart = store.createPart({
+        type: 'GeneralActor', label: 'CommonScriptCaller', model, streams: [],
+        script: 'CommonScript_Example(ctx); return { value: 1 };', scriptEnabled: true,
+      });
+
+      // (3) an ordinary script with no dependency on batchScriptCode at all.
+      const plainPart = store.createPart({
+        type: 'GeneralActor', label: 'PlainScriptCaller', model, streams: [],
+        script: 'return { value: 42 };', scriptEnabled: true,
+      });
+
+      sim.stepSimulation(app, model);
+
+      const rt1 = store.simRuntime.get(model);
+      const callerEntry1 = rt1.values.get(callerPart.id);
+      const plainEntry1 = rt1.values.get(plainPart.id);
+      const logHasDefaultMessage = store.messageLog.some(e => JSON.stringify(e).includes(
+        'called by GeneralActor CommonScriptCaller ' + model));
+
+      // (2) a person's OWN custom function added to store.batchScriptCode -- simulates
+      // editing it via the Script Console (same mechanism check_batch_script_code_
+      // persists_with_local_settings uses to replace it wholesale) -- callable from a
+      // part script too, using its return value in the part's own output.
+      store.batchScriptCode = store.batchScriptCode + '\\nfunction CommonScript_Double(n) { return n * 2; }';
+      const doublerPart = store.createPart({
+        type: 'GeneralActor', label: 'DoublerCaller', model, streams: [],
+        script: 'return { value: CommonScript_Double(21) };', scriptEnabled: true,
+      });
+      sim.stepSimulation(app, model);
+      const rt2 = store.simRuntime.get(model);
+      const doublerEntry = rt2.values.get(doublerPart.id);
+      const plainEntry2 = rt2.values.get(plainPart.id);
+
+      return {
+        callerError: callerEntry1?.lastError,
+        callerValue: callerEntry1?.value,
+        logHasDefaultMessage,
+        plainValue1: plainEntry1?.value,
+        plainError1: plainEntry1?.lastError,
+        doublerError: doublerEntry?.lastError,
+        doublerValue: doublerEntry?.value,
+        plainValue2: plainEntry2?.value,
+        plainError2: plainEntry2?.lastError,
+      };
+    }
+    """)
+    problems = []
+    if result["callerError"]:
+        return False, f"expected a part calling the shipped CommonScript_Example(ctx) to run without error, got {result['callerError']}"
+    if result["callerValue"] != 1:
+        problems.append(f"expected the calling part's own returned value (1) to still come through unaffected, got {result['callerValue']}")
+    if not result["logHasDefaultMessage"]:
+        problems.append("expected the Message Log to contain 'called by GeneralActor CommonScriptCaller <model>' after CommonScript_Example(ctx) ran")
+    if result["plainError1"] or result["plainValue1"] != 42:
+        problems.append(f"expected an ordinary part script with no batchScriptCode dependency to behave exactly as before, got value={result['plainValue1']} error={result['plainError1']}")
+    if result["doublerError"]:
+        problems.append(f"expected a part calling a CUSTOM function just added to store.batchScriptCode to run without error, got {result['doublerError']}")
+    if result["doublerValue"] != 42:
+        problems.append(f"expected CommonScript_Double(21), called from a part script, to return 42, got {result['doublerValue']}")
+    if result["plainError2"] or result["plainValue2"] != 42:
+        problems.append(f"expected the ordinary part script to still behave the same on a later tick too (after batchScriptCode was edited), got value={result['plainValue2']} error={result['plainError2']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "a part's own script can call ANY function store.batchScriptCode defines -- both the shipped CommonScript_Example(ctx) (logging 'called by <type> <label> <model>') and a person's own custom addition -- while an ordinary part script with no such dependency behaves exactly as before"
+
+
 def check_smart_stream_preset_local_persistence(page):
     """Regression guard: Insert Smart Stream's named presets (store.smartStreamPresets)
     are Local Settings — reported directly: "Add ability to create and maintain a list
@@ -11269,6 +11365,7 @@ CHECKS = [
     check_pinned_field_dblclick_not_stolen_by_pin_icon,
     check_local_secrets_settings_split,
     check_batch_script_code_persists_with_local_settings,
+    check_common_script_callable_from_part_script,
     check_smart_stream_preset_local_persistence,
     check_smart_stream_preset_dialog_save_and_load,
     check_instructions_closed_persists_across_reload,

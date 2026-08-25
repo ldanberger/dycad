@@ -788,6 +788,17 @@ Assignment needed — Business Function and General Actor land on the top row fo
 script also defines <code>dataAutoFill()</code>, which <strong>Data Modeling &gt; Autofill</strong> (see above)
 calls directly by name instead, since it only makes sense to run against a view that already has Data Entity
 Details tables on it. Editing <code>dataAutoFill()</code> here changes what that menu item does.</p>
+<p>A third kind of function belongs here too: anything meant to be called from a <strong>part's own script</strong>
+(see "Node Scripting / Simulation" below), not from <code>main()</code> or a menu item. Every function/const
+defined anywhere in this Script Console text is automatically in scope inside every part script — a part's
+script can call it by name, using its own <code>ctx</code>. The default script ships one ready-made example,
+<code>CommonScript_Example(ctx)</code>, which logs <code>"called by &lt;type&gt; &lt;label&gt; &lt;model&gt;"</code>
+to the Message Log using the CALLING part's own <code>ctx.part</code> — a part's script just needs a line like
+<code>CommonScript_Example(ctx);</code>. The convention for adding your own is
+<code>CommonScript_&lt;Name&gt;</code>, kept visually distinct from <code>BatchScript_&lt;Name&gt;</code>
+(<code>main()</code>) and <code>dataAutoFill</code> (Autofill). A common function you write this way can use
+anything its own <code>ctx</code> parameter provides — it has no access to <code>app</code>/<code>store</code>
+directly, the same restriction any part script already has.</p>
 
 <h3>Code Summary</h3>
 <p>Advanced &gt; Code Summary opens a read-only listing of the Script Console's own text plus every part's own

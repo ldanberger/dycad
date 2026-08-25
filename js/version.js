@@ -4080,4 +4080,29 @@
 // every other node's bounding box for genuine intersection, proven via TEMP BREAK to
 // reproduce all 4 real overlaps before this criterion existed, then reverted.
 // DESIGN_DOCUMENT.md SS6 and tests/README.md updated. Full suite 147/147.
-export const APP_VERSION = '0.893';
+// v0.894: reported directly: "Create a common script in script console example that
+// can be called from any part script. Within the new script I want to take action
+// based on calling part type, label, and model. As an example have the script send to
+// message log something like 'called by ' part type, label, and model." runTick
+// (simulation.js) now compiles a part's own script as new Function('ctx',
+// store.batchScriptCode + newline + part.script) instead of just new Function('ctx',
+// part.script) -- every function/const the Script Console's own text defines is
+// therefore in scope inside every part script too, callable by name using that
+// script's own ctx. New CommonScript_Example(ctx) (state.js, DEFAULT_BATCH_SCRIPT_CODE)
+// ships as the reported example, logging "called by <type> <label> <model>" via
+// ctx.log/ctx.part -- a THIRD kind of entry point this file hosts, alongside main()'s
+// BatchScript_* chain and dataAutoFill; CommonScript_<Name> is the naming convention
+// for future additions meant to be called from a part script. Caught and fixed a real
+// authoring bug along the way: using a raw '\n' inside a comment INSIDE the
+// DEFAULT_BATCH_SCRIPT_CODE template literal gets interpreted as an actual newline by
+// the OUTER template literal (not left as literal backslash-n), corrupting the string
+// -- fixed by writing it as plain "newline" in prose there instead of a stray
+// backtick/backslash-n. New check_common_script_callable_from_part_script (tests/
+// run_all.py): the shipped default logs the exact reported message; a person's own
+// custom function added to store.batchScriptCode is equally callable (a general
+// mechanism, not special-cased to the shipped example); an ordinary part script with
+// no batchScriptCode dependency behaves exactly as before -- proven via TEMP BREAK
+// reverting the prepend ("CommonScript_Example is not defined"), then reverted.
+// DESIGN_DOCUMENT.md SS8 and public/instructions.html updated (a new paragraph next to
+// dataAutoFill's own). Full suite 148/148.
+export const APP_VERSION = '0.894';
