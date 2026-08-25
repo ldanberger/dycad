@@ -1364,7 +1364,24 @@ def check_batch_script_quickstart(page):
     newly introduced here — so these become two genuinely distinct Parts (confirmed via
     each one's own distinct id) that simply share a label, the same as the pre-existing
     Application-layer "Manufacturing Operations"/"Production Planning" pairs already
-    documented below."""
+    documented below. Then, direct follow-up in the same session: "in script console
+    function main, after 'await BatchScript_RemapExample();' line add [an
+    InsertSmartStreamExample2 call, a messageLog reminder, and a return] and remove
+    from function BatchScript_InsertSmartStream2 the first if statement after 'let
+    tab =...', replace with unconditional [a store.addView/createCanvasTab/
+    switchToTab sequence]" (see main()/BatchScript_InsertSmartStreamExample2's own
+    source, state.js, for the exact wording used) — main() now runs BOTH
+    Insert Smart Stream examples every time (uncommented, and reordered to run
+    InsertSmartStreamExample2 LAST, after RemapExample rather than right after the
+    first InsertSmartStreamExample), and InsertSmartStreamExample2 now unconditionally
+    builds its OWN separate "Smart Stream Example 2" view (via `store.addView`, not the
+    old "reuse the active tab if it's already a freeform canvas" check) instead of
+    topping up the first "Smart Stream Example" view — so the two showTypes traces
+    (7-type and 12-type) now live on two genuinely independent views, and only the
+    FIRST one ever gets Smart Check View/Remap run on it by main() itself; the second
+    is left exactly as insertSmartStream places it, with a Message Log reminder (exact
+    text given in the report, reproduced verbatim below) telling a person which
+    settings to use if they want to Smart Check/Remap it too, interactively."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -1387,6 +1404,9 @@ def check_batch_script_quickstart(page):
       const view3dTab = store.tabs.find(t => t.type === '3d');
       const streamView = store.findView('Smart Stream Example');
       const streamTabsForView = streamView ? store.tabs.filter(t => t.viewId === streamView.id) : [];
+      const streamView2 = store.findView('Smart Stream Example 2');
+      const streamTabsForView2 = streamView2 ? store.tabs.filter(t => t.viewId === streamView2.id) : [];
+      const streamVms2 = streamView2 ? store.viewMembersForView(streamView2.id).filter(v => v.objectType === 'part') : [];
 
       const streamVms = streamView ? store.viewMembersForView(streamView.id).filter(v => v.objectType === 'part') : [];
       // Group by row (y) so the 'layered' pattern's hierarchical structure can be
@@ -1418,10 +1438,14 @@ def check_batch_script_quickstart(page):
         view3dOpened: !!view3dTab,
         streamExampleViewCreated: !!streamView,
         streamExamplePartLabels: streamVms.map(vm => store.findPart(vm.objectId).label),
-        streamExampleTabIsActive: streamTabsForView.length ? store.activeTabId === streamTabsForView[0].id : false,
         streamExampleSingleTab: streamTabsForView.length === 1,
         rowCount: rowYs.length,
         rowTypeSets,
+        streamExample2ViewCreated: !!streamView2,
+        streamExample2PartCount: streamVms2.length,
+        streamExample2SingleTab: streamTabsForView2.length === 1,
+        streamExample2TabIsActive: streamTabsForView2.length ? store.activeTabId === streamTabsForView2[0].id : false,
+        messageLogHasReminder: store.messageLog.some(e => JSON.stringify(e).includes('example 2 created, now run smart check view (missing connectors; derive connectors) and remap (enterprise; layered; minimum crossings; minimum connector length; connectorOrder, streamOrder, streamName, entityType, nodeLevel, elementGroup)')),
       };
     }
     """)
@@ -1446,8 +1470,8 @@ def check_batch_script_quickstart(page):
         problems.append("expected main() to also run BatchScript_InsertSmartStreamExample after BatchScript_QuickStart, creating a 'Smart Stream Example' view")
     if not result["messageLogHasStream1Done"]:
         problems.append("expected 'Insert Smart Stream example done' written to the persistent Message Log -- BatchScript_InsertSmartStreamExample should have run")
-    if result["messageLogHasStream2Done"]:
-        problems.append("expected 'Insert Smart Stream example 2 done' NOT written to the persistent Message Log -- main()'s call to BatchScript_InsertSmartStreamExample2 is currently commented out")
+    if not result["messageLogHasStream2Done"]:
+        problems.append("expected 'Insert Smart Stream example 2 done' written to the persistent Message Log -- BatchScript_InsertSmartStreamExample2 should have run, now uncommented and moved to the end of main()")
     # 'Production Schedule' appears twice, not once: public/capabilities-general-
     # SFCCE.json itself lists it as an entity under BOTH the "Manufacturing Operations"
     # and "Production Planning" Business Capabilities as two separate source records,
@@ -1459,10 +1483,18 @@ def check_batch_script_quickstart(page):
     expected_stream_labels = sorted(['Production', 'Production Planning Process', 'Production Planning Consumer', 'Manage Production Planning', 'Manage Production Planning', 'Manufacturing Operations Process', 'Manufacturing Operations Consumer', 'Manage Manufacturing Operations', 'Manage Manufacturing Operations', 'Demand Forecast', 'Production Schedule', 'Production Schedule', 'Bill of Materials'])
     if sorted(result["streamExamplePartLabels"]) != expected_stream_labels:
         problems.append(f"expected BatchScript_InsertSmartStreamExample to trace the full chain from 'Production', got {sorted(result['streamExamplePartLabels'])}")
-    if not result["streamExampleTabIsActive"]:
-        problems.append("expected the 'Smart Stream Example' tab to be the ACTIVE tab once main() finishes -- proving the later scripts genuinely ran afterward, not that main() stopped early")
     if not result["streamExampleSingleTab"]:
         problems.append("expected exactly ONE tab open on the 'Smart Stream Example' view -- BatchScript_RemapExample should reuse InsertSmartStreamExample's own tab, not open a redundant second one")
+    if not result["streamExample2ViewCreated"]:
+        problems.append("expected BatchScript_InsertSmartStreamExample2 to create its own separate 'Smart Stream Example 2' view")
+    if result["streamExample2PartCount"] != 23:
+        problems.append(f"expected the broader 12-type trace to place 23 parts on 'Smart Stream Example 2' (same as the old one-pass 12-type shape), got {result['streamExample2PartCount']}")
+    if not result["streamExample2SingleTab"]:
+        problems.append("expected exactly ONE tab open on the 'Smart Stream Example 2' view")
+    if not result["streamExample2TabIsActive"]:
+        problems.append("expected the 'Smart Stream Example 2' tab to be the ACTIVE tab once main() finishes -- InsertSmartStreamExample2 now runs LAST and switches to its own new tab, proving it genuinely ran rather than main() stopping early")
+    if not result["messageLogHasReminder"]:
+        problems.append("expected the exact 'example 2 created, now run smart check view ...' reminder written to the persistent Message Log after InsertSmartStreamExample2")
     if not result["messageLogHasSmartCheckDone"]:
         problems.append("expected 'Smart Check View example done' written to the persistent Message Log -- BatchScript_SmartCheckViewExample should have run between InsertSmartStreamExample and RemapExample")
     if not result["messageLogHasRemapDone"]:
@@ -1487,7 +1519,7 @@ def check_batch_script_quickstart(page):
         problems.append(f"expected row type groupings {expected_row_type_sets}, got {result['rowTypeSets']}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "main() (run via the real Script Console UI) runs BatchScript_QuickStart, BatchScript_InsertSmartStreamExample (BatchScript_InsertSmartStreamExample2 currently commented out), BatchScript_SmartCheckViewExample, then BatchScript_RemapExample in sequence, ending with the Smart Stream Example tab (reused throughout, not duplicated) active and pattern:'layered' correctly producing the 4-row hierarchy the single 7-type showTypes trace implies, with the two 'Production Schedule' Data Entity parts confirmed as genuinely distinct (not a dedup bug) by tracing back to the source SFCCE data and buildIndustryTree's own documented id-derivation behavior"
+    return True, "main() (run via the real Script Console UI) runs BatchScript_QuickStart, BatchScript_InsertSmartStreamExample, BatchScript_SmartCheckViewExample, BatchScript_RemapExample, then BatchScript_InsertSmartStreamExample2 in sequence, with pattern:'layered' correctly producing the 4-row hierarchy the first (7-type) trace implies, InsertSmartStreamExample2 unconditionally building its own separate 'Smart Stream Example 2' view (23 parts, the 12-type trace) and ending as the ACTIVE tab, and the exact reminder message logged afterward -- with the two 'Production Schedule' Data Entity parts on the first view confirmed as genuinely distinct (not a dedup bug) by tracing back to the source SFCCE data and buildIndustryTree's own documented id-derivation behavior"
 
 
 def check_script_console_remap_and_smart_check_bindings(page):

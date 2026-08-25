@@ -4105,4 +4105,27 @@
 // reverting the prepend ("CommonScript_Example is not defined"), then reverted.
 // DESIGN_DOCUMENT.md SS8 and public/instructions.html updated (a new paragraph next to
 // dataAutoFill's own). Full suite 148/148.
-export const APP_VERSION = '0.894';
+// v0.895: direct follow-up, given verbatim: exact lines to add to main() after
+// "await BatchScript_RemapExample();" -- an await BatchScript_InsertSmartStreamExample2()
+// call, a messageLog(...) reminder naming the exact Smart Check View/Remap settings to
+// use, and a return; -- plus an exact replacement for BatchScript_InsertSmartStream2's
+// (sic -- BatchScript_InsertSmartStreamExample2's) own conditional "reuse the active
+// tab if it's already a freeform canvas" check, swapped for an unconditional
+// store.addView('Smart Stream Example 2', 'ff')/createCanvasTab/switchToTab sequence.
+// main() now runs BatchScript_InsertSmartStreamExample2 LAST (uncommented, and moved
+// from right after the first InsertSmartStreamExample to after RemapExample), and it
+// always builds its own SEPARATE "Smart Stream Example 2" view (the 12-type trace, 23
+// parts) instead of topping up the first "Smart Stream Example" view (the 7-type
+// trace) -- so the two showTypes traces now live on two independent views, and only
+// the first ever gets Smart Check View/Remap run on it automatically; the second is
+// left exactly as insertSmartStream places it, with main()'s own reminder message
+// telling a person which settings to use if they want to Smart Check/Remap it too,
+// interactively. check_batch_script_quickstart heavily updated: new streamExample2*
+// fields/assertions (view created, 23 parts, single tab, ACTIVE once main() finishes,
+// exact reminder text logged) -- proven via TEMP BREAK reverting
+// BatchScript_InsertSmartStreamExample2 back to its old conditional-reuse behavior,
+// which fails 6 different assertions at once (including corrupting the FIRST view's
+// own row count/labels by topping it up instead of building a separate one), then
+// reverted. tests/README.md and public/instructions.html (main()'s own five-step
+// walkthrough paragraph) updated. Full suite 148/148.
+export const APP_VERSION = '0.895';

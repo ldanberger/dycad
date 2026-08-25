@@ -3,21 +3,21 @@
 /** Store.batchScriptCode's out-of-the-box default — the Script Console's Run button
  * calls whatever top-level `main()` this text defines (see App.promptScriptConsole,
  * main.js), which can in turn call any number of other functions defined alongside it.
- * This one gives a working starting point: main() calling four starter batch scripts
+ * This one gives a working starting point: main() calling five starter batch scripts
  * in sequence — BatchScript_QuickStart(), which builds a basic Business Functions
  * organization view from the built-in default industry data end to end (ending with
  * the 3D View); BatchScript_InsertSmartStreamExample(), which traces a Smart Stream
  * from data QuickStart itself just generated; BatchScript_SmartCheckViewExample(),
  * which runs Smart Check View on that same view with "Missing connectors" and
- * "Derive hidden connections" checked; then BatchScript_RemapExample(), which remaps
- * that same Smart Stream view with both layout-optimization checkboxes.
- * BatchScript_InsertSmartStreamExample2() (defined alongside the others, an
- * otherwise-identical second Insert Smart Stream call with a broader showTypes list
- * that would top the same view up with whatever additional element types that broader
- * list allows) is currently commented out of main() below — left in place as a ready
- * second example to re-enable, not deleted. Naming convention for future additions:
- * `BatchScript_<Name>`, so main() can pick and choose which one(s) to run without
- * renaming anything.
+ * "Derive hidden connections" checked; BatchScript_RemapExample(), which remaps that
+ * same Smart Stream view with both layout-optimization checkboxes; then, last,
+ * BatchScript_InsertSmartStreamExample2() — an otherwise-identical second Insert Smart
+ * Stream call with a broader showTypes list, but building its own SEPARATE "Smart
+ * Stream Example 2" view rather than topping up the first one — after which main()
+ * logs a reminder (with the exact settings) for a person to run Smart Check View and
+ * Remap on that new view interactively, rather than auto-running them itself. Naming
+ * convention for future additions: `BatchScript_<Name>`, so main() can pick and choose
+ * which one(s) to run without renaming anything.
  *
  * `dataAutoFill()` (below, after the BatchScript_* functions) is a different
  * kind of entry point: it's invoked directly by the Data Modeling > Autofill menu item
@@ -41,9 +41,11 @@ async function main() {
   await BatchScript_QuickStart();
   // Runs after BatchScript_QuickStart's own 3D View step above.
   await BatchScript_InsertSmartStreamExample();
-  // await BatchScript_InsertSmartStreamExample2();
   await BatchScript_SmartCheckViewExample();
-  return BatchScript_RemapExample();
+  await BatchScript_RemapExample();
+  await BatchScript_InsertSmartStreamExample2();
+  messageLog('example 2 created, now run smart check view (missing connectors; derive connectors) and remap (enterprise; layered; minimum crossings; minimum connector length; connectorOrder, streamOrder, streamName, entityType, nodeLevel, elementGroup)');
+  return;
 }
 
 // A starter batch script: builds a basic Business Functions organization view from the
@@ -85,8 +87,8 @@ async function BatchScript_QuickStart() {
 // named "Production", which BatchScript_QuickStart's default industry data creates
 // (adjust the label/types below to match your own model if you remove that call).
 // BatchScript_InsertSmartStreamExample2 below is an otherwise-identical second pass
-// with a broader showTypes list, meant to run right after this one on the same view --
-// currently commented out of main() below, kept here as a ready second example.
+// with a broader showTypes list, run by main() at the very end -- on its OWN separate
+// "Smart Stream Example 2" view, not this one.
 async function BatchScript_InsertSmartStreamExample() {
   let tab = store.activeTab();
   if (!tab || tab.type !== 'canvas' || store.findView(tab.viewId)?.viewType !== 'ff') {
@@ -119,22 +121,21 @@ async function BatchScript_InsertSmartStreamExample() {
   messageLog('Insert Smart Stream example done');
 }
 
-// Example: a second Insert Smart Stream call, meant to run immediately after
-// BatchScript_InsertSmartStreamExample above -- otherwise identical (same start part,
-// same options) except for a broader showTypes list, so it would top the same "Smart
-// Stream Example" view (whose tab BatchScript_InsertSmartStreamExample just switched to
-// and left active) up with whatever additional element types that broader list allows.
-// insertSmartStream only ever adds parts/connectors not already on the view, so running
-// this right after the original never duplicates anything the original already placed.
-// NOT currently called by main() below (commented out) -- kept as a ready-to-enable
-// second example rather than deleted.
+// Example: a second Insert Smart Stream call, run by main() LAST -- after
+// BatchScript_RemapExample has already finished laying out the first "Smart Stream
+// Example" view. Otherwise identical to BatchScript_InsertSmartStreamExample above
+// (same start part, same options) except for a broader showTypes list, but always
+// builds its own SEPARATE "Smart Stream Example 2" view rather than topping up the
+// first one -- unconditional, unlike BatchScript_InsertSmartStreamExample's own
+// reuse-if-already-on-a-freeform-view check, since this one is never meant to land on
+// whatever view happens to already be active. main() logs a reminder afterward and
+// returns without auto-running Smart Check View/Remap on this new view -- left for a
+// person to run interactively (see main()'s own message for the exact settings).
 async function BatchScript_InsertSmartStreamExample2() {
   let tab = store.activeTab();
-  if (!tab || tab.type !== 'canvas' || store.findView(tab.viewId)?.viewType !== 'ff') {
-    const view = store.addView('Smart Stream Example', 'ff');
-    tab = app.createCanvasTab(view);
-    app.switchToTab(tab.id);
-  }
+  const view = store.addView('Smart Stream Example 2', 'ff');
+  tab = app.createCanvasTab(view);
+  app.switchToTab(tab.id);
 
   const start = findParts({ type: 'BusinessFunction', model: store.defaultModel }).find((p) => p.label === 'Production');
   if (!start) { log('No Business Function named "Production" found in model "' + store.defaultModel + '".'); return; }
