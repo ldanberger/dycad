@@ -4058,4 +4058,26 @@
 // failure, then reverted). New check_smart_check_model_detection_and_fix_precedence
 // and check_smart_check_model_dialog. DESIGN_DOCUMENT.md SS5.7 and tests/README.md
 // added/updated. Full suite 146/146.
-export const APP_VERSION = '0.892';
+// v0.893: reported directly: "smart stream example from script console is directly
+// placing nodes over connectors instead of resizing to fit properly after remap. why?
+// what remap settings are needed to avoid this?" then "yes, treat it as a real penalty
+// in the scoring." Diagnosed against the REAL generateIndustry -> insertSmartStream ->
+// smartCheckView -> remap pipeline: 'layered' puts a Business Capability and its own
+// Business Process on the same row (equidistant from a root), connected by a real
+// same-row connector; minimizeRowCrossings' crossings-first scoring could lock in a
+// column order (Process, Process, Capability, Capability) that's genuinely better on
+// cross-row crossings than the interleaved alternative, so the same-row connector drew
+// a straight line directly through the OTHER pair's Process node sitting between them
+// -- no existing Remap setting avoided this, a genuine scoring gap, not a missing
+// checkbox. Fixed by adding a new `occlusions` criterion (commands.js's
+// minimizeRowCrossings) -- for every same-row edge, how many other row members sit
+// strictly between its two endpoint columns -- checked FIRST, ahead of crossings, in
+// both the local swap heuristic (transposeAll, via a new rowOcclusionCount) and the
+// final best-of-all-iterations comparison (isBetter). New
+// check_remap_layered_avoids_node_occlusion (tests/run_all.py): runs the real pipeline
+// (not a hand-built fixture -- the sibling crossing-minimization test's own fixture
+// doesn't reproduce this) and checks every connector's straight-line path against
+// every other node's bounding box for genuine intersection, proven via TEMP BREAK to
+// reproduce all 4 real overlaps before this criterion existed, then reverted.
+// DESIGN_DOCUMENT.md SS6 and tests/README.md updated. Full suite 147/147.
+export const APP_VERSION = '0.893';

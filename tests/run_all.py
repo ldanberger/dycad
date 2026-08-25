@@ -389,6 +389,105 @@ def check_remap_crossing_minimization_finds_global_optimum(page):
     return True, "minimizeRowCrossings' two-start search + intra-row-length tie-break correctly centers Business Function between its two Processes and interleaves Business Capability/Process instead of grouping them, on the exact real 'Smart Stream Example' topology and sortKeys"
 
 
+def check_remap_layered_avoids_node_occlusion(page):
+    """Regression guard for minimizeRowCrossings' new `occlusions` scoring criterion
+    (commands.js), direct follow-up to check_remap_crossing_minimization_finds_global_
+    optimum above (same file/topology, different failure mode). Reported directly:
+    "smart stream example from script console is directly placing nodes over
+    connectors instead of resizing to fit properly after remap. why? what remap
+    settings are needed to avoid this?" Diagnosed via the REAL generateIndustry ->
+    insertSmartStream -> smartCheckView -> remap pipeline (not the hand-built synthetic
+    fixture the sibling check above uses -- that fixture's extra connectors happen to
+    already score the interleaved order best on crossings alone, so it never exposed
+    this): 'layered' puts a Business Capability and its own Business Process on the
+    same row (equidistant from a root) with a real same-row connector between them:
+    the OLD scoring (crossings first, intra-row length only as a tie-break) locked in
+    a column order -- Process, Process, Capability, Capability -- that's genuinely
+    BETTER on cross-row crossings than the interleaved alternative, so the tie-break
+    never even got a chance to run; the Capability -> Process same-row connector then
+    drew a straight line directly through the OTHER pair's Process node sitting between
+    them. No existing Remap setting (Minimize Crossings, Minimize Connector Length,
+    Edge Assignment, Spacing Scale) avoided this -- it's a genuine scoring gap, not a
+    missing checkbox. Fixed by adding `occlusions` (how many row members sit strictly
+    between a same-row edge's two endpoint columns) as a NEW criterion checked before
+    crossings, in both the local swap heuristic (transposeAll) and the final
+    best-of-all-iterations comparison (isBetter) -- accepting a real crossing increase
+    is worth it to eliminate a node sitting directly on a connector, since that's a far
+    more visible defect than a diagonal line crossing. Runs the real pipeline directly
+    (generateIndustry/insertSmartStream/smartCheckView/applyRemapLayout, not through
+    the Script Console UI, for speed) with BatchScript_RemapExample's own exact
+    options, then checks EVERY connector's straight-line path against EVERY other
+    node's bounding box for genuine geometric intersection (a small inward padding so
+    mere edge-touching at a box's boundary isn't flagged) -- not just the specific
+    Capability/Process pair the bug happened to hit, so any future regression of the
+    same shape (any same-row edge landing on top of any other row member) is caught
+    too."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const canvas = await import('./js/canvas.js');
+
+      await commands.generateIndustry(app, null, false);
+      const view = store.addView('RegrOcclusion_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const start = store.doc.parts.find(p => p.type === 'BusinessFunction' && p.label === 'Production');
+      commands.insertSmartStream(app, tab, {
+        connectorType: 's', startPartIds: [start.id], direction: 'both', endType: 'DataDataEntity', levels: null,
+        showTypes: ['ApplicationCapability', 'BusinessFunction', 'BusinessProcess', 'BusinessCapability', 'DataDataEntity', 'GeneralActor', 'TechnologyLogicalComponent'],
+      });
+      commands.smartCheckView(app, tab, { missingConnectors: true, deriveConnectors: true });
+      commands.remap(app, tab, {
+        templateName: 'Enterprise', pattern: 'layered', minimizeCrossings: true, minimizeConnectorLength: true,
+        sortKeys: ['connectionOrder', 'streamOrder', 'streamName', 'entityType', 'nodeLabel', 'elementGroup'],
+      });
+
+      const partVms = store.viewMembersForView(view.id).filter(v => v.objectType === 'part');
+      const connVms = store.viewMembersForView(view.id).filter(v => v.objectType === 'connector');
+      const { w, h } = canvas.getNodeSize(view);
+      const nodeById = new Map(partVms.map(vm => [vm.id, vm]));
+
+      const segIntersectsRect = (x1, y1, x2, y2, rx, ry, rw, rh) => {
+        let t0 = 0, t1 = 1;
+        const dx = x2 - x1, dy = y2 - y1;
+        const p = [-dx, dx, -dy, dy];
+        const q = [x1 - rx, rx + rw - x1, y1 - ry, ry + rh - y1];
+        for (let i = 0; i < 4; i++) {
+          if (p[i] === 0) { if (q[i] < 0) return false; continue; }
+          const r = q[i] / p[i];
+          if (p[i] < 0) { if (r > t1) return false; if (r > t0) t0 = r; }
+          else { if (r < t0) return false; if (r < t1) t1 = r; }
+        }
+        return true;
+      };
+
+      const overlaps = [];
+      for (const cv of connVms) {
+        const fromVm = nodeById.get(cv.fromVmId), toVm = nodeById.get(cv.toVmId);
+        if (!fromVm || !toVm) continue;
+        const x1 = fromVm.x + w / 2, y1 = fromVm.y + h / 2;
+        const x2 = toVm.x + w / 2, y2 = toVm.y + h / 2;
+        for (const vm of partVms) {
+          if (vm.id === fromVm.id || vm.id === toVm.id) continue;
+          const pad = 4;
+          if (segIntersectsRect(x1, y1, x2, y2, vm.x + pad, vm.y + pad, w - 2 * pad, h - 2 * pad)) {
+            overlaps.push({ from: store.findPart(fromVm.objectId)?.label, to: store.findPart(toVm.objectId)?.label, through: store.findPart(vm.objectId)?.label });
+          }
+        }
+      }
+
+      return { overlapsCount: overlaps.length, overlaps, partCount: partVms.length };
+    }
+    """)
+    if result["overlapsCount"] != 0:
+        return False, f"expected zero connectors passing through an unrelated node's box after 'layered' remap with Minimize Crossings on, got {result['overlapsCount']}: {result['overlaps']} (full: {result})"
+    if result["partCount"] < 8:
+        return False, f"test setup itself is wrong -- expected the real Smart Stream Example trace to place at least 8 parts, got {result['partCount']}"
+    return True, "'layered' remap with Minimize Crossings on produces zero connectors passing through an unrelated node's box, on the real generateIndustry/insertSmartStream/smartCheckView pipeline that originally reported this"
+
+
 def check_force_directed_no_runaway_drift(page):
     """Regression guard: force-directed layout once let two disconnected pairs drift
     thousands of pixels apart. Confirms a-b/c-d stay within a sane bound."""
@@ -11106,6 +11205,7 @@ CHECKS = [
     check_remap_patterns,
     check_remap_layered_pattern,
     check_remap_crossing_minimization_finds_global_optimum,
+    check_remap_layered_avoids_node_occlusion,
     check_force_directed_no_runaway_drift,
     check_force_directed_adjacent_cells,
     check_remap_clusters_decomposition,

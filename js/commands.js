@@ -3287,6 +3287,27 @@ function minimizeRowCrossings(rowGroups, connVms, stepX, baseX, iterations = 8) 
   if (rowGroups.length < 2) return;
   const neighborsOf = buildNeighborMap(connVms);
   const rowMembership = rowGroups.map((row) => new Set(row.map((vm) => vm.id)));
+  // Real bug report: "smart stream example ... directly placing nodes over connectors
+  // instead of resizing to fit properly after remap" -- a SAME-ROW connector (routine
+  // for 'layered', whose whole point is putting two directly connected types on one
+  // row when they're equidistant from a root, per intraRowConns below) is a straight
+  // horizontal line between its two endpoints' columns; if the column ordering leaves
+  // some OTHER, unrelated row member sitting at a column strictly between those two
+  // endpoints, that node visually sits right on top of the connector. Neither
+  // `crossings` (only ever counted between adjacent-row edge pairs, never against a
+  // same-row edge) nor plain `length` (a SHORTER same-row edge is preferred, which
+  // usually — but, as this report found, not always — also avoids anything landing
+  // between its endpoints) previously modeled this at all: real-data testing showed
+  // the cross-row crossings criterion (checked first) can lock in a column order that
+  // happens to leave an unrelated node between two same-row-connected endpoints even
+  // though a strictly SHORTER (hence occlusion-free) alternative existed, because nothing
+  // scored the difference between "shorter" and "shorter AND unobstructed". `occlusions`
+  // below counts exactly that — for every same-row edge, how many other row members sit
+  // strictly between its two endpoints' columns — and is now checked FIRST, ahead of
+  // crossings, in both the local swap heuristic (`transposeAll`) and the final
+  // best-of-all-iterations comparison (`isBetter`): a node sitting directly on a
+  // connector it has nothing to do with is a worse visual defect than a diagonal
+  // crossing, so it's worth accepting a small crossing increase to eliminate one.
   const rowIndexOf = new Map();
   rowGroups.forEach((row, i) => row.forEach((vm) => rowIndexOf.set(vm.id, i)));
   const intraRowConns = connVms.filter((cv) => cv.fromVmId !== cv.toVmId && rowIndexOf.get(cv.fromVmId) === rowIndexOf.get(cv.toVmId));
@@ -3307,6 +3328,29 @@ function minimizeRowCrossings(rowGroups, connVms, stepX, baseX, iterations = 8) 
     for (const p of targetsIn(colOf, a.id, ownRowIds)) { if (p !== idx && p !== idx + 1) delta += Math.abs(idx - p) - Math.abs(idx + 1 - p); }
     for (const p of targetsIn(colOf, b.id, ownRowIds)) { if (p !== idx && p !== idx + 1) delta += Math.abs(idx + 1 - p) - Math.abs(idx - p); }
     return delta;
+  };
+
+  // For every same-row edge fully within `row`, counts how many OTHER members of that
+  // same row currently sit at a column strictly between the edge's own two endpoints —
+  // i.e. how many nodes visually overlap a connector they have nothing to do with. Only
+  // ever needs to look at THIS row (a same-row edge's occlusion can only ever be caused
+  // by, or caused to, members of its own row), so it's recomputed directly from `colOf`
+  // rather than tracked incrementally — cheap enough at realistic row sizes, and much
+  // simpler than deriving a closed-form delta the way `lengthDeltaOf` does above.
+  const rowOcclusionCount = (row, colOf, ownRowIds) => {
+    let count = 0;
+    for (const cv of intraRowConns) {
+      if (!ownRowIds.has(cv.fromVmId) || !ownRowIds.has(cv.toVmId)) continue;
+      const c1 = colOf.get(cv.fromVmId), c2 = colOf.get(cv.toVmId);
+      const lo = Math.min(c1, c2), hi = Math.max(c1, c2);
+      if (hi - lo < 2) continue; // adjacent (or same) columns -- nothing can sit between them
+      for (const vm of row) {
+        if (vm.id === cv.fromVmId || vm.id === cv.toVmId) continue;
+        const c = colOf.get(vm.id);
+        if (c > lo && c < hi) count += 1;
+      }
+    }
+    return count;
   };
 
   const transposeAll = (rows, colOf) => {
@@ -3330,16 +3374,36 @@ function minimizeRowCrossings(rowGroups, connVms, stepX, baseX, iterations = 8) 
               else if (pa < pb) crossDelta -= 1; // currently non-crossing -- swap would introduce it
             }
           }
-          // Swap on a strict crossing improvement, same as before -- but ALSO on a
-          // crossing-NEUTRAL swap that strictly shortens a/b's own edges (inter-row OR
-          // same-row). Without this second case, two orderings that tie on crossings
-          // (0 crossings either way) but differ in length can never be locally
-          // improved upon: the transpose only ever accepted a strict crossing
-          // reduction, so a same-row-connected pair could stay needlessly stretched
-          // apart even though moving them adjacent is free (crossing-wise) and
-          // strictly shorter -- reported directly, this is exactly what left Business
-          // Capability/Business Process "grouped" instead of interleaved.
-          const shouldSwap = crossDelta > 0 || (crossDelta === 0 && lengthDeltaOf(colOf, a, b, idx, aboveIds, belowIds, ownRowIds) > 0);
+          // Occlusion delta (positive = swapping a/b strictly reduces how many row
+          // members sit on top of a same-row connector): computed by actually trying
+          // the swap and comparing, then reverting -- swapping two ADJACENT columns
+          // can only change occlusion counts for same-row edges where a or b is
+          // itself an endpoint (see rowOcclusionCount's own doc comment), so this is
+          // cheap despite the brute-force before/after.
+          const beforeOcclusion = rowOcclusionCount(row, colOf, ownRowIds);
+          row[idx] = b; row[idx + 1] = a;
+          colOf.set(a.id, idx + 1); colOf.set(b.id, idx);
+          const afterOcclusion = rowOcclusionCount(row, colOf, ownRowIds);
+          row[idx] = a; row[idx + 1] = b;
+          colOf.set(a.id, idx); colOf.set(b.id, idx + 1);
+          const occlusionDelta = beforeOcclusion - afterOcclusion;
+
+          // Swap on a strict occlusion improvement FIRST (a node sitting directly on a
+          // connector it has nothing to do with is a worse visual defect than a
+          // diagonal crossing), then on a strict crossing improvement (occlusion tied),
+          // then ALSO on an occlusion-and-crossing-NEUTRAL swap that strictly shortens
+          // a/b's own edges (inter-row OR same-row). Without that last case, two
+          // orderings that tie on crossings (0 crossings either way) but differ in
+          // length can never be locally improved upon: the transpose only ever accepted
+          // a strict crossing reduction, so a same-row-connected pair could stay
+          // needlessly stretched apart even though moving them adjacent is free
+          // (crossing-wise) and strictly shorter -- reported directly, this is exactly
+          // what left Business Capability/Business Process "grouped" instead of
+          // interleaved. occlusionDelta is checked ahead of both, per this function's
+          // own top-of-function doc comment on the "nodes placed over connectors"
+          // report this whole criterion exists to fix.
+          const shouldSwap = occlusionDelta > 0
+            || (occlusionDelta === 0 && (crossDelta > 0 || (crossDelta === 0 && lengthDeltaOf(colOf, a, b, idx, aboveIds, belowIds, ownRowIds) > 0)));
           if (shouldSwap) {
             row[idx] = b; row[idx + 1] = a;
             colOf.set(a.id, idx + 1); colOf.set(b.id, idx);
@@ -3371,7 +3435,7 @@ function minimizeRowCrossings(rowGroups, connVms, stepX, baseX, iterations = 8) 
   // found via real-data testing, where scoring inter-row length alone picked exactly
   // that "grouped" ordering over the shorter-OVERALL "interleaved" one.
   const scoreOf = (rows, colOf) => {
-    let crossings = 0, length = 0;
+    let crossings = 0, length = 0, occlusions = 0;
     for (let i = 0; i < rows.length - 1; i++) {
       const topIds = rowMembership[i], botIds = rowMembership[i + 1];
       const pairs = [];
@@ -3388,9 +3452,15 @@ function minimizeRowCrossings(rowGroups, connVms, stepX, baseX, iterations = 8) 
       }
     }
     for (const cv of intraRowConns) length += Math.abs(colOf.get(cv.fromVmId) - colOf.get(cv.toVmId));
-    return { crossings, length };
+    for (let i = 0; i < rows.length; i++) occlusions += rowOcclusionCount(rows[i], colOf, rowMembership[i]);
+    return { occlusions, crossings, length };
   };
-  const isBetter = (a, b) => a.crossings < b.crossings || (a.crossings === b.crossings && a.length < b.length);
+  // occlusions checked FIRST — see this function's own top-of-function doc comment: a
+  // node sitting directly on a connector it has nothing to do with is a worse visual
+  // defect than a diagonal crossing, so a small crossing increase is worth accepting to
+  // eliminate one.
+  const isBetter = (a, b) => a.occlusions < b.occlusions
+    || (a.occlusions === b.occlusions && (a.crossings < b.crossings || (a.crossings === b.crossings && a.length < b.length)));
 
   // Runs the full barycenter+transpose search from a given starting row order,
   // alternating sweep direction each pass -- `startDownward` picks which direction

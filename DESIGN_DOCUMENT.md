@@ -546,6 +546,35 @@ occupying a static, evenly-spaced band slot regardless of connectivity. Both ban
 passes are one-directional (bands align to the middle grid, never the reverse), so
 neither risks perturbing the middle grid's own already-finalized layout.
 
+**Node occlusion** (a fourth fix to `minimizeRowCrossings`, direct follow-up to the
+three above): reported directly — *"smart stream example from script console is
+directly placing nodes over connectors instead of resizing to fit properly after
+remap. why? what remap settings are needed to avoid this?"*, then *"yes, treat it as a
+real penalty in the scoring."* Diagnosed against the REAL `generateIndustry` →
+`insertSmartStream` → `smartCheckView` → remap pipeline (the synthetic fixture (2)
+above already scores its own interleaved order best on crossings alone, so it never
+exposed this): the crossings-first scoring could lock in a column order — Process,
+Process, Capability, Capability — that's genuinely BETTER on cross-row crossings than
+the interleaved alternative, so the LENGTH tie-break from fix (2) above never even got
+a chance to run; the same-row Capability→Process connector then drew a straight line
+directly through the OTHER pair's Process node sitting between them. No existing Remap
+setting (Minimize Crossings, Minimize Connector Length, Edge Assignment, Spacing Scale)
+avoided this — a genuine scoring gap, not a missing checkbox: neither `crossings`
+(only ever counted between ADJACENT-row edge pairs) nor `length` modeled "does this
+same-row edge's straight path pass over an unrelated third node" at all. Fixed by
+adding a new `occlusions` criterion — for every same-row edge, how many other row
+members sit strictly between its two endpoint columns — checked FIRST, ahead of
+crossings, in both the local swap heuristic (`transposeAll`, via a brute-force
+before/after `rowOcclusionCount` recompute — cheap at realistic row sizes, simpler than
+deriving a closed-form delta) and the final best-of-all-iterations comparison
+(`isBetter`): a node sitting directly on a connector it has nothing to do with is a
+worse visual defect than a diagonal crossing, so a real crossing increase is worth
+accepting to eliminate one. New `check_remap_layered_avoids_node_occlusion`
+(`tests/run_all.py`) runs the real pipeline (not a hand-built fixture) and checks
+EVERY connector's straight-line path against EVERY other node's bounding box for
+genuine geometric intersection — proven via TEMP BREAK to reproduce all 4 real
+overlaps before this criterion existed, then reverted.
+
 Two further pieces of state, separate from the layout algorithm itself:
 `view.remapLastOptions` (set by `remap()` on every successful run, alongside the
 pre-existing `view.remapSortKeys`) records every OTHER dialog field — pattern,
