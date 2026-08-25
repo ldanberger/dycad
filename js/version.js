@@ -4009,4 +4009,53 @@
 // Log check (proven to catch a missing call, then reverted), and the new row grouping;
 // check_smart_stream_preset_local_persistence's expected showTypes reverted to match.
 // tests/README.md updated for both. Full suite 144/144.
-export const APP_VERSION = '0.890';
+// v0.891: direct follow-up: "in example script comment out call to
+// BatchScript_InsertSmartStreamExample2." main()'s call to
+// BatchScript_InsertSmartStreamExample2() commented out (function definition kept,
+// just not invoked by default) -- main() is back to a single 7-type
+// BatchScript_InsertSmartStreamExample pass, same shape it had right after v0.890's own
+// "revert the original" step, before the second pass was ever added to main(). Also
+// answers the same follow-up's question: "Problem, BatchScript_InsertSmartStreamExample
+// is creating two duplicate nodes Data Entity 'Production Schedule', why?" Investigated
+// and confirmed NOT a regression from this session's changes -- reproduces with the
+// single 7-type pass alone. Root cause: public/capabilities-general-SFCCE.json itself
+// lists an entity named "Production Schedule" under BOTH the "Manufacturing Operations"
+// and "Production Planning" Business Capabilities as two separate source records, and
+// buildIndustryTree (since v0.865, see DESIGN_DOCUMENT.md SS7.5) auto-derives every
+// generated Part's id from its own full ancestor chain (Function -> Capability ->
+// Entity) rather than sharing ids across capabilities that happen to reuse an entity
+// name -- a deliberate, previously-made and documented design choice, not a dedup bug,
+// confirmed via each Part's own distinct id (not assumed). Left as-is pending a
+// decision on whether to change that dedup behavior (would affect ALL industry
+// generation, not just this one example). check_batch_script_quickstart updated: its
+// "Insert Smart Stream example 2 done" Message Log check inverted (now requires it NOT
+// present, proven via TEMP BREAK against a temporarily-restored call, then reverted),
+// and its stream-label/row-type-set expectations reverted to the single-pass 7-type
+// shape (13 parts, 4 rows). tests/README.md updated. Full suite 144/144.
+// v0.892: reported directly: "in Advanced menu before Smart Check View add a new item
+// 'Smart Check Model' for a new smart check model command. This command opens a dialog
+// confirming what the user wants to check, begin with two items 'disconnected parts'
+// for parts with no connectors of any type, 'disconnected connectors' for connectors
+// that have one or both parts invalid (missing), and 'duplicate parts' for parts that
+// have same type, model, and label, and present list to user to confirm individually
+// which to fix / merge or leave as is." New commands.js smartCheckModel (pure
+// detection, three categories, each independently toggleable) and
+// applySmartCheckModelFixes (deletes confirmed disconnected parts/connectors, merges
+// confirmed duplicate groups via a new mergeDuplicateParts -- same rewire/dedupe shape
+// mergePartsAndView already uses, keyed by part id instead of a view selection). New
+// App.promptSmartCheckModel (main.js): Advanced menu item added directly ABOVE Smart
+// Check View, per the report; reachable with no canvas tab open (whole-model, not
+// view-scoped, same as Auto-Detect Connectors); same preview-then-confirm two-step
+// shape that dialog established -- Check populates a per-category results table (every
+// row checked by default, per-section Select All), Fix Selected applies only what's
+// still checked. Real bug caught while building this: a duplicate-group part that's
+// ALSO zero-connector gets confirmed in both the delete-disconnected-parts list and the
+// merge-this-group list at once (same pre-fix snapshot) -- applying delete first (or
+// any order not accounting for this) silently no-ops the merge or drops a copy's
+// connectors on the floor. Fixed by giving merge precedence: any part id in a confirmed
+// mergeGroups entry is excluded from deletePartIds processing regardless of order --
+// proven directly against a TEMP BREAK removing that exclusion (reproduced the exact
+// failure, then reverted). New check_smart_check_model_detection_and_fix_precedence
+// and check_smart_check_model_dialog. DESIGN_DOCUMENT.md SS5.7 and tests/README.md
+// added/updated. Full suite 146/146.
+export const APP_VERSION = '0.892';

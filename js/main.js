@@ -4,7 +4,7 @@ import { parseArchimateXml } from './archimate.js';
 import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderViewDisplayFilters, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields, getAllFieldHeights, setAllFieldHeights, isAttributeForeignKey } from './render.js';
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule, formatSimValue } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
-import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors } from './commands.js';
+import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors } from './commands.js';
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection, computeSectionLayout, getAllowedTypesForView } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
@@ -1729,6 +1729,170 @@ class App {
     tab.tableCols = ['section', 'sectionId', 'sectionDescription', 'sectionOrder', 'functionId', 'functionName', 'functionDescription', 'capabilityId', 'capabilityName', 'capabilityDescription', 'applicationCapabilityId', 'applicationCapabilityName', 'applicationCapabilityDescription', 'entityId', 'entityName', 'entityDescription'];
     this.switchToTab(tab.id);
     return tab;
+  }
+
+  /** Smart Check Model (Advanced menu, above Smart Check View): the whole-document
+   * counterpart to Smart Check View/Node below — those two repair gaps within ONE
+   * view's own placed content; this one scans the entire model for data-hygiene issues
+   * unrelated to any one view. Reachable with no canvas tab open at all, same as Data
+   * Modeling > Auto-Detect Connectors (promptAutoDetectConnectors, above) — the same
+   * preview-then-confirm two-step shape that dialog established: "Check" runs
+   * commands.js's smartCheckModel (pure detection, no store mutation) against whichever
+   * of the three category checkboxes are on, populates a per-category results table
+   * with every row checked by default, then "Fix Selected" applies only whatever's
+   * still checked via applySmartCheckModelFixes — unchecking a row (or a whole
+   * category's Select All) leaves that specific issue alone. Reported directly: "in
+   * Advanced menu before Smart Check View add a new item 'Smart Check Model' ...
+   * 'disconnected parts' for parts with no connectors of any type, 'disconnected
+   * connectors' for connectors that have one or both parts invalid (missing), and
+   * 'duplicate parts' for parts that have same type, model, and label, and present list
+   * to user to confirm individually which to fix / merge or leave as is." Duplicate
+   * groups don't offer a choice of which copy survives — smartCheckModel always keeps
+   * the first part in store.doc.parts' own array order (creation order) and merges the
+   * rest into it (mergeDuplicateParts, commands.js) — shown in each row so it's never a
+   * surprise which one survives. */
+  promptSmartCheckModel() {
+    const root = document.getElementById('modal-root');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal-box';
+    box.style.width = '760px';
+    box.style.maxWidth = '92vw';
+    box.innerHTML = `
+      <h3>Smart Check Model</h3>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
+        Scans the whole model (every part and connector, not just the current view) for data-hygiene
+        issues. Nothing changes until you review and confirm the list below.
+      </div>
+      <div class="prop-row checkbox"><input type="checkbox" id="scm-disconnected-parts" checked /><label for="scm-disconnected-parts">Disconnected parts — parts with no connectors of any type</label></div>
+      <div class="prop-row checkbox"><input type="checkbox" id="scm-disconnected-connectors" checked /><label for="scm-disconnected-connectors">Disconnected connectors — connectors with one or both parts missing</label></div>
+      <div class="prop-row checkbox"><input type="checkbox" id="scm-duplicate-parts" checked /><label for="scm-duplicate-parts">Duplicate parts — parts with the same type, model, and label</label></div>
+      <div id="scm-results" style="margin-top:12px;">
+        <div style="color:var(--text-muted);font-size:12px;">No issues found yet — click "Check" below.</div>
+      </div>
+      <div class="modal-actions">
+        <button class="cancel">Cancel</button>
+        <button id="scm-check" class="primary">Check</button>
+        <button id="scm-fix" class="primary hidden">Fix Selected</button>
+      </div>
+    `;
+    overlay.appendChild(box);
+    root.appendChild(overlay);
+    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+
+    let result = { disconnectedParts: [], disconnectedConnectors: [], duplicateGroups: [] };
+    const selectedParts = new Set();
+    const selectedConns = new Set();
+    const selectedGroups = new Set();
+    const resultsEl = box.querySelector('#scm-results');
+    const fixBtn = box.querySelector('#scm-fix');
+
+    const section = (title, rows, selectedSet, sectionKey, columns) => {
+      if (rows.length === 0) return '';
+      return `
+        <div style="font-weight:600;margin:10px 0 4px;">${title} (${rows.length})</div>
+        <div style="max-height:200px;overflow:auto;border:1px solid var(--border);border-radius:6px;">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead><tr>
+              <th style="width:28px;"><input type="checkbox" class="scm-select-all" data-section="${sectionKey}" title="Select/deselect all" /></th>
+              ${columns.map((c) => `<th style="text-align:left;padding:5px 8px;">${c.label}</th>`).join('')}
+            </tr></thead>
+            <tbody>
+              ${rows.map((row, i) => `
+                <tr>
+                  <td style="padding:4px 8px;"><input type="checkbox" class="scm-row-check" data-section="${sectionKey}" data-idx="${i}" ${selectedSet.has(i) ? 'checked' : ''} /></td>
+                  ${columns.map((c) => `<td style="padding:4px 8px;">${escapeHtml(c.value(row))}</td>`).join('')}
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    };
+
+    const renderResults = () => {
+      const html = [
+        section('Disconnected Parts', result.disconnectedParts, selectedParts, 'parts', [
+          { label: 'Label', value: (r) => r.label },
+          { label: 'Type', value: (r) => r.type },
+          { label: 'Model', value: (r) => r.model },
+        ]),
+        section('Disconnected Connectors', result.disconnectedConnectors, selectedConns, 'conns', [
+          { label: 'From', value: (r) => r.fromLabel },
+          { label: 'To', value: (r) => r.toLabel },
+          { label: 'Relationship', value: (r) => r.relationship },
+        ]),
+        section('Duplicate Parts', result.duplicateGroups, selectedGroups, 'groups', [
+          { label: 'Label', value: (r) => r.keepLabel },
+          { label: 'Type', value: (r) => r.type },
+          { label: 'Model', value: (r) => r.model },
+          { label: 'Copies', value: (r) => `${r.count} (keeping the first-created one, merging the other ${r.duplicateIds.length})` },
+        ]),
+      ].join('');
+      const totalIssues = result.disconnectedParts.length + result.disconnectedConnectors.length + result.duplicateGroups.length;
+      resultsEl.innerHTML = html || `<div style="color:var(--text-muted);font-size:12px;">No issues found.</div>`;
+      fixBtn.classList.toggle('hidden', totalIssues === 0);
+      if (totalIssues === 0) return;
+
+      const setsBySection = { parts: selectedParts, conns: selectedConns, groups: selectedGroups };
+      const rowsBySection = { parts: result.disconnectedParts, conns: result.disconnectedConnectors, groups: result.duplicateGroups };
+      const syncSelectAll = (sectionKey) => {
+        const sa = resultsEl.querySelector(`.scm-select-all[data-section="${sectionKey}"]`);
+        if (!sa) return;
+        const set = setsBySection[sectionKey], total = rowsBySection[sectionKey].length;
+        sa.checked = set.size === total;
+        sa.indeterminate = set.size > 0 && set.size < total;
+      };
+      resultsEl.querySelectorAll('.scm-row-check').forEach((cb) => {
+        cb.addEventListener('change', () => {
+          const sectionKey = cb.dataset.section, idx = Number(cb.dataset.idx);
+          const set = setsBySection[sectionKey];
+          if (cb.checked) set.add(idx); else set.delete(idx);
+          syncSelectAll(sectionKey);
+        });
+      });
+      resultsEl.querySelectorAll('.scm-select-all').forEach((sa) => {
+        sa.addEventListener('change', (e) => {
+          const sectionKey = sa.dataset.section;
+          const set = setsBySection[sectionKey];
+          if (e.target.checked) rowsBySection[sectionKey].forEach((_, i) => set.add(i));
+          else set.clear();
+          renderResults();
+        });
+        syncSelectAll(sa.dataset.section);
+      });
+    };
+
+    box.querySelector('#scm-check').addEventListener('click', () => {
+      const options = {
+        disconnectedParts: box.querySelector('#scm-disconnected-parts').checked,
+        disconnectedConnectors: box.querySelector('#scm-disconnected-connectors').checked,
+        duplicateParts: box.querySelector('#scm-duplicate-parts').checked,
+      };
+      if (!options.disconnectedParts && !options.disconnectedConnectors && !options.duplicateParts) { this.toast('Nothing selected to check.', true); return; }
+      result = smartCheckModel(this.store, options);
+      selectedParts.clear(); result.disconnectedParts.forEach((_, i) => selectedParts.add(i));
+      selectedConns.clear(); result.disconnectedConnectors.forEach((_, i) => selectedConns.add(i));
+      selectedGroups.clear(); result.duplicateGroups.forEach((_, i) => selectedGroups.add(i));
+      renderResults();
+    });
+
+    fixBtn.addEventListener('click', () => {
+      const fixes = {
+        deletePartIds: [...selectedParts].map((i) => result.disconnectedParts[i].id),
+        deleteConnectorIds: [...selectedConns].map((i) => result.disconnectedConnectors[i].id),
+        mergeGroups: [...selectedGroups].map((i) => result.duplicateGroups[i]).map((g) => ({ keepId: g.keepId, duplicateIds: g.duplicateIds })),
+      };
+      overlay.remove();
+      if (fixes.deletePartIds.length === 0 && fixes.deleteConnectorIds.length === 0 && fixes.mergeGroups.length === 0) { this.toast('Nothing selected to fix.', true); return; }
+      const summary = applySmartCheckModelFixes(this, fixes);
+      this.recordAndRender();
+      const parts = [];
+      if (summary.partsDeleted) parts.push(`${summary.partsDeleted} disconnected part${summary.partsDeleted === 1 ? '' : 's'} deleted`);
+      if (summary.connectorsDeleted) parts.push(`${summary.connectorsDeleted} disconnected connector${summary.connectorsDeleted === 1 ? '' : 's'} deleted`);
+      if (summary.groupsMerged) parts.push(`${summary.groupsMerged} duplicate group${summary.groupsMerged === 1 ? '' : 's'} merged (${summary.partsMergedAway} part${summary.partsMergedAway === 1 ? '' : 's'} merged away)`);
+      this.toast(`Smart Check Model: ${parts.join(', ')}.`, false, true);
+    });
   }
 
   /** Smart Check View (Advanced menu): repairs gaps between the current view's placed
@@ -4388,6 +4552,7 @@ function wireGlobalEvents(app) {
     { separator: true },
     { label: 'Generate Inventory View', action: 'generateInventoryView' },
     { label: 'Generate Industry', action: 'generateIndustry' },
+    { label: 'Smart Check Model', action: 'smartCheckModel' },
     { label: 'Smart Check View', action: 'smartCheckView' },
     { label: 'Smart Check Node', action: 'smartCheckNode' },
     { separator: true },
@@ -4402,6 +4567,8 @@ function wireGlobalEvents(app) {
         generateInventoryView(app);
       } else if (item.dataset.action === 'generateIndustry') {
         app.promptGenerateIndustry();
+      } else if (item.dataset.action === 'smartCheckModel') {
+        app.promptSmartCheckModel();
       } else if (item.dataset.action === 'smartCheckView') {
         app.promptSmartCheckView();
       } else if (item.dataset.action === 'smartCheckNode') {

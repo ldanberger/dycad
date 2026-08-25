@@ -380,6 +380,71 @@ the control's left edge to land on the identical pixel. Base `.prop-row`'s
 `margin-bottom` dropped from `8px` to `4px` (denser rows in both panels); a dialog's
 own `.modal-box .prop-row` override (`12px`, higher specificity) is untouched.
 
+### 5.7 Smart Check Model (`smartCheckModel`, `applySmartCheckModelFixes` — `commands.js`)
+
+Reported directly: *"in Advanced menu before Smart Check View add a new item 'Smart
+Check Model' for a new smart check model command. This command opens a dialog
+confirming what the user wants to check, begin with two items 'disconnected parts' for
+parts with no connectors of any type, 'disconnected connectors' for connectors that
+have one or both parts invalid (missing), and 'duplicate parts' for parts that have
+same type, model, and label, and present list to user to confirm individually which to
+fix / merge or leave as is."* The whole-document counterpart to §5.5's Smart Check
+View/Node — those two repair gaps within ONE view's own placed content; this one scans
+the entire model (every part/connector, regardless of which views, if any, show them)
+for three kinds of data-hygiene issue, unrelated to any one view. `App.
+promptSmartCheckModel` (`main.js`) is reachable with no canvas tab open at all — same
+as Data Modeling > Auto-Detect Connectors (§7a) — and follows that dialog's own
+preview-then-confirm two-step shape: a "Check" button runs pure detection
+(`smartCheckModel`, no store mutation) against whichever category checkboxes are on,
+rendering one sub-table per category with every row checked by default (plus a
+per-section Select All); a "Fix Selected" button then applies only whatever's still
+checked via `applySmartCheckModelFixes`, so unchecking a specific row leaves that one
+issue alone.
+
+- **Disconnected parts** — parts with no connector (`from`/`to`) referencing them at
+  all, of ANY `connectorType`. Fix = delete the part model-wide (and any viewMember
+  placements — `Store.deletePart` itself doesn't cascade, same non-cascading
+  convention `App.deleteSelection`'s own orphan-cleanup prompt already relies on).
+- **Disconnected connectors** — connectors whose `from` and/or `to` no longer resolves
+  to a real part (`store.findPart` returns nothing), e.g. left behind by a part deleted
+  through some path that didn't clean up its connectors. Fix = delete via
+  `store.deleteConnectorAndMembers`, which already cascades to every viewMember
+  showing it.
+- **Duplicate parts** — 2+ parts sharing the exact same type + model + label, grouped
+  by that triple. The FIRST part in each group (`store.doc.parts`' own array order —
+  creation order) is always the keep part; there's no UI to pick a different one, but
+  each row names it, so which copy survives is never a surprise. Fix = merge
+  (`mergeDuplicateParts`) — reassigns every connector's `from`/`to` and every `'part'`
+  viewMember's `objectId` from each duplicate onto the keep part (de-duplicating
+  per-view where the keep part and a duplicate turn out to already share a view — the
+  earliest viewMember there survives, with any `'connector'` viewMember's own
+  `fromVmId`/`toVmId` that referenced the removed one repointed first), then
+  de-duplicates any connectors this reassignment made identical (same
+  `from`+`to`+`connectorType`, via `deleteConnectorAndMembers` so its own viewMembers
+  go too, everywhere at once) — the exact same rewire/dedupe shape `mergePartsAndView`
+  (§ merge, `commands.js`) already uses for a view-selection-driven merge, just keyed
+  directly by part id instead, since Smart Check Model's duplicates were found
+  model-wide and may not be selected — or even placed — on any one view together.
+
+**A real bug caught while building this**: `deletePartIds` and `mergeGroups` are both
+computed from the SAME pre-fix detection snapshot, so a part that's disconnected (zero
+connectors) AND also a duplicate-group member — the keep part or one of its copies —
+can legitimately appear checked in both the "delete this" and "merge this group" rows
+at once. Applying the delete first (or in any order that doesn't account for this)
+either silently no-ops the merge entirely (`mergeDuplicateParts` bails once its own
+keep part is already gone) or drops a copy's connectors/streams on the floor instead of
+carrying them into the survivor. `applySmartCheckModelFixes`'s fix: merge always wins —
+every part id appearing in any confirmed `mergeGroups` entry (keep or duplicate) is
+excluded from `deletePartIds` processing regardless of call order. Proven directly
+against a TEMP BREAK removing that exclusion (reproduced the exact failure, then
+reverted) — see `check_smart_check_model_detection_and_fix_precedence`,
+`tests/run_all.py`.
+
+New `check_smart_check_model_detection_and_fix_precedence` (pure logic, the above) and
+`check_smart_check_model_dialog` (real Advanced menu/dialog wiring — menu position
+above Smart Check View, no-tab-required reachability, per-row uncheck-then-fix, and
+Cancel making zero changes) in `tests/run_all.py`.
+
 ## 6. Layout and rendering algorithms
 
 ### 6.1 Force-directed Remap (`layout.js`)

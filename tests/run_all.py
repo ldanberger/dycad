@@ -1178,7 +1178,7 @@ def check_script_console_runs_main_function(page):
 def check_batch_script_quickstart(page):
     """Regression guard/new-feature check for the built-in default batch script
     (store.batchScriptCode's out-of-the-box default, DEFAULT_BATCH_SCRIPT_CODE in
-    state.js) — verifies main() actually runs all five starter scripts in sequence, via
+    state.js) — verifies main() actually runs its starter scripts in sequence, via
     the real Script Console UI. BatchScript_QuickStart: (1) Generate Industry with the
     built-in default industry data, not placed on any view; (2) a new View "Business
     Functions" of type "org" (Business Function Organization); (3) Populate From
@@ -1244,21 +1244,28 @@ def check_batch_script_quickstart(page):
     after the original" — BatchScript_InsertSmartStreamExample (and
     DEFAULT_SMART_STREAM_PRESETS's own StreamSet1) reverted back to the original 7-type
     showTypes list, BatchScript_InsertSmartStreamExample2 added as a copy of the
-    (now former) 12-type version, and main() now runs BOTH, back to back, on the same
-    "Smart Stream Example" tab: the 7-type pass first, then the 12-type pass topping the
-    same view up with whatever additional types it allows (insertSmartStream only ever
-    adds parts/connectors not already on the view, so nothing from the first pass is
-    lost or duplicated by the second). End result: the SAME 23 parts as the one-pass
-    12-type version above (a two-pass 7-then-12 union is still exactly the 12-type set,
-    since 12 types is a superset of the reachable 7), but a DIFFERENT connector
-    topology — the first (7-type) pass's own insertSmartStream call places its own
-    subset of connectors along the way before the second (12-type) pass runs, so
-    'layered' (which measures hop-distance over whatever connectors ended up on the
-    view, not just which parts are on it) now puts BusinessCapability 1 hop out
-    (grouped with BusinessProcess/BusinessService/ApplicationPhysicalComponent) instead
-    of 2 (previously grouped with ApplicationCapability/DataDataEntity) — verified this
-    new shape directly against a fresh trace (a dedicated probe script) before updating
-    the fixed expectations below, rather than assumed from the one-pass shape above."""
+    (now former) 12-type version, main() briefly running BOTH back to back. Then, direct
+    follow-up in the same session: "in example script comment out call to
+    BatchScript_InsertSmartStreamExample2" — main()'s call to
+    BatchScript_InsertSmartStreamExample2() commented out (function definition kept,
+    just not invoked by default), so main() is back to a single 7-type
+    BatchScript_InsertSmartStreamExample pass — same part/row shape as immediately after
+    the "revert the original" step above, before the (now-commented-out) second pass was
+    ever added to main(). Same follow-up message also asked: "Problem, [it] is creating
+    two duplicate nodes Data Entity 'Production Schedule', why?" — investigated and
+    confirmed NOT a regression from any of this session's changes: it happens with the
+    single 7-type pass alone too, and traces back to public/capabilities-general-
+    SFCCE.json itself, which lists an entity named "Production Schedule" under BOTH the
+    "Manufacturing Operations" and "Production Planning" Business Capabilities as two
+    separate source records. Since v0.865 (see js/version.js's own changelog and
+    DESIGN_DOCUMENT.md SS7.5), buildIndustryTree auto-derives every generated Part's id
+    from its own full ancestor chain (Function -> Capability -> Entity) rather than
+    string-matching/sharing ids across capabilities that happen to reuse the same entity
+    name — a deliberate, previously-made and documented design choice, not something
+    newly introduced here — so these become two genuinely distinct Parts (confirmed via
+    each one's own distinct id) that simply share a label, the same as the pre-existing
+    Application-layer "Manufacturing Operations"/"Production Planning" pairs already
+    documented below."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -1340,20 +1347,17 @@ def check_batch_script_quickstart(page):
         problems.append("expected main() to also run BatchScript_InsertSmartStreamExample after BatchScript_QuickStart, creating a 'Smart Stream Example' view")
     if not result["messageLogHasStream1Done"]:
         problems.append("expected 'Insert Smart Stream example done' written to the persistent Message Log -- BatchScript_InsertSmartStreamExample should have run")
-    if not result["messageLogHasStream2Done"]:
-        problems.append("expected 'Insert Smart Stream example 2 done' written to the persistent Message Log -- BatchScript_InsertSmartStreamExample2 should have run right after the original")
-    # Several labels appear twice, not once: the built-in default dataset (unlike the
-    # old hand-curated fce-generalnodes.json) maps no explicit entity id, so each of
-    # Production's two capabilities' own descendant entities (Production Schedule) or
-    # same-named Application-layer counterparts (Manufacturing Operations, Production
-    # Planning — one ApplicationLogicalComponent + one ApplicationApplication each,
-    # confirmed via each part's own distinct id, not a dedup failure) auto-derive their
-    # id from their own full ancestor chain (see buildIndustryTree) rather than sharing
-    # one id across capabilities — distinct parts that happen to share a label, not a
-    # bug. showTypes broadened (direct follow-up, see this function's own docstring)
-    # to 12 types pulls in the Application-layer + BusinessService companions below
-    # that the narrower original 7-type list excluded.
-    expected_stream_labels = sorted(['Production', 'Production Planning Process', 'Production Planning Process', 'Production Planning Consumer', 'Manage Production Planning', 'Manage Production Planning', 'Manufacturing Operations Process', 'Manufacturing Operations Process', 'Manufacturing Operations Consumer', 'Manage Manufacturing Operations', 'Manage Manufacturing Operations', 'Demand Forecast', 'Production Schedule', 'Production Schedule', 'Bill of Materials', 'Manufacturing Operations', 'Manufacturing Operations', 'Production Planning', 'Production Planning', 'Provide Manufacturing Operations', 'Provide Production Planning', '< Manufacturing Operations > Solution', '< Production Planning > Solution'])
+    if result["messageLogHasStream2Done"]:
+        problems.append("expected 'Insert Smart Stream example 2 done' NOT written to the persistent Message Log -- main()'s call to BatchScript_InsertSmartStreamExample2 is currently commented out")
+    # 'Production Schedule' appears twice, not once: public/capabilities-general-
+    # SFCCE.json itself lists it as an entity under BOTH the "Manufacturing Operations"
+    # and "Production Planning" Business Capabilities as two separate source records,
+    # and buildIndustryTree (since v0.865, see DESIGN_DOCUMENT.md SS7.5) auto-derives
+    # every Part's id from its own full ancestor chain rather than sharing ids across
+    # capabilities that happen to reuse an entity name -- a deliberate, previously-made
+    # design choice, confirmed (not just assumed) via each part's own distinct id, not a
+    # dedup failure and not something this function's own docstring history introduced.
+    expected_stream_labels = sorted(['Production', 'Production Planning Process', 'Production Planning Consumer', 'Manage Production Planning', 'Manage Production Planning', 'Manufacturing Operations Process', 'Manufacturing Operations Consumer', 'Manage Manufacturing Operations', 'Manage Manufacturing Operations', 'Demand Forecast', 'Production Schedule', 'Production Schedule', 'Bill of Materials'])
     if sorted(result["streamExamplePartLabels"]) != expected_stream_labels:
         problems.append(f"expected BatchScript_InsertSmartStreamExample to trace the full chain from 'Production', got {sorted(result['streamExamplePartLabels'])}")
     if not result["streamExampleTabIsActive"]:
@@ -1364,32 +1368,27 @@ def check_batch_script_quickstart(page):
         problems.append("expected 'Smart Check View example done' written to the persistent Message Log -- BatchScript_SmartCheckViewExample should have run between InsertSmartStreamExample and RemapExample")
     if not result["messageLogHasRemapDone"]:
         problems.append("expected 'Remap example done' written to the persistent Message Log -- BatchScript_RemapExample should have run")
-    # pattern:'layered' row structure: Function+Actors+the two Application roots
-    # (layer 0), then Process/Service/Capability/the two Application Physical Component
-    # "Solution" parts TOGETHER on one row (all exactly 1 hop out over whatever
-    # connectors the two insertSmartStream passes placed -- see this function's own
-    # docstring for why BusinessCapability lands here now, 1 hop out, rather than 2 hops
-    # out as it did with the older single-pass 12-type trace), then Application
-    # Capability/Data Entity together (2 hops each -- shortest-path layering, not
-    # longest-path, is what merges same-hop-distance types onto one row regardless of
-    # a direct edge between them; see computeLayerAssignment's doc comment in
-    # commands.js), then the lone ApplicationProcess pair (3 hops), then the lone
-    # ApplicationLogicalComponent pair (4 hops) -- a 5th row that only exists because
-    # the second (12-type) insertSmartStream pass reaches this far.
+    # pattern:'layered' row structure (single 7-type pass, BatchScript_
+    # InsertSmartStreamExample2 commented out of main() -- see this function's own
+    # docstring): Function+Actors (layer 0), then Capability/Process together on one row
+    # (both exactly 1 hop from a layer-0 root -- shortest-path layering, not
+    # longest-path, is what merges same-hop-distance types onto one row regardless of a
+    # direct Capability -> Process edge; see computeLayerAssignment's doc comment in
+    # commands.js), then Application Capability (2 hops), then the lone Data Entity
+    # row (3 hops).
     expected_row_type_sets = [
-        sorted(['BusinessFunction', 'GeneralActor', 'ApplicationApplication']),
-        sorted(['BusinessProcess', 'BusinessService', 'BusinessCapability', 'ApplicationPhysicalComponent']),
-        sorted(['ApplicationCapability', 'DataDataEntity']),
-        sorted(['ApplicationProcess']),
-        sorted(['ApplicationLogicalComponent']),
+        sorted(['BusinessFunction', 'GeneralActor']),
+        sorted(['BusinessProcess', 'BusinessCapability']),
+        sorted(['ApplicationCapability']),
+        sorted(['DataDataEntity']),
     ]
-    if result["rowCount"] != 5:
+    if result["rowCount"] != 4:
         problems.append(f"expected BatchScript_RemapExample's pattern:'layered' to produce exactly 5 rows, got {result['rowCount']} ({result['rowTypeSets']})")
     elif result["rowTypeSets"] != expected_row_type_sets:
         problems.append(f"expected row type groupings {expected_row_type_sets}, got {result['rowTypeSets']}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "main() (run via the real Script Console UI) runs BatchScript_QuickStart, BatchScript_InsertSmartStreamExample, BatchScript_InsertSmartStreamExample2, BatchScript_SmartCheckViewExample, then BatchScript_RemapExample in sequence, ending with the Smart Stream Example tab (reused throughout, not duplicated) active and pattern:'layered' correctly producing the 5-row hierarchy the two-pass (7-type then 12-type) showTypes trace implies"
+    return True, "main() (run via the real Script Console UI) runs BatchScript_QuickStart, BatchScript_InsertSmartStreamExample (BatchScript_InsertSmartStreamExample2 currently commented out), BatchScript_SmartCheckViewExample, then BatchScript_RemapExample in sequence, ending with the Smart Stream Example tab (reused throughout, not duplicated) active and pattern:'layered' correctly producing the 4-row hierarchy the single 7-type showTypes trace implies, with the two 'Production Schedule' Data Entity parts confirmed as genuinely distinct (not a dedup bug) by tracing back to the source SFCCE data and buildIndustryTree's own documented id-derivation behavior"
 
 
 def check_script_console_remap_and_smart_check_bindings(page):
@@ -10289,6 +10288,210 @@ def check_derived_connector_relationship_fallback(page):
     return True, "A derived 'c' connector's relationship falls back correctly when the traced value (e.g. the literal 'Stream' from an 's'-typed hidden chain) isn't valid for the resulting pair: the pair's own data-defined default when one exists, else 'Association' -- while a genuinely valid traced relationship (from a 'c'-typed hidden chain) is always kept as-is, and the 's' version is never affected by any of this"
 
 
+def check_smart_check_model_detection_and_fix_precedence(page):
+    """Regression guard, direct follow-up: "in Advanced menu before Smart Check View add
+    a new item 'Smart Check Model' for a new smart check model command. This command
+    opens a dialog confirming what the user wants to check, begin with two items
+    'disconnected parts' for parts with no connectors of any type, 'disconnected
+    connectors' for connectors that have one or both parts invalid (missing), and
+    'duplicate parts' for parts that have same type, model, and label, and present list
+    to user to confirm individually which to fix / merge or leave as is." Exercises
+    commands.js's smartCheckModel (pure detection) and applySmartCheckModelFixes
+    directly (bypassing the dialog -- check_smart_check_model_dialog, below, covers the
+    UI itself), against a small hand-built graph: a normal connected pair (must never be
+    flagged by anything); an orphan part with zero connectors (disconnected part); a
+    connector whose `to` doesn't resolve to any real part (disconnected connector); and
+    a 3-way duplicate group (same type+model+label) where the keep part (the FIRST one
+    created) and one of its two copies are BOTH also zero-connector parts in their own
+    right -- deliberately constructed to hit a real bug caught while building this
+    feature: with all three checkboxes on, a duplicate-group part that's also
+    "disconnected" gets confirmed in BOTH the delete-disconnected-parts list AND the
+    merge-this-group list at once (both computed from the same pre-fix snapshot), and
+    applying the delete first (or in any order that doesn't account for this) either
+    silently no-ops the merge entirely (mergeDuplicateParts bails once its own keep part
+    is already gone) or drops a copy's connectors/streams on the floor instead of
+    carrying them into the survivor. applySmartCheckModelFixes' fix -- merge always wins
+    for any part id that appears in fixes.mergeGroups, excluded from deletePartIds
+    processing regardless of order -- is proven directly against a TEMP BREAK removing
+    that exclusion (confirmed to reproduce exactly this failure, then reverted). Also
+    covers: the third (non-keep, non-disconnected) duplicate copy, which HAS a
+    connector to the connected pair's own second part, ends up correctly rewired onto
+    the surviving keep part after merge; the keep part and that third copy, placed
+    together on the SAME view, correctly end up as exactly one viewMember there
+    afterward (not zero, not two); and toggling a category checkbox off makes
+    smartCheckModel return an empty array for exactly that category, nothing else."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+
+      const view = store.addView('SCM_Detect_' + Date.now(), 'ff');
+      const partA = store.createPart({ type: 'Unknown', label: 'SCM Connected A', model, streams: [] });
+      const partB = store.createPart({ type: 'Unknown', label: 'SCM Connected B', model, streams: [] });
+      store.createConnector({ from: partA.id, to: partB.id, model, connectorType: 'c', relationship: 'Association', streams: [] });
+
+      const orphan = store.createPart({ type: 'Unknown', label: 'SCM Orphan', model, streams: [] });
+      const badConn = store.createConnector({ from: partA.id, to: 'no-such-part-id', model, connectorType: 'c', relationship: 'Association', streams: [] });
+
+      const dupKeep = store.createPart({ type: 'GeneralActor', label: 'SCM Dup Actor', model, streams: [] });
+      const dupNoConn = store.createPart({ type: 'GeneralActor', label: 'SCM Dup Actor', model, streams: [] });
+      const dupConnected = store.createPart({ type: 'GeneralActor', label: 'SCM Dup Actor', model, streams: [] });
+      store.createConnector({ from: dupConnected.id, to: partB.id, model, connectorType: 'c', relationship: 'Association', streams: [] });
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: dupKeep.id, x: 10, y: 10 });
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: dupConnected.id, x: 200, y: 10 });
+
+      // Category toggle: only duplicateParts on -- the other two arrays must be empty.
+      const onlyDup = commands.smartCheckModel(store, { disconnectedParts: false, disconnectedConnectors: false, duplicateParts: true });
+
+      const full = commands.smartCheckModel(store, { disconnectedParts: true, disconnectedConnectors: true, duplicateParts: true });
+      const group = full.duplicateGroups.find(g => g.keepId === dupKeep.id);
+
+      const summary = commands.applySmartCheckModelFixes(app, {
+        deletePartIds: full.disconnectedParts.map(p => p.id),
+        deleteConnectorIds: full.disconnectedConnectors.map(c => c.id),
+        mergeGroups: full.duplicateGroups.map(g => ({ keepId: g.keepId, duplicateIds: g.duplicateIds })),
+      });
+
+      return {
+        onlyDupOtherCategoriesEmpty: onlyDup.disconnectedParts.length === 0 && onlyDup.disconnectedConnectors.length === 0,
+        onlyDupHasGroup: onlyDup.duplicateGroups.some(g => g.keepId === dupKeep.id),
+        foundOrphan: full.disconnectedParts.some(p => p.id === orphan.id),
+        foundBadConn: full.disconnectedConnectors.some(c => c.id === badConn.id),
+        foundGroup: !!group,
+        groupCount: group ? group.count : null,
+        summary,
+        orphanGone: !store.findPart(orphan.id),
+        badConnGone: !store.findConnector(badConn.id),
+        dupKeepSurvives: !!store.findPart(dupKeep.id),
+        dupNoConnGone: !store.findPart(dupNoConn.id),
+        dupConnectedGone: !store.findPart(dupConnected.id),
+        rewiredOntoKeep: store.doc.connectors.some(c => c.from === dupKeep.id && c.to === partB.id),
+        viewMemberCountForView: store.viewMembersForView(view.id).filter(vm => vm.objectType === 'part').length,
+        partAUntouched: !!store.findPart(partA.id),
+        partBUntouched: !!store.findPart(partB.id),
+        connectedPairUntouched: store.doc.connectors.some(c => c.from === partA.id && c.to === partB.id),
+      };
+    }
+    """)
+    problems = []
+    if not result["onlyDupOtherCategoriesEmpty"]:
+        problems.append("expected disconnectedParts/disconnectedConnectors to come back empty when only duplicateParts is requested")
+    if not result["onlyDupHasGroup"]:
+        problems.append("expected the duplicate group to still be found when duplicateParts is the only category requested")
+    if not result["foundOrphan"]:
+        problems.append("expected the zero-connector 'SCM Orphan' part to be flagged as a disconnected part")
+    if not result["foundBadConn"]:
+        problems.append("expected the connector with an invalid 'to' part id to be flagged as a disconnected connector")
+    if not result["foundGroup"] or result["groupCount"] != 3:
+        problems.append(f"expected a 3-member duplicate group for 'SCM Dup Actor', got group={result['foundGroup']} count={result['groupCount']}")
+    if not result["orphanGone"]:
+        problems.append("expected the disconnected part to be deleted")
+    if not result["badConnGone"]:
+        problems.append("expected the disconnected connector to be deleted")
+    if not result["dupKeepSurvives"]:
+        problems.append("expected the duplicate group's keep part (first-created) to survive the merge, even though it was ALSO confirmed as a disconnected part -- merge must take precedence over an independent delete for the same part id")
+    if not result["dupNoConnGone"] or not result["dupConnectedGone"]:
+        problems.append(f"expected both non-keep duplicate copies to be gone after merge, got dupNoConnGone={result['dupNoConnGone']} dupConnectedGone={result['dupConnectedGone']}")
+    if not result["rewiredOntoKeep"]:
+        problems.append("expected the connector from the connected duplicate copy to be rewired onto the surviving keep part after merge")
+    if result["viewMemberCountForView"] != 1:
+        problems.append(f"expected exactly one part viewMember left on the shared view after merging two duplicates that were both placed there, got {result['viewMemberCountForView']}")
+    if not result["partAUntouched"] or not result["partBUntouched"] or not result["connectedPairUntouched"]:
+        problems.append("expected the normal connected pair (and its connector) to be completely untouched by any of this")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "smartCheckModel correctly detects disconnected parts, disconnected connectors, and duplicate-part groups (respecting each category's own on/off toggle), and applySmartCheckModelFixes correctly gives a duplicate-group merge precedence over an independent disconnected-part deletion for the same part id -- proven against a real bug caught while building this feature, not just designed around it"
+
+
+def check_smart_check_model_dialog(page):
+    """Regression guard, direct follow-up (same report as
+    check_smart_check_model_detection_and_fix_precedence, above): covers the actual
+    Advanced menu item and its dialog UI, which that check bypasses entirely. Covers:
+    (1) 'Smart Check Model' appears in the Advanced menu ABOVE 'Smart Check View', per
+    the report's own "in Advanced menu before Smart Check View add a new item"; (2) the
+    dialog opens with NO open canvas tab at all (it's whole-model, not view-scoped, same
+    as Auto-Detect Connectors) and its Check button populates a real results table;
+    (3) unchecking one specific row before clicking "Fix Selected" leaves exactly that
+    one issue alone while still applying every other checked row -- the "confirm
+    individually which to fix ... or leave as is" part of the report, not just an
+    all-or-nothing bulk apply; (4) Cancel (after Check has already populated results)
+    makes zero changes to the model."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+
+      const advancedMenuLabels = [...document.querySelectorAll('#advanced-menu .dd-item')].map(el => el.textContent.trim());
+
+      const keepPart = store.createPart({ type: 'Unknown', label: 'SCMDialogOrphanKeep', model, streams: [] });
+      const deletePart = store.createPart({ type: 'Unknown', label: 'SCMDialogOrphanDelete', model, streams: [] });
+
+      app.promptSmartCheckModel();
+      await new Promise(r => setTimeout(r, 60));
+      const dialogOpenedWithNoTab = !!document.querySelector('.modal-box #scm-check');
+
+      const box = document.querySelector('.modal-box');
+      box.querySelector('#scm-check').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      // Uncheck the row for "SCMDialogOrphanKeep" specifically, leaving every other
+      // checked row (including SCMDialogOrphanDelete) as-is.
+      const rows = [...box.querySelectorAll('.scm-row-check[data-section="parts"]')];
+      const keepRowCb = rows.find(cb => cb.closest('tr').textContent.includes('SCMDialogOrphanKeep'));
+      keepRowCb.checked = false;
+      keepRowCb.dispatchEvent(new Event('change', { bubbles: true }));
+
+      box.querySelector('#scm-fix').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      const toasts = [...document.querySelectorAll('.toast')];
+      const lastToast = toasts.length ? toasts[toasts.length - 1].textContent : null;
+
+      // Second run, to check Cancel makes no changes.
+      const partBeforeCancel = store.createPart({ type: 'Unknown', label: 'SCMDialogCancelProbe', model, streams: [] });
+      app.promptSmartCheckModel();
+      await new Promise(r => setTimeout(r, 60));
+      const box2 = document.querySelector('.modal-box');
+      box2.querySelector('#scm-check').click();
+      await new Promise(r => setTimeout(r, 60));
+      box2.querySelector('.cancel').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      return {
+        advancedMenuLabels,
+        dialogOpenedWithNoTab,
+        keepPartStillExists: !!store.findPart(keepPart.id),
+        deletePartGone: !store.findPart(deletePart.id),
+        lastToast,
+        cancelLeftDialogClosed: !document.querySelector('.modal-overlay'),
+        cancelProbeStillExists: !!store.findPart(partBeforeCancel.id),
+      };
+    }
+    """)
+    problems = []
+    labels = result["advancedMenuLabels"]
+    if 'Smart Check Model' not in labels or 'Smart Check View' not in labels:
+        problems.append(f"expected both 'Smart Check Model' and 'Smart Check View' in the Advanced menu, got {labels}")
+    elif labels.index('Smart Check Model') >= labels.index('Smart Check View'):
+        problems.append(f"expected 'Smart Check Model' to appear BEFORE 'Smart Check View' in the Advanced menu, got order {labels}")
+    if not result["dialogOpenedWithNoTab"]:
+        problems.append("expected Smart Check Model's dialog to open with no canvas tab required (whole-model, not view-scoped)")
+    if not result["keepPartStillExists"]:
+        problems.append("expected unchecking a specific disconnected-part row before Fix Selected to leave that exact part alone")
+    if not result["deletePartGone"]:
+        problems.append("expected every OTHER still-checked disconnected-part row to still be deleted by Fix Selected")
+    if not result["lastToast"] or "Smart Check Model" not in result["lastToast"]:
+        problems.append(f"expected a summary toast mentioning Smart Check Model's results, got {result['lastToast']!r}")
+    if not result["cancelLeftDialogClosed"]:
+        problems.append("expected Cancel to close the dialog")
+    if not result["cancelProbeStillExists"]:
+        problems.append("expected Cancel (even after Check already populated results) to make zero changes to the model")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Smart Check Model appears in the Advanced menu above Smart Check View, its dialog is reachable with no canvas tab open, unchecking a specific row before Fix Selected leaves exactly that issue alone while still applying the rest, and Cancel never touches the model"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
@@ -11041,6 +11244,8 @@ CHECKS = [
     check_insert_smart_stream_derived_connections,
     check_smart_check_view_derive_connectors,
     check_derived_connector_relationship_fallback,
+    check_smart_check_model_detection_and_fix_precedence,
+    check_smart_check_model_dialog,
 ]
 
 

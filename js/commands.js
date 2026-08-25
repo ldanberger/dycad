@@ -1929,6 +1929,199 @@ function createDerivedConnectorPairs(store, derivedPairs, log, describePart) {
   return created;
 }
 
+// ===================== SMART CHECK MODEL =====================
+/**
+ * Advanced menu > Smart Check Model: the whole-document counterpart to Smart Check
+ * View/Node above — those two repair gaps within ONE view's own placed content; this
+ * one scans the entire model (every part/connector, regardless of which views, if any,
+ * show them) for three kinds of data-hygiene issue, matching the same preview-then-
+ * confirm shape Data Modeling > Auto-Detect Connectors already established
+ * (detectConnectorCandidates/createDetectedConnectors below) — pure detection here,
+ * with no store mutation, so it's safe to call on every "Check" click; a separate
+ * applySmartCheckModelFixes (below) only touches the store once a person has reviewed
+ * and confirmed which specific rows to act on.
+ *
+ * - `disconnectedParts`: parts with NO connector of any type at all (not scoped to a
+ *   view — a part could be off every view and still not count here if it has a real
+ *   connector; conversely a part placed on a view could still be disconnected if it has
+ *   no connector). Fix = delete from the model (and any viewMember placements, since
+ *   Store.deletePart itself doesn't cascade — see main.js's own deleteSelection for the
+ *   same non-cascading convention elsewhere).
+ * - `disconnectedConnectors`: connectors whose `from` and/or `to` no longer resolves to
+ *   a real part (store.findPart returns nothing) — a genuinely invalid/orphaned record,
+ *   e.g. left behind by a part deleted through some path that didn't clean up its
+ *   connectors. Fix = delete via store.deleteConnectorAndMembers, which already cascades
+ *   to every viewMember showing it.
+ * - `duplicateGroups`: 2+ parts sharing the exact same type + model + label — grouped
+ *   by that triple, ordered by store.doc.parts' own array order (creation order), the
+ *   FIRST part in each group is `keep`, the rest are `duplicateIds`. Fix = merge (see
+ *   mergeDuplicateParts below) — reassigns every connector/viewMember pointing at a
+ *   duplicate onto the kept part, then deletes the duplicates.
+ *
+ * `options`: `{ disconnectedParts, disconnectedConnectors, duplicateParts }` (all
+ * booleans, default false) — only the requested categories are computed, so an
+ * unchecked category's array is always empty rather than omitted (keeps the caller's
+ * shape stable regardless of which checkboxes were on).
+ */
+function smartCheckModel(store, options = {}) {
+  const result = { disconnectedParts: [], disconnectedConnectors: [], duplicateGroups: [] };
+
+  if (options.disconnectedParts) {
+    const connectedIds = new Set();
+    for (const c of store.doc.connectors) {
+      connectedIds.add(String(c.from ?? '').toLowerCase());
+      connectedIds.add(String(c.to ?? '').toLowerCase());
+    }
+    result.disconnectedParts = store.doc.parts
+      .filter((p) => !connectedIds.has(String(p.id).toLowerCase()))
+      .map((p) => ({ id: p.id, label: p.label, type: p.type, model: p.model }));
+  }
+
+  if (options.disconnectedConnectors) {
+    result.disconnectedConnectors = store.doc.connectors
+      .filter((c) => !store.findPart(c.from) || !store.findPart(c.to))
+      .map((c) => ({
+        id: c.id,
+        fromLabel: store.findPart(c.from)?.label ?? '(missing part)',
+        toLabel: store.findPart(c.to)?.label ?? '(missing part)',
+        relationship: c.relationship || c.connectorType,
+      }));
+  }
+
+  if (options.duplicateParts) {
+    const groups = new Map();
+    for (const p of store.doc.parts) {
+      const key = `${p.type}|${p.model}|${p.label}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(p);
+    }
+    for (const parts of groups.values()) {
+      if (parts.length < 2) continue;
+      const [keep, ...dups] = parts;
+      result.duplicateGroups.push({
+        keepId: keep.id, keepLabel: keep.label, type: keep.type, model: keep.model,
+        duplicateIds: dups.map((p) => p.id), count: parts.length,
+      });
+    }
+  }
+
+  return result;
+}
+
+/** Merges `duplicatePartIds` into `keepPartId`, model-wide: reassigns every connector's
+ * from/to, then every 'part' viewMember's objectId (de-duplicating per-view where the
+ * kept part and a duplicate turn out to already share a view — keeps the earliest
+ * viewMember there as the survivor, repointing any 'connector' viewMember's own
+ * fromVmId/toVmId that referenced the one being removed), then de-duplicates any
+ * connectors this reassignment made identical (same from+to+connectorType, via
+ * deleteConnectorAndMembers so its own viewMembers go too, on every view at once), then
+ * finally deletes the duplicate parts themselves. Same rewire/dedupe shape
+ * mergePartsAndView (above) already uses for a view-selection-driven merge, but keyed
+ * directly by part id instead, since Smart Check Model's duplicates were found
+ * model-wide and may not be selected — or even placed — on any one view together. */
+function mergeDuplicateParts(store, keepPartId, duplicatePartIds) {
+  const keepPart = store.findPart(keepPartId);
+  if (!keepPart) return;
+  const dupIds = duplicatePartIds.filter((id) => id !== keepPartId);
+  const dupIdSet = new Set(dupIds);
+  if (dupIdSet.size === 0) return;
+
+  for (const conn of store.doc.connectors) {
+    if (dupIdSet.has(conn.from)) conn.from = keepPartId;
+    if (dupIdSet.has(conn.to)) conn.to = keepPartId;
+  }
+
+  const affectedViewIds = new Set(
+    store.doc.viewMembers
+      .filter((vm) => vm.objectType === 'part' && (dupIdSet.has(vm.objectId) || vm.objectId === keepPartId))
+      .map((vm) => vm.view)
+  );
+  for (const viewId of affectedViewIds) {
+    const partVmsHere = store.doc.viewMembers.filter((vm) => vm.view === viewId && vm.objectType === 'part' && (dupIdSet.has(vm.objectId) || vm.objectId === keepPartId));
+    if (partVmsHere.length === 0) continue;
+    const [survivor, ...extras] = partVmsHere;
+    survivor.objectId = keepPartId;
+    for (const extra of extras) {
+      for (const cvm of store.doc.viewMembers) {
+        if (cvm.view !== viewId || cvm.objectType !== 'connector') continue;
+        if (cvm.fromVmId === extra.id) cvm.fromVmId = survivor.id;
+        if (cvm.toVmId === extra.id) cvm.toVmId = survivor.id;
+      }
+      store.deleteViewMember(extra.id);
+    }
+  }
+
+  const seenKey = new Map();
+  for (const conn of [...store.doc.connectors]) {
+    const key = `${conn.from}|${conn.to}|${conn.connectorType}`;
+    if (seenKey.has(key)) {
+      store.deleteConnectorAndMembers(conn.id);
+    } else {
+      seenKey.set(key, conn.id);
+    }
+  }
+
+  const mergedStreams = new Set(keepPart.streams || []);
+  for (const id of dupIdSet) {
+    const p = store.findPart(id);
+    if (p) for (const s of (p.streams || [])) mergedStreams.add(s);
+  }
+  keepPart.streams = [...mergedStreams];
+  keepPart.note = (keepPart.note || '') + (keepPart.note ? '\n' : '') + `Merged with duplicate part(s): ${[...dupIdSet].join(', ')}`;
+
+  for (const id of dupIdSet) store.deletePart(id);
+}
+
+/** Applies a CONFIRMED subset of smartCheckModel's own findings (the caller has already
+ * filtered this down to whatever a person checked in the preview list) — mirrors
+ * createDetectedConnectors' own "detect now, apply later, only on what's confirmed"
+ * split above. `fixes`: `{ deletePartIds: [...], deleteConnectorIds: [...],
+ * mergeGroups: [{ keepId, duplicateIds }, ...] }` — any field may be omitted/empty.
+ * Returns a summary `{ partsDeleted, connectorsDeleted, groupsMerged, partsMergedAway }`
+ * for the caller's own toast.
+ *
+ * `deletePartIds` and `mergeGroups` are both computed from the SAME pre-fix snapshot
+ * (smartCheckModel's own detection pass), so a part that's disconnected (no connectors
+ * yet) AND also a member of a duplicate group — the keep part or one of the copies —
+ * can legitimately appear in both lists at once (checked in both preview rows). Merge
+ * always wins for that part: it's excluded from deletePartIds below rather than deleted
+ * first, since deleting the keep part out from under its own merge would silently no-op
+ * the merge (mergeDuplicateParts bails if the keep part is already gone), and deleting
+ * a copy first would leave its connectors/streams never carried over to the survivor. */
+function applySmartCheckModelFixes(app, fixes) {
+  const { store } = app;
+  let partsDeleted = 0, connectorsDeleted = 0, groupsMerged = 0, partsMergedAway = 0;
+
+  const mergedPartIds = new Set();
+  for (const group of fixes.mergeGroups || []) {
+    mergedPartIds.add(group.keepId);
+    for (const id of group.duplicateIds || []) mergedPartIds.add(id);
+  }
+
+  for (const partId of fixes.deletePartIds || []) {
+    if (mergedPartIds.has(partId)) continue;
+    if (!store.findPart(partId)) continue;
+    store.doc.viewMembers = store.doc.viewMembers.filter((vm) => !(vm.objectType === 'part' && ciEq(vm.objectId, partId)));
+    store.deletePart(partId);
+    partsDeleted += 1;
+  }
+
+  for (const connId of fixes.deleteConnectorIds || []) {
+    if (!store.findConnector(connId)) continue;
+    store.deleteConnectorAndMembers(connId);
+    connectorsDeleted += 1;
+  }
+
+  for (const group of fixes.mergeGroups || []) {
+    if (!group.duplicateIds || group.duplicateIds.length === 0) continue;
+    mergeDuplicateParts(store, group.keepId, group.duplicateIds);
+    groupsMerged += 1;
+    partsMergedAway += group.duplicateIds.length;
+  }
+
+  return { partsDeleted, connectorsDeleted, groupsMerged, partsMergedAway };
+}
+
 function smartCheckView(app, tab, options = {}) {
   const { missingConnectors = true, missingConnectorsAndNodes = false, levels = null, syncWithInventory = false, deriveConnectors = false } = options;
   const { store } = app;
@@ -4268,4 +4461,4 @@ function createDetectedConnectors(app, candidates) {
   return { created, placements, unplaced };
 }
 
-export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors };
+export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors };
