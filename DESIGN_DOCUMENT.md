@@ -845,6 +845,88 @@ the single `spacingScale` value, which has no separate per-axis concept to selec
 between; the toggle button is still visible and clickable regardless, it simply has no
 effect on that fallback path.
 
+### 6.1e The `'custom'` Remap pattern — user-designed layout logic (`commands.js`, `state.js`)
+
+A short design back-and-forth, reported directly: *"is it possible to build a small
+framework for user designed remap logic, something that can be loaded in and stored in
+user local settings perhaps. What types of parameter options can be added beyond what
+is already there?"* → (design discussion, not yet built) → *"can there be an option to
+use grid coordinates based on rows and columns and spacers between, as an alternate to
+the x,y canvas coordinates?"* → (design discussion: as a convenience layer resolved at
+remap time, never persisted as a grid) → *"yes go with the convenience layer at remap
+time. please build it."*
+
+**Storage: no new field at all.** Rather than a new Local Settings field/editor, a
+user-designed remap function is just a function named `CustomRemap_<Name>(ctx)` written
+directly in the Script Console's own text (`store.batchScriptCode`) — the exact same
+persistence, editing surface, and "found by name" mechanism `main()`'s own
+`BatchScript_<Name>` chain, `dataAutoFill()`, and `CommonScript_<Name>` (§8) already
+established. This is the FOURTH such convention that text now hosts; `state.js`'s own
+top-of-file doc comment documents all four together. `findCustomRemapFunctionNames(code)`
+(`main.js`) is a pure regex scan (`/function\s+(CustomRemap_\w+)\s*\(/g`, deliberately
+NOT a `new Function` compile, so it's safe to call on every dialog open even against
+code that doesn't currently parse) populating a new "Custom Function" dropdown that
+appears in the Remap dialog (`App.promptRemap`) once `'custom'` is selected as the
+Pattern — a sixth `REMAP_PATTERNS` entry alongside `default`/`none`/`layered`/`force`/
+`clusters`. Selecting it hides Sort priority/Edge Assignment/Minimize Crossings/Minimize
+Connector Length, the same "the function owns placement completely" treatment `force`/
+`clusters` already get (§6.1, §6.1c) — extended from a two-way `isForceOrClusters` flag
+to a three-way `ownsPlacementItself`. `customFunctionName` round-trips through every
+existing per-view/cross-view memory path exactly like every other Remap field already
+does: `view.remapLastOptions`, the cross-view `getCachedRemapOptions` cache, and
+`remapPresets` entries (Save As.../Load).
+
+**`applyRemapLayout`'s `'custom'` branch** (`commands.js`) sits right after `'clusters'`,
+in the same early-return group (before Edge Assignment/passive-row splitting, which
+`'custom'` — like `'force'`/`'clusters'` — has no use for): extracts the named function
+via `new Function('ctx', store.batchScriptCode + '\n' + 'return typeof ' + name + " ===
+'function' ? " + name + ' : null;')()` (the same extraction shape `dataAutoFill`/`main`
+already use), builds a `ctx` from the CURRENT `partVms`/`connVms` for this remap
+(already scoped by `visiblePartVmIds`, same as every other pattern), calls it, and
+applies whatever it returns. Every failure mode along the way — no function name given,
+the name not found, a Script Console syntax error, the function itself throwing, or a
+non-array return — THROWS a specific `Error` rather than returning `null` (every other
+pattern's failure convention); `remap()` (also `commands.js`) now wraps its
+`applyRemapLayout` call in try/catch specifically to turn one of these into a real
+`"Remap failed: <message>"` toast instead of an uncaught exception, while every
+pre-existing `null`-return failure mode (no stream templates available) is completely
+unaffected.
+
+**`ctx` contract**: `{ parts: [{vmId, partId, type, label, model, x, y}, ...],
+connectors: [{fromVmId, toVmId, relationship, connectorType, streams}, ...], nodeSize:
+{w, h}, spacingScale, gridToXY(row, col), setRowGap(afterRow, extraPx),
+setColGap(afterCol, extraPx) }`. A returned position may be `{vmId, x, y}` (explicit
+pixels) or `{vmId, row, col}` (resolved via `gridToXY`) — freely mixed in one array — and
+a `vmId` never mentioned keeps its current position untouched. **The grid-coordinate
+convenience layer is `makeGridResolver(baseX, rowBaseY, stepX, stepY)`** (`commands.js`,
+shared only by the `'custom'` branch): the exact same `baseX + col*stepX`/`rowBaseY +
+row*stepY` math every OTHER pattern already computes internally, just exposed directly
+so a script can think in row/column terms instead of hand-computing canvas pixels — and,
+critically, a PURE convenience layer: grid coordinates are resolved to plain x/y right
+here and nowhere else in the app (viewMembers, rendering, overlap-avoidance, Save/Load
+JSON) ever knows a grid was involved. `setRowGap`/`setColGap` add EXTRA space after a
+specific row/column index, on top of the uniform per-cell step — answering "spacers
+between" directly: a sparse map (`afterIndex -> extraPx`, last call for the same index
+wins) applied to every row/column strictly PAST that index (`after < idx`, not `<=` —
+the gap point itself is unaffected, only what comes after it shifts), letting a script
+visually separate sub-bands within one grid without needing genuinely disconnected
+components or a separate Edge Assignment band. Row/column indices may be fractional
+(e.g. row `1.5`) to nest a position between two grid rows without disturbing either —
+ordinary floating-point arithmetic, no special casing needed.
+
+**`CustomRemap_Example(ctx)`** (`state.js`, shipped default, not called from `main()`)
+demonstrates the convenience layer end to end: groups parts onto one row per element
+TYPE (alphabetically), columns within each row sorted by label, using `{row, col}`
+directly with no pixel arithmetic anywhere in the function body, plus a
+`ctx.setRowGap(0, 30)` call adding breathing room below the first row.
+
+New `check_custom_remap_grid_convenience_layer` (grid resolution, gap boundary
+semantics, mixed x/y and row/col entries, all four failure modes, `remap()`'s
+catch-and-toast — the gap boundary and the catch-and-toast both proven via TEMP BREAK)
+and `check_custom_remap_dialog` (Pattern dropdown option, Custom Function dropdown
+population/visibility, a real submit repositioning nodes, per-view persistence on
+reopen) in `tests/run_all.py`.
+
 ### 6.2 Connector routing (`routing.js`, dispatched from `canvas.js`)
 
 `view.routingStyle` governs `'c'`-type connectors, `view.routingStyleStream` governs

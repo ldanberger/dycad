@@ -34,7 +34,18 @@
  * text ahead of a part's script before compiling it, so CommonScript_Example is
  * callable BY NAME from any part's own script, using that script's own `ctx`. Naming
  * convention for future additions meant to be called this way:
- * `CommonScript_<Name>`. */
+ * `CommonScript_<Name>`.
+ *
+ * `CustomRemap_Example()` (below, after CommonScript_Example) is a FOURTH kind of
+ * entry point, reported directly: "is it possible to build a small framework for user
+ * designed remap logic, something that can be loaded in and stored in user local
+ * settings perhaps." Picked interactively from the Remap dialog's Pattern dropdown
+ * ("custom" reveals a second dropdown listing every `CustomRemap_<Name>` function
+ * found here) — `applyRemapLayout` (commands.js) extracts and calls the chosen one by
+ * name, passing a `ctx` with the view's current parts/connectors, node size, and a
+ * grid-coordinate convenience layer (`ctx.gridToXY`/`setRowGap`/`setColGap`) as an
+ * alternative to hand-computed canvas pixels. Naming convention for future additions
+ * meant to be selectable this way: `CustomRemap_<Name>`. */
 const DEFAULT_BATCH_SCRIPT_CODE = `// main() is what the Script Console's Run button actually calls. Define whatever
 // batch scripts you like below, and have main() call whichever one(s) you want to run.
 async function main() {
@@ -296,6 +307,40 @@ function dataAutoFill() {
 //   return { value: ctx.inputs[0]?.value };
 function CommonScript_Example(ctx) {
   ctx.log('called by ' + ctx.part.type + ' ' + ctx.part.label + ' ' + ctx.part.model);
+}
+
+// Custom remap: a FOURTH kind of entry point, reported directly: "is it possible to
+// build a small framework for user designed remap logic, something that can be loaded
+// in and stored in user local settings perhaps." Not called from main(), not
+// extracted by name from a menu item, and not called from a part script either --
+// instead it's picked interactively from the Remap dialog's Pattern dropdown ("custom"
+// reveals a second dropdown listing every CustomRemap_<Name> function found here) on
+// whichever view Remap is run against. See applyRemapLayout's own doc comment
+// (commands.js) for the full ctx contract this receives -- parts/connectors already on
+// the view, nodeSize, spacingScale, and a grid-coordinate convenience layer
+// (ctx.gridToXY/setRowGap/setColGap) as an alternative to hand-computed canvas pixels,
+// direct follow-up: "can there be an option to use grid coordinates based on rows and
+// columns and spacers between, as an alternate to the x,y canvas coordinates?" Naming
+// convention for future additions meant to be selectable this way: CustomRemap_<Name>.
+//
+// This one groups parts onto one row PER ELEMENT TYPE (alphabetically), columns within
+// each row sorted by label -- using grid coordinates directly (no pixel math at all),
+// plus a little extra breathing room below the first row via setRowGap, to demonstrate
+// both parts of the convenience layer.
+function CustomRemap_Example(ctx) {
+  const byType = new Map();
+  for (const p of ctx.parts) {
+    if (!byType.has(p.type)) byType.set(p.type, []);
+    byType.get(p.type).push(p);
+  }
+  const types = [...byType.keys()].sort();
+  const positions = [];
+  types.forEach((type, row) => {
+    const rowParts = byType.get(type).sort((a, b) => a.label.localeCompare(b.label));
+    rowParts.forEach((p, col) => positions.push({ vmId: p.vmId, row, col }));
+  });
+  if (types.length > 1) ctx.setRowGap(0, 30); // extra space below the first row
+  return positions;
 }
 `;
 

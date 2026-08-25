@@ -4128,4 +4128,40 @@
 // own row count/labels by topping it up instead of building a separate one), then
 // reverted. tests/README.md and public/instructions.html (main()'s own five-step
 // walkthrough paragraph) updated. Full suite 148/148.
-export const APP_VERSION = '0.895';
+// v0.896: a short design back-and-forth, reported directly: "is it possible to build a
+// small framework for user designed remap logic, something that can be loaded in and
+// stored in user local settings perhaps. What types of parameter options can be added
+// beyond what is already there?" -> (design discussion) -> "can there be an option to
+// use grid coordinates based on rows and columns and spacers between, as an alternate
+// to the x,y canvas coordinates?" -> (design discussion: convenience layer, resolved
+// at remap time, never persisted) -> "yes go with the convenience layer at remap time.
+// please build it." New 'custom' Remap pattern (sixth REMAP_PATTERNS entry): a
+// function named CustomRemap_<Name>(ctx), written directly in the Script Console's own
+// text (store.batchScriptCode) -- the FOURTH such convention that text hosts,
+// alongside main()'s BatchScript_<Name> chain, dataAutoFill, and CommonScript_<Name>
+// -- picked from a new "Custom Function" dropdown in the Remap dialog once "custom" is
+// selected as the Pattern (findCustomRemapFunctionNames, main.js, a pure regex scan).
+// applyRemapLayout's new 'custom' branch (commands.js, sitting right after 'clusters',
+// same early-return group) extracts and calls the chosen function, passing a ctx with
+// this remap's own parts/connectors/nodeSize/spacingScale PLUS a grid-coordinate
+// convenience layer -- ctx.gridToXY(row, col), ctx.setRowGap(afterRow, extraPx),
+// ctx.setColGap(afterCol, extraPx) (new makeGridResolver helper) -- answering the
+// "spacers between" half of the report: extra space after a specific row/column index,
+// applied to everything strictly past it, resolved to plain x/y right there and never
+// persisted as a grid anywhere else in the app. A returned position may be {vmId, x,
+// y} or {vmId, row, col}, freely mixed. Every failure mode (no function selected, not
+// found, the function throws, a non-array return) now THROWS a specific Error instead
+// of returning null; remap() (commands.js) wraps its applyRemapLayout call in
+// try/catch specifically to turn these into a real "Remap failed: ..." toast instead
+// of an uncaught exception, leaving every pre-existing null-return failure mode
+// unaffected. New CustomRemap_Example(ctx) (state.js) ships as a worked example --
+// groups parts onto one row per element type using grid coordinates alone, plus a
+// ctx.setRowGap(0, 30) call. customFunctionName round-trips through
+// view.remapLastOptions/the cross-view cache/remapPresets exactly like every other
+// Remap field. New check_custom_remap_grid_convenience_layer and
+// check_custom_remap_dialog (tests/run_all.py) -- the gap boundary semantics
+// (afterIdx < idx, not <=) and remap()'s catch-and-toast both proven via TEMP BREAK,
+// reverted. DESIGN_DOCUMENT.md SS6.1e, tests/README.md, and public/instructions.html
+// (Remap's own pattern list + a new Script Console paragraph) updated. Full suite
+// 150/150.
+export const APP_VERSION = '0.896';

@@ -488,6 +488,212 @@ def check_remap_layered_avoids_node_occlusion(page):
     return True, "'layered' remap with Minimize Crossings on produces zero connectors passing through an unrelated node's box, on the real generateIndustry/insertSmartStream/smartCheckView pipeline that originally reported this"
 
 
+def check_custom_remap_grid_convenience_layer(page):
+    """New-feature check for the 'custom' Remap pattern (commands.js's
+    applyRemapLayout), reported directly across a short back-and-forth: "is it
+    possible to build a small framework for user designed remap logic, something that
+    can be loaded in and stored in user local settings perhaps" -> (answered: reuse the
+    Script Console's own text/persistence, a new CustomRemap_<Name>(ctx) naming
+    convention) -> "can there be an option to use grid coordinates based on rows and
+    columns and spacers between, as an alternate to the x,y canvas coordinates?" ->
+    (answered: yes, as a pure convenience layer resolved to x/y at remap time, never
+    persisted as a grid) -> "yes go with the convenience layer at remap time. please
+    build it." Exercises applyRemapLayout/remap directly (commands.js), covering: (1)
+    the shipped CustomRemap_Example groups parts onto one row per element TYPE using
+    grid coordinates alone (no pixel math in the function itself), with its own
+    ctx.setRowGap(0, 30) call actually widening the gap after row 0; (2) a custom
+    function can freely MIX explicit {vmId, x, y} and grid {vmId, row, col} entries in
+    one returned array, and ctx.setColGap's "applies to every column PAST the given
+    index, last call wins" semantics are exactly right (col 0 itself unaffected by
+    setColGap(0, ...), col 1 shifted by the full extra amount); (3) four distinct
+    failure modes -- no customFunctionName given, a name not found in
+    store.batchScriptCode, the named function itself throwing, and the named function
+    returning something other than an array -- each throw a SPECIFIC, distinguishable
+    error message from applyRemapLayout directly, not a generic failure; (4) remap()
+    (the dialog/script-facing wrapper) catches any of those and reports them via a
+    real toast ("Remap failed: ...") instead of leaving them as an uncaught exception,
+    proven via TEMP BREAK removing remap()'s own try/catch (which then throws instead
+    of toasting), then reverted."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+
+      const view = store.addView('CustomRemapUnit_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const a = store.createPart({ type: 'GeneralActor', label: 'A', model, streams: [] });
+      const b = store.createPart({ type: 'BusinessFunction', label: 'B', model, streams: [] });
+      const c = store.createPart({ type: 'BusinessFunction', label: 'C', model, streams: [] });
+      const vmA = store.createViewMember({ view: view.id, objectType: 'part', objectId: a.id, x: 0, y: 0 });
+      const vmB = store.createViewMember({ view: view.id, objectType: 'part', objectId: b.id, x: 0, y: 0 });
+      const vmC = store.createViewMember({ view: view.id, objectType: 'part', objectId: c.id, x: 0, y: 0 });
+
+      // 1) shipped CustomRemap_Example: BusinessFunction row (alphabetically before
+      // GeneralActor) gets B, C (sorted by label); GeneralActor row gets A -- with an
+      // extra 30px gap below row 0.
+      commands.remap(app, tab, { pattern: 'custom', customFunctionName: 'CustomRemap_Example' });
+      const exampleRowY = { a: vmA.y, b: vmB.y, c: vmC.y };
+      const exampleSameRow = vmB.y === vmC.y;
+      const exampleRowGap = vmA.y - vmB.y; // row 1 - row 0, should include the +30 extra
+
+      // Baseline gap (no setRowGap) for comparison, using a fresh throwaway pair.
+      store.batchScriptCode = store.batchScriptCode + `
+        function CustomRemap_NoGap(ctx) {
+          const out = [];
+          for (const p of ctx.parts) out.push({ vmId: p.vmId, row: p.label === 'A' ? 1 : 0, col: 0 });
+          return out;
+        }
+      `;
+      commands.remap(app, tab, { pattern: 'custom', customFunctionName: 'CustomRemap_NoGap' });
+      const baselineRowGap = vmA.y - vmB.y;
+
+      // 2) mixed x/y + row/col, and setColGap boundary semantics.
+      store.batchScriptCode = store.batchScriptCode + `
+        function CustomRemap_Mixed(ctx) {
+          ctx.setColGap(0, 100);
+          const out = [];
+          for (const p of ctx.parts) {
+            if (p.label === 'A') out.push({ vmId: p.vmId, x: 999, y: 888 });
+            if (p.label === 'B') out.push({ vmId: p.vmId, row: 0, col: 0 });
+            if (p.label === 'C') out.push({ vmId: p.vmId, row: 0, col: 1 });
+          }
+          return out;
+        }
+      `;
+      commands.remap(app, tab, { pattern: 'custom', customFunctionName: 'CustomRemap_Mixed' });
+      const mixed = { ax: vmA.x, ay: vmA.y, bx: vmB.x, cx: vmC.x };
+
+      // 3) four distinct failure modes, straight from applyRemapLayout.
+      const errors = {};
+      try { commands.applyRemapLayout(app, view.id, { pattern: 'custom' }); } catch (e) { errors.noName = e.message; }
+      try { commands.applyRemapLayout(app, view.id, { pattern: 'custom', customFunctionName: 'NoSuchFn' }); } catch (e) { errors.notFound = e.message; }
+      store.batchScriptCode = store.batchScriptCode + `function CustomRemap_Throws(ctx) { throw new Error('boom'); }`;
+      try { commands.applyRemapLayout(app, view.id, { pattern: 'custom', customFunctionName: 'CustomRemap_Throws' }); } catch (e) { errors.threw = e.message; }
+      store.batchScriptCode = store.batchScriptCode + `function CustomRemap_BadReturn(ctx) { return 'nope'; }`;
+      try { commands.applyRemapLayout(app, view.id, { pattern: 'custom', customFunctionName: 'CustomRemap_BadReturn' }); } catch (e) { errors.badReturn = e.message; }
+
+      // 4) remap() wrapper catches and toasts instead of throwing.
+      let remapThrew = false;
+      try { commands.remap(app, tab, { pattern: 'custom', customFunctionName: 'NoSuchFn2' }); } catch (e) { remapThrew = true; }
+      await new Promise(r => setTimeout(r, 60));
+      const toasts = [...document.querySelectorAll('.toast')];
+      const lastToast = toasts.length ? toasts[toasts.length - 1].textContent : null;
+
+      return { exampleRowY, exampleSameRow, exampleRowGap, baselineRowGap, mixed, errors, remapThrew, lastToast };
+    }
+    """)
+    problems = []
+    if not result["exampleSameRow"]:
+        problems.append(f"expected CustomRemap_Example to put both BusinessFunction parts on the SAME row (grid col 0/1), got y values {result['exampleRowY']}")
+    if result["exampleRowGap"] <= result["baselineRowGap"]:
+        problems.append(f"expected CustomRemap_Example's ctx.setRowGap(0, 30) to make row 1 sit further from row 0 than the no-gap baseline, got exampleRowGap={result['exampleRowGap']} baselineRowGap={result['baselineRowGap']}")
+    m = result["mixed"]
+    if m["ax"] != 999 or m["ay"] != 888:
+        problems.append(f"expected an explicit {{x,y}} entry to be used verbatim, got A at ({m['ax']},{m['ay']})")
+    if m["bx"] != 60:
+        problems.append(f"expected col 0 to be UNAFFECTED by setColGap(0, 100) (gap applies strictly PAST the given index), got B at x={m['bx']}")
+    expected_col_gap_effect = m["cx"] - m["bx"]
+    if expected_col_gap_effect <= 100:
+        problems.append(f"expected col 1 to be shifted by its normal step PLUS the full 100px gap (since 0 < 1), got C-B x distance = {expected_col_gap_effect}")
+    e = result["errors"]
+    if "selected" not in (e.get("noName") or ""):
+        problems.append(f"expected a specific 'no custom remap function selected' error when customFunctionName is omitted, got {e.get('noName')!r}")
+    if "NoSuchFn" not in (e.get("notFound") or ""):
+        problems.append(f"expected a specific 'no function named ... found' error for an unknown function name, got {e.get('notFound')!r}")
+    if "boom" not in (e.get("threw") or ""):
+        problems.append(f"expected the custom function's own thrown error message to propagate, got {e.get('threw')!r}")
+    if "array" not in (e.get("badReturn") or ""):
+        problems.append(f"expected a specific 'must return an array' error when the custom function returns something else, got {e.get('badReturn')!r}")
+    if result["remapThrew"]:
+        problems.append("expected remap() to catch a custom-pattern error itself, not let it propagate as an uncaught exception")
+    if not result["lastToast"] or "Remap failed" not in result["lastToast"]:
+        problems.append(f"expected remap() to report the custom-pattern error via a real toast starting with 'Remap failed:', got {result['lastToast']!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "the 'custom' Remap pattern's grid-coordinate convenience layer (ctx.gridToXY/setRowGap/setColGap) resolves correctly, mixes freely with explicit x/y, and all four of its distinct failure modes are caught by remap() and reported via a specific toast instead of an uncaught exception"
+
+
+def check_custom_remap_dialog(page):
+    """UI-level companion to check_custom_remap_grid_convenience_layer, above (same
+    report) — covers the actual Remap dialog wiring that check bypasses. Covers: (1)
+    'custom' appears in the Pattern dropdown and, once selected, reveals a Custom
+    Function dropdown populated from every CustomRemap_<Name> function found in
+    store.batchScriptCode (including the shipped CustomRemap_Example) while hiding
+    Sort priority/Edge Assignment/Minimize Crossings/Minimize Connector Length — same
+    "the function owns placement completely" treatment force-directed/clusters already
+    get; (2) submitting with CustomRemap_Example selected actually repositions the
+    view's nodes (not a no-op); (3) view.remapLastOptions.customFunctionName persists
+    the choice, and reopening Remap on the SAME view later pre-selects both the
+    'custom' pattern and that exact function again -- the same "this view's own last
+    choice wins" precedent every other Remap field already follows."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+
+      const view = store.addView('CustomRemapDialog_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const a = store.createPart({ type: 'GeneralActor', label: 'DialogA', model, streams: [] });
+      const b = store.createPart({ type: 'BusinessFunction', label: 'DialogB', model, streams: [] });
+      const vmA = store.createViewMember({ view: view.id, objectType: 'part', objectId: a.id, x: 5, y: 5 });
+      const vmB = store.createViewMember({ view: view.id, objectType: 'part', objectId: b.id, x: 5, y: 5 });
+      const beforeX = { a: vmA.x, b: vmB.x };
+
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 60));
+      const box = document.querySelector('.modal-box');
+      const patternSelect = box.querySelector('#rm-pattern');
+      const hasCustomOption = [...patternSelect.options].some(o => o.value === 'custom');
+      patternSelect.value = 'custom';
+      patternSelect.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 30));
+
+      const fnRowVisible = !box.querySelector('#rm-custom-function-row').classList.contains('hidden');
+      const priorityHidden = box.querySelector('#rm-priority-section').classList.contains('hidden');
+      const edgeHidden = box.querySelector('#rm-edge-section').classList.contains('hidden');
+      const minimizeCrossingsHidden = box.querySelector('#rm-minimize-crossings-row').classList.contains('hidden');
+      const fnSelect = box.querySelector('#rm-custom-function');
+      const hasExampleOption = [...fnSelect.options].some(o => o.value === 'CustomRemap_Example');
+      fnSelect.value = 'CustomRemap_Example';
+
+      box.querySelector('.submit').click();
+      await new Promise(r => setTimeout(r, 60));
+      const afterX = { a: vmA.x, b: vmB.x };
+      const movedSomething = afterX.a !== beforeX.a || afterX.b !== beforeX.b;
+
+      // Reopen: this view's own last choice (pattern + function name) should win.
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 60));
+      const box2 = document.querySelector('.modal-box');
+      const reopenedPattern = box2.querySelector('#rm-pattern').value;
+      const reopenedFn = box2.querySelector('#rm-custom-function').value;
+      box2.querySelector('.cancel').click();
+
+      return { hasCustomOption, fnRowVisible, priorityHidden, edgeHidden, minimizeCrossingsHidden, hasExampleOption, movedSomething, reopenedPattern, reopenedFn };
+    }
+    """)
+    problems = []
+    if not result["hasCustomOption"]:
+        problems.append("expected 'custom' to be a Pattern option in the Remap dialog")
+    if not result["fnRowVisible"]:
+        problems.append("expected the Custom Function dropdown to appear once 'custom' is selected")
+    if not result["priorityHidden"] or not result["edgeHidden"] or not result["minimizeCrossingsHidden"]:
+        problems.append(f"expected Sort priority/Edge Assignment/Minimize Crossings to be hidden for 'custom', got priorityHidden={result['priorityHidden']} edgeHidden={result['edgeHidden']} minimizeCrossingsHidden={result['minimizeCrossingsHidden']}")
+    if not result["hasExampleOption"]:
+        problems.append("expected the shipped CustomRemap_Example to appear in the Custom Function dropdown")
+    if not result["movedSomething"]:
+        problems.append("expected submitting with CustomRemap_Example selected to actually move at least one node")
+    if result["reopenedPattern"] != "custom" or result["reopenedFn"] != "CustomRemap_Example":
+        problems.append(f"expected reopening Remap on this view to pre-select pattern='custom' and function='CustomRemap_Example' (this view's own last choice), got pattern={result['reopenedPattern']!r} fn={result['reopenedFn']!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "the Remap dialog's 'custom' pattern reveals a Custom Function dropdown populated from store.batchScriptCode (hiding the grid-specific options that don't apply), submitting with it actually repositions nodes, and this view's own last choice is remembered on reopen"
+
+
 def check_force_directed_no_runaway_drift(page):
     """Regression guard: force-directed layout once let two disconnected pairs drift
     thousands of pixels apart. Confirms a-b/c-d stay within a sane bound."""
@@ -11334,6 +11540,8 @@ CHECKS = [
     check_remap_layered_pattern,
     check_remap_crossing_minimization_finds_global_optimum,
     check_remap_layered_avoids_node_occlusion,
+    check_custom_remap_grid_convenience_layer,
+    check_custom_remap_dialog,
     check_force_directed_no_runaway_drift,
     check_force_directed_adjacent_cells,
     check_remap_clusters_decomposition,

@@ -3645,8 +3645,38 @@ function shiftToOriginalPosition(vms, originalPositions) {
   for (const vm of vms) { vm.x += shiftX; vm.y += shiftY; }
 }
 
+/** Shared row/col -> pixel conversion for the 'custom' Remap pattern below — the same
+ * `baseX + col*stepX`/`rowBaseY + row*stepY` math every other pattern already uses
+ * internally, just exposed directly so a CustomRemap_<Name>(ctx) script (see
+ * applyRemapLayout's own doc comment) can think in row/column grid coordinates
+ * instead of raw canvas pixels — reported directly: "can there be an option to use
+ * grid coordinates based on rows and columns and spacers between, as an alternate to
+ * the x,y canvas coordinates?" A pure CONVENIENCE layer: grid coordinates are resolved
+ * to plain x/y right here and nowhere else in the app ever knows a grid was involved.
+ * `setRowGap`/`setColGap` let a script add EXTRA space after a specific row/column
+ * index, on top of the uniform per-cell step — e.g. visually separating two sub-bands
+ * within one grid without them needing to be genuinely disconnected components or a
+ * separate Edge Assignment band. Gaps accumulate in a sparse map (last call for the
+ * same index wins) and apply to every row/column PAST that index (strictly greater —
+ * `afterRow < row`), so setting one gap shifts everything below/right of it uniformly.
+ * Row/column indices may be fractional (e.g. row 1.5) to nest a position between two
+ * grid rows without disturbing either — ordinary floating-point arithmetic, no special
+ * casing needed. */
+function makeGridResolver(baseX, rowBaseY, stepX, stepY) {
+  const rowGaps = new Map(); // afterRow index -> extra px
+  const colGaps = new Map(); // afterCol index -> extra px
+  const gapSum = (gaps, idx) => { let sum = 0; for (const [after, extra] of gaps) if (after < idx) sum += extra; return sum; };
+  return {
+    gridToXY(row, col) {
+      return { x: baseX + col * stepX + gapSum(colGaps, col), y: rowBaseY + row * stepY + gapSum(rowGaps, row) };
+    },
+    setRowGap(afterRow, extraPx) { rowGaps.set(afterRow, extraPx); },
+    setColGap(afterCol, extraPx) { colGaps.set(afterCol, extraPx); },
+  };
+}
+
 function applyRemapLayout(app, viewId, options = {}) {
-  const { sortKeys, templateName, pattern = 'default', limitColumnsToView = false, visiblePartVmIds = null, forcePreferRight = false, forceGroupRows = false, edgeAssignment = null, minimizeCrossings = false, minimizeConnectorLength = false } = options;
+  const { sortKeys, templateName, pattern = 'default', limitColumnsToView = false, visiblePartVmIds = null, forcePreferRight = false, forceGroupRows = false, edgeAssignment = null, minimizeCrossings = false, minimizeConnectorLength = false, customFunctionName = null } = options;
   const { store } = app;
   const view = store.findView(viewId);
   if (!view) return null;
@@ -3751,6 +3781,92 @@ function applyRemapLayout(app, viewId, options = {}) {
     for (const vm of partVms) {
       const p = positions.get(vm.id);
       if (p) { vm.x = p.x; vm.y = p.y; }
+    }
+    shiftToOriginalPosition(partVms, originalPartPositions);
+    return { view, template, maxCols: partVms.length };
+  }
+
+  if (pattern === 'custom') {
+    // User-designed remap logic — reported directly: "is it possible to build a small
+    // framework for user designed remap logic, something that can be loaded in and
+    // stored in user local settings perhaps." Reuses the Script Console's own text
+    // (store.batchScriptCode) rather than a new storage field or editor: a function
+    // named CustomRemap_<Name>(ctx), written and persisted there exactly like
+    // BatchScript_<Name>/dataAutoFill/CommonScript_<Name> already are (see
+    // DEFAULT_BATCH_SCRIPT_CODE's own top-of-file doc comment, state.js), picked from
+    // a dropdown in the Remap dialog once "custom" is selected as the pattern
+    // (App.promptRemap, main.js — the dropdown scans batchScriptCode for
+    // `function CustomRemap_...(` matches, same technique used to populate the Script
+    // Console's own Reference tab).
+    //
+    // ctx: { parts: [{vmId, partId, type, label, model, x, y}], connectors:
+    // [{fromVmId, toVmId, relationship, connectorType, streams}], nodeSize: {w, h},
+    // spacingScale, gridToXY(row, col), setRowGap(afterRow, extraPx),
+    // setColGap(afterCol, extraPx) } — like 'force'/'clusters' above, driven by the
+    // FULL partVms/connVms for this remap (already scoped by visiblePartVmIds, same as
+    // every other pattern), with no sort keys/edgeAssignment/passive-row handling of
+    // its own, since a custom function owns placement completely. Must return an array
+    // of positions, each either {vmId, x, y} (explicit pixels) or {vmId, row, col}
+    // (resolved via gridToXY, including any gap overrides the function itself called
+    // setRowGap/setColGap with) — mixed freely in one array. A vmId never mentioned
+    // keeps its current position untouched, so a custom function only needs to
+    // reposition whatever it actually cares about.
+    //
+    // Every failure mode here THROWS (rather than returning null, like the "no
+    // template" case just below the pattern branches) — remap() (below) catches it and
+    // toasts the SPECIFIC message, instead of the generic "no templates" one.
+    if (!customFunctionName) throw new Error('No custom remap function selected.');
+    let customFn;
+    try {
+      customFn = new Function('ctx', `${store.batchScriptCode || ''}\nreturn typeof ${customFunctionName} === 'function' ? ${customFunctionName} : null;`)();
+    } catch (err) {
+      throw new Error(`Script Console text has a syntax error: ${err.message}`);
+    }
+    if (typeof customFn !== 'function') throw new Error(`No function named "${customFunctionName}" found in the Script Console.`);
+
+    const spacingCustom = view.spacingScale || 1;
+    const stepXCustom = (nodeW + 40) * spacingCustom, stepYCustom = (nodeH + 44) * spacingCustom;
+    const grid = makeGridResolver(60, 40, stepXCustom, stepYCustom);
+
+    const customVmIdSet = new Set(partVms.map((vm) => vm.id));
+    const ctxParts = partVms.map((vm) => {
+      const part = store.findPart(vm.objectId);
+      return { vmId: vm.id, partId: vm.objectId, type: part?.type, label: part?.label, model: part?.model, x: vm.x, y: vm.y };
+    });
+    const ctxConnectors = connVms
+      .filter((cv) => customVmIdSet.has(cv.fromVmId) && customVmIdSet.has(cv.toVmId))
+      .map((cv) => {
+        const conn = store.findConnector(cv.objectId);
+        return { fromVmId: cv.fromVmId, toVmId: cv.toVmId, relationship: conn?.relationship, connectorType: conn?.connectorType, streams: conn?.streams || [] };
+      });
+
+    let customOut;
+    try {
+      customOut = customFn({
+        parts: ctxParts,
+        connectors: ctxConnectors,
+        nodeSize: { w: nodeW, h: nodeH },
+        spacingScale: spacingCustom,
+        gridToXY: grid.gridToXY,
+        setRowGap: grid.setRowGap,
+        setColGap: grid.setColGap,
+      });
+    } catch (err) {
+      throw new Error(`"${customFunctionName}" threw: ${err.message}`);
+    }
+    if (!Array.isArray(customOut)) throw new Error(`"${customFunctionName}" must return an array of positions.`);
+
+    const customVmById = new Map(partVms.map((vm) => [vm.id, vm]));
+    for (const entry of customOut) {
+      if (!entry) continue;
+      const vm = customVmById.get(entry.vmId);
+      if (!vm) continue;
+      if (typeof entry.x === 'number' && typeof entry.y === 'number') {
+        vm.x = entry.x; vm.y = entry.y;
+      } else if (typeof entry.row === 'number' && typeof entry.col === 'number') {
+        const { x, y } = grid.gridToXY(entry.row, entry.col);
+        vm.x = x; vm.y = y;
+      }
     }
     shiftToOriginalPosition(partVms, originalPartPositions);
     return { view, template, maxCols: partVms.length };
@@ -4049,7 +4165,18 @@ function applyRemapLayout(app, viewId, options = {}) {
 }
 
 function remap(app, tab, options = {}) {
-  const result = applyRemapLayout(app, tab.viewId, options);
+  let result;
+  try {
+    result = applyRemapLayout(app, tab.viewId, options);
+  } catch (err) {
+    // The 'custom' pattern below throws (rather than returning null, like every other
+    // failure mode here) specifically so its own errors -- no function selected/found,
+    // a Script Console syntax error, the function itself throwing, a bad return shape
+    // -- reach the user with a SPECIFIC message instead of the generic "no templates"
+    // toast just below.
+    app.toast(`Remap failed: ${err.message}`, true);
+    return;
+  }
   if (!result) { app.toast('No stream templates available to remap against.', true); return; }
   if (options.sortKeys && options.sortKeys.length) result.view.remapSortKeys = options.sortKeys;
   // Remembers every OTHER dialog field too (sortKeys stays in its own remapSortKeys
@@ -4068,9 +4195,12 @@ function remap(app, tab, options = {}) {
     edgeAssignment: options.edgeAssignment || {},
     minimizeCrossings: !!options.minimizeCrossings,
     minimizeConnectorLength: !!options.minimizeConnectorLength,
+    customFunctionName: options.customFunctionName || null,
   };
   app.recordAndRender();
-  const detail = options.pattern === 'force' ? 'force-directed placement' : `${result.maxCols} columns`;
+  const detail = options.pattern === 'force' ? 'force-directed placement'
+    : options.pattern === 'custom' ? `custom layout, "${options.customFunctionName}"`
+    : `${result.maxCols} columns`;
   app.toast(`Remapped "${result.view.viewName}" using template "${result.template.name}" (${detail}).`, false, true);
 }
 

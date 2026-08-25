@@ -95,7 +95,7 @@ current 3D scene instead — whatever rotation/zoom/filters are showing right no
 no meaningful vector serialization of a rendered 3D scene).</p>
 
 <h3>Remap</h3>
-<p>Reorganizes a view's layout. Five patterns:</p>
+<p>Reorganizes a view's layout. Six patterns:</p>
 <ul>
   <li><strong>Default</strong> — groups nodes by stream into rows, following the stream template's own
   ordering.</li>
@@ -122,6 +122,17 @@ no meaningful vector serialization of a rendered 3D scene).</p>
   up sitting on top of an unrelated connector line gets nudged aside — but a table that connects to more than
   one cluster can't always land adjacent to every cluster it touches, the same kind of unavoidable 2D-layout
   tradeoff Force-directed already makes for cycles.</li>
+  <li><strong>Custom (Script Console)</strong> — hands placement completely to a function YOU write, named
+  <code>CustomRemap_&lt;Name&gt;(ctx)</code>, in the Script Console text (Advanced menu) — the same place
+  <code>main()</code>'s starter scripts and <code>dataAutoFill()</code> already live. Selecting this pattern
+  reveals a second dropdown listing every such function found there; pick one and Remap calls it with a
+  <code>ctx</code> holding this view's own parts/connectors, node size, and spacing — see "Node Scripting" below
+  for the full <code>ctx</code> shape, including a grid-coordinate convenience layer
+  (<code>ctx.gridToXY(row, col)</code>, <code>setRowGap</code>/<code>setColGap</code>) so you can think in rows
+  and columns instead of hand-computing canvas pixels. The shipped default,
+  <code>CustomRemap_Example</code>, groups parts onto one row per element type using exactly that. Like
+  Force-directed/Centralize in Clusters, it doesn't use sort order, column limits, or Edge Assignment — the
+  function decides every position itself.</li>
 </ul>
 <p>Remap also has an "only remap filtered nodes" option — combine it with the Stream, Type, or Section filter
 to reorganize just a subset of a busy view without disturbing everything else. A sibling "only remap selected
@@ -152,16 +163,17 @@ pinned to Top/Bottom/Left/Right can get reordered within its band and slides alo
 with whatever it's connected to in the middle grid, not just the plain, evenly-spaced band position it'd
 otherwise get. Both are heuristics, not guaranteed-optimal, but they noticeably clean up busy
 views — and combine well, since crossing reduction decides ordering first and length minimization then
-tightens the actual spacing. None of the three options do anything on the Force-directed or Centralize in
-Clusters patterns, or a section-based view, since none of them have a free row/column to bias.</p>
+tightens the actual spacing. None of the three options do anything on the Force-directed, Centralize in
+Clusters, or Custom patterns, or a section-based view, since none of them have a free row/column to bias.</p>
 <p>Remap's own choices (pattern, options, sort priority order) are remembered as your defaults the next
 time you open it on any view — and reopening it on the SAME view you last ran it on brings back that view's
-own settings specifically (pattern, both minimize checkboxes, Edge Assignment, template — not just sort
-order), ahead of the general cross-view default a brand-new view still falls back to. The Stream Template
-you pick is remembered too, and shared as the default across every dialog that offers one (Remap, Generate
-Stream, Smart Check View's Auto-Complete Streams) — so you only have to pick it once. A Preset row at the
-top of the dialog can also save the current field values — including Edge Assignment, Minimize Crossings,
-and Minimize Connector Length — as a named, reusable preset (<strong>Save As…</strong>) or load one back in
+own settings specifically (pattern, both minimize checkboxes, Edge Assignment, template, which Custom
+function was selected — not just sort order), ahead of the general cross-view default a brand-new view still
+falls back to. The Stream Template you pick is remembered too, and shared as the default across every dialog
+that offers one (Remap, Generate Stream, Smart Check View's Auto-Complete Streams) — so you only have to pick
+it once. A Preset row at the top of the dialog can also save the current field values — including Edge
+Assignment, Minimize Crossings, Minimize Connector Length, and the selected Custom function — as a named,
+reusable preset (<strong>Save As…</strong>) or load one back in
 (<strong>Load</strong>). Presets are Local Settings, not part of the model — like Insert Smart Stream's own
 presets, they never end up in a saved JSON file, but do travel with File &gt; Save/Load Local Settings and
 auto-apply from this browser's cache on reload. Also callable directly from a batch script — see
@@ -803,6 +815,12 @@ to the Message Log using the CALLING part's own <code>ctx.part</code> — a part
 (<code>main()</code>) and <code>dataAutoFill</code> (Autofill). A common function you write this way can use
 anything its own <code>ctx</code> parameter provides — it has no access to <code>app</code>/<code>store</code>
 directly, the same restriction any part script already has.</p>
+<p>A fourth kind of function belongs here too: a user-designed <strong>Remap layout</strong> (see "Remap" above),
+picked interactively from that dialog's Pattern dropdown ("Custom" reveals a second dropdown listing every
+matching function found here) rather than called from <code>main()</code>, a menu item, or a part script. The
+convention is <code>CustomRemap_&lt;Name&gt;(ctx)</code>; the default script ships
+<code>CustomRemap_Example</code>, which groups a view's parts onto one row per element type using grid
+coordinates. See "Remap" above for what its own <code>ctx</code> provides.</p>
 
 <h3>Code Summary</h3>
 <p>Advanced &gt; Code Summary opens a read-only listing of the Script Console's own text plus every part's own

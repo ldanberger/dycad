@@ -266,7 +266,21 @@ function addRecentFile(name, content) {
 /** Every valid Remap `pattern` value (promptRemap's #rm-pattern <option>s below) — a
  * single shared list so the dialog's own default-pattern resolution and preset-load
  * guard can never drift out of sync with which patterns actually exist. */
-const REMAP_PATTERNS = ['default', 'none', 'layered', 'force', 'clusters'];
+const REMAP_PATTERNS = ['default', 'none', 'layered', 'force', 'clusters', 'custom'];
+
+/** Scans `code` (store.batchScriptCode) for every top-level `function CustomRemap_Foo(`
+ * declaration and returns their names — same technique dataAutoFill/main() extraction
+ * uses to find a function BY NAME, just listing every match instead of one specific
+ * name, for the Remap dialog's own function-name dropdown (promptRemap, below). Pure
+ * text scan (no `new Function` compile — safe to call on every dialog open/keystroke,
+ * even on code that doesn't currently parse). */
+function findCustomRemapFunctionNames(code) {
+  const names = [];
+  const re = /function\s+(CustomRemap_\w+)\s*\(/g;
+  let m;
+  while ((m = re.exec(code || '')) !== null) names.push(m[1]);
+  return [...new Set(names)];
+}
 
 class App {
   constructor(store) {
@@ -2234,6 +2248,16 @@ class App {
       : REMAP_PATTERNS.includes(cachedRemap.pattern) ? cachedRemap.pattern : 'default';
 
     const store = this.store;
+    // Custom remap: "is it possible to build a small framework for user designed remap
+    // logic, something that can be loaded in and stored in user local settings
+    // perhaps." Scans the Script Console's own text (store.batchScriptCode) for every
+    // CustomRemap_<Name> function, same "this view's own last choice wins, else the
+    // cross-view cache, else the first one found" precedent every other field here
+    // already follows.
+    const customFnNames = findCustomRemapFunctionNames(store.batchScriptCode);
+    const defaultCustomFn = (viewLast.customFunctionName && customFnNames.includes(viewLast.customFunctionName)) ? viewLast.customFunctionName
+      : (cachedRemap.customFunctionName && customFnNames.includes(cachedRemap.customFunctionName)) ? cachedRemap.customFunctionName
+      : (customFnNames[0] || '');
     const typesInView = [...new Set(store.viewMembersForView(tab.viewId).filter((vm) => vm.objectType === 'part').map((vm) => store.findPart(vm.objectId)?.type).filter(Boolean))]
       .map((type) => { const el = elementByType(store, type); return { type, title: el?.title || type }; })
       .sort((a, b) => a.title.localeCompare(b.title));
@@ -2252,7 +2276,8 @@ class App {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;">
         <div>
           <div class="prop-row"><label>Stream Template</label><select id="rm-template">${templateNames.map((n) => `<option value="${escapeHtml(n)}" ${n === defaultTemplate ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></div>
-          <div class="prop-row"><label>Pattern</label><select id="rm-pattern"><option value="default" ${defaultPattern === 'default' ? 'selected' : ''}>default</option><option value="none" ${defaultPattern === 'none' ? 'selected' : ''}>none</option><option value="layered" ${defaultPattern === 'layered' ? 'selected' : ''}>layered</option><option value="force" ${defaultPattern === 'force' ? 'selected' : ''}>force-directed</option><option value="clusters" ${defaultPattern === 'clusters' ? 'selected' : ''}>centralize in clusters</option></select></div>
+          <div class="prop-row"><label>Pattern</label><select id="rm-pattern"><option value="default" ${defaultPattern === 'default' ? 'selected' : ''}>default</option><option value="none" ${defaultPattern === 'none' ? 'selected' : ''}>none</option><option value="layered" ${defaultPattern === 'layered' ? 'selected' : ''}>layered</option><option value="force" ${defaultPattern === 'force' ? 'selected' : ''}>force-directed</option><option value="clusters" ${defaultPattern === 'clusters' ? 'selected' : ''}>centralize in clusters</option><option value="custom" ${defaultPattern === 'custom' ? 'selected' : ''}>custom (Script Console)</option></select></div>
+          <div class="prop-row hidden" id="rm-custom-function-row"><label>Custom Function</label><select id="rm-custom-function">${customFnNames.length ? customFnNames.map((n) => `<option value="${escapeHtml(n)}" ${n === defaultCustomFn ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('') : '<option value="">(none found)</option>'}</select></div>
           <div class="prop-row checkbox" id="rm-limit-row"><input type="checkbox" id="rm-limit" ${rOpt('limitColumnsToView') ? 'checked' : ''} /><label for="rm-limit">Limit columns to view</label></div>
           <div class="prop-row checkbox"><input type="checkbox" id="rm-filtered-only" ${rOpt('filteredOnly') ? 'checked' : ''} /><label for="rm-filtered-only">Only remap filtered nodes</label></div>
           <div class="prop-row checkbox"><input type="checkbox" id="rm-selected-only" ${rOpt('selectedOnly') ? 'checked' : ''} /><label for="rm-selected-only">Only remap selected nodes and their connectors</label></div>
@@ -2260,6 +2285,7 @@ class App {
           <div class="prop-row checkbox" id="rm-minimize-length-row"><input type="checkbox" id="rm-minimize-length" ${rOpt('minimizeConnectorLength') ? 'checked' : ''} /><label for="rm-minimize-length">Minimize connector length</label></div>
           <div id="rm-force-note" class="hidden" style="margin-top:10px; font-size:12px; color:var(--text-muted);">Force-directed placement clusters connected nodes together and reduces total edge length — it doesn't use sort order, column limits, Edge Assignment, or crossing/length minimization, so those are hidden while this pattern is selected.</div>
           <div id="rm-clusters-note" class="hidden" style="margin-top:10px; font-size:12px; color:var(--text-muted);">Centralize in Clusters repeatedly centers each locally most-connected node with its own single-connection neighbors around it, tiling the resulting clusters together — like force-directed, it doesn't use sort order, column limits, Edge Assignment, or crossing/length minimization. A node that connects to more than one cluster (a "bridge") can't be guaranteed adjacent to every cluster it touches — an inherent limit of any 2D grid layout, same as force-directed's own cycle-edge case.</div>
+          <div id="rm-custom-note" class="hidden" style="margin-top:10px; font-size:12px; color:var(--text-muted);">Runs the selected CustomRemap_&lt;Name&gt; function from the Script Console (Advanced menu) against this view's own parts/connectors — like force-directed/clusters, it doesn't use sort order, column limits, Edge Assignment, or crossing/length minimization; the function decides every position itself. Add one by editing the Script Console text.</div>
           <div class="prop-row checkbox hidden" id="rm-force-prefer-right-row"><input type="checkbox" id="rm-force-prefer-right" ${rOpt('forcePreferRight') ? 'checked' : ''} /><label for="rm-force-prefer-right">Prefer placing connected nodes to the right when a cell is available</label></div>
           <div class="prop-row checkbox hidden" id="rm-force-group-rows-row"><input type="checkbox" id="rm-force-group-rows" ${rOpt('forceGroupRows') ? 'checked' : ''} /><label for="rm-force-group-rows">Only start a new row when a node is a new hop away (keep same-hop nodes on one row)</label></div>
         </div>
@@ -2308,23 +2334,31 @@ class App {
     const updatePatternVisibility = () => {
       const isForce = patternSelect.value === 'force';
       const isClusters = patternSelect.value === 'clusters';
-      const isForceOrClusters = isForce || isClusters;
+      const isCustom = patternSelect.value === 'custom';
+      // 'custom' hands placement completely to a user-written function -- same "no sort
+      // order, column limits, Edge Assignment, or crossing/length minimization" rule
+      // 'force'/'clusters' already established, extended to a third fully-custom
+      // pattern rather than special-cased on its own.
+      const ownsPlacementItself = isForce || isClusters || isCustom;
       const isLayered = patternSelect.value === 'layered';
-      box.querySelector('#rm-priority-section').classList.toggle('hidden', isForceOrClusters);
+      box.querySelector('#rm-priority-section').classList.toggle('hidden', ownsPlacementItself);
       // Column-wrapping (maxCols) has no meaning for 'layered' -- every row is exactly
-      // one hierarchy layer, however wide -- so it's hidden for 'force'/'clusters' and
-      // 'layered' alike, but Edge Assignment/Minimize Crossings/Minimize Connector
-      // Length all still apply to 'layered' same as 'default'/'none'.
-      box.querySelector('#rm-limit-row').classList.toggle('hidden', isForceOrClusters || isLayered);
-      box.querySelector('#rm-edge-section').classList.toggle('hidden', isForceOrClusters);
-      box.querySelector('#rm-minimize-crossings-row').classList.toggle('hidden', isForceOrClusters);
-      box.querySelector('#rm-minimize-length-row').classList.toggle('hidden', isForceOrClusters);
+      // one hierarchy layer, however wide -- so it's hidden for 'force'/'clusters'/
+      // 'custom' and 'layered' alike, but Edge Assignment/Minimize Crossings/Minimize
+      // Connector Length all still apply to 'layered' same as 'default'/'none'.
+      box.querySelector('#rm-limit-row').classList.toggle('hidden', ownsPlacementItself || isLayered);
+      box.querySelector('#rm-edge-section').classList.toggle('hidden', ownsPlacementItself);
+      box.querySelector('#rm-minimize-crossings-row').classList.toggle('hidden', ownsPlacementItself);
+      box.querySelector('#rm-minimize-length-row').classList.toggle('hidden', ownsPlacementItself);
       box.querySelector('#rm-force-note').classList.toggle('hidden', !isForce);
       box.querySelector('#rm-clusters-note').classList.toggle('hidden', !isClusters);
+      box.querySelector('#rm-custom-note').classList.toggle('hidden', !isCustom);
+      box.querySelector('#rm-custom-function-row').classList.toggle('hidden', !isCustom);
       // 'clusters' reuses 'force''s own "prefer right" option (same ring-placement
       // mechanic), but NOT "group rows" -- a hub's ring is always exactly one level
-      // deep, so BFS-depth-based row grouping has nothing to do here.
-      box.querySelector('#rm-force-prefer-right-row').classList.toggle('hidden', !isForceOrClusters);
+      // deep, so BFS-depth-based row grouping has nothing to do here. 'custom' uses
+      // neither -- a user function has no built-in placement mechanic of its own to tune.
+      box.querySelector('#rm-force-prefer-right-row').classList.toggle('hidden', !(isForce || isClusters));
       box.querySelector('#rm-force-group-rows-row').classList.toggle('hidden', !isForce);
     };
     patternSelect.addEventListener('change', updatePatternVisibility);
@@ -2356,6 +2390,7 @@ class App {
       box.querySelector('#rm-minimize-length').checked = false;
       box.querySelector('#rm-force-prefer-right').checked = false;
       box.querySelector('#rm-force-group-rows').checked = false;
+      if (customFnNames.length) box.querySelector('#rm-custom-function').value = customFnNames[0];
       applyEdgeAssignment({});
       orderedKeys.splice(0, orderedKeys.length, ...DEFAULT_REMAP_SORT_KEYS, ...REMAP_SORT_KEYS.filter((k) => !DEFAULT_REMAP_SORT_KEYS.includes(k)));
       renderPriorityList();
@@ -2377,6 +2412,7 @@ class App {
       box.querySelector('#rm-minimize-length').checked = !!preset.minimizeConnectorLength;
       box.querySelector('#rm-force-prefer-right').checked = !!preset.forcePreferRight;
       box.querySelector('#rm-force-group-rows').checked = !!preset.forceGroupRows;
+      if (preset.customFunctionName && customFnNames.includes(preset.customFunctionName)) box.querySelector('#rm-custom-function').value = preset.customFunctionName;
       const presetKeys = Array.isArray(preset.sortKeys) ? preset.sortKeys.filter((k) => REMAP_SORT_KEYS.includes(k)) : [];
       orderedKeys.splice(0, orderedKeys.length, ...presetKeys, ...REMAP_SORT_KEYS.filter((k) => !presetKeys.includes(k)));
       renderPriorityList();
@@ -2405,6 +2441,7 @@ class App {
             edgeAssignment: collectEdgeAssignment(),
             minimizeCrossings: box.querySelector('#rm-minimize-crossings').checked,
             minimizeConnectorLength: box.querySelector('#rm-minimize-length').checked,
+            customFunctionName: box.querySelector('#rm-custom-function').value || null,
           };
           const list = [...(store.remapPresets || [])];
           const idx = list.findIndex((p) => p.name === name);
@@ -2433,16 +2470,17 @@ class App {
       forceGroupRows: box.querySelector('#rm-force-group-rows').checked,
       edgeAssignment: collectEdgeAssignment(),
       sortKeys: [...orderedKeys],
+      customFunctionName: box.querySelector('#rm-custom-function').value || null,
     });
 
     box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
     wireCopyCallOnRightClick(this, box.querySelector('.submit'), () => `remap(app, tab, ${JSON.stringify(collectRemapOptions(), null, 2)});`);
     box.querySelector('.submit').addEventListener('click', () => {
-      const { templateName, pattern, limitColumnsToView, filteredOnly, selectedOnly, minimizeCrossings, minimizeConnectorLength, forcePreferRight, forceGroupRows, edgeAssignment, sortKeys } = collectRemapOptions();
+      const { templateName, pattern, limitColumnsToView, filteredOnly, selectedOnly, minimizeCrossings, minimizeConnectorLength, forcePreferRight, forceGroupRows, edgeAssignment, sortKeys, customFunctionName } = collectRemapOptions();
       overlay.remove();
 
       setCachedStreamTemplate(templateName);
-      setCachedRemapOptions({ pattern, limitColumnsToView, filteredOnly, selectedOnly, forcePreferRight, forceGroupRows, sortKeys, minimizeCrossings, minimizeConnectorLength });
+      setCachedRemapOptions({ pattern, limitColumnsToView, filteredOnly, selectedOnly, forcePreferRight, forceGroupRows, sortKeys, minimizeCrossings, minimizeConnectorLength, customFunctionName });
 
       let visiblePartVmIds = null;
       if (filteredOnly && isAnyVisibilityFilterActive(tab)) {
@@ -2467,7 +2505,7 @@ class App {
         const selectedPartVmIds = new Set([...tab.selection].filter((id) => this.store.findViewMember(id)?.objectType === 'part'));
         visiblePartVmIds = visiblePartVmIds ? new Set([...visiblePartVmIds].filter((id) => selectedPartVmIds.has(id))) : selectedPartVmIds;
       }
-      remap(this, tab, { sortKeys, templateName, pattern, limitColumnsToView, filteredOnly, selectedOnly, visiblePartVmIds, forcePreferRight, forceGroupRows, edgeAssignment, minimizeCrossings, minimizeConnectorLength });
+      remap(this, tab, { sortKeys, templateName, pattern, limitColumnsToView, filteredOnly, selectedOnly, visiblePartVmIds, forcePreferRight, forceGroupRows, edgeAssignment, minimizeCrossings, minimizeConnectorLength, customFunctionName });
     });
   }
 
