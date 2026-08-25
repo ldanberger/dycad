@@ -670,6 +670,88 @@ function setAllPinnedFields(config) {
   setPinnedFields('table', Array.isArray(config?.table) ? config.table : [...DEFAULT_PINNED_FIELDS]);
 }
 
+// ===================== RESIZABLE TEXTAREA HEIGHTS =====================
+// Same "cross-document, cross-model UI preference, a per-browser habit not document
+// data" reasoning as PINNED_FIELDS above — reported directly: "when property
+// resizable text fields are lengthened by user (lower right corner dragged) can that
+// be persisted for the user for that property in any view for current session and
+// future sessions. currently the resize is lost when user clicks away from the
+// node." Keyed by field NAME alone (not entity-qualified) — "for that property in
+// any view" reads as one shared height per field, e.g. Note ends up the same whether
+// it's a Part's, Connector's, or ViewMember's (all three are labeled "Note" and use
+// the same textarea), which is simpler and more useful than a finer per-entity-type
+// split nobody asked for.
+const FIELD_HEIGHTS_KEY = 'dycad-field-heights';
+
+function getFieldHeight(fieldName) {
+  try {
+    const all = JSON.parse(localStorage.getItem(FIELD_HEIGHTS_KEY) || '{}');
+    const px = Number(all[fieldName]);
+    return Number.isFinite(px) && px > 0 ? px : null;
+  } catch {
+    return null;
+  }
+}
+
+function setFieldHeight(fieldName, px) {
+  let all = {};
+  try { all = JSON.parse(localStorage.getItem(FIELD_HEIGHTS_KEY) || '{}'); } catch { /* start fresh */ }
+  all[fieldName] = Math.round(px);
+  localStorage.setItem(FIELD_HEIGHTS_KEY, JSON.stringify(all));
+}
+
+/** Whole-config read/write, used by File > Save/Load Local Settings — same "travels
+ * with a person between browsers/machines" precedent as getAllPinnedFields/
+ * setAllPinnedFields above. */
+function getAllFieldHeights() {
+  try {
+    const all = JSON.parse(localStorage.getItem(FIELD_HEIGHTS_KEY) || '{}');
+    return (all && typeof all === 'object' && !Array.isArray(all)) ? all : {};
+  } catch {
+    return {};
+  }
+}
+
+function setAllFieldHeights(config) {
+  localStorage.setItem(FIELD_HEIGHTS_KEY, JSON.stringify((config && typeof config === 'object' && !Array.isArray(config)) ? config : {}));
+}
+
+/** The persisted height for `fieldName` (getFieldHeight, above) as an inline style
+ * attribute string — empty if none saved yet, so a fresh field still falls back to
+ * its normal CSS min-height. Shared by every textarea-rendering call site so a
+ * field's remembered height stays identical everywhere it's edited. */
+function fieldHeightStyle(fieldName) {
+  const px = getFieldHeight(fieldName);
+  return px ? ` style="height:${px}px;"` : '';
+}
+
+/** Wires a ResizeObserver onto a rendered textarea so a user's own drag-resize (the
+ * native CSS `resize: vertical` handle, bottom-right corner) is genuinely persisted
+ * per fieldName instead of lost the moment this panel next re-renders (every commit
+ * calls app.recordAndRender(), which rebuilds the whole panel from scratch — reported
+ * directly: "currently the resize is lost when user clicks away from the node").
+ * Call once per textarea, right after it's actually in the DOM. A fresh
+ * ResizeObserver + textarea element is created on every re-render; nothing else
+ * references the old ones once replaced, so both become garbage-collectable together
+ * with no explicit teardown needed — EXCEPT that a removed-from-DOM (or hidden)
+ * element fires one final callback reporting a 0x0 content rect first (confirmed via
+ * real testing: switching away from this node, which rebuilds #properties-body and
+ * detaches the old textarea, was persisting a bogus 0px height for every field, not
+ * just the one actually resized) — guarded against below, not just the redundant
+ * "first callback reports the current size" case. */
+function wireFieldHeightPersistence(el, fieldName) {
+  if (!el || typeof ResizeObserver === 'undefined') return;
+  let lastHeight = el.getBoundingClientRect().height;
+  const ro = new ResizeObserver(() => {
+    const h = el.getBoundingClientRect().height;
+    if (h <= 0) return; // element was removed/hidden, not resized by the user
+    if (Math.abs(h - lastHeight) < 1) return; // ResizeObserver's own first callback just reports the current size -- not a real user resize
+    lastHeight = h;
+    setFieldHeight(fieldName, h);
+  });
+  ro.observe(el);
+}
+
 /** Builds and appends the "Pinned" section above a property panel's normal content —
  * one field row per pinned name that actually exists in one of `sources` (in pin order),
  * reusing renderShowFieldsPanel's own per-field rendering/wiring so pinned fields stay
@@ -860,7 +942,7 @@ function renderShowFieldsPanel(app, tab, entityKeyOrSpec, accessors, buttonHandl
     } else if (def.show === 'c') {
       html.push(row(label, `<input type="color" id="${id}" value="${toHexColor(val)}" />`, fieldName, pinBtn, id));
     } else if (def.show === 'm') {
-      html.push(row(label, `<textarea id="${id}">${escapeHtml(val ?? '')}</textarea>`, fieldName, pinBtn, id));
+      html.push(row(label, `<textarea id="${id}"${fieldHeightStyle(fieldName)}>${escapeHtml(val ?? '')}</textarea>`, fieldName, pinBtn, id));
     } else if (def.show === 's') {
       html.push(row(label, `<select id="${id}">${selectOptionsFor(app, sourceEntityKey, fieldName, val, ctx)}</select>`, fieldName, pinBtn, id));
     } else if (def.show === 'a') {
@@ -998,6 +1080,7 @@ function renderShowFieldsPanel(app, tab, entityKeyOrSpec, accessors, buttonHandl
     if (def.access === 'r') continue; // nothing else to wire for readonly fields
     const el = document.getElementById(`sf-${idNs}-${fieldName}`);
     if (!el) continue;
+    if (def.show === 'm') wireFieldHeightPersistence(el, fieldName);
     if (def.show === 'b') {
       if (buttonHandlers[fieldName]) el.addEventListener('click', () => buttonHandlers[fieldName]());
       continue;
@@ -1745,7 +1828,7 @@ function renderMultiSelectProperties(app, tab) {
     } else if (def.show === 'c') {
       html.push(row(label, `<input type="color" id="${id}" value="${toHexColor(allEqual ? values[0] : null)}" data-field="${fieldName}" />`));
     } else if (def.show === 'm') {
-      html.push(row(label, `<textarea id="${id}" data-field="${fieldName}" placeholder="${escapeHtml(placeholder)}">${allEqual ? escapeHtml(values[0] ?? '') : ''}</textarea>`));
+      html.push(row(label, `<textarea id="${id}" data-field="${fieldName}" placeholder="${escapeHtml(placeholder)}"${fieldHeightStyle(fieldName)}>${allEqual ? escapeHtml(values[0] ?? '') : ''}</textarea>`));
     } else if (def.show === 's') {
       html.push(row(label, `<select id="${id}" data-field="${fieldName}">${selectOptionsFor(app, entityKeyForOptions, fieldName, allEqual ? values[0] : '', selectCtx)}</select>`));
     } else {
@@ -1755,6 +1838,7 @@ function renderMultiSelectProperties(app, tab) {
   body.innerHTML = html.join('') || '<div class="empty-hint">No common editable attributes.</div>';
 
   body.querySelectorAll('[data-field]').forEach((el) => {
+    if (el.tagName === 'TEXTAREA') wireFieldHeightPersistence(el, el.dataset.field);
     el.addEventListener('change', (e) => {
       const fieldName = el.dataset.field;
       const def = spec[fieldName];
@@ -1784,4 +1868,4 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderViewDisplayFilters, renderMessageLog, escapeHtml, kindFromType, iconSvgFor, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields, isAttributeForeignKey };
+export { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderViewDisplayFilters, renderMessageLog, escapeHtml, kindFromType, iconSvgFor, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields, getAllFieldHeights, setAllFieldHeights, isAttributeForeignKey };

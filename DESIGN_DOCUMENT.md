@@ -116,6 +116,32 @@ for ViewMember-level fields (this placement's position/color/order/external-flag
 fields. Catalog table rows (§5.2) show only tier 2, since there's no "this view's
 placement" outside an actual diagram.
 
+**Resizable textarea heights** (`show: 'm'` fields — Note, Description, Script) are a
+cross-document, cross-model UI preference, `dycad-field-heights` in localStorage — the
+exact same "per-browser habit, not document data" reasoning `PINNED_FIELDS`
+(`render.js`) already uses for pinned fields, get/set/getAll/setAll functions included
+(`getFieldHeight`/`setFieldHeight`/`getAllFieldHeights`/`setAllFieldHeights`, the last
+two wired into File > Save/Load Local Settings alongside `pinnedFields`). Reported
+directly: *"when property resizable text fields are lengthened by user (lower right
+corner dragged) can that be persisted for the user for that property in any view for
+current session and future sessions. currently the resize is lost when user clicks
+away from the node."* Root cause: `renderShowFieldsPanel`'s own `'change'` handler
+calls `app.recordAndRender()` on every commit — including a plain blur — which rebuilds
+`#properties-body` from scratch, discarding whatever height a user had dragged the
+native CSS `resize: vertical` handle to. `wireFieldHeightPersistence(el, fieldName)`
+observes each rendered textarea with a `ResizeObserver`, persisting `fieldName`'s new
+height (keyed by field NAME alone, not entity-qualified — Note ends up the same
+whether it's a Part's, Connector's, or ViewMember's, all sharing the one textarea
+style) whenever it genuinely changes; `fieldHeightStyle(fieldName)` applies whatever's
+saved as each textarea's own initial inline `height`. A real bug found via direct
+testing before landing this: a `ResizeObserver`'s very last callback on an element
+that's just been removed from the DOM (exactly what happens to the OLD textarea the
+instant a re-render swaps it for a new one) reports a bogus `0x0` content rect — an
+early guard (`if (h <= 0) return;`) was needed, or every deselect would have silently
+zeroed out the height it had just saved a moment earlier. Wired into both textarea
+call sites — the single-selection panel above, and `renderMultiSelectProperties`'s own
+bulk-edit textarea.
+
 ### 5.2 Generic table tabs
 
 A tab with `type: 'table'` is driven entirely by `tab.tableRows` (array of plain
@@ -1456,6 +1482,28 @@ visually overflowed past the node's own fixed-height box, overlapping whatever t
 canvas placed below it. Fixed by raising the ceiling to `600px` (comfortably fits
 ~40 attribute rows — still a real ceiling, so one pathologically huge pasted table
 can't blow up every other node's shared, uniform-per-view size without limit).
+
+**Redraw's "Show all text" option** — direct follow-up: *"In redraw command for a view,
+add option something like 'show all text' checkbox and if selected resize default
+size for text that fits and full size that displays all text of node such as long
+descriptions. And retain setting for the specific view for future sessions."* Redraw
+(Commands panel) previously ran `redrawAndResolveLayout` immediately, no dialog; a new
+`App.promptRedraw(tab)` (`main.js`) now shows one checkbox, pre-filled from — and, on
+submit, written back to — `view.chkShowAllText`, the exact same "retained for the
+specific view" mechanism every other `view.chkShowXxx` toggle already gets (a plain
+document field, round-trips through Save/Load JSON via `Store.toJSON`'s whole-doc
+clone, no special-casing needed). `buildNodeEl` (`canvas.js`) reads this same flag at
+BOTH measurement time (`redrawNodeSizes` builds its measurement element by calling
+`buildNodeEl` itself, so this is "free") and real render time: `.fnode-label` and
+`.fnode-description` both have a `-webkit-line-clamp: 2` truncation in their base CSS,
+which `redrawNodeSizes`' pre-existing label-measurement already bypassed (it has
+*always* measured the label's true, unclamped height, a quirk that predates this
+feature) but the description never did — so without this fix, a taller box would have
+displayed the identical truncated "…" with the extra room simply wasted. When
+`chkShowAllText` is on, an inline `-webkit-line-clamp: unset; display: block; overflow:
+visible;` override removes BOTH clamps, at both times, so a size Redraw computes for
+"the full text" is a size that genuinely SHOWS the full text — not a bigger, still-
+truncated box.
 
 **Auto-Detect Connectors** (`js/commands.js`'s `detectConnectorCandidates`/
 `createDetectedConnectors`; `App.promptAutoDetectConnectors`, `main.js`) — reported

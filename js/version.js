@@ -3925,4 +3925,42 @@
 // New check_view_display_filters_moved_to_filters_panel and check_filters_properties_
 // alignment_and_row_spacing, both proven to catch a reintroduced regression and
 // reverted. DESIGN_DOCUMENT.md SS5.6 and tests/README.md updated. Full suite 142/142.
-export const APP_VERSION = '0.887';
+// v0.888: two direct follow-ups.
+// (1) "when property resizable text fields are lengthened by user (lower right
+// corner dragged) can that be persisted for the user for that property in any view
+// for current session and future sessions. currently the resize is lost when user
+// clicks away from the node." New dycad-field-heights localStorage key (render.js),
+// same PINNED_FIELDS "cross-document, cross-model, per-browser habit" precedent --
+// getFieldHeight/setFieldHeight/getAllFieldHeights/setAllFieldHeights, the latter two
+// wired into File > Save/Load Local Settings alongside pinnedFields. A new
+// wireFieldHeightPersistence(el, fieldName) ResizeObserver persists a genuine
+// textarea resize keyed by field NAME alone (Note shares one height across Part/
+// Connector/ViewMember); fieldHeightStyle(fieldName) applies whatever's saved as the
+// initial height. Real bug found via direct testing before landing this: a removed-
+// from-DOM textarea's own final ResizeObserver callback reports a bogus 0x0 rect --
+// an `if (h <= 0) return;` guard was needed, or every deselect (which rebuilds
+// #properties-body) would silently zero out the height it had just saved. Wired into
+// both textarea call sites (the single-selection panel, and renderMultiSelectProperties's
+// bulk-edit textarea).
+// (2) "In redraw command for a view, add option something like 'show all text'
+// checkbox and if selected resize default size for text that fits and full size
+// that displays all text of node such as long descriptions. And retain setting for
+// the specific view for future sessions." Redraw (Commands panel) previously ran
+// immediately; new App.promptRedraw(tab) (main.js) shows one checkbox, pre-filled
+// from and written back to view.chkShowAllText (a plain view field, retained the
+// same way every other view.chkShowXxx toggle already is -- round-trips through
+// Save/Load JSON for free). buildNodeEl (canvas.js) reads the same flag at BOTH
+// measurement time (redrawNodeSizes measures by calling buildNodeEl itself) and real
+// render time, removing .fnode-label/.fnode-description's -webkit-line-clamp:2 at
+// both -- without touching render time too, a taller box would just show the same
+// truncated "..." with the extra room wasted. chkShowAllText added to every view-
+// creation/migration default alongside the other chkShowXxx fields (state.js x3,
+// archimate.js) for consistency.
+// Two existing tests (check_new_content_sized_and_non_overlapping,
+// check_data_entity_details_sizing_fits_attribute_count) updated for Redraw now
+// opening a dialog instead of running immediately. New
+// check_textarea_height_persisted_per_field and check_redraw_dialog_show_all_text,
+// both proven to catch a reintroduced regression and reverted. DESIGN_DOCUMENT.md
+// SS5.1 and its Data Modeling section, plus tests/README.md, updated. Full suite
+// 144/144.
+export const APP_VERSION = '0.888';

@@ -668,6 +668,18 @@ function buildNodeEl(app, tab, vm, part) {
   const showTypes = view?.chkShowElementTypes;
   const showKeys = view?.chkShowKeys;
   const showDescription = view?.chkShowDescription;
+  // Reported directly: "In redraw command for a view, add option something like 'show
+  // all text' checkbox and if selected resize default size for text that fits and
+  // full size that displays all text of node such as long descriptions." Without
+  // this, redrawNodeSizes below already measures the FULL label (it always has —
+  // .fnode-label's own -webkit-line-clamp:2 is a display-time-only truncation,
+  // unrelated to sizing) but .fnode-description stays clamped to 2 lines even after a
+  // taller box is sized for it, wasting the extra room instead of showing more text.
+  // view.chkShowAllText (persisted on the view itself, same as any other view.chkShowXxx
+  // field — retained "for the specific view for future sessions" the same way, via
+  // Save/Load JSON) removes BOTH clamps at actual render time too, not just during
+  // measurement, so a Redraw genuinely displays the full text it sized for.
+  const noClampStyle = view?.chkShowAllText ? ' style="-webkit-line-clamp:unset;display:block;overflow:visible;"' : '';
 
   // Data Modeling: a DataEntityDetails node shows its own attribute list right on the
   // canvas (name : dataType, PK marked, FK looked up live the same way the property
@@ -725,8 +737,8 @@ function buildNodeEl(app, tab, vm, part) {
       ${showTypes ? `<div class="fnode-type">${escapeHtml(elDef?.title || part.type)}</div>` : '<span></span>'}
       <span class="fnode-icon" title="${escapeHtml(part.type)}">${iconSvgFor(app, elDef)}</span>
     </div>
-    <div class="fnode-label">${escapeHtml(part.label)}</div>
-    ${showDescription && part.description ? `<div class="fnode-description">${escapeHtml(part.description)}</div>` : ''}
+    <div class="fnode-label"${noClampStyle}>${escapeHtml(part.label)}</div>
+    ${showDescription && part.description ? `<div class="fnode-description"${noClampStyle}>${escapeHtml(part.description)}</div>` : ''}
     ${attributesHtml}
     ${showKeys ? `<div class="fnode-type" style="opacity:.5;">vm:${escapeHtml(vm.id)}<br>obj:${escapeHtml(part.id)}</div>` : ''}
     ${part.order > 0 ? `<div class="fnode-badge">${part.order}</div>` : ''}

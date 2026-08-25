@@ -235,7 +235,7 @@ function parseArchimateXml(xmlText, knownElementTypes, elementDefs, elementGroup
       id: viewId, viewName, viewType: 'ff',
       chkShowConnectorType: true, chkShowStreamType: false, chkShowKeys: false,
       chkShowElementTypes: true, chkShowDescription: true, chkShowOnPageCatalogs: false,
-      chkShowSimValues: false, chkShowScriptBadge: false,
+      chkShowSimValues: false, chkShowScriptBadge: false, chkShowAllText: false,
       margin: 50, sections: [], nodeWidth: 130, nodeHeight: 46, remapSortKeys: null, spacingScale: 1,
     });
 

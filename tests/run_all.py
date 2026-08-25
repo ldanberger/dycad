@@ -2328,7 +2328,11 @@ def check_new_content_sized_and_non_overlapping(page):
       }
       app.render();
       await new Promise(r => setTimeout(r, 30));
+      // Redraw now opens a dialog (the new "Show all text" checkbox) instead of
+      // running immediately -- click its own Redraw submit button.
       app.runCommand('redraw');
+      await new Promise(r => setTimeout(r, 30));
+      document.querySelector('.modal-overlay .submit').click();
       await new Promise(r => setTimeout(r, 50));
       const redrawVms = store.viewMembersForView(view4.id).filter(v => v.objectType === 'part');
       function overlap2(v1, v2, w, h) { return !(v1.x+w<=v2.x || v2.x+w<=v1.x || v1.y+h<=v2.y || v2.y+h<=v1.y); }
@@ -8129,7 +8133,11 @@ CREATE TABLE Trust_Ledger_Entries (
 
       const afterCreate = {{ nodeHeight: view.nodeHeight, ...measureFit() }};
 
+      // Redraw now opens a dialog (the new "Show all text" checkbox) instead of
+      // running immediately -- click its own Redraw submit button.
       app.runCommand('redraw');
+      await new Promise(r => setTimeout(r, 30));
+      document.querySelector('.modal-overlay .submit').click();
       await new Promise(r => setTimeout(r, 150));
       const afterRedraw = {{ nodeHeight: view.nodeHeight, ...measureFit() }};
 
@@ -8149,6 +8157,193 @@ CREATE TABLE Trust_Ledger_Entries (
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
     return True, "a DataEntityDetails node with a realistic 8-9 column attribute list sizes tall enough to show every row, on creation (Import DDL), Redraw, and Remap alike"
+
+
+def check_textarea_height_persisted_per_field(page):
+    """Regression guard, reported directly: "when property resizable text fields are
+    lengthened by user (lower right corner dragged) can that be persisted for the
+    user for that property in any view for current session and future sessions.
+    currently the resize is lost when user clicks away from the node." A
+    ResizeObserver (wireFieldHeightPersistence, render.js) now persists a textarea's
+    own height to localStorage (dycad-field-heights) keyed by field NAME alone (not
+    entity-qualified) whenever it genuinely changes size. Covers: (1) resizing the
+    Note textarea (simulated via a direct style.height change, same real box-size
+    change a native drag-resize produces) persists it; (2) a full panel rebuild
+    (deselect then reselect, exactly what "clicks away from the node" does — the
+    reported bug) picks the saved height back up, instead of resetting to default;
+    (3) "for that property in any view" — a DIFFERENT part's SAME field (Note) also
+    picks up the identical saved height, and a genuinely different field (Description)
+    does NOT; (4) a real bug found during testing: deselecting itself (which removes
+    the old textarea from the DOM) must NOT overwrite the just-saved height with a
+    bogus 0px (ResizeObserver's own final callback on a removed element reports a
+    0x0 rect) — proven by checking the stored height survives a deselect intact;
+    (5) File > Save/Load Local Settings round-trips fieldHeights, same as pinnedFields
+    already does."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const render = await import('./js/render.js');
+      localStorage.removeItem('dycad-field-heights');
+      const view = store.doc.views[0];
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const partA = store.createPart({ type: 'BusinessFunction', label: 'RegrHeightA', model: store.defaultModel, streams: [], note: 'note A', description: 'description A' });
+      const partB = store.createPart({ type: 'BusinessFunction', label: 'RegrHeightB', model: store.defaultModel, streams: [], note: 'note B', description: 'description B' });
+      const vmA = store.createViewMember({ view: view.id, objectType: 'part', objectId: partA.id, x: 40, y: 40 });
+      const vmB = store.createViewMember({ view: view.id, objectType: 'part', objectId: partB.id, x: 300, y: 40 });
+
+      tab.selection = new Set([vmA.id]);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      const noteTextarea = document.getElementById('sf-part-note');
+      const originalHeight = noteTextarea.getBoundingClientRect().height;
+      noteTextarea.style.height = (originalHeight + 90) + 'px';
+      await new Promise(r => setTimeout(r, 150));
+
+      const out = {};
+      out.storedAfterResize = { ...render.getAllFieldHeights() };
+
+      // deselect (removes the textarea from the DOM) -- must NOT zero out the height
+      tab.selection = new Set();
+      app.render();
+      await new Promise(r => setTimeout(r, 100));
+      out.storedAfterDeselect = { ...render.getAllFieldHeights() };
+
+      // reselect the SAME part -- rebuilt textarea should come back at the saved height
+      tab.selection = new Set([vmA.id]);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      out.rebuiltSameFieldHeight = document.getElementById('sf-part-note').style.height;
+
+      // a DIFFERENT part's SAME field name picks up the identical saved height
+      tab.selection = new Set([vmB.id]);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      out.otherPartSameFieldHeight = document.getElementById('sf-part-note').style.height;
+      // a genuinely different field is NOT affected
+      out.otherFieldHeight = document.getElementById('sf-part-description').style.height;
+
+      // Local Settings round-trip
+      const saved = render.getAllFieldHeights();
+      render.setAllFieldHeights({});
+      out.clearedHeights = { ...render.getAllFieldHeights() };
+      render.setAllFieldHeights(saved);
+      out.restoredHeights = { ...render.getAllFieldHeights() };
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["storedAfterResize"].get("note") or result["storedAfterResize"]["note"] < 100:
+        problems.append(f"expected resizing the Note textarea to persist a real height under 'note', got {result['storedAfterResize']}")
+    if result["storedAfterDeselect"].get("note") != result["storedAfterResize"].get("note"):
+        problems.append(f"expected deselecting (which removes the textarea from the DOM) to NOT overwrite the saved height with a bogus 0px, got {result['storedAfterDeselect']} vs originally {result['storedAfterResize']}")
+    if not result["rebuiltSameFieldHeight"] or result["rebuiltSameFieldHeight"] == "44px":
+        problems.append(f"expected the rebuilt Note textarea (after deselect+reselect) to come back at the saved height, got {result['rebuiltSameFieldHeight']}")
+    elif result["rebuiltSameFieldHeight"] != f"{result['storedAfterResize']['note']}px":
+        problems.append(f"expected the rebuilt Note textarea's height to exactly match the stored value, got {result['rebuiltSameFieldHeight']} vs stored {result['storedAfterResize']['note']}")
+    if result["otherPartSameFieldHeight"] != result["rebuiltSameFieldHeight"]:
+        problems.append(f"expected a DIFFERENT part's Note field to share the identical saved height ('for that property in any view'), got {result['otherPartSameFieldHeight']} vs {result['rebuiltSameFieldHeight']}")
+    if result["otherFieldHeight"] == result["rebuiltSameFieldHeight"]:
+        problems.append(f"expected Description's own height to be independent of Note's, got both {result['otherFieldHeight']}")
+    if result["clearedHeights"]:
+        problems.append(f"expected setAllFieldHeights({{}}) to genuinely clear stored heights, got {result['clearedHeights']}")
+    if result["restoredHeights"].get("note") != result["storedAfterResize"].get("note"):
+        problems.append(f"expected setAllFieldHeights to restore exactly what getAllFieldHeights returned (Local Settings round-trip), got {result['restoredHeights']} vs {result['storedAfterResize']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "A resized textarea's height is persisted per field name (dycad-field-heights), survives the exact rebuild that used to lose it (deselecting the node), doesn't get zeroed out by the element's own removal from the DOM, is shared across different parts using the same field, stays independent per field, and round-trips through Local Settings"
+
+
+def check_redraw_dialog_show_all_text(page):
+    """Regression guard, reported directly: "In redraw command for a view, add option
+    something like 'show all text' checkbox and if selected resize default size for
+    text that fits and full size that displays all text of node such as long
+    descriptions. And retain setting for the specific view for future sessions."
+    Redraw previously ran immediately with no dialog; it now opens one with a single
+    "Show all text" checkbox. Covers: (1) unchecked by default on a fresh view; (2)
+    leaving it unchecked reproduces today's existing behavior (description still
+    2-line-clamped, smaller nodeHeight); (3) checking it grows nodeHeight further AND
+    the actually-rendered node's own .fnode-description genuinely loses its line-clamp
+    (not just a bigger box with the same truncated text); (4) the checked state is
+    retained on THIS view for next time (view.chkShowAllText, reopening Redraw here
+    defaults to checked); (5) a DIFFERENT, unrelated view's own Redraw dialog is
+    NOT affected (defaults to unchecked) -- proving this is genuinely per-view, not a
+    global setting."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const longDesc = 'A genuinely long description with enough words to definitely wrap past two lines when fully shown, since the whole point of this checkbox is to prove the extra text really becomes visible instead of staying clamped.';
+      const view = store.addView('RegrRedrawShowAllText_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const part = store.createPart({ type: 'BusinessFunction', label: 'RegrRedrawShowAllTextPart', model: store.defaultModel, streams: [], description: longDesc });
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: 40, y: 40 });
+      view.chkShowDescription = true;
+
+      const out = {};
+
+      app.promptRedraw(tab);
+      await new Promise(r => setTimeout(r, 30));
+      out.defaultUnchecked = !document.getElementById('redraw-show-all-text').checked;
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 60));
+      out.heightOff = view.nodeHeight;
+      out.chkShowAllTextOff = view.chkShowAllText;
+      app.render();
+      await new Promise(r => setTimeout(r, 30));
+      out.descStyleOff = document.querySelector('.fnode-description')?.getAttribute('style') || null;
+
+      app.promptRedraw(tab);
+      await new Promise(r => setTimeout(r, 30));
+      document.getElementById('redraw-show-all-text').checked = true;
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 60));
+      out.heightOn = view.nodeHeight;
+      out.chkShowAllTextOn = view.chkShowAllText;
+      app.render();
+      await new Promise(r => setTimeout(r, 30));
+      out.descStyleOn = document.querySelector('.fnode-description')?.getAttribute('style') || null;
+
+      // reopening on the SAME view retains the checked state
+      app.promptRedraw(tab);
+      await new Promise(r => setTimeout(r, 30));
+      out.retainedOnSameView = document.getElementById('redraw-show-all-text').checked;
+      document.querySelector('.modal-overlay .cancel').click();
+
+      // a DIFFERENT view is unaffected
+      const otherView = store.addView('RegrRedrawShowAllTextOther_' + Date.now(), 'ff');
+      const otherTab = app.createCanvasTab(otherView);
+      app.switchToTab(otherTab.id);
+      app.promptRedraw(otherTab);
+      await new Promise(r => setTimeout(r, 30));
+      out.uncheckedOnOtherView = !document.getElementById('redraw-show-all-text').checked;
+      document.querySelector('.modal-overlay .cancel').click();
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["defaultUnchecked"]:
+        problems.append("expected 'Show all text' unchecked by default on a fresh view")
+    if result["chkShowAllTextOff"]:
+        problems.append("expected view.chkShowAllText to stay false after submitting unchecked")
+    if result["descStyleOff"] is not None:
+        problems.append(f"expected the rendered description to have NO clamp-override style when off, got {result['descStyleOff']!r}")
+    if not result["chkShowAllTextOn"]:
+        problems.append("expected view.chkShowAllText to be set true after submitting checked")
+    if result["descStyleOn"] != "-webkit-line-clamp:unset;display:block;overflow:visible;":
+        problems.append(f"expected the rendered description to genuinely lose its line-clamp when on, got {result['descStyleOn']!r}")
+    if result["heightOn"] <= result["heightOff"]:
+        problems.append(f"expected nodeHeight to grow further with 'Show all text' checked (full description) than unchecked (2-line clamp), got off={result['heightOff']} on={result['heightOn']}")
+    if not result["retainedOnSameView"]:
+        problems.append("expected reopening Redraw on the SAME view to retain the checked state")
+    if not result["uncheckedOnOtherView"]:
+        problems.append("expected a DIFFERENT view's own Redraw dialog to default to unchecked (per-view, not global)")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Redraw's new 'Show all text' checkbox defaults to unchecked, growing nodeHeight further and genuinely removing the description's line-clamp at render time when checked, is retained per-view for next time, and doesn't leak to other views"
 
 
 def check_data_modeling_attribute_editing_and_auto_fk(page):
@@ -10778,6 +10973,8 @@ CHECKS = [
     check_data_modeling_menu_and_ddl_import_export,
     check_data_modeling_node_attributes_and_manual_connector_creation,
     check_data_entity_details_sizing_fits_attribute_count,
+    check_textarea_height_persisted_per_field,
+    check_redraw_dialog_show_all_text,
     check_data_modeling_attribute_editing_and_auto_fk,
     check_data_modeling_autofill,
     check_auto_detect_connectors_detection_and_creation,

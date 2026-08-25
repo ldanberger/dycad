@@ -1,7 +1,7 @@
 import { loadAllData } from './data.js';
 import { Store, ciEq, newId } from './state.js';
 import { parseArchimateXml } from './archimate.js';
-import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderViewDisplayFilters, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields, isAttributeForeignKey } from './render.js';
+import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderViewDisplayFilters, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields, getAllFieldHeights, setAllFieldHeights, isAttributeForeignKey } from './render.js';
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule, formatSimValue } from './canvas.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
 import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors } from './commands.js';
@@ -1305,18 +1305,7 @@ class App {
     } else if (key === 'merge') {
       this.promptMerge(tab, selIds);
     } else if (key === 'redraw') {
-      // Uses redrawAndResolveLayout, not the bare resize — resizing alone can leave
-      // nodes overlapping if they grew (a real bug: redraw used to call redrawNodeSizes
-      // directly, skipping the overlap-resolution pass every other resize path already
-      // used). This still only nudges genuinely-overlapping nodes to the nearest free
-      // spot — it does not reposition everything the way Remap does.
-      const did = redrawAndResolveLayout(this, tab);
-      if (did) {
-        this.store.normalizeViewCoordinates(tab.viewId);
-        this.recordAndRender();
-        this.toast('Node sizes redrawn and coordinates normalized for this view.');
-      }
-      else this.toast('No nodes in this view to measure.', true);
+      this.promptRedraw(tab);
     } else if (key === 'addExisting') {
       this.promptAddExisting(tab, canvasPos);
     } else if (key === 'populateFromTemplate') {
@@ -2473,6 +2462,52 @@ class App {
     });
   }
 
+  /** Commands panel > Redraw. Reported directly: "In redraw command for a view, add
+   * option something like 'show all text' checkbox and if selected resize default
+   * size for text that fits and full size that displays all text of node such as
+   * long descriptions. And retain setting for the specific view for future sessions."
+   * Redraw previously ran immediately with no dialog at all — now a single checkbox,
+   * pre-filled from (and, on submit, written back to) view.chkShowAllText, the same
+   * "retained for the specific view" way every other view.chkShowXxx toggle already
+   * persists (round-trips through Save/Load JSON, unlike a Local Settings/localStorage
+   * preference). buildNodeEl (canvas.js) reads this same flag at BOTH measurement time
+   * (redrawNodeSizes calls buildNodeEl to build what it measures) and real render
+   * time, so a taller box this produces genuinely shows the full label/description
+   * instead of still truncating to 2 lines with the extra room wasted. */
+  promptRedraw(tab) {
+    const view = this.store.findView(tab.viewId);
+    if (!view) return;
+    const root = document.getElementById('modal-root');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal-box';
+    box.innerHTML = `<h3>Redraw</h3>
+      <div style="margin-bottom:12px;font-size:12px;color:var(--text-muted);">Recalculates this view's uniform node size to fit its current content, then normalizes coordinates.</div>
+      <div class="prop-row checkbox"><input type="checkbox" id="redraw-show-all-text" ${view.chkShowAllText ? 'checked' : ''} /><label for="redraw-show-all-text">Show all text — size (and display) nodes to fit the full label/description instead of truncating to 2 lines</label></div>
+      <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Redraw</button></div>`;
+    overlay.appendChild(box);
+    root.appendChild(overlay);
+    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+    box.querySelector('.submit').addEventListener('click', () => {
+      view.chkShowAllText = box.querySelector('#redraw-show-all-text').checked;
+      overlay.remove();
+      // Uses redrawAndResolveLayout, not the bare resize — resizing alone can leave
+      // nodes overlapping if they grew (a real bug: redraw used to call redrawNodeSizes
+      // directly, skipping the overlap-resolution pass every other resize path already
+      // used). This still only nudges genuinely-overlapping nodes to the nearest free
+      // spot — it does not reposition everything the way Remap does.
+      const did = redrawAndResolveLayout(this, tab);
+      if (did) {
+        this.store.normalizeViewCoordinates(tab.viewId);
+        this.recordAndRender();
+        this.toast(`Node sizes redrawn and coordinates normalized for this view${view.chkShowAllText ? ' (showing all text)' : ''}.`);
+      } else {
+        this.toast('No nodes in this view to measure.', true);
+      }
+    });
+  }
+
   promptMerge(tab, selIds) {
     const nodeVmIds = selIds.filter((id) => this.store.findViewMember(id)?.objectType === 'part');
     if (nodeVmIds.length < 2) { this.toast('Select 2 or more nodes to merge.', true); return; }
@@ -2725,21 +2760,24 @@ class App {
   }
 
   /** File > Save Local Settings: bundles user PREFERENCES that deliberately live outside
-   * the main save file — the pinned-fields config, maxScriptEntities (the
-   * ctx.createPart/ctx.createConnector safety cap, see simulation.js),
-   * nodeSizeMultiplier (the default node box size new views are created with, see
-   * state.js's defaultNodeSize), batchScriptCode (the Script Console's persistent
-   * text, Advanced menu), smartStreamPresets (Insert Smart Stream's named dialog
-   * presets), and remapPresets (Remap's named dialog presets) — into a single
-   * downloadable file, so they travel together between browsers/machines. Deliberately
-   * excludes secrets (see saveLocalSecrets above) — these two were bundled together in
-   * an earlier version of this feature; split apart because secrets must never be
-   * cached to localStorage while these settings now deliberately ARE (see
-   * loadLocalSettings's handler), so bundling them would have meant either caching
-   * secrets too (unacceptable) or a settings load leaving secrets in some ambiguous
-   * state. */
+   * the main save file — the pinned-fields config, fieldHeights (resizable textarea
+   * heights — Description/Note/Script — reported directly: "when property resizable
+   * text fields are lengthened by user ... can that be persisted for the user for
+   * that property in any view for current session and future sessions"),
+   * maxScriptEntities (the ctx.createPart/ctx.createConnector safety cap, see
+   * simulation.js), nodeSizeMultiplier (the default node box size new views are
+   * created with, see state.js's defaultNodeSize), batchScriptCode (the Script
+   * Console's persistent text, Advanced menu), smartStreamPresets (Insert Smart
+   * Stream's named dialog presets), and remapPresets (Remap's named dialog presets)
+   * — into a single downloadable file, so they travel together between
+   * browsers/machines. Deliberately excludes secrets (see saveLocalSecrets above) —
+   * these two were bundled together in an earlier version of this feature; split
+   * apart because secrets must never be cached to localStorage while these settings
+   * now deliberately ARE (see loadLocalSettings's handler), so bundling them would
+   * have meant either caching secrets too (unacceptable) or a settings load leaving
+   * secrets in some ambiguous state. */
   saveLocalSettings() {
-    const data = { pinnedFields: getAllPinnedFields(), maxScriptEntities: this.store.maxScriptEntities, nodeSizeMultiplier: this.store.nodeSizeMultiplier, batchScriptCode: this.store.batchScriptCode, smartStreamPresets: this.store.smartStreamPresets, remapPresets: this.store.remapPresets };
+    const data = { pinnedFields: getAllPinnedFields(), fieldHeights: getAllFieldHeights(), maxScriptEntities: this.store.maxScriptEntities, nodeSizeMultiplier: this.store.nodeSizeMultiplier, batchScriptCode: this.store.batchScriptCode, smartStreamPresets: this.store.smartStreamPresets, remapPresets: this.store.remapPresets };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -4213,14 +4251,16 @@ function wireGlobalEvents(app) {
       app.toast(`Local secrets load failed: ${err.message}`, true);
     }
   });
-  // File > Load Local Settings: user PREFERENCES only (pinnedFields, maxScriptEntities,
-  // nodeSizeMultiplier, batchScriptCode, smartStreamPresets, remapPresets) — separate
-  // from secrets above. Caches maxScriptEntities/nodeSizeMultiplier/batchScriptCode/
-  // smartStreamPresets/remapPresets to localStorage (see setCachedMaxScriptEntities/
-  // setCachedNodeSizeMultiplier/setCachedBatchScriptCode/setCachedSmartStreamPresets/
-  // setCachedRemapPresets) so they survive a page refresh without re-loading this file;
-  // pinnedFields already caches itself the moment setAllPinnedFields runs. Same
-  // dual-shape acceptance as Load Local Secrets, for the same pre-split-file reason.
+  // File > Load Local Settings: user PREFERENCES only (pinnedFields, fieldHeights,
+  // maxScriptEntities, nodeSizeMultiplier, batchScriptCode, smartStreamPresets,
+  // remapPresets) — separate from secrets above. Caches maxScriptEntities/
+  // nodeSizeMultiplier/batchScriptCode/smartStreamPresets/remapPresets to localStorage
+  // (see setCachedMaxScriptEntities/setCachedNodeSizeMultiplier/
+  // setCachedBatchScriptCode/setCachedSmartStreamPresets/setCachedRemapPresets) so
+  // they survive a page refresh without re-loading this file; pinnedFields/
+  // fieldHeights already cache themselves the moment setAllPinnedFields/
+  // setAllFieldHeights run. Same dual-shape acceptance as Load Local Secrets, for the
+  // same pre-split-file reason.
   document.getElementById('load-local-settings-input').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     e.target.value = '';
@@ -4230,6 +4270,8 @@ function wireGlobalEvents(app) {
       const obj = JSON.parse(text);
       if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('Expected a JSON object.');
       if (obj.pinnedFields) setAllPinnedFields(obj.pinnedFields);
+      const hasFieldHeights = obj.fieldHeights && typeof obj.fieldHeights === 'object' && !Array.isArray(obj.fieldHeights);
+      if (hasFieldHeights) setAllFieldHeights(obj.fieldHeights);
       const capNum = Number(obj.maxScriptEntities);
       const hasCap = Number.isFinite(capNum) && capNum > 0;
       if (hasCap) {
@@ -4261,6 +4303,7 @@ function wireGlobalEvents(app) {
       app.render(); // picks up the new pin config immediately if a property panel is open
       const parts = [];
       if (obj.pinnedFields) parts.push('pinned fields');
+      if (hasFieldHeights) parts.push('field heights');
       if (hasCap) parts.push(`max script entities: ${app.store.maxScriptEntities}`);
       if (hasMult) parts.push(`node size multiplier: ${app.store.nodeSizeMultiplier}`);
       if (hasBatchScript) parts.push('script console text');
