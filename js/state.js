@@ -93,7 +93,7 @@ async function BatchScript_InsertSmartStreamExample() {
     direction: 'both',
     endType: 'DataDataEntity',
     levels: null,
-    showTypes: ['ApplicationCapability', 'BusinessFunction', 'BusinessProcess', 'BusinessCapability', 'DataDataEntity', 'GeneralActor', 'TechnologyLogicalComponent'],
+    showTypes: ['GeneralActor', 'BusinessService', 'BusinessCapability', 'BusinessProcess', 'ApplicationService', 'ApplicationCapability', 'ApplicationProcess', 'ApplicationLogicalComponent', 'ApplicationPhysicalComponent', 'DataDataEntity', 'BusinessFunction', 'ApplicationApplication'],
   });
 
   app.recordAndRender();
@@ -246,7 +246,7 @@ const DEFAULT_SMART_STREAM_PRESETS = [
     direction: 'both',
     endType: 'DataDataEntity',
     levels: null,
-    showTypes: ['ApplicationCapability', 'BusinessFunction', 'BusinessProcess', 'BusinessCapability', 'DataDataEntity', 'GeneralActor', 'TechnologyLogicalComponent'],
+    showTypes: ['GeneralActor', 'BusinessService', 'BusinessCapability', 'BusinessProcess', 'ApplicationService', 'ApplicationCapability', 'ApplicationProcess', 'ApplicationLogicalComponent', 'ApplicationPhysicalComponent', 'DataDataEntity', 'BusinessFunction', 'ApplicationApplication'],
   },
 ];
 

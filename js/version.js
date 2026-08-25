@@ -3963,4 +3963,26 @@
 // both proven to catch a reintroduced regression and reverted. DESIGN_DOCUMENT.md
 // SS5.1 and its Data Modeling section, plus tests/README.md, updated. Full suite
 // 144/144.
-export const APP_VERSION = '0.888';
+// v0.889: direct follow-up: "update state.js default function
+// BatchScript_InsertSmartStreamExample and DEFAULT_SMART_STREAM_PRESETS from
+// showTypes: ['ApplicationCapability', 'BusinessFunction', 'BusinessProcess',
+// 'BusinessCapability', 'DataDataEntity', 'GeneralActor', 'ApplicationLogicalComponent',
+// 'ApplicationApplication','ApplicationPhysicalComponent','BusinessService'] to
+// showTypes: ['GeneralActor', 'BusinessService', 'BusinessCapability',
+// 'BusinessProcess', 'ApplicationService', 'ApplicationCapability',
+// 'ApplicationProcess', 'ApplicationLogicalComponent', 'ApplicationPhysicalComponent',
+// 'DataDataEntity', 'BusinessFunction', 'ApplicationApplication']." Both call sites
+// (state.js's own comment already documented they're meant to mirror each other
+// exactly, so the same trace is available both as a runnable script and as a
+// ready-made StreamSet1 dialog preset) broadened from 7 to 12 element types --
+// verified every new type name exists in custom.json's own element list before
+// landing this. Genuinely changes what the SAME trace (from "Production", built-in
+// default industry data) collects: 10 more parts now pass the filter (Application-
+// layer + BusinessService companions the narrower original list excluded), and
+// BatchScript_RemapExample's pattern:'layered' now needs a 5th row (ApplicationProcess
+// lands one hop further out than the Capability/Process/Service row, the lone
+// ApplicationLogicalComponent pair a hop further still) -- verified this new shape
+// directly against a fresh trace (not assumed) before updating check_batch_script_
+// quickstart's and check_smart_stream_preset_local_persistence's fixed expectations
+// to match. Full suite 144/144.
+export const APP_VERSION = '0.889';

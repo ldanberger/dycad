@@ -1230,7 +1230,19 @@ def check_batch_script_quickstart(page):
     requested layout exactly. Reuses the same "Smart Stream Example" tab (not opening
     a redundant second one), which ends up the ACTIVE tab once main() finishes (not
     the 3D tab — proving the later scripts really did run afterward, rather than
-    main() silently stopping early)."""
+    main() silently stopping early). Direct follow-up, later in the same session:
+    "update state.js default function BatchScript_InsertSmartStreamExample and
+    DEFAULT_SMART_STREAM_PRESETS from showTypes: [...] to showTypes: [...]" —
+    both broadened from 7 to 12 element types (adding BusinessService,
+    ApplicationService, ApplicationProcess, dropping the never-actually-reachable
+    TechnologyLogicalComponent), which genuinely changes what this SAME trace collects
+    from the SAME built-in data: 10 more parts now pass the filter (companion
+    Application-layer entities for the two Business Capabilities/Processes, plus a
+    BusinessService pair), and 'layered' now needs a 5th row (ApplicationProcess
+    lands 2 hops out, one further than the Capability/Process pair; the lone
+    ApplicationLogicalComponent pair lands a 3rd hop out) — verified this new,
+    genuinely different shape is itself correct (not a regression) directly against
+    a fresh trace before updating the fixed expectations below."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -1308,12 +1320,18 @@ def check_batch_script_quickstart(page):
         problems.append("expected 'Done' written to the persistent Message Log")
     if not result["streamExampleViewCreated"]:
         problems.append("expected main() to also run BatchScript_InsertSmartStreamExample after BatchScript_QuickStart, creating a 'Smart Stream Example' view")
-    # Two 'Production Schedule' parts, not one: the built-in default dataset (unlike the
+    # Several labels appear twice, not once: the built-in default dataset (unlike the
     # old hand-curated fce-generalnodes.json) maps no explicit entity id, so each of
-    # Production's two capabilities' own "Production Schedule" entity auto-derives its
-    # id from its own full ancestor chain (see buildIndustryTree) rather than sharing
-    # one id across capabilities — two distinct parts with the same label, not a bug.
-    expected_stream_labels = sorted(['Production', 'Production Planning Process', 'Production Planning Consumer', 'Manage Production Planning', 'Manage Production Planning', 'Manufacturing Operations Process', 'Manufacturing Operations Consumer', 'Manage Manufacturing Operations', 'Manage Manufacturing Operations', 'Demand Forecast', 'Production Schedule', 'Production Schedule', 'Bill of Materials'])
+    # Production's two capabilities' own descendant entities (Production Schedule) or
+    # same-named Application-layer counterparts (Manufacturing Operations, Production
+    # Planning — one ApplicationLogicalComponent + one ApplicationApplication each,
+    # confirmed via each part's own distinct id, not a dedup failure) auto-derive their
+    # id from their own full ancestor chain (see buildIndustryTree) rather than sharing
+    # one id across capabilities — distinct parts that happen to share a label, not a
+    # bug. showTypes broadened (direct follow-up, see this function's own docstring)
+    # to 12 types pulls in the Application-layer + BusinessService companions below
+    # that the narrower original 7-type list excluded.
+    expected_stream_labels = sorted(['Production', 'Production Planning Process', 'Production Planning Process', 'Production Planning Consumer', 'Manage Production Planning', 'Manage Production Planning', 'Manufacturing Operations Process', 'Manufacturing Operations Process', 'Manufacturing Operations Consumer', 'Manage Manufacturing Operations', 'Manage Manufacturing Operations', 'Demand Forecast', 'Production Schedule', 'Production Schedule', 'Bill of Materials', 'Manufacturing Operations', 'Manufacturing Operations', 'Production Planning', 'Production Planning', 'Provide Manufacturing Operations', 'Provide Production Planning', '< Manufacturing Operations > Solution', '< Production Planning > Solution'])
     if sorted(result["streamExamplePartLabels"]) != expected_stream_labels:
         problems.append(f"expected BatchScript_InsertSmartStreamExample to trace the full chain from 'Production', got {sorted(result['streamExamplePartLabels'])}")
     if not result["streamExampleTabIsActive"]:
@@ -1324,24 +1342,31 @@ def check_batch_script_quickstart(page):
         problems.append("expected 'Smart Check View example done' written to the persistent Message Log -- BatchScript_SmartCheckViewExample should have run between InsertSmartStreamExample and RemapExample")
     if not result["messageLogHasRemapDone"]:
         problems.append("expected 'Remap example done' written to the persistent Message Log -- BatchScript_RemapExample should have run")
-    # pattern:'layered' row structure: Function+Actors (roots, layer 0), then Capability
-    # and Process TOGETHER on one row (both exactly 1 hop from a layer-0 root, even
-    # though a real Capability -> Process edge also exists -- shortest-path layering,
-    # not longest-path, is what merges them; see computeLayerAssignment's doc comment
-    # in commands.js), then Application Capability, then Data Entity.
+    # pattern:'layered' row structure: Function+Actors+the two Application roots
+    # (layer 0), then Process/Service/the two Application Physical Component
+    # "Solution" parts TOGETHER on one row (all exactly 1 hop out), then Capability/
+    # Application Capability/Data Entity together (2 hops each, even though a real
+    # Capability -> Process edge also exists -- shortest-path layering, not
+    # longest-path, is what merges same-hop-distance types onto one row regardless of
+    # a direct edge between them; see computeLayerAssignment's doc comment in
+    # commands.js), then the lone ApplicationProcess pair (3 hops), then the lone
+    # ApplicationLogicalComponent pair (4 hops) -- a 5th row that only exists because
+    # showTypes now reaches this far (direct follow-up, broadened from 7 to 12 types;
+    # see this function's own docstring).
     expected_row_type_sets = [
-        sorted(['BusinessFunction', 'GeneralActor']),
-        sorted(['BusinessCapability', 'BusinessProcess']),
-        sorted(['ApplicationCapability']),
-        sorted(['DataDataEntity']),
+        sorted(['BusinessFunction', 'GeneralActor', 'ApplicationApplication']),
+        sorted(['BusinessProcess', 'BusinessService', 'ApplicationPhysicalComponent']),
+        sorted(['BusinessCapability', 'ApplicationCapability', 'DataDataEntity']),
+        sorted(['ApplicationProcess']),
+        sorted(['ApplicationLogicalComponent']),
     ]
-    if result["rowCount"] != 4:
-        problems.append(f"expected BatchScript_RemapExample's pattern:'layered' to produce exactly 4 rows, got {result['rowCount']} ({result['rowTypeSets']})")
+    if result["rowCount"] != 5:
+        problems.append(f"expected BatchScript_RemapExample's pattern:'layered' to produce exactly 5 rows, got {result['rowCount']} ({result['rowTypeSets']})")
     elif result["rowTypeSets"] != expected_row_type_sets:
-        problems.append(f"expected row type groupings {expected_row_type_sets} (Business Capability and Business Process sharing row 2), got {result['rowTypeSets']}")
+        problems.append(f"expected row type groupings {expected_row_type_sets}, got {result['rowTypeSets']}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "main() (run via the real Script Console UI) runs BatchScript_QuickStart, BatchScript_InsertSmartStreamExample, BatchScript_SmartCheckViewExample, then BatchScript_RemapExample in sequence, ending with the Smart Stream Example tab (reused throughout, not duplicated) active and pattern:'layered' correctly grouping Business Capability with Business Process on one shared row"
+    return True, "main() (run via the real Script Console UI) runs BatchScript_QuickStart, BatchScript_InsertSmartStreamExample, BatchScript_SmartCheckViewExample, then BatchScript_RemapExample in sequence, ending with the Smart Stream Example tab (reused throughout, not duplicated) active and pattern:'layered' correctly producing the 5-row hierarchy the now-broadened (12-type) showTypes list implies"
 
 
 def check_script_console_remap_and_smart_check_bindings(page):
@@ -3687,7 +3712,7 @@ def check_smart_stream_preset_local_persistence(page):
     expected = {
         "connectorType": "c", "startType": "BusinessFunction", "startInstanceLabels": ["Production"],
         "direction": "both", "endType": "DataDataEntity", "levels": None,
-        "showTypes": ["ApplicationCapability", "BusinessFunction", "BusinessProcess", "BusinessCapability", "DataDataEntity", "GeneralActor", "TechnologyLogicalComponent"],
+        "showTypes": ["GeneralActor", "BusinessService", "BusinessCapability", "BusinessProcess", "ApplicationService", "ApplicationCapability", "ApplicationProcess", "ApplicationLogicalComponent", "ApplicationPhysicalComponent", "DataDataEntity", "BusinessFunction", "ApplicationApplication"],
     }
     for key, val in expected.items():
         if stream_set_1.get(key) != val:
