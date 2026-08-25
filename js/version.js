@@ -3985,4 +3985,28 @@
 // directly against a fresh trace (not assumed) before updating check_batch_script_
 // quickstart's and check_smart_stream_preset_local_persistence's fixed expectations
 // to match. Full suite 144/144.
-export const APP_VERSION = '0.889';
+// v0.890: direct follow-up: "copy the newly updated BatchScript_InsertSmartStreamExample
+// to BatchScript_InsertSmartStreamExample2 and revert the original back to the previous
+// element list, including the DEFAULT_SMART_STREAM_PRESETS list. Call the
+// BatchScript_InsertSmartStreamExample2 after the original in console script."
+// BatchScript_InsertSmartStreamExample2 added as a verbatim copy of the (former v0.889)
+// 12-type BatchScript_InsertSmartStreamExample, distinguished only by its own Message
+// Log line ("Insert Smart Stream example 2 done"); the original BatchScript_
+// InsertSmartStreamExample and DEFAULT_SMART_STREAM_PRESETS's StreamSet1 both reverted
+// back to the pre-v0.889 7-type showTypes list; main() updated to call
+// BatchScript_InsertSmartStreamExample2() immediately after BatchScript_
+// InsertSmartStreamExample(), both still running on the same "Smart Stream Example"
+// tab/view (insertSmartStream only ever adds parts/connectors not already on the view,
+// so the second pass tops the first up rather than duplicating it). Verified directly
+// against a fresh trace (a dedicated probe script, not assumed): the two-pass 7-then-12
+// run lands on the exact same 23-part set as the old one-pass 12-type run, but a
+// different connector topology -- the first pass's own connectors are already on the
+// view before the second pass runs, so BatchScript_RemapExample's pattern:'layered' now
+// puts BusinessCapability 1 hop out (grouped with BusinessProcess/BusinessService/
+// ApplicationPhysicalComponent) instead of 2 (previously grouped with
+// ApplicationCapability/DataDataEntity) -- still 5 rows total. check_batch_script_
+// quickstart updated for the new call, new "Insert Smart Stream example 2 done" Message
+// Log check (proven to catch a missing call, then reverted), and the new row grouping;
+// check_smart_stream_preset_local_persistence's expected showTypes reverted to match.
+// tests/README.md updated for both. Full suite 144/144.
+export const APP_VERSION = '0.890';

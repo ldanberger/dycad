@@ -3,16 +3,19 @@
 /** Store.batchScriptCode's out-of-the-box default — the Script Console's Run button
  * calls whatever top-level `main()` this text defines (see App.promptScriptConsole,
  * main.js), which can in turn call any number of other functions defined alongside it.
- * This one gives a working starting point: main() calling four starter batch scripts
+ * This one gives a working starting point: main() calling five starter batch scripts
  * in sequence — BatchScript_QuickStart(), which builds a basic Business Functions
  * organization view from the built-in default industry data end to end (ending with
  * the 3D View); BatchScript_InsertSmartStreamExample(), which traces a Smart Stream
- * from data QuickStart itself just generated; BatchScript_SmartCheckViewExample(),
- * which runs Smart Check View on that same view with "Missing connectors" and
- * "Derive hidden connections" checked; then BatchScript_RemapExample(), which remaps
- * that same Smart Stream view with both layout-optimization checkboxes. Naming
- * convention for future additions: `BatchScript_<Name>`, so main() can pick and choose
- * which one(s) to run without renaming anything.
+ * from data QuickStart itself just generated; BatchScript_InsertSmartStreamExample2(),
+ * an otherwise-identical second Insert Smart Stream call with a broader showTypes list,
+ * which tops the same view up with whatever additional element types that broader list
+ * allows; BatchScript_SmartCheckViewExample(), which runs Smart Check View on that same
+ * view with "Missing connectors" and "Derive hidden connections" checked; then
+ * BatchScript_RemapExample(), which remaps that same Smart Stream view with both
+ * layout-optimization checkboxes. Naming convention for future additions:
+ * `BatchScript_<Name>`, so main() can pick and choose which one(s) to run without
+ * renaming anything.
  *
  * `dataAutoFill()` (below, after the BatchScript_* functions) is a different
  * kind of entry point: it's invoked directly by the Data Modeling > Autofill menu item
@@ -26,6 +29,7 @@ async function main() {
   await BatchScript_QuickStart();
   // Runs after BatchScript_QuickStart's own 3D View step above.
   await BatchScript_InsertSmartStreamExample();
+  await BatchScript_InsertSmartStreamExample2();
   await BatchScript_SmartCheckViewExample();
   return BatchScript_RemapExample();
 }
@@ -68,6 +72,8 @@ async function BatchScript_QuickStart() {
 // Called by main() above, after BatchScript_QuickStart. Depends on a Business Function
 // named "Production", which BatchScript_QuickStart's default industry data creates
 // (adjust the label/types below to match your own model if you remove that call).
+// BatchScript_InsertSmartStreamExample2 below runs right after this one, on the same
+// view, with a broader showTypes list.
 async function BatchScript_InsertSmartStreamExample() {
   let tab = store.activeTab();
   if (!tab || tab.type !== 'canvas' || store.findView(tab.viewId)?.viewType !== 'ff') {
@@ -93,22 +99,54 @@ async function BatchScript_InsertSmartStreamExample() {
     direction: 'both',
     endType: 'DataDataEntity',
     levels: null,
-    showTypes: ['GeneralActor', 'BusinessService', 'BusinessCapability', 'BusinessProcess', 'ApplicationService', 'ApplicationCapability', 'ApplicationProcess', 'ApplicationLogicalComponent', 'ApplicationPhysicalComponent', 'DataDataEntity', 'BusinessFunction', 'ApplicationApplication'],
+    showTypes: ['ApplicationCapability', 'BusinessFunction', 'BusinessProcess', 'BusinessCapability', 'DataDataEntity', 'GeneralActor', 'TechnologyLogicalComponent'],
   });
 
   app.recordAndRender();
   messageLog('Insert Smart Stream example done');
 }
 
+// Example: a second Insert Smart Stream call, immediately after
+// BatchScript_InsertSmartStreamExample above -- otherwise identical (same start part,
+// same options) except for a broader showTypes list, so it tops the same "Smart Stream
+// Example" view (whose tab BatchScript_InsertSmartStreamExample just switched to and
+// left active) up with whatever additional element types that broader list allows.
+// insertSmartStream only ever adds parts/connectors not already on the view, so running
+// this right after the original never duplicates anything the original already placed.
+async function BatchScript_InsertSmartStreamExample2() {
+  let tab = store.activeTab();
+  if (!tab || tab.type !== 'canvas' || store.findView(tab.viewId)?.viewType !== 'ff') {
+    const view = store.addView('Smart Stream Example', 'ff');
+    tab = app.createCanvasTab(view);
+    app.switchToTab(tab.id);
+  }
+
+  const start = findParts({ type: 'BusinessFunction', model: store.defaultModel }).find((p) => p.label === 'Production');
+  if (!start) { log('No Business Function named "Production" found in model "' + store.defaultModel + '".'); return; }
+
+  insertSmartStream(app, tab, {
+    connectorType: 's',
+    startPartIds: [start.id],
+    direction: 'both',
+    endType: 'DataDataEntity',
+    levels: null,
+    showTypes: ['GeneralActor', 'BusinessService', 'BusinessCapability', 'BusinessProcess', 'ApplicationService', 'ApplicationCapability', 'ApplicationProcess', 'ApplicationLogicalComponent', 'ApplicationPhysicalComponent', 'DataDataEntity', 'BusinessFunction', 'ApplicationApplication'],
+  });
+
+  app.recordAndRender();
+  messageLog('Insert Smart Stream example 2 done');
+}
+
 // Example: Smart Check View called directly with explicit options (same shape the
 // dialog builds from the user's picks -- see promptSmartCheckView in main.js). Called
-// by main() above, after BatchScript_InsertSmartStreamExample -- runs on the same
-// "Smart Stream Example" view that script just built (reusing its active tab, same
-// pattern BatchScript_RemapExample below uses), checking "Missing connectors" (any
-// connector already in the model between two nodes already on this view, not yet
-// placed here) and "Derive hidden connections" (bridges two on-view nodes only linked
-// through a chain of off-view parts, creating both a Connector and a Stream version --
-// see smartCheckView's deriveConnectors option, commands.js).
+// by main() above, after BatchScript_InsertSmartStreamExample and
+// BatchScript_InsertSmartStreamExample2 -- runs on the same "Smart Stream Example" view
+// those scripts just built (reusing its active tab, same pattern BatchScript_RemapExample
+// below uses), checking "Missing connectors" (any connector already in the model
+// between two nodes already on this view, not yet placed here) and "Derive hidden
+// connections" (bridges two on-view nodes only linked through a chain of off-view
+// parts, creating both a Connector and a Stream version -- see smartCheckView's
+// deriveConnectors option, commands.js).
 async function BatchScript_SmartCheckViewExample() {
   const view = store.findView('Smart Stream Example');
   if (!view) { log('No "Smart Stream Example" view found -- run BatchScript_InsertSmartStreamExample first.'); return; }
@@ -246,7 +284,7 @@ const DEFAULT_SMART_STREAM_PRESETS = [
     direction: 'both',
     endType: 'DataDataEntity',
     levels: null,
-    showTypes: ['GeneralActor', 'BusinessService', 'BusinessCapability', 'BusinessProcess', 'ApplicationService', 'ApplicationCapability', 'ApplicationProcess', 'ApplicationLogicalComponent', 'ApplicationPhysicalComponent', 'DataDataEntity', 'BusinessFunction', 'ApplicationApplication'],
+    showTypes: ['ApplicationCapability', 'BusinessFunction', 'BusinessProcess', 'BusinessCapability', 'DataDataEntity', 'GeneralActor', 'TechnologyLogicalComponent'],
   },
 ];
 
