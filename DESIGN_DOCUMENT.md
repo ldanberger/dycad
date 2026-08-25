@@ -307,6 +307,53 @@ text), then explicitly expands + `scrollIntoView`s the Filters section (removing
 handler, same precedent as this file's own `preferredStreamTemplateName`) so the
 panel is genuinely "brought up," not just referenced in text.
 
+Further direct follow-up, once the panel existed: *"Move the view filter checkboxes
+such as connectors, streams, data, types, description, attributes, keys, show
+simulation values (rename to show left badge), show script badge (rename to show
+right badge) that are currently below properties to the newly created filters
+group."* These 9 fields (`chkShowConnectorType`/`chkShowStreamType`/`chkShowDataType`/
+`chkShowElementTypes`/`chkShowDescription`/`chkShowAttributes`/`chkShowKeys`/
+`chkShowSimValues`/`chkShowScriptBadge`) used to render inside `renderViewProperties`
+(Properties panel), and — unlike the 8 tab-scoped filters above — only while nothing
+was selected. `renderViewProperties`'s own `showFields.view.fields` spec (`custom.json`)
+is now split via a shared `filteredViewSpec(app, keep)` helper into two disjoint
+filtered subsets, both still built from the same underlying `viewFieldAccessors(app,
+tab, view)` (factored out so neither copy can drift): the 8 REMAINING properties
+(Id/Name/View Type/Margin/Spacing/Spacing Direction/Connector Routing/Stream Connector
+Routing) render exactly as before, still gated on "nothing selected"; the 9 MOVED
+fields now render via a new `renderViewDisplayFilters(app)` — called from `app.render()`
+directly, into a new `#view-display-filters-wrap`/`#view-display-filters-body` pair
+appended after the Filters panel's 8 tab-scoped controls (a thin `border-top`
+separates the two groups visually) — any time the active tab is a canvas view,
+**independent of selection state**: a genuine behavior improvement, not just a
+relocation, since you no longer have to deselect everything first to reach them.
+Hidden entirely for every other tab type (including 3D — a 3D tab has no single
+backing `view` object, per §5.6's own earlier paragraph). Both `renderShowFieldsPanel`
+calls pass an explicit `idNamespace` (`'view'` for Properties, `'view-filter'` for
+Filters) — passing a merged/filtered spec OBJECT instead of the plain `'view'` string
+this used to pass directly triggers `renderShowFieldsPanel`'s own `isMergedSpec`
+branch, which would otherwise default BOTH to the generic `'custom'` namespace and
+collide.
+
+`chkShowSimValues`/`chkShowScriptBadge` were also renamed in their own
+`showFields.view` label (`custom.json`) — **Show Left Badge** / **Show Right Badge** —
+to match what they actually indicate (a badge on the node's bottom-left vs.
+bottom-right corner, `.fnode-sim-badge`/`.fnode-sim-badge-right`, `css/styles.css`),
+now that they sit side by side in the same panel and the old asymmetric naming
+("Show Simulation Values" next to "Show Script Badge") read as inconsistent.
+
+Final direct follow-up in the same exchange: *"align view filter panel values to same
+column as property values. ... In property and filter panels reduce vertical gaps
+between rows."* `#right-panel .tb-label` now gets the exact same fixed `flex: 0 0
+84px` width `.prop-row label` already used, so a Filters row's own value control
+lines up under a Properties row's regardless of how long either row's label text is
+("Stream" vs. "View Scope" vs. "Id") — and `#right-panel .toolbar-group`'s own `gap`
+was bumped from the toolbar's original `4px` to `8px` to match `.prop-row`'s `gap`
+too, since the label-to-control GAP has to match, not just the label's own width, for
+the control's left edge to land on the identical pixel. Base `.prop-row`'s
+`margin-bottom` dropped from `8px` to `4px` (denser rows in both panels); a dialog's
+own `.modal-box .prop-row` override (`12px`, higher specificity) is untouched.
+
 ## 6. Layout and rendering algorithms
 
 ### 6.1 Force-directed Remap (`layout.js`)
@@ -1596,8 +1643,8 @@ so a future session doesn't have to re-derive it from scratch):
   `store.simRuntime` entry for its own model gets a small colored marker
   (`syncSimOverlay`) floating just above its cube — green/blue/red for
   normal/changed/error, `SIM_STATE_COLORS` mirroring `.fnode-sim-badge`'s CSS colors
-  exactly, the SAME encoding the 2D canvas's "Show Simulation Values" badge already uses,
-  not a new one. A 'changed' marker additionally pulses (`updateSimPulse`, its scale
+  exactly, the SAME encoding the 2D canvas's "Show Left Badge" (renamed from "Show
+  Simulation Values") badge already uses, not a new one. A 'changed' marker additionally pulses (`updateSimPulse`, its scale
   oscillates every animation frame via `performance.now()`) — 3D's stand-in for the 2D
   badge's static "changed" border color, since a static color swap reads less clearly in a
   scene you're also free to rotate. Current-tick only, no history scrubbing (that would

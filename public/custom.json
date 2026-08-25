@@ -422,12 +422,12 @@
         "chkShowSimValues": {
           "show": "y",
           "access": "w",
-          "label": "Show Simulation Values"
+          "label": "Show Left Badge"
         },
         "chkShowScriptBadge": {
           "show": "y",
           "access": "w",
-          "label": "Show Script Badge"
+          "label": "Show Right Badge"
         },
         "routingStyle": {
           "show": "s",

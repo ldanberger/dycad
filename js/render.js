@@ -1064,12 +1064,23 @@ function renderSectionProperties(app, tab) {
   renderShowFieldsPanel(app, tab, 'section', accessors, buttonHandlersFor(app, tab, 'section', { section }), body);
 }
 
-function renderViewProperties(app, tab) {
-  const body = document.getElementById('properties-body');
-  const view = app.store.findView(tab.viewId);
-  if (!view) { body.innerHTML = '<div class="empty-hint">Select a node or edge to edit its properties.</div>'; return; }
+// Reported directly: "Move the view filter checkboxes such as connectors, streams,
+// data, types, description, attributes, keys, show simulation values (rename to show
+// left badge), show script badge (rename to show right badge) that are currently
+// below properties to the newly created filters group." These 9 fields used to render
+// inside renderViewProperties below (only while nothing was selected); they now
+// render in the Filters panel (renderViewDisplayFilters, below) any time the active
+// tab is a canvas view, independent of selection state — the same "always visible per
+// tab type, not per selection" convention the panel's other 8 controls already follow.
+// (chkShowSimValues/chkShowScriptBadge were also renamed in their own showFields.view
+// label, custom.json, to match what they actually indicate — a left-side vs.
+// right-side badge on the node — now that "Show Simulation Values" sitting right next
+// to "Show Script Badge" in the same panel made the asymmetric old naming obviously
+// inconsistent.)
+const VIEW_DISPLAY_FILTER_FIELDS = ['chkShowConnectorType', 'chkShowStreamType', 'chkShowDataType', 'chkShowElementTypes', 'chkShowDescription', 'chkShowAttributes', 'chkShowKeys', 'chkShowSimValues', 'chkShowScriptBadge'];
 
-  const accessors = {
+function viewFieldAccessors(app, tab, view) {
+  return {
     id: { get: () => view.id, set: (v) => { if (v) app.store.renameView(view.id, v); } },
     viewName: { get: () => view.viewName, set: (v) => { if (v) app.store.renameView(view.id, v); } },
     viewType: { get: () => view.viewType, set: (v) => { if (v) view.viewType = v; } },
@@ -1088,8 +1099,57 @@ function renderViewProperties(app, tab) {
     routingStyle: { get: () => view.routingStyle || 'default', set: (v) => { view.routingStyle = v; app.render(); } },
     routingStyleStream: { get: () => view.routingStyleStream || 'default', set: (v) => { view.routingStyleStream = v; app.render(); } },
   };
+}
+
+/** A subset of showFields.view.fields (custom.json), tagged with __sourceEntityKey so
+ * selectOptionsFor still resolves correctly for any 's'-type field in the subset —
+ * same merged-spec convention renderPinnedSection already established above. */
+function filteredViewSpec(app, keep) {
+  const fullSpec = app.store.settings.showFields?.view?.fields || {};
+  const out = {};
+  for (const [name, def] of Object.entries(fullSpec)) {
+    if (!keep(name)) continue;
+    out[name] = { ...def, __sourceEntityKey: 'view' };
+  }
+  return out;
+}
+
+function renderViewProperties(app, tab) {
+  const body = document.getElementById('properties-body');
+  const view = app.store.findView(tab.viewId);
+  if (!view) { body.innerHTML = '<div class="empty-hint">Select a node or edge to edit its properties.</div>'; return; }
+
+  const accessors = viewFieldAccessors(app, tab, view);
+  const spec = filteredViewSpec(app, (name) => !VIEW_DISPLAY_FILTER_FIELDS.includes(name));
   body.innerHTML = `<div class="empty-hint" style="margin-bottom:10px;">Nothing selected — showing view settings for "${escapeHtml(view.viewName)}".</div><div id="sf-view-fields"></div>`;
-  renderShowFieldsPanel(app, tab, 'view', accessors, {}, document.getElementById('sf-view-fields'));
+  // idNamespace: 'view' keeps the original sf-view-<field> ids stable (a merged-spec
+  // object, unlike the plain 'view' string this used to pass directly, would
+  // otherwise default to the generic 'custom' namespace).
+  renderShowFieldsPanel(app, tab, spec, accessors, {}, document.getElementById('sf-view-fields'), undefined, { idNamespace: 'view' });
+}
+
+/** Filters panel (index.html, right column, above Properties): the 9 view-level
+ * display toggles moved here from renderViewProperties above. Shown any time the
+ * active tab is a canvas view, regardless of whether a node is currently selected
+ * (unlike before, where deselecting everything was the only way to reach them) —
+ * hidden entirely for every other tab type, including 3D, since these are genuine
+ * View DOCUMENT properties, not tab-scoped session filters, and a 3D tab isn't
+ * backed by any single view. */
+function renderViewDisplayFilters(app) {
+  const wrap = document.getElementById('view-display-filters-wrap');
+  const container = document.getElementById('view-display-filters-body');
+  if (!wrap || !container) return;
+  const tab = app.store.activeTab();
+  const view = tab && tab.type === 'canvas' ? app.store.findView(tab.viewId) : null;
+  if (!view) {
+    wrap.classList.add('hidden');
+    container.innerHTML = '';
+    return;
+  }
+  wrap.classList.remove('hidden');
+  const accessors = viewFieldAccessors(app, tab, view);
+  const spec = filteredViewSpec(app, (name) => VIEW_DISPLAY_FILTER_FIELDS.includes(name));
+  renderShowFieldsPanel(app, tab, spec, accessors, {}, container, undefined, { idNamespace: 'view-filter' });
 }
 
 /**
@@ -1724,4 +1784,4 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderMessageLog, escapeHtml, kindFromType, iconSvgFor, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields, isAttributeForeignKey };
+export { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderViewDisplayFilters, renderMessageLog, escapeHtml, kindFromType, iconSvgFor, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields, isAttributeForeignKey };

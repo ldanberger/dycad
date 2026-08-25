@@ -3894,4 +3894,35 @@
 // debug-hook-only test can't catch drift from the real listener) -- both proven to
 // catch a reintroduced regression and reverted. DESIGN_DOCUMENT.md SS5.6 (new),
 // tests/README.md updated. Full suite 140/140.
-export const APP_VERSION = '0.886';
+// v0.887: direct follow-up: "align view filter panel values to same column as
+// property values. Move view filter checkboxes such as connectors, streams, data,
+// types, description, attributes, keys, show simulation values (rename to show left
+// badge), show script badge (rename to show right badge) that are currently below
+// properties to the newly created filters group. In property and filter panels
+// reduce vertical gaps between rows."
+// The 9 view-display toggles moved from renderViewProperties (Properties panel) into
+// a new renderViewDisplayFilters(app) (Filters panel, #view-display-filters-wrap/
+// #view-display-filters-body, below the 8 tab-scoped filter controls, separated by a
+// thin border), called from app.render() any time the active tab is a canvas view --
+// independent of node selection, unlike before, when deselecting everything was the
+// only way to reach them. renderViewProperties keeps the remaining 8 fields (Id/Name/
+// View Type/Margin/Spacing/Spacing Direction/Connector Routing/Stream Connector
+// Routing). Both now share a new viewFieldAccessors(app, tab, view) + filteredViewSpec
+// (app, keep) pair (factored out of the old single accessors object) so neither copy
+// can drift; each renderShowFieldsPanel call passes an explicit idNamespace ('view'/
+// 'view-filter') since a merged-spec object (unlike the plain 'view' string this used
+// to pass) would otherwise default both to the generic 'custom' namespace and collide.
+// chkShowSimValues/chkShowScriptBadge renamed in their own showFields.view label
+// (custom.json) to Show Left Badge / Show Right Badge, matching what they actually
+// indicate now that they sit side by side in the same panel.
+// #right-panel .tb-label got .prop-row label's own fixed 84px width, and #right-panel
+// .toolbar-group's gap bumped 4px->8px to match .prop-row's gap too (both the label
+// width AND the label-to-control gap have to match for the control's left edge to
+// land on the identical pixel) -- so a Filters row's value control now aligns to the
+// same column as a Properties row's. Base .prop-row margin-bottom dropped 8px->4px in
+// both panels; a dialog's own higher-specificity .modal-box .prop-row override (12px)
+// is untouched.
+// New check_view_display_filters_moved_to_filters_panel and check_filters_properties_
+// alignment_and_row_spacing, both proven to catch a reintroduced regression and
+// reverted. DESIGN_DOCUMENT.md SS5.6 and tests/README.md updated. Full suite 142/142.
+export const APP_VERSION = '0.887';

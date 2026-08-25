@@ -160,9 +160,21 @@ button, select, input { font-family: inherit; font-size: inherit; color: inherit
    .toolbar-group markup verbatim (same ids -- render.js's renderToolbar keeps working
    unchanged via document.getElementById, wherever the element actually lives) -- but
    stacked one per row instead of the toolbar's flex-wrap-many-per-line layout, so each
-   needs its own spacing and a chance to wrap internally in a narrower column. */
-#right-panel .toolbar-group { margin-bottom: 8px; flex-wrap: wrap; }
+   needs its own spacing and a chance to wrap internally in a narrower column. Reported
+   directly: "align view filter panel values to same column as property values" --
+   .tb-label gets the exact same fixed width .prop-row's own label already uses, so a
+   Filters row's dropdown/button lines up under a Properties row's input regardless of
+   how long either row's own label text is. */
+#right-panel .toolbar-group { margin-bottom: 4px; flex-wrap: wrap; gap: 8px; }
 #right-panel .toolbar-group:last-child { margin-bottom: 0; }
+#right-panel .tb-label { flex: 0 0 84px; margin-right: 0; }
+/* The 9 view-level display toggles (Connectors/Streams/Data/Types/Description/
+   Attributes/Keys/Show Left Badge/Show Right Badge) moved here from the Properties
+   panel (renderViewDisplayFilters, render.js) -- a thin top border sets them apart
+   from the tab-scoped filters above, same visual break .root-properties-section
+   already uses for its own sub-grouping. Starts hidden (index.html) since it only
+   applies to canvas tabs; toggled by renderViewDisplayFilters itself. */
+#view-display-filters-wrap { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .toolbar-spacer { flex: 1; }
 .tb-label { color: var(--text-muted); font-size: 11px; margin-right: 2px; }
 .tb-select, .tb-btn, .icon-btn {
@@ -436,7 +448,12 @@ button, select, input { font-family: inherit; font-size: inherit; color: inherit
 
 
 /* ===================== PROPERTIES PANEL ===================== */
-.prop-row { margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+/* Reported directly: "In property and filter panels reduce vertical gaps between
+   rows." Bare .prop-row governs both panels now (the Filters panel's own 9 moved-in
+   view-display rows are real .prop-row/.prop-row.checkbox markup, same as everything
+   in Properties) -- .modal-box .prop-row's own higher-specificity 12px override
+   (above) is untouched, so dialog forms keep their original, roomier spacing. */
+.prop-row { margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
 .prop-row label { flex: 0 0 84px; font-size: 11px; color: var(--text-muted); margin-bottom: 0; cursor: pointer; }
 .prop-row input[type="text"], .prop-row input[type="number"], .prop-row select, .prop-row textarea {
   flex: 1; min-width: 0; border: 1px solid var(--border-strong); border-radius: 5px; padding: 5px 7px;

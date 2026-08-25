@@ -6092,6 +6092,144 @@ def check_view3d_empty_click_deselects_and_shows_filters(page):
     return True, "Clicking empty 3D canvas space (a genuine mouse click, not a debug hook) deselects the part, switches the Properties panel to the 3D-specific hint pointing at the Filters panel, and re-expands that panel if it had been collapsed"
 
 
+def check_view_display_filters_moved_to_filters_panel(page):
+    """Regression guard, direct follow-up: "Move the view filter checkboxes such as
+    connectors, streams, data, types, description, attributes, keys, show simulation
+    values (rename to show left badge), show script badge (rename to show right
+    badge) that are currently below properties to the newly created filters group."
+    Covers: (1) the 9 fields render inside #view-display-filters-body (the Filters
+    panel), not inside #properties-body, with the two renamed labels; (2) they render
+    there even while a NODE is selected (unlike before the move, when they only
+    showed once nothing was selected) -- a real behavior improvement, not just a
+    relocation; (3) they're genuinely gone from Properties' own view-settings display
+    (renderViewProperties keeps only Id/Name/View Type/Margin/Spacing/Spacing
+    Direction/Connector Routing/Stream Connector Routing); (4) toggling one there
+    still actually writes view.chkShowXxx (the move didn't silently break the wiring);
+    (5) the whole #view-display-filters-wrap hides for a non-canvas tab (3D)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      const view = store.findView(homeTab.viewId);
+      const out = {};
+
+      const filtersHtml = document.getElementById('view-display-filters-body').innerHTML;
+      const propertiesHtml = document.getElementById('properties-body').innerHTML;
+      out.filtersHasConnectors = filtersHtml.includes('>Connectors<');
+      out.filtersHasLeftBadge = filtersHtml.includes('>Show Left Badge<');
+      out.filtersHasRightBadge = filtersHtml.includes('>Show Right Badge<');
+      out.propertiesLacksConnectors = !propertiesHtml.includes('>Connectors<');
+      out.propertiesHasId = propertiesHtml.includes('>Id<');
+      out.propertiesHasRouting = propertiesHtml.includes('>Connector Routing<');
+      out.wrapHiddenBefore = document.getElementById('view-display-filters-wrap').classList.contains('hidden');
+
+      // select a node -- the 9 fields should STILL show in Filters (independent of
+      // selection), while Properties switches away to the node's own fields
+      const part = store.createPart({ type: 'BusinessFunction', label: 'RegrViewFiltersMove', model: store.defaultModel, streams: [] });
+      const vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: 40, y: 40 });
+      homeTab.selection = new Set([vm.id]);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      out.filtersStillShownWithNodeSelected = document.getElementById('view-display-filters-body').innerHTML.includes('>Connectors<');
+      out.propertiesShowsNodeNotView = document.getElementById('properties-body').innerHTML.includes('RegrViewFiltersMove');
+      homeTab.selection = new Set();
+
+      // toggling actually still writes to the view
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      const streamsCb = [...document.querySelectorAll('#view-display-filters-body .prop-row.checkbox label')].find(l => l.textContent === 'Streams')?.previousElementSibling;
+      const before = view.chkShowStreamType;
+      streamsCb.checked = !before;
+      streamsCb.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 60));
+      out.toggleWorked = view.chkShowStreamType === !before;
+
+      // hidden on a non-canvas (3D) tab
+      app.openOrSwitch3DView();
+      await new Promise(r => setTimeout(r, 400));
+      out.wrapHiddenOn3D = document.getElementById('view-display-filters-wrap').classList.contains('hidden');
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["filtersHasConnectors"] or not result["filtersHasLeftBadge"] or not result["filtersHasRightBadge"]:
+        problems.append(f"expected the Filters panel to include Connectors and the two renamed labels (Show Left Badge/Show Right Badge), got {result}")
+    if not result["propertiesLacksConnectors"]:
+        problems.append("expected 'Connectors' (and the other 8 moved fields) to be GONE from the Properties panel's own view settings")
+    if not result["propertiesHasId"] or not result["propertiesHasRouting"]:
+        problems.append(f"expected Properties to still show the fields that DIDN'T move (Id, Connector Routing, ...), got {result}")
+    if result["wrapHiddenBefore"]:
+        problems.append("expected #view-display-filters-wrap visible on a canvas tab with nothing selected")
+    if not result["filtersStillShownWithNodeSelected"]:
+        problems.append("expected the Filters panel's view-display fields to keep showing even while a node is selected (independent of selection state)")
+    if not result["propertiesShowsNodeNotView"]:
+        problems.append("expected Properties to switch to the selected node's own fields once one is selected")
+    if not result["toggleWorked"]:
+        problems.append("expected toggling 'Streams' in the Filters panel to actually flip view.chkShowStreamType")
+    if not result["wrapHiddenOn3D"]:
+        problems.append("expected #view-display-filters-wrap to hide on a non-canvas (3D) tab")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The 9 view-display toggles (Connectors/Streams/Data/Types/Description/Attributes/Keys/Show Left Badge/Show Right Badge) now render in the Filters panel independent of node selection, are gone from Properties' own view settings (which keeps the rest), still write to the view when toggled, and hide on non-canvas tabs"
+
+
+def check_filters_properties_alignment_and_row_spacing(page):
+    """Regression guard, direct follow-up: "align view filter panel values to same
+    column as property values. ... In property and filter panels reduce vertical
+    gaps between rows." Covers: (1) a Filters row's own value control (e.g. the
+    Stream filter button) starts at the SAME x pixel position as a Properties row's
+    own value control (e.g. the Id input) -- proving the column alignment survives
+    each row's differently-long label text ("Stream" vs "View Scope" vs "Id"), not
+    just that they happen to look similar; (2) .prop-row's own computed margin-bottom
+    dropped from the old 8px to a tighter 4px, in BOTH panels; (3) a dialog's own
+    .prop-row (higher-specificity 12px override) is genuinely UNAFFECTED by the
+    tightened base rule -- this was meant to only apply to the two side panels."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+
+      const streamBtn = document.getElementById('stream-filter-btn');
+      const idInput = document.getElementById('sf-view-id');
+      const out = {};
+      out.streamLeft = Math.round(streamBtn.getBoundingClientRect().left);
+      out.idLeft = idInput ? Math.round(idInput.getBoundingClientRect().left) : null;
+
+      out.filtersRowMarginBottom = getComputedStyle(document.getElementById('stream-filter-group')).marginBottom;
+      out.propertiesRowMarginBottom = getComputedStyle(document.querySelector('#properties-body .prop-row')).marginBottom;
+
+      app.promptRemap(homeTab);
+      await new Promise(r => setTimeout(r, 60));
+      const modalPropRow = document.querySelector('.modal-overlay .prop-row');
+      out.modalRowMarginBottom = modalPropRow ? getComputedStyle(modalPropRow).marginBottom : null;
+      document.querySelector('.modal-overlay .cancel')?.click();
+
+      return out;
+    }
+    """)
+    problems = []
+    if result["idLeft"] is None:
+        problems.append("test fixture problem: couldn't find a Properties panel input to compare against")
+    elif abs(result["streamLeft"] - result["idLeft"]) > 1:
+        problems.append(f"expected the Filters panel's Stream button and the Properties panel's Id input to start at the same x position (column-aligned), got streamLeft={result['streamLeft']} idLeft={result['idLeft']}")
+    if result["filtersRowMarginBottom"] != "4px":
+        problems.append(f"expected the Filters panel's own row spacing to be 4px, got {result['filtersRowMarginBottom']}")
+    if result["propertiesRowMarginBottom"] != "4px":
+        problems.append(f"expected the Properties panel's own row spacing to be 4px, got {result['propertiesRowMarginBottom']}")
+    if result["modalRowMarginBottom"] != "12px":
+        problems.append(f"expected a dialog's own .prop-row spacing to stay at its original 12px (unaffected by the side panels' tightened spacing), got {result['modalRowMarginBottom']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The Filters panel's own value controls now align to the same column as the Properties panel's, both panels' row spacing tightened to 4px, and a dialog's own .prop-row spacing (12px) stayed untouched"
+
+
 def check_view3d_node_context_menu(page):
     """Regression guard for the 3D node right-click context menu's Filter to Stream
     quick filter. (Its former Connector Type submenu moved to the toolbar's own
@@ -10537,6 +10675,8 @@ CHECKS = [
     check_toolbar_filter_groups_hidden_when_inactive,
     check_filters_panel_moved_from_toolbar,
     check_view3d_empty_click_deselects_and_shows_filters,
+    check_view_display_filters_moved_to_filters_panel,
+    check_filters_properties_alignment_and_row_spacing,
     check_script_console_runs_main_function,
     check_batch_script_quickstart,
     check_script_console_remap_and_smart_check_bindings,
