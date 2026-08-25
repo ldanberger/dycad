@@ -573,6 +573,31 @@ function selectPartInPanel(app, tab, partId) {
   app.render();
 }
 
+/** Clicking empty 3D canvas space (no part hit) — reported directly: "Update the 3D
+ * View behaviour so that clicking on empty in the canvas will bring up this view
+ * filters and any view properties specific to 3D View." Mirrors the 2D canvas's own
+ * "click empty background -> Properties panel shows the view's own properties"
+ * convention: clears any selected part (renderProperties, render.js, then falls
+ * through to its new 3D-tab branch showing a short pointer at the Filters panel,
+ * since a 3D tab has no single backing `view` object of its own the way a 2D canvas
+ * tab does -- its only real "view properties" are exactly the tab-scoped filters:
+ * View Scope, Stream, Types, Section, Connector Type, Layer Order, Highlight, all now
+ * living in the Filters panel). Also expands + scrolls that panel into view, so it's
+ * genuinely "brought up" rather than just mentioned in text — same
+ * expand/localStorage mechanics as the generic collapsible-panel handler
+ * (bootstrapApp, main.js), duplicated here in miniature rather than importing
+ * main.js, which sits at the top of this app's dependency graph (same precedent as
+ * this file's own preferredStreamTemplateName). */
+function deselectAndShowViewFilters(app, tab) {
+  tab.selectedCatalogRow = null;
+  app.render();
+  const filtersSection = document.querySelector('.panel-section[data-panel-id="filters"]');
+  if (!filtersSection) return;
+  filtersSection.classList.remove('collapsed');
+  try { localStorage.setItem('dycad-panel-filters-collapsed', 'false'); } catch { /* ignore */ }
+  filtersSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 /** Stage 4's actual "zoom-to-detail" destination: finds a 2D canvas view that already
  * has partId placed on it (the FIRST one found in store.doc.views order — no attempt to
  * prefer an already-open tab over a closed one; simplest thing that works), switches to
@@ -917,6 +942,8 @@ function createInstance(app, tab, container) {
     if (hit) {
       focusPart(inst, hit.partId);
       selectPartInPanel(app, tab, hit.partId);
+    } else {
+      deselectAndShowViewFilters(app, tab);
     }
   });
   renderer.domElement.addEventListener('dblclick', (e) => {

@@ -271,6 +271,42 @@ placed as a viewMember here (unlike `mirrorCompositionChildConnectorsUp`, which 
 onto a *different*, parent view and so never places anything) — both endpoints are, by
 definition, already on this view.
 
+### 5.6 The Filters panel (right column)
+
+Reported directly: *"In the right column above properties add a new collapsable group
+called Filters. Move the existing filters Stream, Type, Section, Level and the others
+but not 'Undo / Redo', 'Current View' or 'Default Model' to this new filter group for
+each view type that they apply to."* The 8 tab-scoped filter controls — View Scope,
+Stream, Types, Section, Connector Type, Layer Order, Highlight, Levels — used to live
+in the header's `#toolbar-row`; they now live in a new `[data-panel-id="filters"]`
+collapsible section inside `#right-panel`, immediately above Properties. This was a
+**pure relocation**, not a rewrite: every one of these elements keeps the exact same
+id (`stream-filter-group`, `view3d-scope-group`, ...), so `renderToolbar`'s existing
+`document.getElementById(...).classList.toggle('hidden', ...)` calls (one per group,
+gating each on tab type — canvas gets Stream/Types/Section/Levels, 3D gets everything
+except Levels, a table/catalog tab gets none) needed **zero logic changes**, only new
+CSS (`#right-panel .toolbar-group` — same `.toolbar-group` markup as the toolbar
+itself, just one per row with spacing instead of flex-wrap-many-per-line) and the
+generic collapsible-panel wiring (`bootstrapApp`, main.js) picking it up automatically
+via its `data-panel-id`. One genuinely new behavior: when NONE of the 8 groups apply
+(so the section would otherwise show an empty "Filters ▾" header), the whole section
+hides too (`renderToolbar`'s own new check, at the end).
+
+Direct follow-up: *"Update the 3D View behaviour so that clicking on empty in the
+canvas will bring up this view filters and any view properties specific to 3D
+View."* A 3D tab has no single backing `view` document object the way a 2D canvas tab
+does (§5.1's `renderViewProperties`) — its only real "view properties" are exactly
+these tab-scoped filters. `view3d.js`'s click listener already called `focusPart` +
+`selectPartInPanel` on a hit; the `else` branch (empty space, no hit) now calls a new
+`deselectAndShowViewFilters(app, tab)`: clears `tab.selectedCatalogRow`, re-renders
+(so `renderProperties`'s new 3D-tab branch, `render.js`, shows a short hint pointing
+at the Filters panel instead of the generic canvas-flavored "Select a node or edge"
+text), then explicitly expands + `scrollIntoView`s the Filters section (removing
+`.collapsed`, updating its `dycad-panel-filters-collapsed` localStorage key directly
+— duplicated in miniature rather than importing `main.js`'s generic collapsible-panel
+handler, same precedent as this file's own `preferredStreamTemplateName`) so the
+panel is genuinely "brought up," not just referenced in text.
+
 ## 6. Layout and rendering algorithms
 
 ### 6.1 Force-directed Remap (`layout.js`)

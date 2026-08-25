@@ -3863,4 +3863,35 @@
 // missingConnectors) -- genuine content the user can now choose to hide per-view via
 // these same checkboxes, not a bug in that step itself. DESIGN_DOCUMENT.md SS9 and
 // tests/README.md updated. Full suite 138/138.
-export const APP_VERSION = '0.885';
+// v0.886: direct follow-up: "In the right column above properties add a new
+// collapsable group called Filters. Move the existing filters Stream, Type, Section,
+// Level and the others but not 'Undo / Redo', 'Current View' or 'Default Model' to
+// this new filter group for each view type that they apply to. So filters such as
+// 'View Scope' that only apply to 3D View will only show up in the filter group when
+// viewing a 3D View. Update the 3D View behaviour so that clicking on empty in the
+// canvas will bring up this view filters and any view properties specific to 3D
+// View."
+// The 8 tab-scoped filter controls (View Scope, Stream, Types, Section, Connector
+// Type, Layer Order, Highlight, Levels) moved from the header toolbar (#toolbar-row)
+// into a new collapsible [data-panel-id="filters"] panel section (index.html) inside
+// #right-panel, directly above Properties -- a pure relocation, same element ids
+// throughout, so renderToolbar's existing per-tab-type classList.toggle('hidden', ...)
+// calls needed no logic changes; new CSS (#right-panel .toolbar-group) just stacks
+// them one per row instead of the toolbar's flex-wrap layout, and the whole section
+// now also hides itself when none of the 8 groups apply (a table/pdf/docs/text tab)
+// rather than showing an empty header. Undo/Redo/Current View/Default Model stay in
+// the toolbar, untouched. view3d.js's click listener gained an else branch (empty
+// space, no part hit) calling new deselectAndShowViewFilters(app, tab): clears
+// tab.selectedCatalogRow, re-renders, then expands + scrollIntoView's the Filters
+// panel. renderProperties (render.js) gained a 3D-tab branch (no selectedCatalogRow)
+// showing a short hint pointing at the Filters panel instead of the generic,
+// canvas-flavored "Select a node or edge" text -- a 3D tab has no single backing
+// `view` document object the way 2D does, so its only real "view properties" are
+// exactly these filters. New check_filters_panel_moved_from_toolbar and
+// check_view3d_empty_click_deselects_and_shows_filters (the latter via a genuine
+// page.mouse.click(), same debugGetScreenPosition pattern
+// check_view3d_real_click_shows_panel_and_no_recenter already established, since a
+// debug-hook-only test can't catch drift from the real listener) -- both proven to
+// catch a reintroduced regression and reverted. DESIGN_DOCUMENT.md SS5.6 (new),
+// tests/README.md updated. Full suite 140/140.
+export const APP_VERSION = '0.886';

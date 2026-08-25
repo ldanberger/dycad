@@ -156,6 +156,13 @@ button, select, input { font-family: inherit; font-size: inherit; color: inherit
   flex-wrap: wrap;
 }
 .toolbar-group { display: flex; align-items: center; gap: 4px; }
+/* Filters panel (right column, above Properties) reuses the header toolbar's own
+   .toolbar-group markup verbatim (same ids -- render.js's renderToolbar keeps working
+   unchanged via document.getElementById, wherever the element actually lives) -- but
+   stacked one per row instead of the toolbar's flex-wrap-many-per-line layout, so each
+   needs its own spacing and a chance to wrap internally in a narrower column. */
+#right-panel .toolbar-group { margin-bottom: 8px; flex-wrap: wrap; }
+#right-panel .toolbar-group:last-child { margin-bottom: 0; }
 .toolbar-spacer { flex: 1; }
 .tb-label { color: var(--text-muted); font-size: 11px; margin-right: 2px; }
 .tb-select, .tb-btn, .icon-btn {

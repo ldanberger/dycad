@@ -1055,12 +1055,13 @@ def check_reset_pinned_3d_positions_moved_to_explore(page):
 
 
 def check_toolbar_filter_groups_hidden_when_inactive(page):
-    """Regression guard: the toolbar's tab-scoped filter controls (View Scope, Stream,
-    Types, Section, Connector Type, Layer Order, Highlight, Levels) are now HIDDEN
-    entirely (not just disabled) on a tab type they don't apply to, instead of sitting
-    there disabled and confusing — reported directly: "Can the filters... be hidden
-    unless active for the current tab? For example Highlight has no purpose and is
-    confusing on other types of tabs." Checks all three tab types these controls
+    """Regression guard: the tab-scoped filter controls (View Scope, Stream, Types,
+    Section, Connector Type, Layer Order, Highlight, Levels — since moved from the
+    header toolbar into their own Filters panel, see check_filters_panel_moved_from_
+    toolbar) are HIDDEN entirely (not just disabled) on a tab type they don't apply
+    to, instead of sitting there disabled and confusing — reported directly: "Can the
+    filters... be hidden unless active for the current tab? For example Highlight has
+    no purpose and is confusing on other types of tabs." Checks all three tab types these controls
     actually differ across: a canvas tab (Stream/Types/Section/Levels visible; View
     Scope/Connector Type/Layer Order/Highlight hidden — those four are 3D-only), a 3D
     tab (the reverse: View Scope/Connector Type/Layer Order/Highlight visible, Levels
@@ -5928,6 +5929,169 @@ def check_view3d_real_click_shows_panel_and_no_recenter(page):
     return True, "a genuine mouse click focuses the part, shows its properties in the panel, and does not recenter the camera"
 
 
+def check_filters_panel_moved_from_toolbar(page):
+    """Regression guard for the header toolbar's own filter controls (View Scope,
+    Stream, Types, Section, Connector Type, Layer Order, Highlight, Levels) being
+    relocated into a new collapsible "Filters" panel section in the right column,
+    above Properties -- reported directly: "In the right column above properties add
+    a new collapsable group called Filters. Move the existing filters ... but not
+    'Undo / Redo', 'Current View' or 'Default Model' to this new filter group."
+    Covers: (1) the new #right-panel > [data-panel-id="filters"] section exists,
+    positioned immediately before [data-panel-id="properties"]; (2) all 8 filter
+    group elements are genuinely inside it (not still in #toolbar-row); (3) Undo/
+    Redo, Current View, and Default Model are still in #toolbar-row, untouched; (4)
+    it's a real collapsible panel (toggling .panel-toggle collapses/expands it, with
+    the same localStorage persistence every other collapsible panel already uses);
+    (5) per-tab-type show/hide still works correctly now that these live in a new
+    location (same assertions as check_toolbar_filter_groups_hidden_when_inactive,
+    confirming the move didn't break the existing behavior); (6) the whole Filters
+    section itself hides when NONE of the 8 groups apply (a table/catalog tab)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const groupIds = ['view3d-scope-group', 'stream-filter-group', 'element-type-filter-group', 'section-filter-group', 'connector-type-filter-group', 'view3d-layer-order-group', 'highlight-type-filter-group', 'connector-levels-group'];
+      const out = {};
+
+      const filtersSection = document.querySelector('#right-panel [data-panel-id="filters"]');
+      const propertiesSection = document.querySelector('#right-panel [data-panel-id="properties"]');
+      out.filtersSectionExists = !!filtersSection;
+      out.filtersBeforeProperties = !!(filtersSection && propertiesSection && filtersSection.compareDocumentPosition(propertiesSection) & Node.DOCUMENT_POSITION_FOLLOWING);
+      out.allGroupsInsideFilters = groupIds.every(id => filtersSection && filtersSection.contains(document.getElementById(id)));
+      out.noGroupsInToolbar = groupIds.every(id => !document.getElementById('toolbar-row').contains(document.getElementById(id)));
+      out.undoRedoStillInToolbar = document.getElementById('toolbar-row').contains(document.getElementById('undo-btn')) && document.getElementById('toolbar-row').contains(document.getElementById('redo-btn'));
+      out.currentViewStillInToolbar = document.getElementById('toolbar-row').contains(document.getElementById('view-select'));
+      out.defaultModelStillInToolbar = document.getElementById('toolbar-row').contains(document.getElementById('model-select'));
+
+      // collapsible, with the same localStorage persistence pattern as every other panel
+      const toggle = filtersSection.querySelector('.panel-toggle');
+      out.startsExpanded = !filtersSection.classList.contains('collapsed');
+      toggle.click();
+      out.collapsedAfterToggle = filtersSection.classList.contains('collapsed');
+      out.localStorageCollapsed = localStorage.getItem('dycad-panel-filters-collapsed');
+      toggle.click();
+      out.expandedAfterSecondToggle = !filtersSection.classList.contains('collapsed');
+
+      // per-tab-type visibility still correct after the move
+      const view = store.doc.views[0];
+      const canvasTab = app.createCanvasTab(view);
+      app.switchToTab(canvasTab.id);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      out.filtersVisibleOnCanvas = !filtersSection.classList.contains('hidden');
+      out.streamHiddenOnCanvas = document.getElementById('stream-filter-group').classList.contains('hidden');
+      out.viewScopeHiddenOnCanvas = document.getElementById('view3d-scope-group').classList.contains('hidden');
+
+      app.openOrSwitchCatalog('parts', 'Parts');
+      await new Promise(r => setTimeout(r, 60));
+      out.filtersHiddenOnTable = filtersSection.classList.contains('hidden');
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["filtersSectionExists"]:
+        problems.append("expected a new [data-panel-id=\"filters\"] section inside #right-panel")
+    if not result["filtersBeforeProperties"]:
+        problems.append("expected the Filters section to come BEFORE the Properties section in the right column")
+    if not result["allGroupsInsideFilters"]:
+        problems.append("expected all 8 filter group elements to be inside the new Filters section")
+    if not result["noGroupsInToolbar"]:
+        problems.append("expected none of the 8 filter groups to remain in #toolbar-row")
+    if not result["undoRedoStillInToolbar"]:
+        problems.append("expected Undo/Redo to stay in the toolbar (not moved)")
+    if not result["currentViewStillInToolbar"]:
+        problems.append("expected Current View to stay in the toolbar (not moved)")
+    if not result["defaultModelStillInToolbar"]:
+        problems.append("expected Default Model to stay in the toolbar (not moved)")
+    if not result["startsExpanded"]:
+        problems.append("expected the Filters panel to start expanded")
+    if not result["collapsedAfterToggle"] or result["localStorageCollapsed"] != "true":
+        problems.append(f"expected clicking the Filters panel's toggle to collapse it and persist that to localStorage, got {result}")
+    if not result["expandedAfterSecondToggle"]:
+        problems.append("expected clicking the toggle again to re-expand the Filters panel")
+    if not result["filtersVisibleOnCanvas"] or result["streamHiddenOnCanvas"] or not result["viewScopeHiddenOnCanvas"]:
+        problems.append(f"expected correct per-tab-type visibility to survive the move to the new panel, got {result}")
+    if not result["filtersHiddenOnTable"]:
+        problems.append("expected the whole Filters section to hide when none of its 8 groups apply (a table/catalog tab)")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The 8 filter controls (View Scope/Stream/Types/Section/Connector Type/Layer Order/Highlight/Levels) now live in a new collapsible Filters panel above Properties in the right column, Undo/Redo/Current View/Default Model stay in the toolbar, per-tab-type show/hide still works, and the whole section hides when nothing applies"
+
+
+def check_view3d_empty_click_deselects_and_shows_filters(page):
+    """Regression guard, direct follow-up: "Update the 3D View behaviour so that
+    clicking on empty in the canvas will bring up this view filters and any view
+    properties specific to 3D View." Uses a genuine page.mouse.click() (not a debug
+    hook) on a real, on-screen part first (via debugGetScreenPosition, the same
+    proven-necessary pattern check_view3d_real_click_shows_panel_and_no_recenter
+    uses, since a hook-only test can't catch drift between a debug shortcut and the
+    real listener), then a second real click on an empty corner of the canvas.
+    Covers: (1) the empty click clears tab.selectedCatalogRow (deselects the part);
+    (2) the Properties panel switches from the part's own fields to the new 3D
+    "no part selected... Filters panel above" hint; (3) the Filters panel
+    auto-expands if it had been manually collapsed beforehand, so the feature is
+    genuinely "brought up" for the user, not just mentioned in text."""
+    setup = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      const part = store.createPart({ type: 'GeneralActor', label: 'RegrEmptyClickTarget', model: store.defaultModel, streams: [] });
+      app.openOrSwitch3DView();
+      const tab = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 250));
+      const pos = view3d.debugGetScreenPosition(tab.id, part.id);
+
+      // Manually collapse the Filters panel, same as a user might have left it
+      const filtersSection = document.querySelector('#right-panel [data-panel-id="filters"]');
+      filtersSection.classList.add('collapsed');
+      localStorage.setItem('dycad-panel-filters-collapsed', 'true');
+
+      const canvasRect = document.querySelector('#pages-container canvas').getBoundingClientRect();
+      return { partId: part.id, pos, emptyCorner: { x: canvasRect.left + 8, y: canvasRect.top + 8 } };
+    }
+    """)
+    if not setup["pos"]:
+        return False, f"debugGetScreenPosition couldn't find the part on screen: {setup}"
+
+    page.mouse.click(setup["pos"]["x"], setup["pos"]["y"])
+    page.wait_for_timeout(150)
+    selectedAfterPartClick = js(page, """
+    () => {
+      const store = window.dycadApp.store;
+      const tab = store.tabs.find(t => t.type === '3d');
+      return tab.selectedCatalogRow ? tab.selectedCatalogRow.id : null;
+    }
+    """)
+
+    page.mouse.click(setup["emptyCorner"]["x"], setup["emptyCorner"]["y"])
+    page.wait_for_timeout(150)
+    result = js(page, """
+    () => {
+      const store = window.dycadApp.store;
+      const tab = store.tabs.find(t => t.type === '3d');
+      const filtersSection = document.querySelector('#right-panel [data-panel-id="filters"]');
+      return {
+        selectedCatalogRow: tab.selectedCatalogRow,
+        panelHtml: document.getElementById('properties-body').innerHTML,
+        filtersCollapsedClass: filtersSection.classList.contains('collapsed'),
+        localStorageCollapsed: localStorage.getItem('dycad-panel-filters-collapsed'),
+      };
+    }
+    """)
+    problems = []
+    if selectedAfterPartClick != setup["partId"]:
+        problems.append(f"setup problem: the first real click didn't select the part, got {selectedAfterPartClick!r}")
+    if result["selectedCatalogRow"] is not None:
+        problems.append(f"expected clicking empty canvas space to clear tab.selectedCatalogRow, got {result['selectedCatalogRow']}")
+    if "RegrEmptyClickTarget" in result["panelHtml"] or "no part selected" not in result["panelHtml"] or "Filters" not in result["panelHtml"]:
+        problems.append(f"expected the Properties panel to switch to the 3D 'no part selected... Filters panel above' hint, got: {result['panelHtml'][:300]!r}")
+    if result["filtersCollapsedClass"] or result["localStorageCollapsed"] != "false":
+        problems.append(f"expected the empty click to re-expand the (manually collapsed) Filters panel and persist that, got {result}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Clicking empty 3D canvas space (a genuine mouse click, not a debug hook) deselects the part, switches the Properties panel to the 3D-specific hint pointing at the Filters panel, and re-expands that panel if it had been collapsed"
+
+
 def check_view3d_node_context_menu(page):
     """Regression guard for the 3D node right-click context menu's Filter to Stream
     quick filter. (Its former Connector Type submenu moved to the toolbar's own
@@ -10371,6 +10535,8 @@ CHECKS = [
     check_script_console_and_code_summary_moved_to_advanced,
     check_reset_pinned_3d_positions_moved_to_explore,
     check_toolbar_filter_groups_hidden_when_inactive,
+    check_filters_panel_moved_from_toolbar,
+    check_view3d_empty_click_deselects_and_shows_filters,
     check_script_console_runs_main_function,
     check_batch_script_quickstart,
     check_script_console_remap_and_smart_check_bindings,

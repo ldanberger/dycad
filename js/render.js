@@ -238,6 +238,19 @@ function renderToolbar(app) {
 
   document.getElementById('undo-btn').disabled = !tab || tab.history.past.length === 0;
   document.getElementById('redo-btn').disabled = !tab || tab.history.future.length === 0;
+
+  // Reported directly: "add a new collapsable group called Filters... Move the
+  // existing filters... to this new filter group for each view type that they apply
+  // to." The 8 individual filter groups above (now living in the right column's
+  // Filters panel, index.html — same ids, so every getElementById/classList.toggle
+  // above keeps working unchanged regardless of where the element actually lives)
+  // already hide themselves per tab type; when NONE of them apply (e.g. a table/pdf/
+  // docs/text tab), hide the whole Filters panel section too, rather than leaving an
+  // empty "Filters ▾" header with nothing under it.
+  const filterGroupIds = ['view3d-scope-group', 'stream-filter-group', 'element-type-filter-group', 'section-filter-group', 'connector-type-filter-group', 'view3d-layer-order-group', 'highlight-type-filter-group', 'connector-levels-group'];
+  const anyFilterApplies = filterGroupIds.some((id) => !document.getElementById(id).classList.contains('hidden'));
+  const filtersSection = document.querySelector('.panel-section[data-panel-id="filters"]');
+  if (filtersSection) filtersSection.classList.toggle('hidden', !anyFilterApplies);
 }
 
 // ===================== TOOLBOX =====================
@@ -464,6 +477,18 @@ function renderProperties(app) {
   const tab = app.store.activeTab();
   if (tab && tab.selectedCatalogRow && (tab.type === '3d' || (tab.type === 'table' && tab.catalogType))) {
     renderCatalogRowProperties(app, tab);
+    return;
+  }
+  // Reported directly: "clicking on empty in the canvas will bring up this view
+  // filters and any view properties specific to 3D View." A 3D tab has no single
+  // backing `view` object of its own (unlike a 2D canvas tab, below) — its only real
+  // "view properties" are the tab-scoped filters (View Scope, Stream, Types, Section,
+  // Connector Type, Layer Order, Highlight), all of which now live in the Filters
+  // panel (view3d.js's deselectAndShowViewFilters already expands/scrolls it into
+  // view on empty-canvas click) — so this just points there instead of showing the
+  // generic, canvas-flavored "Select a node or edge" hint below.
+  if (tab && tab.type === '3d') {
+    body.innerHTML = '<div class="empty-hint">3D View — no part selected.<br>View-level filters (Stream, Types, Section, Connector Type, View Scope, Layer Order, Highlight) are in the <strong>Filters</strong> panel above.</div>';
     return;
   }
   if (!tab || tab.type !== 'canvas') {
