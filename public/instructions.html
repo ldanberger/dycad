@@ -536,7 +536,7 @@ Output ONLY the JSON array, valid and complete -- no commentary.</pre>
     just this view's placement(s). If that leaves a part or connector with no other placement anywhere (and, for a
     part, nothing still connected to it), you're separately asked whether to delete it from the model entirely, not
     just this view. Declining leaves it exactly as before.</td></tr>
-    <tr><td><code>Ctrl/Cmd + Enter</code></td><td>Run the Script Console's main() (Advanced menu).</td></tr>
+    <tr><td><code>Ctrl/Cmd + Enter</code></td><td>Run the Script Console's selected function — main() by default (Advanced menu).</td></tr>
   </tbody>
 </table>
 <p>All of the above are ignored while typing in a text field (so, for example, deleting text in a Label field
@@ -779,9 +779,12 @@ needs one, e.g. via <code>app.createCanvasTab(view)</code> / <code>app.switchToT
 <p>The editor's text is a real script FILE, not a one-off REPL entry: it's saved as you go (both to this browser's
 localStorage and, if you edit it, alongside File &gt; Save Local Settings — see below), and Run doesn't clear it
 afterward. Run (or Ctrl+Enter) defines everything currently in the box — so any <code>function foo() {...}</code>
-you write becomes callable — then calls exactly one predetermined entry point, a top-level <code>main()</code>,
-which is free to call whatever other functions you've defined alongside it (they all share the same bindings
-automatically, without needing them passed in). The default script's <code>main()</code> runs five starter
+you write becomes callable — then calls whichever function is selected in the "Function" dropdown next to the
+Run button, which is free to call whatever other functions you've defined alongside it (they all share the same
+bindings automatically, without needing them passed in). That dropdown lists every top-level function in the
+script, sorted alphabetically, and refreshes as you type; it defaults to <code>main()</code> when present, and
+otherwise remembers your last selection across edits where possible. The default script's <code>main()</code>
+runs five starter
 batch scripts in sequence — the convention for adding your own is <code>BatchScript_&lt;Name&gt;</code>, with
 <code>main()</code> picking which one(s) to run, in whatever order. First,
 <code>BatchScript_QuickStart()</code> builds the "Business Functions" view end to end, ending with the 3D View.

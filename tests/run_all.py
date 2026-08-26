@@ -1480,6 +1480,81 @@ def check_script_console_runs_main_function(page):
     return True, "Script Console's Run button now calls a predetermined main() (which can call sibling functions), keeps the editor's text as a persistent script file, and persists edits on both Run and Close"
 
 
+def check_script_console_run_function_picker(page):
+    """Regression guard/new-feature check for the Script Console's Run function picker.
+    Reported directly: "change the run button so user can select (from a sorted list of
+    functions in the script file) a function from the script file to run, with main as
+    the default." Run used to always call a hardcoded main(); it now calls whichever
+    top-level function name is selected in a new #console-run-fn <select>, populated
+    (alphabetically sorted) by scanning the editor's own text for `function Name(`
+    declarations on every edit, defaulting to main() when present. Covers: the default
+    script's own functions appear sorted with main present; editing the script rebuilds
+    the list; running a non-main selection actually calls that function (not main); the
+    previously-selected function is kept selected across an edit if it still exists,
+    even when main is no longer present; and with neither the prior selection nor main
+    present, selection falls back to the first name alphabetically."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const results = {};
+
+      app.promptScriptConsole();
+      await new Promise(r => setTimeout(r, 60));
+      const box = document.querySelector('.modal-box.modal-box-console');
+      const textarea = box.querySelector('#console-input');
+      const sel = box.querySelector('#console-run-fn');
+
+      const initialOptions = [...sel.options].map(o => o.value);
+      results.initialOptionsSorted = JSON.stringify(initialOptions) === JSON.stringify([...initialOptions].sort());
+      results.initialOptionsHasMain = initialOptions.includes('main');
+      results.initialSelectedIsMain = sel.value === 'main';
+
+      textarea.value = "function zeta() { return 'z'; }\\nfunction main() { return 'm'; }\\nfunction alpha() { return 'a'; }";
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      results.rebuiltOptionsSorted = JSON.stringify([...sel.options].map(o => o.value)) === JSON.stringify(['alpha', 'main', 'zeta']);
+      results.rebuiltSelectionStaysMain = sel.value === 'main';
+
+      sel.value = 'alpha';
+      box.querySelector('.run').click();
+      await new Promise(r => setTimeout(r, 150));
+      results.ranSelectedNonMainFunction = box.querySelector('#console-output').textContent.includes('alpha() returned: "a"');
+
+      // Selection (zeta) survives an edit that drops main entirely.
+      sel.value = 'zeta';
+      textarea.value = "function zeta() { return 'z2'; }\\nfunction beta() { return 'b'; }";
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      results.keepsPriorSelectionWhenMainGone = sel.value === 'zeta';
+
+      // Neither main nor the prior selection (zeta) exists -- falls back to first alphabetically.
+      textarea.value = "function gamma() { return 'g'; }\\nfunction delta() { return 'd'; }";
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      results.fallsBackToFirstAlphabetically = sel.value === 'delta';
+
+      return results;
+    }
+    """)
+    problems = []
+    if not result["initialOptionsSorted"]:
+        problems.append("expected the default script's function list to be sorted alphabetically")
+    if not result["initialOptionsHasMain"]:
+        problems.append("expected the default script's function list to include main")
+    if not result["initialSelectedIsMain"]:
+        problems.append("expected main to be selected by default")
+    if not result["rebuiltOptionsSorted"]:
+        problems.append("expected the function list to rebuild (sorted) after editing the script")
+    if not result["rebuiltSelectionStaysMain"]:
+        problems.append("expected main to stay selected across an edit where it's still present")
+    if not result["ranSelectedNonMainFunction"]:
+        problems.append("expected Run to call the selected non-main function (alpha), not main")
+    if not result["keepsPriorSelectionWhenMainGone"]:
+        problems.append("expected the previously-selected function (zeta) to stay selected after an edit that removes main but keeps zeta")
+    if not result["fallsBackToFirstAlphabetically"]:
+        problems.append("expected selection to fall back to the first function alphabetically when neither main nor the prior selection exists")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Script Console's Run button now offers a sorted, live-updating dropdown of the script's top-level functions (main selected by default) and Run calls whichever one is selected"
+
+
 def check_batch_script_quickstart(page):
     """Regression guard/new-feature check for the built-in default batch script
     (store.batchScriptCode's out-of-the-box default, DEFAULT_BATCH_SCRIPT_CODE in
@@ -11560,6 +11635,7 @@ CHECKS = [
     check_view_display_filters_moved_to_filters_panel,
     check_filters_properties_alignment_and_row_spacing,
     check_script_console_runs_main_function,
+    check_script_console_run_function_picker,
     check_batch_script_quickstart,
     check_script_console_remap_and_smart_check_bindings,
     check_script_console_reference_tab,

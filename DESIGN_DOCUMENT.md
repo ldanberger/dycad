@@ -192,6 +192,34 @@ supplying a different getter (`outputEl.textContent` / `inputEl.value` /
 `referenceScrollEl.textContent`) so a mixed-up wire-up is directly testable (marker
 text unique to each pane, checked against the real clipboard).
 
+**Run function picker**: reported directly, *"change the run button so user can select
+(from a sorted list of functions in the script file) a function from the script file to
+run, with main as the default."* Run used to always compile-and-call a hardcoded
+`main`; it now calls whichever name is selected in a new `#console-run-fn <select>`
+next to the Run button. `findAllScriptFunctionNames(code)` (`main.js`, alongside
+`findCustomRemapFunctionNames`, same pure-text-scan technique — no `new Function`
+compile, so it's safe to call on every keystroke even against code that doesn't
+currently parse) scans for every top-level `function Name(` declaration (matching
+`async function` too, since `async` just precedes the `function` keyword the regex
+looks for) and returns the names sorted alphabetically. The dropdown is rebuilt on the
+editor's own `input` event via `populateRunFnSelect(preserveSelection)`: it tries to
+keep whatever's currently selected if that name still exists in the rebuilt list, else
+falls back to `main` if present, else the first name alphabetically — so a person
+picking, say, `BatchScript_RemapExample` doesn't get silently bounced back to `main` on
+every keystroke, but an edit that removes the selected function entirely still lands on
+a sane default instead of a dangling selection. `run()` reads `runFnSelect.value` (or
+`'main'` if the dropdown is empty) as `fnName` and swaps it into the same
+`new Function(...)('...;return typeof ${fnName} === "function" ? ${fnName} : null;')`
+extraction the old hardcoded-`main` version used — `fnName` only ever comes from a
+scanned `function Name(` match (word characters only), never free-typed, so this stays
+as safe as the existing `main`/`dataAutoFill`/`CustomRemap_<Name>` extractions. New
+`check_script_console_run_function_picker` (`tests/run_all.py`): the default script's
+functions list sorted with `main` selected by default; the list rebuilding after an
+edit; Run actually calling a selected non-`main` function; the prior selection
+surviving an edit that drops `main` but keeps that selection; and falling back to the
+first name alphabetically once neither `main` nor the prior selection survives — the
+fallback-priority and non-`main` execution both proven via TEMP BREAK.
+
 ### 5.4 Feedback channels
 
 `app.toast(message, isError, alsoLog)` is the single entry point for user-facing

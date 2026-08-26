@@ -4164,4 +4164,31 @@
 // reverted. DESIGN_DOCUMENT.md SS6.1e, tests/README.md, and public/instructions.html
 // (Remap's own pattern list + a new Script Console paragraph) updated. Full suite
 // 150/150.
-export const APP_VERSION = '0.896';
+// v0.897: reported directly: "in script console change the run button so user can
+// select (from a sorted list of functions in the script file) a function from the
+// script file to run, with main as the default." Run used to always compile-and-call a
+// hardcoded main(); it now calls whichever name is selected in a new #console-run-fn
+// <select> next to the Run button (promptScriptConsole, main.js). New
+// findAllScriptFunctionNames(code) (alongside findCustomRemapFunctionNames, same pure
+// regex-scan technique, safe on every keystroke even against code that doesn't
+// currently parse) scans the editor's text for every top-level `function Name(`
+// declaration (matches `async function` too) and returns the names sorted
+// alphabetically. populateRunFnSelect(preserveSelection) rebuilds the dropdown on the
+// editor's own input event: keeps the current selection if it still exists, else falls
+// back to main if present, else the first name alphabetically -- so picking a non-main
+// function doesn't get silently reset on every keystroke, but an edit that removes the
+// selected function still lands on a sane default. run() reads the select's value (or
+// 'main' if empty) as fnName and swaps it into the same
+// `new Function(...)('...;return typeof X === "function" ? X : null;')` extraction the
+// old hardcoded-main version used -- fnName only ever comes from a scanned
+// `function Name(` match, never free-typed. New
+// check_script_console_run_function_picker (tests/run_all.py): the default script's
+// functions sorted with main selected by default; the list rebuilding after an edit;
+// Run actually calling a selected non-main function; the prior selection surviving an
+// edit that drops main but keeps that selection; falling back to the first name
+// alphabetically once neither main nor the prior selection survives -- the
+// fallback-priority logic and non-main execution both proven via TEMP BREAK, reverted.
+// DESIGN_DOCUMENT.md SS5.3, tests/README.md, and public/instructions.html (Script
+// Console's own Run paragraph + the Ctrl+Enter shortcut row) updated. Full suite
+// 151/151.
+export const APP_VERSION = '0.897';

@@ -282,6 +282,20 @@ function findCustomRemapFunctionNames(code) {
   return [...new Set(names)];
 }
 
+/** Scans `code` (store.batchScriptCode) for every top-level `function Foo(` declaration
+ * (async or not — the `async` keyword just precedes `function` and isn't part of this
+ * match) and returns their names sorted alphabetically, for the Script Console's own
+ * "which function should Run call" dropdown (promptScriptConsole, below). Same pure
+ * text-scan technique as findCustomRemapFunctionNames — safe to call on every keystroke,
+ * even on code that doesn't currently parse. */
+function findAllScriptFunctionNames(code) {
+  const names = [];
+  const re = /function\s+(\w+)\s*\(/g;
+  let m;
+  while ((m = re.exec(code || '')) !== null) names.push(m[1]);
+  return [...new Set(names)].sort((a, b) => a.localeCompare(b));
+}
+
 class App {
   constructor(store) {
     this.store = store;
@@ -756,7 +770,7 @@ class App {
       </div>
       <div id="console-tab-console">
         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
-          Ctrl+Enter or Run calls your top-level <code>main()</code>${modelName ? '' : ' — <span style="color:#c0392b;">no simulation model selected, model will be null</span>'}.
+          Ctrl+Enter or Run calls the selected function below (<code>main()</code> by default)${modelName ? '' : ' — <span style="color:#c0392b;">no simulation model selected, model will be null</span>'}.
           Bindings and <code>remap</code>/<code>smartCheckView</code>/<code>smartCheckNode</code>/<code>insertSmartStream</code> options: see the <strong>Reference</strong> tab above.
           Edits are saved automatically (Local Settings).
         </div>
@@ -813,15 +827,37 @@ class App {
         </table>
         </div>
       </div>
-      <div class="modal-actions"><button class="cancel">Close</button><button class="primary run">Run main() (Ctrl+Enter)</button></div>`;
+      <div class="modal-actions">
+        <button class="cancel">Close</button>
+        <label for="console-run-fn" style="font-size:11px;color:var(--text-muted);margin-right:4px;">Function</label>
+        <select id="console-run-fn" style="margin-right:8px;"></select>
+        <button class="primary run">Run (Ctrl+Enter)</button>
+      </div>`;
     overlay.appendChild(box);
     root.appendChild(overlay);
 
     const outputEl = box.querySelector('#console-output');
     const inputEl = box.querySelector('#console-input');
     const referenceScrollEl = box.querySelector('#console-reference-scroll');
+    const runFnSelect = box.querySelector('#console-run-fn');
     inputEl.value = this.store.batchScriptCode || '';
     inputEl.focus();
+
+    /** Rebuilds the Run function dropdown from the script text's own top-level function
+     * declarations (sorted alphabetically), preferring to keep whatever's currently
+     * selected if it still exists, else falling back to main() if present, else the
+     * first name alphabetically. Called on open and on every edit so the list never
+     * goes stale while the console is open. */
+    const populateRunFnSelect = (preserveSelection) => {
+      const names = findAllScriptFunctionNames(inputEl.value);
+      const prevValue = preserveSelection ? runFnSelect.value : null;
+      runFnSelect.innerHTML = names.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+      if (prevValue && names.includes(prevValue)) runFnSelect.value = prevValue;
+      else if (names.includes('main')) runFnSelect.value = 'main';
+      else if (names.length) runFnSelect.value = names[0];
+    };
+    populateRunFnSelect(false);
+    inputEl.addEventListener('input', () => populateRunFnSelect(true));
 
     /** Reported directly: "Add 'copy' buttons to the three windows: output, script,
      * reference to allow user to easily copy individually." One shared handler, one
@@ -883,6 +919,7 @@ class App {
       const code = inputEl.value;
       persist();
       if (!code.trim()) return;
+      const fnName = runFnSelect.value || 'main';
 
       const bindingNames = ['app', 'store', 'model', 'findParts', 'log', 'messageLog', 'generateIndustry', 'populateFromTemplate', 'remap', 'smartCheckView', 'smartCheckNode', 'insertSmartStream'];
       const bindingValues = [
@@ -895,12 +932,12 @@ class App {
 
       let result, threw = false, errMessage = '';
       try {
-        const mainFn = new Function(...bindingNames, `${code}\n;return typeof main === 'function' ? main : null;`)(...bindingValues);
-        if (typeof mainFn !== 'function') {
+        const entryFn = new Function(...bindingNames, `${code}\n;return typeof ${fnName} === 'function' ? ${fnName} : null;`)(...bindingValues);
+        if (typeof entryFn !== 'function') {
           threw = true;
-          errMessage = "No top-level main() function found — Run calls main(), which can call whatever else you've defined.";
+          errMessage = `No top-level ${fnName}() function found — Run calls the selected function, which can call whatever else you've defined.`;
         } else {
-          result = await mainFn();
+          result = await entryFn();
         }
       } catch (err) {
         threw = true;
@@ -909,7 +946,7 @@ class App {
       if (threw) {
         appendOutput(`Error: ${errMessage}`, '#c0392b');
       } else {
-        appendOutput(result !== undefined ? `main() returned: ${stringifyForConsole(result)}` : 'main() completed.', 'var(--accent)');
+        appendOutput(result !== undefined ? `${fnName}() returned: ${stringifyForConsole(result)}` : `${fnName}() completed.`, 'var(--accent)');
         this.render();
       }
       inputEl.focus();
