@@ -2,7 +2,8 @@ import { loadAllData } from './data.js';
 import { Store, ciEq, newId } from './state.js';
 import { parseArchimateXml } from './archimate.js';
 import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderViewDisplayFilters, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields, getAllFieldHeights, setAllFieldHeights, isAttributeForeignKey } from './render.js';
-import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule, formatSimValue } from './canvas.js';
+import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule, formatSimValue, segmentIntersectsRect } from './canvas.js';
+import { computeRoutedPath } from './routing.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
 import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors } from './commands.js';
 import { APP_VERSION } from './version.js';
@@ -3428,12 +3429,31 @@ class App {
       if (conn.connectorType === 'c' && view?.chkShowConnectorType === false) continue;
       if (conn.connectorType === 's' && view?.chkShowStreamType === false) continue;
       if (conn.connectorType === 'd' && view?.chkShowDataType === false) continue;
-      const fCenter = { x: fromVm.x - ox + halfW, y: fromVm.y - oy + halfH };
-      const tCenter = { x: toVm.x - ox + halfW, y: toVm.y - oy + halfH };
-      const dx = tCenter.x - fCenter.x, dy = tCenter.y - fCenter.y;
-      const margin = 11;
-      const fc = clipToRectEdgeForExport(fCenter.x, fCenter.y, dx, dy, halfW + margin, halfH + margin);
-      const tc = clipToRectEdgeForExport(tCenter.x, tCenter.y, -dx, -dy, halfW + margin, halfH + margin);
+
+      // Reported directly: "view options 'Connector Routing' and 'Stream Connector
+      // Routing' are ignored when exporting view to image." Routing/obstacle-avoidance
+      // (computeRoutedPath, routing.js) is computed in RAW view-space -- the same
+      // coordinate frame drawEdge (canvas.js) uses -- so its obstacle search sees
+      // fromVm/toVm/otherVms' own real .x/.y consistently; only the FINAL path points
+      // are shifted by -ox/-oy afterward, same as every other shape in this export.
+      const fCenterRaw = { x: fromVm.x + halfW, y: fromVm.y + halfH };
+      const tCenterRaw = { x: toVm.x + halfW, y: toVm.y + halfH };
+      const rawDx = tCenterRaw.x - fCenterRaw.x, rawDy = tCenterRaw.y - fCenterRaw.y;
+      const clipMargin = 11;
+      const fcRaw = clipToRectEdgeForExport(fCenterRaw.x, fCenterRaw.y, rawDx, rawDy, halfW + clipMargin, halfH + clipMargin);
+      const tcRaw = clipToRectEdgeForExport(tCenterRaw.x, tCenterRaw.y, -rawDx, -rawDy, halfW + clipMargin, halfH + clipMargin);
+      const shift = (p) => ({ x: p.x - ox, y: p.y - oy });
+      const fc = shift(fcRaw), tc = shift(tcRaw);
+
+      // Separate routing settings per connector type — 'c' (regular) uses
+      // view.routingStyle, 's' (stream) uses view.routingStyleStream — same lookup
+      // drawEdge (canvas.js) uses for the on-screen render.
+      const routingStyle = (conn.connectorType === 's' ? view?.routingStyleStream : view?.routingStyle) || 'default';
+      let pathPoints = null;
+      if (routingStyle === 'direct' || routingStyle === 'manhattan') {
+        const otherVms = partVms.filter((vm) => vm.id !== fromVm.id && vm.id !== toVm.id);
+        pathPoints = computeRoutedPath(fromVm, toVm, fcRaw, tcRaw, otherVms, nodeW, nodeH, routingStyle, segmentIntersectsRect);
+      }
 
       const style = (this.store.settings.relationshipStyles || []).find((s) => ciEq(s.type, conn.relationship));
       const stroke = style?.stroke ?? conn.stroke ?? '#333';
@@ -3442,7 +3462,12 @@ class App {
       const endSize = conn.endSize || 'medium';
 
       let d;
-      if (conn.connectorType === 'c') {
+      if (routingStyle === 'straight') {
+        d = `M ${fc.x} ${fc.y} L ${tc.x} ${tc.y}`;
+      } else if ((routingStyle === 'manhattan' && pathPoints) || (routingStyle === 'direct' && pathPoints && pathPoints.length > 2)) {
+        const shifted = pathPoints.map(shift);
+        d = `M ${shifted[0].x} ${shifted[0].y} ` + shifted.slice(1).map((p) => `L ${p.x} ${p.y}`).join(' ');
+      } else if (conn.connectorType === 'c') {
         const midX = (fc.x + tc.x) / 2, midY = (fc.y + tc.y) / 2;
         const cdx = tc.x - fc.x, cdy = tc.y - fc.y;
         const len = Math.sqrt(cdx * cdx + cdy * cdy) || 1;

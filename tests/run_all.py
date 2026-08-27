@@ -7800,6 +7800,112 @@ def check_export_svg_respects_connector_type_checkboxes(page):
     return True, "Export View as Image's SVG builder now respects the view's own chkShowConnectorType/chkShowStreamType/chkShowDataType checkboxes exactly like the real on-screen canvas does, instead of always drawing every connector type regardless"
 
 
+def check_export_svg_respects_connector_routing(page):
+    """Regression guard, reported directly: "view options 'Connector Routing' and
+    'Stream Connector Routing' are ignored when exporting view to image." Root cause:
+    buildViewSvgString's connector-drawing loop was a separate, hand-rolled path
+    builder that always drew a 'c' connector as a fixed gentle curve and anything else
+    as a plain straight line, never once reading view.routingStyle/routingStyleStream
+    or calling computeRoutedPath (routing.js) — the same obstacle-avoiding router
+    drawEdge (canvas.js) already uses for the real on-screen canvas. Covers: (1) with an
+    obstacle node sitting directly between two others, routingStyle:'manhattan' on the
+    'c' connector produces a multi-point elbow path in the EXPORTED svg (not a straight
+    2-point line or the default curve), with the same point count as the real on-screen
+    render of the identical setup; (2) independently, routingStyleStream:'direct' on
+    the 's' connector between the SAME two endpoints also detours around the obstacle
+    in the export, proving the two settings are read independently per connectorType,
+    matching drawEdge's own per-type lookup; (3) routingStyle:'straight' forces a plain
+    2-point line for a 'c' connector in the export too, overriding its usual default
+    curve; (4) with no obstacle and the default routing style, a 'c' connector still
+    exports as the classic quadratic curve ('Q' command) — the pre-existing look is
+    preserved when there's nothing to route around."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const view = store.addView('RegrSvgRouting_' + Date.now(), 'ff');
+      view.chkShowStreamType = true; // 'ff' views default this to false
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const a = store.createPart({ type: 'BusinessFunction', label: 'RegrSvgRouteA', model, streams: [] });
+      const blocker = store.createPart({ type: 'BusinessProcess', label: 'RegrSvgRouteBlocker', model, streams: [] });
+      const b = store.createPart({ type: 'ApplicationCapability', label: 'RegrSvgRouteB', model, streams: [] });
+      const vmA = store.createViewMember({ view: view.id, objectType: 'part', objectId: a.id, x: 60, y: 60 });
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: blocker.id, x: 260, y: 60 });
+      const vmB = store.createViewMember({ view: view.id, objectType: 'part', objectId: b.id, x: 460, y: 60 });
+      const connC = store.createConnector({ from: a.id, to: b.id, connectorType: 'c', model, relationship: 'Association' });
+      const connS = store.createConnector({ from: a.id, to: b.id, connectorType: 's', model, relationship: 'Association' });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: connC.id, fromVmId: vmA.id, toVmId: vmB.id });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: connS.id, fromVmId: vmA.id, toVmId: vmB.id });
+
+      const pointCount = (d) => (d.match(/[ML]/g) || []).length;
+      const exportPaths = () => {
+        const svg = app.buildViewSvgString(view).svgString;
+        const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+        return [...doc.documentElement.querySelectorAll(':scope > path')].map(p => p.getAttribute('d'));
+      };
+
+      const out = {};
+
+      // 1) manhattan 'c' routing detours around the obstacle in the export, matching
+      // the real on-screen render's own point count.
+      view.routingStyle = 'manhattan';
+      view.routingStyleStream = 'default';
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      const onScreenC = document.querySelector('.edge-layer path:not(.edge-hit)').getAttribute('d');
+      const [exportedC1] = exportPaths();
+      out.manhattanCPointCountMatch = pointCount(exportedC1) === pointCount(onScreenC);
+      out.manhattanCPointCount = pointCount(exportedC1);
+
+      // 2) independently, 's' direct routing also detours -- proves the two fields
+      // (routingStyle vs routingStyleStream) are read independently per connectorType.
+      view.routingStyle = 'default';
+      view.routingStyleStream = 'direct';
+      const [, exportedS] = exportPaths();
+      out.directSPointCount = pointCount(exportedS);
+
+      // 3) 'straight' forces a plain 2-point line for 'c', overriding its usual curve.
+      view.routingStyle = 'straight';
+      view.routingStyleStream = 'default';
+      const [exportedCStraight] = exportPaths();
+      out.straightCIsPlainLine = /^M [\\d.]+ [\\d.]+ L [\\d.]+ [\\d.]+$/.test(exportedCStraight.trim());
+
+      // 4) default style, no obstacle -- classic curve preserved.
+      const view2 = store.addView('RegrSvgRouteCurve_' + Date.now(), 'ff');
+      const tab2 = app.createCanvasTab(view2);
+      app.switchToTab(tab2.id);
+      const a2 = store.createPart({ type: 'BusinessFunction', label: 'RegrSvgCurveA', model, streams: [] });
+      const b2 = store.createPart({ type: 'ApplicationCapability', label: 'RegrSvgCurveB', model, streams: [] });
+      const vmA2 = store.createViewMember({ view: view2.id, objectType: 'part', objectId: a2.id, x: 60, y: 60 });
+      const vmB2 = store.createViewMember({ view: view2.id, objectType: 'part', objectId: b2.id, x: 300, y: 60 });
+      const connC2 = store.createConnector({ from: a2.id, to: b2.id, connectorType: 'c', model, relationship: 'Association' });
+      store.createViewMember({ view: view2.id, objectType: 'connector', objectId: connC2.id, fromVmId: vmA2.id, toVmId: vmB2.id });
+      const svg2 = app.buildViewSvgString(view2).svgString;
+      const doc2 = new DOMParser().parseFromString(svg2, 'image/svg+xml');
+      const curvePath = doc2.documentElement.querySelector(':scope > path').getAttribute('d');
+      out.defaultStillCurved = curvePath.includes('Q ');
+
+      return out;
+    }
+    """)
+    problems = []
+    if result["manhattanCPointCount"] < 3:
+        problems.append(f"expected the exported 'c' connector to detour around the obstacle under routingStyle:'manhattan' (>= 3 points), got {result['manhattanCPointCount']}")
+    if not result["manhattanCPointCountMatch"]:
+        problems.append(f"expected the exported manhattan path's point count to match the real on-screen render's, got {result}")
+    if result["directSPointCount"] < 3:
+        problems.append(f"expected the exported 's' connector to detour around the obstacle under routingStyleStream:'direct' (>= 3 points), independently of the 'c' connector's own routingStyle, got {result['directSPointCount']}")
+    if not result["straightCIsPlainLine"]:
+        problems.append(f"expected routingStyle:'straight' to force a plain 2-point line for a 'c' connector in the export, got a path that doesn't match, full: {result}")
+    if not result["defaultStillCurved"]:
+        problems.append("expected a 'c' connector with default routing and no obstacle to still export as the classic quadratic curve ('Q' command)")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Export View as Image's SVG builder now reads view.routingStyle/routingStyleStream independently per connectorType and routes around obstacles (manhattan/direct) exactly like the real on-screen canvas, while 'straight' still forces a plain line and the default curve is preserved when there's nothing to route around"
+
+
 def check_export_svg_respects_content_checkboxes(page):
     """Regression guard, direct follow-up clarifying the report above: the view's own
     property panel (click the view background, not a node/connector) also has
@@ -12222,6 +12328,7 @@ CHECKS = [
     check_view3d_highlight_type_picker,
     check_view3d_disposed_on_full_document_load,
     check_export_svg_respects_connector_type_checkboxes,
+    check_export_svg_respects_connector_routing,
     check_export_svg_respects_content_checkboxes,
     check_export_view3d_as_image,
     check_view3d_section_boundaries,

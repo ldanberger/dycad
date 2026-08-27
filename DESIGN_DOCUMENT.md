@@ -2321,6 +2321,28 @@ so a future session doesn't have to re-derive it from scratch):
     same state `buildNodeEl` reads, via a newly-exported `formatSimValue`,
     `canvas.js`) — all gated exactly like `buildNodeEl`'s own conditions, just
     hand-drawn as SVG `<rect>`/`<text>` instead of styled `<div>`s.
+  - **`buildViewSvgString` ignored `view.routingStyle`/`routingStyleStream` too.**
+    Reported directly: *"view options 'Connector Routing' and 'Stream Connector
+    Routing' are ignored when exporting view to image."* Same root cause as the
+    checkbox gap above — being a genuinely separate renderer, the connector loop had
+    its OWN hard-coded shape rule (always a fixed gentle curve for `'c'`, always a
+    plain straight line for anything else) and never once read either routing field or
+    called `computeRoutedPath` (`routing.js`, §6.2) — the same obstacle-avoiding router
+    `drawEdge` (`canvas.js`) already uses on-screen. Fix mirrors `drawEdge`'s own
+    branching exactly: look up `routingStyle` per connectorType (`'s'` uses
+    `routingStyleStream`, everything else uses `routingStyle`), and for `'direct'`/
+    `'manhattan'` call `computeRoutedPath` with the OTHER placed parts as obstacles,
+    falling through to the pre-existing curve/straight-line shapes otherwise. The one
+    wrinkle unique to this exporter: its endpoints (`fc`/`tc`) are computed already
+    shifted by `-ox`/`-oy` (the export's own local coordinate frame, content starting
+    at `(0,0)`), but `computeRoutedPath`'s obstacle search reads `fromVm`/`toVm`/every
+    obstacle's OWN `.x`/`.y` directly — so routing is computed entirely in RAW,
+    unshifted view-space (mirroring `drawEdge`/`edgeEndpoints` exactly, via a local
+    `fcRaw`/`tcRaw` pair) and only the FINAL resolved path points get shifted by
+    `-ox`/`-oy` afterward, same as every other shape in this export. Mixing the two
+    frames (e.g. routing against already-shifted endpoints but raw obstacle rects)
+    silently produces a wrong-shaped detour rather than an error — proven as a real
+    failure mode via TEMP BREAK, not just theorized.
 
 ## 10. Testing strategy
 

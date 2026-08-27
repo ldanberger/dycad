@@ -4305,4 +4305,33 @@
 // unmodified. DESIGN_DOCUMENT.md SS5.5, tests/README.md, and public/instructions.html
 // (Smart Check View's own table row + the Script Console reference table's
 // smartCheckView() row) updated. Full suite 156/156.
-export const APP_VERSION = '0.900';
+// v0.901: reported directly: "view options 'Connector Routing' and 'Stream Connector
+// Routing' are ignored when exporting view to image." Root cause: buildViewSvgString
+// (main.js, backs both Export View as Image's SVG and PNG paths) is a genuinely
+// separate, hand-rolled renderer from the real on-screen canvas -- its connector loop
+// had its own hard-coded shape rule (always a fixed curve for 'c', always a plain
+// straight line for anything else) and never once read view.routingStyle/
+// routingStyleStream or called computeRoutedPath (routing.js), the same obstacle-
+// avoiding router drawEdge (canvas.js) already uses on-screen. Fixed by mirroring
+// drawEdge's own branching exactly: look up routingStyle per connectorType ('s' uses
+// routingStyleStream, everything else uses routingStyle), and for 'direct'/'manhattan'
+// call computeRoutedPath (newly imported from routing.js, plus segmentIntersectsRect
+// from canvas.js) with the other placed parts as obstacles, falling through to the
+// pre-existing curve/straight-line shapes otherwise. Routing itself is computed in
+// RAW, unshifted view-space (a new fcRaw/tcRaw pair, mirroring drawEdge/edgeEndpoints
+// exactly) since computeRoutedPath's obstacle search reads every vm's own real .x/.y
+// directly -- only the FINAL resolved path points get shifted by -ox/-oy afterward,
+// same as every other shape in this export; mixing shifted endpoints with raw
+// obstacle coordinates silently produces a wrong-shaped detour instead of an error,
+// confirmed as a real failure mode via TEMP BREAK (not just theorized), alongside
+// TEMP BREAK on the routing-style lookup itself. New
+// check_export_svg_respects_connector_routing (tests/run_all.py): manhattan 'c'
+// routing detours around an obstacle in the export with the same point count as the
+// real on-screen render; routingStyleStream:'direct' on the 's' connector between the
+// same endpoints detours independently (proving the two fields are read per
+// connectorType, not conflated); 'straight' forces a plain 2-point line for 'c',
+// overriding its usual curve; and the classic quadratic curve is preserved for 'c'
+// under default routing with no obstacle. DESIGN_DOCUMENT.md SS9's own export bullet
+// list, tests/README.md, and public/instructions.html (Export View as Image's own
+// paragraph) updated. Full suite 157/157.
+export const APP_VERSION = '0.901';
