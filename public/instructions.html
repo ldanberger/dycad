@@ -145,13 +145,18 @@ point — so a small remapped group lands where you had it, instead of landing o
 occupies that corner of the view. A full, unrestricted Remap (neither box checked) is unaffected and still
 starts from the view's normal origin as always.</p>
 <p><strong>Edge Assignment</strong> (Default/None/Layered patterns only) pins an element type — scoped to the types
-actually placed on the current view — to a single row or column along the Top, Bottom, Left, or Right edge
-of the whole layout instead of its normal stream/element-group position, e.g. Business Actors on the left,
-Business Functions on top, Data Entities on the bottom. Members within an edge are ordered by the same Sort
-priority keys as the main grid by default, so picking Connection Order there gives "natural flow" along the
-edge too — unless Minimize Crossings (below) is also checked, in which case an edge's order comes from that
-instead, so e.g. a Data Entity connected to two different Capabilities correctly lands between the two
-Entities that only connect to one of them each, rather than wherever alphabetical order happens to put it.
+actually placed on the current view — to a numbered row or column slot (1-5) along the Top, Bottom, Left, or
+Right edge of the whole layout instead of its normal stream/element-group position, e.g. Business Actors on
+Left 1, Business Functions on Top 1, Data Entities on Bottom 1. Slot 1 sits closest to that physical edge of
+the layout; higher numbers step inward toward the middle grid — assign two different element types to, say,
+Left 1 and Left 2 to give each its own separate column instead of sharing one. A slot with nothing assigned
+to it is skipped automatically (Left 1 and Left 3 used, nothing on Left 2, produces two adjacent columns with
+no gap) — check <strong>Blank slots</strong> below the type list for a specific edge/number to force that slot
+to stay reserved but empty instead, opening up a deliberate gap. Members within one slot are ordered by the
+same Sort priority keys as the main grid by default, so picking Connection Order there gives "natural flow"
+within that slot too — unless Minimize Crossings (below) is also checked, in which case a slot's order comes
+from that instead, so e.g. a Data Entity connected to two different Capabilities correctly lands between the
+two Entities that only connect to one of them each, rather than wherever alphabetical order happens to put it.
 <strong>Minimize connector crossings</strong> and <strong>Minimize connector length</strong> (also Default/None/
 Layered only) run two further passes, in that order. Minimize connector crossings reorders nodes sideways within
 their own row (or, per the above, an Edge Assignment band) to reduce how often connector lines cross. Minimize
@@ -757,8 +762,12 @@ needs one, e.g. via <code>app.createCanvasTab(view)</code> / <code>app.switchToT
     <tr><td><code>remap(app, tab, options)</code></td><td>options: <code>sortKeys</code>, <code>templateName</code>,
     <code>pattern</code> — <code>'default'</code>/<code>'none'</code>/<code>'layered'</code>/<code>'force'</code>/<code>'clusters'</code> —
     <code>limitColumnsToView</code>, <code>visiblePartVmIds</code>, <code>forcePreferRight</code>,
-    <code>forceGroupRows</code>, <code>edgeAssignment</code> (<code>{elementType: 'top'|'bottom'|'left'|
-    'right'}</code>, Default/None/Layered patterns only), <code>minimizeCrossings</code>,
+    <code>forceGroupRows</code>, <code>edgeAssignment</code> (<code>{elementType: 'top1'..'top5'|
+    'bottom1'..'bottom5'|'left1'..'left5'|'right1'..'right5'}</code> — 1 = closest to that edge, 5 = closest to
+    the middle grid; a bare <code>'top'|'bottom'|'left'|'right'</code> with no digit means index 1, Default/
+    None/Layered patterns only), <code>edgeBlanks</code> (<code>{top|bottom|left|right: [1-5, ...]}</code> —
+    forces specific slot numbers to stay reserved-but-empty instead of being skipped/compacted away, Default/
+    None/Layered only), <code>minimizeCrossings</code>,
     <code>minimizeConnectorLength</code> (both boolean, Default/None/Layered only); all optional, same defaults
     as the Remap dialog.</td></tr>
     <tr><td><code>smartCheckView(app, tab, options)</code></td><td>options: <code>missingConnectors</code>,

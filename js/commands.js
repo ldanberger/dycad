@@ -3675,8 +3675,42 @@ function makeGridResolver(baseX, rowBaseY, stepX, stepY) {
   };
 }
 
+/** Parses one Edge Assignment value ('top'/'bottom'/'left'/'right', each optionally
+ * suffixed 1-5) into { edge, index } — index is 1-based, 1 = the slot closest to that
+ * physical edge of the layout, 5 = the slot furthest from it (closest to the middle
+ * grid). A bare edge name with no digit — the pre-v0.899 convention, still what every
+ * existing document/preset/remapLastOptions has stored — is treated as index 1, so old
+ * saved settings keep behaving exactly as they always did. Returns null for anything
+ * unrecognized (safe to call on stale/hand-edited data). */
+function parseEdgeAssignmentValue(value) {
+  const m = /^(top|bottom|left|right)([1-5])?$/.exec(String(value || ''));
+  if (!m) return null;
+  return { edge: m[1], index: m[2] ? Number(m[2]) : 1 };
+}
+
+/** Given one edge's 5 slot buckets (index 0..4 = position 1..5) and the set of indices
+ * explicitly forced blank for that edge (edgeBlanks, below), returns the ascending list
+ * of "active" indices — occupied by at least one part OR explicitly forced blank — each
+ * mapped to a compacted 0-based physical position. An index with nothing assigned and
+ * not forced blank is skipped entirely (auto-compaction): e.g. Left 1 + Left 3 used,
+ * Left 2 untouched, produces two physical columns with no gap between them, exactly as
+ * if they'd been labeled Left 1/Left 2 — UNLESS Left 2 is explicitly in edgeBlanks, in
+ * which case it becomes its own (permanently empty) physical column between them. */
+function makeEdgeSlots() { return [[], [], [], [], []]; }
+
+function edgeSlotLayout(slotBuckets, blankIndices) {
+  const blankSet = new Set(blankIndices || []);
+  const active = [];
+  for (let i = 0; i < 5; i++) {
+    const idx = i + 1;
+    if (slotBuckets[i].length > 0 || blankSet.has(idx)) active.push(idx);
+  }
+  const positionOf = new Map(active.map((idx, pos) => [idx, pos]));
+  return { active, positionOf, depth: active.length };
+}
+
 function applyRemapLayout(app, viewId, options = {}) {
-  const { sortKeys, templateName, pattern = 'default', limitColumnsToView = false, visiblePartVmIds = null, forcePreferRight = false, forceGroupRows = false, edgeAssignment = null, minimizeCrossings = false, minimizeConnectorLength = false, customFunctionName = null } = options;
+  const { sortKeys, templateName, pattern = 'default', limitColumnsToView = false, visiblePartVmIds = null, forcePreferRight = false, forceGroupRows = false, edgeAssignment = null, edgeBlanks = null, minimizeCrossings = false, minimizeConnectorLength = false, customFunctionName = null } = options;
   const { store } = app;
   const view = store.findView(viewId);
   if (!view) return null;
@@ -3876,18 +3910,20 @@ function applyRemapLayout(app, viewId, options = {}) {
   // returned, and
   // section-based views returned even earlier via applyRemapLayoutSectioned): a part
   // whose TYPE has an entry in edgeAssignment is pulled OUT of the normal stream/
-  // element-group grid entirely and placed instead in a single row/column band along
-  // that edge of the layout (see the post-processing below), ordered by the same
-  // sort-priority keys as everything else. Everything else (no entry, or edgeAssignment
-  // not passed at all) goes through the existing grid logic completely unchanged.
-  const edgeBuckets = { top: [], bottom: [], left: [], right: [] };
+  // element-group grid entirely and placed instead into one of 5 numbered row/column
+  // slots (1 = closest to that physical edge, 5 = closest to the middle grid — see
+  // parseEdgeAssignmentValue) along that edge of the layout (see the post-processing
+  // below), ordered within its own slot by the same sort-priority keys as everything
+  // else. Everything else (no entry, or edgeAssignment not passed at all) goes through
+  // the existing grid logic completely unchanged.
+  const edgeBuckets = { top: makeEdgeSlots(), bottom: makeEdgeSlots(), left: makeEdgeSlots(), right: makeEdgeSlots() };
   let middlePartVms = partVms;
   if (edgeAssignment) {
     middlePartVms = [];
     for (const vm of partVms) {
       const part = store.findPart(vm.objectId);
-      const dir = part && edgeAssignment[part.type];
-      if (dir && edgeBuckets[dir]) edgeBuckets[dir].push(vm);
+      const parsed = part && edgeAssignment[part.type] ? parseEdgeAssignmentValue(edgeAssignment[part.type]) : null;
+      if (parsed) edgeBuckets[parsed.edge][parsed.index - 1].push(vm);
       else middlePartVms.push(vm);
     }
   }
@@ -4060,18 +4096,25 @@ function applyRemapLayout(app, viewId, options = {}) {
     if (minimizeConnectorLength) minimizeConnectorLengthPass(rowGroups, connVms, stepX, baseX);
   }
 
-  // Edge Assignment placement: shift the middle grid over to make room for a left/top
-  // band (if either has any members), then lay each band out as a single row/column
-  // along its own edge of the whole layout — ordered by the same sort-priority keys as
-  // everything else by default (reusing remapSortValue so "ordered by connector
-  // order/natural flow" works here too), UNLESS minimizeCrossings is also on, in which
-  // case each band's order is instead a barycenter reordering against the middle
-  // grid's own final positions (see orderBand below) — the sortKeys order becomes just
-  // the tie-break for members with no middle-grid connection to align to.
-  const hasTop = edgeBuckets.top.length > 0, hasBottom = edgeBuckets.bottom.length > 0;
-  const hasLeft = edgeBuckets.left.length > 0, hasRight = edgeBuckets.right.length > 0;
-  if (hasTop || hasBottom || hasLeft || hasRight) {
-    const shiftX = hasLeft ? stepX : 0, shiftY = hasTop ? stepY : 0;
+  // Edge Assignment placement: shift the middle grid over to make room for however many
+  // numbered slots (1-5) are actually in use on each edge — auto-compacted around any
+  // gap (edgeSlotLayout) unless edgeBlanks explicitly reserves one as a permanently
+  // empty spacer column/row — then lay each used slot out as its own single row/column
+  // along that edge of the whole layout, slot 1 closest to the physical edge and higher
+  // numbers stepping inward toward the middle grid. Ordered within each slot by the
+  // same sort-priority keys as everything else by default (reusing remapSortValue so
+  // "ordered by connector order/natural flow" works here too), UNLESS minimizeCrossings
+  // is also on, in which case each slot's order is instead a barycenter reordering
+  // against the middle grid's own final positions (see orderBand below) — the sortKeys
+  // order becomes just the tie-break for members with no middle-grid connection to
+  // align to.
+  const blanks = { top: edgeBlanks?.top || [], bottom: edgeBlanks?.bottom || [], left: edgeBlanks?.left || [], right: edgeBlanks?.right || [] };
+  const topLayout = edgeSlotLayout(edgeBuckets.top, blanks.top);
+  const bottomLayout = edgeSlotLayout(edgeBuckets.bottom, blanks.bottom);
+  const leftLayout = edgeSlotLayout(edgeBuckets.left, blanks.left);
+  const rightLayout = edgeSlotLayout(edgeBuckets.right, blanks.right);
+  if (topLayout.depth || bottomLayout.depth || leftLayout.depth || rightLayout.depth) {
+    const shiftX = leftLayout.depth * stepX, shiftY = topLayout.depth * stepY;
     if (shiftX || shiftY) {
       for (const vm of allMiddleVms) { vm.x += shiftX; vm.y += shiftY; }
     }
@@ -4121,15 +4164,24 @@ function applyRemapLayout(app, viewId, options = {}) {
         .map((e) => e.vm);
     };
 
-    const orderedTop = orderBand(edgeBuckets.top, 'x');
-    const orderedBottom = orderBand(edgeBuckets.bottom, 'x');
-    const orderedLeft = orderBand(edgeBuckets.left, 'y');
-    const orderedRight = orderBand(edgeBuckets.right, 'y');
+    // One ordered VM list per (edge, physical slot position) — a forced-blank slot
+    // still reserves its physical position (contributing to shiftX/shiftY and to every
+    // OTHER slot's spacing on that edge) but produces an empty list here, so nothing is
+    // ever actually placed into it.
+    const orderedSlotsFor = (layout, bucket, axis) => {
+      const bySlot = new Array(layout.depth).fill(null).map(() => []);
+      for (const idx of layout.active) bySlot[layout.positionOf.get(idx)] = orderBand(bucket[idx - 1], axis);
+      return bySlot;
+    };
+    const topSlots = orderedSlotsFor(topLayout, edgeBuckets.top, 'x');
+    const bottomSlots = orderedSlotsFor(bottomLayout, edgeBuckets.bottom, 'x');
+    const leftSlots = orderedSlotsFor(leftLayout, edgeBuckets.left, 'y');
+    const rightSlots = orderedSlotsFor(rightLayout, edgeBuckets.right, 'y');
 
-    orderedTop.forEach((vm, i) => { vm.x = middleMinX + i * stepX; vm.y = rowBaseY; });
-    orderedBottom.forEach((vm, i) => { vm.x = middleMinX + i * stepX; vm.y = middleMaxY + stepY; });
-    orderedLeft.forEach((vm, i) => { vm.x = baseX; vm.y = middleMinY + i * stepY; });
-    orderedRight.forEach((vm, i) => { vm.x = middleMaxX + stepX; vm.y = middleMinY + i * stepY; });
+    topSlots.forEach((vms, p) => vms.forEach((vm, i) => { vm.x = middleMinX + i * stepX; vm.y = rowBaseY + p * stepY; }));
+    bottomSlots.forEach((vms, p) => vms.forEach((vm, i) => { vm.x = middleMinX + i * stepX; vm.y = middleMaxY + (bottomLayout.depth - p) * stepY; }));
+    leftSlots.forEach((vms, p) => vms.forEach((vm, i) => { vm.x = baseX + p * stepX; vm.y = middleMinY + i * stepY; }));
+    rightSlots.forEach((vms, p) => vms.forEach((vm, i) => { vm.x = middleMaxX + (rightLayout.depth - p) * stepX; vm.y = middleMinY + i * stepY; }));
 
     // Minimize Connector Length also aligns each band's CROSS axis (x for top/bottom,
     // y for left/right) toward whatever its members are actually connected to — the
@@ -4153,10 +4205,10 @@ function applyRemapLayout(app, viewId, options = {}) {
         const resolved = resolveSpacedPositions(desired, step);
         bandVmsOrdered.forEach((vm, i) => { vm[axis] = resolved[i]; posOf.set(vm.id, { x: vm.x, y: vm.y }); });
       };
-      alignBand(orderedTop, 'x', stepX);
-      alignBand(orderedBottom, 'x', stepX);
-      alignBand(orderedLeft, 'y', stepY);
-      alignBand(orderedRight, 'y', stepY);
+      for (const vms of topSlots) alignBand(vms, 'x', stepX);
+      for (const vms of bottomSlots) alignBand(vms, 'x', stepX);
+      for (const vms of leftSlots) alignBand(vms, 'y', stepY);
+      for (const vms of rightSlots) alignBand(vms, 'y', stepY);
     }
   }
 
@@ -4193,6 +4245,7 @@ function remap(app, tab, options = {}) {
     forcePreferRight: !!options.forcePreferRight,
     forceGroupRows: !!options.forceGroupRows,
     edgeAssignment: options.edgeAssignment || {},
+    edgeBlanks: options.edgeBlanks || {},
     minimizeCrossings: !!options.minimizeCrossings,
     minimizeConnectorLength: !!options.minimizeConnectorLength,
     customFunctionName: options.customFunctionName || null,

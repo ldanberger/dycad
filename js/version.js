@@ -4218,4 +4218,53 @@
 // via TEMP BREAK, reverted. DESIGN_DOCUMENT.md new SS5.8 and tests/README.md updated;
 // no end-user-visible behavior change (still click-hold-drag-release), so
 // public/instructions.html untouched. Full suite 152/152.
-export const APP_VERSION = '0.898';
+// v0.899: reported directly: "for remap edge assignment (all applicable patterns);
+// change left to be left 1, and add left 2, left 3 etc to 5. likewise for other edges.
+// this directs placement to be first column or row, 2nd column or row etc. from that
+// specific edge. Add ability to specify 'blank', where nothing goes into that edge
+// column or row." Asked a clarifying question on what 'blank' should mean (auto-
+// compact by default, with 'blank' as a separate per-edge/index toggle forcing a
+// reserved empty gap -- the option the user picked -- vs. always-reserve-to-max-used,
+// vs. a per-type "exclude entirely" value); user chose the forced-gap design.
+// edgeAssignment values are now 'top1'..'top5'/'bottom1'..'bottom5'/'left1'..'left5'/
+// 'right1'..'right5' (1 = closest to that physical edge, 5 = closest to the middle
+// grid) instead of a single bare direction -- new parseEdgeAssignmentValue
+// (commands.js) parses one, treating a bare 'top'/'bottom'/'left'/'right' with no
+// digit (every already-saved document/preset/remapLastOptions) as index 1, so nothing
+// old changes behavior. New edgeBlanks: {top|bottom|left|right: [1-5,...]} option
+// forces specific slot numbers to stay reserved-but-empty; new edgeSlotLayout
+// (commands.js) computes, per edge, which of the 5 slots are "active" (occupied by
+// >=1 part, union'd with edgeBlanks) sorted ascending and compacted to 0-based
+// physical positions -- an untouched slot with nothing forced blank is skipped
+// entirely (auto-compaction), so Left1+Left3 with Left2 untouched produces two
+// adjacent columns with no gap, while edgeBlanks:{left:[2]} reserves a real empty
+// column there instead. applyRemapLayout's Edge Assignment placement section
+// (previously one bucket/band per edge) rewritten around 5 slots/edge -- shiftX/shiftY
+// now scale with each edge's own active-slot COUNT (not a fixed 1 step), and
+// orderBand/alignBand (crossing-minimization ordering, connector-length alignment)
+// both now run once per (edge, slot) pair instead of once per edge. main.js's
+// promptRemap: each element type's edge <select> now offers 21 grouped options (1
+// default + 5 numbered x 4 edges, edgeAssignmentOptionsHtml); a new normalizeEdge
+// AssignmentValue normalizes a legacy bare value to index 1 when pre-filling the
+// select from saved data (the select's own <option>s no longer include the bare
+// value); a new Blank Slots checkbox grid (20 checkboxes, .rm-edge-blank) collected/
+// applied via collectEdgeBlanks/applyEdgeBlanks, wired into Reset, Save As/Load
+// (preset.edgeBlanks), and view.remapLastOptions.edgeBlanks exactly like
+// edgeAssignment already was. New check_remap_edge_assignment_numbered_slots_and_
+// blanks (commands-level: separate columns for left1/left2, auto-compaction, forced-
+// blank gap verified as an exact 2x-vs-1x step-distance comparison, index-1-closest-
+// to-edge convention checked for all 4 edges) and check_remap_edge_assignment_dialog_
+// numbered_ui (option count/optgroups, legacy-value normalization, blank-grid round-
+// trip through Reset/Save-Load/view-memory) -- both new checks' key assertions proven
+// via TEMP BREAK (ignoring edgeBlanks, disabling compaction, ignoring the digit
+// suffix, disabling legacy normalization), reverted. Three pre-existing edge-
+// assignment dialog tests (check_remap_preset_dialog_and_local_persistence,
+// check_remap_view_remembers_own_settings) updated to set/expect 'left2'/'top1'/
+// 'top3' instead of bare 'left'/'top' -- the SELECT's own <option>s changed, so a
+// direct .value assignment to the old bare string now selects nothing; the
+// commands.js-level bare-value backward-compat tests in check_remap_edge_assignment_
+// and_layout_optimization needed NO changes (still pass unmodified). DESIGN_DOCUMENT.md
+// SS6.1a, tests/README.md, and public/instructions.html (Edge Assignment's own
+// paragraph + the Script Console reference table's remap() row) updated. Full suite
+// 154/154.
+export const APP_VERSION = '0.899';

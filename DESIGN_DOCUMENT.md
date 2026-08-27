@@ -534,17 +534,43 @@ neighbor search, so same-depth siblings share a row).
 
 ### 6.1a Edge Assignment & layout optimization (`commands.js`'s `applyRemapLayout`)
 
-Three options layered onto the `'default'`/`'none'` Remap patterns only (force-directed
+Four options layered onto the `'default'`/`'none'` Remap patterns only (force-directed
 above and section-based views' fixed grid have no free row/column axis to bias, so all
-three are silently ignored there — the Remap dialog hides their controls whenever
-`pattern:'force'` is selected). `edgeAssignment: {elementType: 'top'|'bottom'|'left'|
-'right'}` pulls every part of a given type OUT of the normal stream/element-group grid
-before that grid is built, and instead lays each edge's members out as a single row
-(top/bottom) or column (left/right) along that side of the whole layout — ordered by
+four are silently ignored there — the Remap dialog hides their controls whenever
+`pattern:'force'` is selected). `edgeAssignment: {elementType: 'top1'..'top5'|
+'bottom1'..'bottom5'|'left1'..'left5'|'right1'..'right5'}` pulls every part of a given
+type OUT of the normal stream/element-group grid before that grid is built, and instead
+lays each edge's members out into one of 5 numbered slots — a single row (top/bottom) or
+column (left/right) along that side of the whole layout — ordered within its own slot by
 the same sort-priority keys as the main grid, so `connectionOrder` gives "natural flow"
-within an edge too. The middle grid is computed first (completely unmodified, existing
-code), then shifted right/down by one step to make room for any left/top band, then
-each band is placed relative to the middle grid's own resulting bounding box.
+within a slot too. Reported directly: *"for remap edge assignment (all applicable
+patterns); change left to be left 1, and add left 2, left 3 etc to 5. likewise for other
+edges. this directs placement to be first column or row, 2nd column or row etc. from
+that specific edge. Add ability to specify 'blank', where nothing goes into that edge
+column or row."*
+
+Slot 1 always sits closest to that physical edge of the layout; slot 5 sits closest to
+the middle grid. `parseEdgeAssignmentValue` parses a value like `'left3'` into `{edge:
+'left', index: 3}` — a bare edge name with no digit (`'left'`, the pre-v0.899
+convention still stored in every already-saved document/preset/`remapLastOptions`) is
+treated as index 1, so nothing written before this feature existed changes behavior.
+`edgeSlotLayout` (one call per edge) then decides which of the 5 slots are actually
+**active**: any slot occupied by ≥1 part, UNION the new `edgeBlanks: {top|bottom|left|
+right: [1-5, ...]}` option's explicitly forced-blank indices for that edge — sorted
+ascending and mapped to compacted, 0-based physical positions. This is
+auto-compaction-by-default: Left 1 + Left 3 assigned, Left 2 untouched, produces exactly
+2 physical columns with NO gap between them (Left 3's occupants sit immediately next to
+Left 1's) — UNLESS `edgeBlanks: {left: [2]}` explicitly reserves Left 2 as a permanently
+empty spacer column, in which case Left 3 lands a full extra step further out. A
+forced-blank slot still contributes to that edge's total depth (and therefore to how far
+the middle grid gets shifted, and to every OTHER active slot's own spacing) despite
+never actually holding any part. The middle grid is computed first (completely
+unmodified, existing code), then shifted right/down by `leftDepth`/`topDepth` steps (the
+COUNT of that edge's active slots, not a fixed 1) to make room, then each slot is placed
+relative to the middle grid's own resulting bounding box — slot *n*'s physical position
+directly determines its row/column offset from either the true edge (top/left) or the
+middle grid's own far side (bottom/right, which never needs to shift the grid itself,
+exactly as before).
 
 `minimizeCrossings`/`minimizeConnectorLength` (both `boolean`) are the two phases of
 the classic Sugiyama layered-graph-drawing pipeline, run in that order (ordering, then

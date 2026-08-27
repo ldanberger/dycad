@@ -4973,6 +4973,120 @@ def check_remap_edge_assignment_and_layout_optimization(page):
     return True, "applyRemapLayout's Edge Assignment places pinned element types on a single top/bottom/left/right band, reordering band members against the middle grid (not just sortKeys) when Minimize Crossings is on so a shared connection lands between its two exclusive ones, Minimize Connector Length genuinely shortens real connectors (middle grid and edge bands alike), and all three options are safely ignored by the force pattern and section-based views"
 
 
+def check_remap_edge_assignment_numbered_slots_and_blanks(page):
+    """Regression guard/new-feature check for Edge Assignment's numbered slots (1-5 per
+    edge) and forced-blank spacer slots. Reported directly: "for remap edge assignment
+    (all applicable patterns); change left to be left 1, and add left 2, left 3 etc to
+    5. likewise for other edges. this directs placement to be first column or row, 2nd
+    column or row etc. from that specific edge. Add ability to specify 'blank', where
+    nothing goes into that edge column or row." A bare 'left'/'top'/'bottom'/'right' (no
+    digit -- the pre-v0.899 convention, still what every existing document/preset has
+    stored) is treated as index 1 for backward compatibility (parseEdgeAssignmentValue,
+    commands.js). Covers: (1) 'left1' and 'left2' assigned to two different element
+    types produce two SEPARATE columns, 'left1' sitting exactly at the true left edge
+    (baseX) and 'left2' one stepX further in, with the unassigned middle-grid part
+    starting right after 'left2's column; (2) auto-compaction — 'left1' + 'left3' used,
+    'left2' untouched and NOT forced blank — produces only two columns with NO gap
+    between them (left3's occupant sits immediately next to left1's, one stepX apart,
+    not two); (3) the companion case with edgeBlanks:{left:[2]} forcing 'left2' blank —
+    now left3's occupant sits a full TWO stepX from left1's (a real reserved gap column
+    in between, containing nothing); (4) same index-1-closest-to-edge / higher-index-
+    closer-to-middle convention holds for 'top' (top1 at the true top, smaller y) and
+    'bottom' (bottom1 farthest from the middle grid, larger y) as it already does for
+    'left'."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const mk = (type, label) => store.createPart({ type, label, model, streams: [] });
+      const freshView = (name) => {
+        const view = store.addView(name + '_' + Date.now(), 'ff');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        return view;
+      };
+      const place = (view, parts) => { for (const p of parts) store.createViewMember({ view: view.id, objectType: 'part', objectId: p.id, x: 0, y: 0 }); };
+      const posOf = (view, label) => {
+        const vm = store.viewMembersForView(view.id).find(v => v.objectType === 'part' && store.findPart(v.objectId)?.label === label);
+        return vm ? { x: vm.x, y: vm.y } : null;
+      };
+      const out = {};
+
+      // 1) left1 vs left2 -> two separate columns.
+      const la = mk('BusinessActor', 'NumLA'), lb = mk('ApplicationCapability', 'NumLB'), mid = mk('BusinessProcess', 'NumMid');
+      const v1 = freshView('RegrEdgeNumbered');
+      place(v1, [la, lb, mid]);
+      commands.applyRemapLayout(app, v1.id, { pattern: 'default', sortKeys: ['nodeLabel'], edgeAssignment: { BusinessActor: 'left1', ApplicationCapability: 'left2' } });
+      const pLa = posOf(v1, 'NumLA'), pLb = posOf(v1, 'NumLB'), pMid = posOf(v1, 'NumMid');
+      out.stepX = pLb.x - pLa.x;
+      out.left1AtTrueEdge = pLa.x === 60;
+      out.left2OneStepIn = pLb.x === pLa.x + out.stepX;
+      out.midAfterLeft2 = pMid.x === pLb.x + out.stepX;
+
+      // 2) auto-compaction: left1 + left3, left2 untouched -> no gap. (3, same labels
+      // as scenario 2 so redrawNodeSizes -- called at the top of applyRemapLayout,
+      // auto-fitting nodeWidth/stepX to each view's OWN longest label text -- computes
+      // an identical stepX for both views, making their deltas directly comparable.)
+      const ca = mk('BusinessActor', 'EdgeCompA'), cb = mk('GeneralActor', 'EdgeCompB');
+      const v2 = freshView('RegrEdgeCompact');
+      place(v2, [ca, cb]);
+      commands.applyRemapLayout(app, v2.id, { pattern: 'default', sortKeys: ['nodeLabel'], edgeAssignment: { BusinessActor: 'left1', GeneralActor: 'left3' } });
+      const pCa = posOf(v2, 'EdgeCompA'), pCb = posOf(v2, 'EdgeCompB');
+      const compactStepX = pCb.x - pCa.x;
+
+      const ba = mk('BusinessActor', 'EdgeCompA'), bb = mk('GeneralActor', 'EdgeCompB');
+      const v3 = freshView('RegrEdgeBlank');
+      place(v3, [ba, bb]);
+      commands.applyRemapLayout(app, v3.id, { pattern: 'default', sortKeys: ['nodeLabel'], edgeAssignment: { BusinessActor: 'left1', GeneralActor: 'left3' }, edgeBlanks: { left: [2] } });
+      const pBa = posOf(v3, 'EdgeCompA'), pBb = posOf(v3, 'EdgeCompB');
+      const blankStepX = pBb.x - pBa.x;
+      out.compactStepX = compactStepX;
+      out.compactedOneStepApart = compactStepX > 100;
+      out.blankedTwoStepsApart = blankStepX === compactStepX * 2;
+
+      // 4) top1 (true top, smaller y) / top2 (further in, larger y); bottom1 (farthest
+      // from grid, larger y) / bottom2 (closer to grid, smaller y).
+      const ta = mk('BusinessActor', 'TopA'), tb = mk('GeneralActor', 'TopB');
+      const v4 = freshView('RegrEdgeTopNumbered');
+      place(v4, [ta, tb]);
+      commands.applyRemapLayout(app, v4.id, { pattern: 'default', sortKeys: ['nodeLabel'], edgeAssignment: { BusinessActor: 'top1', GeneralActor: 'top2' } });
+      const pTa = posOf(v4, 'TopA'), pTb = posOf(v4, 'TopB');
+      out.top1AtTrueEdge = pTa.y === 40;
+      out.top2FurtherIn = pTb.y > pTa.y;
+
+      const boa = mk('BusinessActor', 'BotA'), bob = mk('GeneralActor', 'BotB');
+      const v5 = freshView('RegrEdgeBottomNumbered');
+      place(v5, [boa, bob]);
+      commands.applyRemapLayout(app, v5.id, { pattern: 'default', sortKeys: ['nodeLabel'], edgeAssignment: { BusinessActor: 'bottom1', GeneralActor: 'bottom2' } });
+      const pBoa = posOf(v5, 'BotA'), pBob = posOf(v5, 'BotB');
+      out.bottom1FarthestFromGrid = pBoa.y > pBob.y;
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["left1AtTrueEdge"]:
+        problems.append(f"expected 'left1' to sit exactly at the true left edge (x=60), got {result}")
+    if not result["left2OneStepIn"]:
+        problems.append("expected 'left2' to sit exactly one column-step further in from 'left1', as its own separate column")
+    if not result["midAfterLeft2"]:
+        problems.append("expected the unassigned middle-grid part to start immediately after the 'left2' column")
+    if not result["compactedOneStepApart"]:
+        problems.append("expected 'left1'+'left3' with 'left2' untouched (not forced blank) to auto-compact into two adjacent columns, one step apart -- no gap")
+    if not result["blankedTwoStepsApart"]:
+        problems.append("expected 'left1'+'left3' with edgeBlanks:{left:[2]} to reserve a real gap column at 'left2', putting 'left3' TWO steps from 'left1' instead of one")
+    if not result["top1AtTrueEdge"]:
+        problems.append("expected 'top1' to sit exactly at the true top edge (y=40)")
+    if not result["top2FurtherIn"]:
+        problems.append("expected 'top2' to sit further down (larger y) than 'top1' -- stepping inward toward the middle grid")
+    if not result["bottom1FarthestFromGrid"]:
+        problems.append("expected 'bottom1' to sit farther from the middle grid (larger y) than 'bottom2' -- index 1 is always closest to the true physical edge, not the grid")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Edge Assignment's numbered slots (1-5 per edge) place different element types into separate, correctly-ordered columns/rows, auto-compact around an untouched gap, and correctly reserve a real empty gap when edgeBlanks explicitly forces one -- consistently for all four edges"
+
+
 def check_remap_preset_dialog_and_local_persistence(page):
     """Regression guard for Remap's named presets (store.remapPresets, main.js's
     promptRemap Preset row) — reported directly: "let's add similar load/save settings
@@ -5012,8 +5126,8 @@ def check_remap_preset_dialog_and_local_persistence(page):
       out.isWide = !!box;
       out.edgeTypes = [...document.querySelectorAll('.rm-edge-select')].map(s => s.dataset.type).sort();
 
-      document.querySelector('.rm-edge-select[data-type=\"BusinessActor\"]').value = 'left';
-      document.querySelector('.rm-edge-select[data-type=\"BusinessFunction\"]').value = 'top';
+      document.querySelector('.rm-edge-select[data-type=\"BusinessActor\"]').value = 'left2';
+      document.querySelector('.rm-edge-select[data-type=\"BusinessFunction\"]').value = 'top3';
       document.getElementById('rm-minimize-crossings').checked = true;
       document.getElementById('rm-minimize-length').checked = true;
       document.getElementById('rm-pattern').value = 'none';
@@ -5073,8 +5187,8 @@ def check_remap_preset_dialog_and_local_persistence(page):
     if "BusinessActor" not in result["edgeTypes"] or "BusinessFunction" not in result["edgeTypes"]:
         problems.append(f"Edge Assignment should list the element types actually placed on this view, got {result['edgeTypes']}")
     saved = result["savedPreset"] or {}
-    if saved.get("pattern") != "none" or saved.get("edgeAssignment") != {"BusinessActor": "left", "BusinessFunction": "top"} or saved.get("minimizeCrossings") is not True or saved.get("minimizeConnectorLength") is not True:
-        problems.append(f"Save As should capture the current pattern/edgeAssignment/minimizeCrossings/minimizeConnectorLength, expected pattern='none' edgeAssignment={{BusinessActor:left,BusinessFunction:top}} minimizeCrossings=True minimizeConnectorLength=True, got {saved}")
+    if saved.get("pattern") != "none" or saved.get("edgeAssignment") != {"BusinessActor": "left2", "BusinessFunction": "top3"} or saved.get("minimizeCrossings") is not True or saved.get("minimizeConnectorLength") is not True:
+        problems.append(f"Save As should capture the current pattern/edgeAssignment/minimizeCrossings/minimizeConnectorLength, expected pattern='none' edgeAssignment={{BusinessActor:left2,BusinessFunction:top3}} minimizeCrossings=True minimizeConnectorLength=True, got {saved}")
     if not result["dropdownOffersNew"]:
         problems.append("the Preset dropdown should immediately offer the newly saved preset's name")
     if not result["edgeHiddenOnForce"] or not result["minCrossHiddenOnForce"] or not result["minLengthHiddenOnForce"]:
@@ -5083,7 +5197,7 @@ def check_remap_preset_dialog_and_local_persistence(page):
         problems.append("'Limit columns to view' should hide when Pattern is switched to 'layered' (no meaning there -- every row is exactly one graph layer)")
     if result["edgeHiddenOnLayered"] or result["minCrossHiddenOnLayered"] or result["minLengthHiddenOnLayered"]:
         problems.append("Edge Assignment, Minimize Crossings, and Minimize Connector Length should all stay VISIBLE for pattern:'layered' (unlike 'force')")
-    if result["loadedPattern"] != "none" or not result["loadedMinCross"] or not result["loadedMinLength"] or result["loadedActorEdge"] != "left" or result["loadedFnEdge"] != "top":
+    if result["loadedPattern"] != "none" or not result["loadedMinCross"] or not result["loadedMinLength"] or result["loadedActorEdge"] != "left2" or result["loadedFnEdge"] != "top3":
         problems.append(f"Load should repopulate pattern/minimizeCrossings/minimizeConnectorLength/edge assignment selects from the preset, got pattern={result['loadedPattern']} minCross={result['loadedMinCross']} minLength={result['loadedMinLength']} actorEdge={result['loadedActorEdge']} fnEdge={result['loadedFnEdge']}")
     if not result["docJsonExcludes"]:
         problems.append("remapPresets must never appear in store.toJSON() (the actual Save JSON document) -- these are Local Settings, not document data")
@@ -5162,7 +5276,7 @@ def check_remap_view_remembers_own_settings(page):
       document.getElementById('rm-pattern').value = 'none';
       document.getElementById('rm-minimize-crossings').checked = true;
       document.getElementById('rm-minimize-length').checked = true;
-      document.querySelector('.rm-edge-select[data-type=\"BusinessFunction\"]').value = 'top';
+      document.querySelector('.rm-edge-select[data-type=\"BusinessFunction\"]').value = 'top1';
       box.querySelector('.submit').click();
       await new Promise(r => setTimeout(r, 60));
 
@@ -5202,7 +5316,7 @@ def check_remap_view_remembers_own_settings(page):
         problems.append("running Remap should record view.remapLastOptions on the view itself")
     if not result["docJsonIncludesIt"]:
         problems.append("view.remapLastOptions should round-trip through store.toJSON() (the Save JSON document) -- it's per-view document state, not a Local Settings preference")
-    if result["reopenedPattern"] != "none" or not result["reopenedMinCross"] or not result["reopenedMinLength"] or result["reopenedFnEdge"] != "top":
+    if result["reopenedPattern"] != "none" or not result["reopenedMinCross"] or not result["reopenedMinLength"] or result["reopenedFnEdge"] != "top1":
         problems.append(f"reopening Remap on the SAME view should pre-fill every field from its own last run, got pattern={result['reopenedPattern']} minCross={result['reopenedMinCross']} minLength={result['reopenedMinLength']} fnEdge={result['reopenedFnEdge']}")
     if not result["freshViewHasNoOwnOptions"]:
         problems.append("a brand-new view should have no remapLastOptions of its own")
@@ -5211,6 +5325,110 @@ def check_remap_view_remembers_own_settings(page):
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
     return True, "Remap remembers every dialog field (not just sort order) per-view via view.remapLastOptions, pre-filling them on reopen while a fresh view still falls back to the cross-view cache, and this state correctly round-trips through the Save JSON document as genuine per-view data"
+
+
+def check_remap_edge_assignment_dialog_numbered_ui(page):
+    """Regression guard/new-feature check for the Remap dialog's numbered Edge
+    Assignment UI. Reported directly (same request as
+    check_remap_edge_assignment_numbered_slots_and_blanks): "change left to be left 1,
+    and add left 2, left 3 etc to 5 ... Add ability to specify 'blank'." Covers: (1)
+    each element type's edge <select> now offers 21 options (the default "normal grid"
+    plus 5 numbered slots x 4 edges, grouped into 4 <optgroup>s); (2) a view whose
+    remapLastOptions has the OLD bare 'left' (no digit) value pre-fills the dialog's
+    <select> as 'left1', not blank/unselected -- backward compatibility for every
+    already-saved document; (3) a new Blank Slots checkbox grid (.rm-edge-blank, one
+    per edge x index) exists and round-trips through Reset (unchecked), Save As/Load
+    (a preset's edgeBlanks), and reopening the same view (view.remapLastOptions.
+    edgeBlanks) exactly like every other field already does."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const actor = store.createPart({ type: 'BusinessActor', label: 'EdgeUiActor', model, streams: [] });
+      const view = store.addView('RegrEdgeUi_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: actor.id, x: 0, y: 0 });
+
+      // Legacy pre-fill: a document saved before numbered slots existed.
+      view.remapLastOptions = { edgeAssignment: { BusinessActor: 'left' } };
+
+      const out = {};
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 30));
+      let box = document.querySelector('.modal-box.modal-box-wide');
+      const sel = box.querySelector('.rm-edge-select[data-type=\"BusinessActor\"]');
+      out.optionCount = sel.querySelectorAll('option').length;
+      out.optgroupCount = sel.querySelectorAll('optgroup').length;
+      out.hasLeft5 = [...sel.options].some(o => o.value === 'left5');
+      out.legacyPrefillNormalized = sel.value;
+
+      out.blankGridExists = box.querySelectorAll('.rm-edge-blank').length === 20;
+
+      // Set a slot + a blank, then Reset should clear both.
+      sel.value = 'left3';
+      box.querySelector('.rm-edge-blank[data-edge=\"left\"][data-index=\"2\"]').checked = true;
+      box.querySelector('.reset').click();
+      out.resetClearsSelect = sel.value;
+      out.resetClearsBlank = box.querySelector('.rm-edge-blank[data-edge=\"left\"][data-index=\"2\"]').checked;
+
+      // Save As with a slot + a blank set, then reload the dialog fresh and Load it back.
+      sel.value = 'left3';
+      box.querySelector('.rm-edge-blank[data-edge=\"left\"][data-index=\"2\"]').checked = true;
+      box.querySelector('#rm-preset-save').click();
+      await new Promise(r => setTimeout(r, 30));
+      const nameInput = [...document.querySelectorAll('.modal-box')].find(b => b.querySelector('h3')?.textContent === 'Save Remap Preset').querySelector('input[data-key=\"name\"]');
+      nameInput.value = 'RegrEdgeUiPreset';
+      [...document.querySelectorAll('.modal-box')].find(b => b.querySelector('h3')?.textContent === 'Save Remap Preset').querySelector('.submit').click();
+      await new Promise(r => setTimeout(r, 30));
+      out.savedPresetBlanks = (store.remapPresets || []).find(p => p.name === 'RegrEdgeUiPreset')?.edgeBlanks;
+      box.querySelector('.cancel').click();
+      await new Promise(r => setTimeout(r, 30));
+
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 30));
+      box = document.querySelector('.modal-box.modal-box-wide');
+      box.querySelector('#rm-preset-select').value = 'RegrEdgeUiPreset';
+      box.querySelector('#rm-preset-load').click();
+      await new Promise(r => setTimeout(r, 30));
+      out.loadedSelect = box.querySelector('.rm-edge-select[data-type=\"BusinessActor\"]').value;
+      out.loadedBlank = box.querySelector('.rm-edge-blank[data-edge=\"left\"][data-index=\"2\"]').checked;
+      box.querySelector('.submit').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      // Reopen on the same view -- edgeBlanks should now come back from
+      // view.remapLastOptions too, same as edgeAssignment already does.
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 30));
+      box = document.querySelector('.modal-box.modal-box-wide');
+      out.reopenedBlank = box.querySelector('.rm-edge-blank[data-edge=\"left\"][data-index=\"2\"]').checked;
+      box.querySelector('.cancel').click();
+
+      return out;
+    }
+    """)
+    problems = []
+    if result["optionCount"] != 21:
+        problems.append(f"expected 21 options (1 default + 5 numbered slots x 4 edges) in the edge-assignment select, got {result['optionCount']}")
+    if result["optgroupCount"] != 4:
+        problems.append(f"expected 4 optgroups (Top/Bottom/Left/Right), got {result['optgroupCount']}")
+    if not result["hasLeft5"]:
+        problems.append("expected a 'left5' option to exist")
+    if result["legacyPrefillNormalized"] != "left1":
+        problems.append(f"expected a legacy bare 'left' value (no digit) to pre-fill the select as 'left1', got {result['legacyPrefillNormalized']!r}")
+    if not result["blankGridExists"]:
+        problems.append("expected exactly 20 .rm-edge-blank checkboxes (5 indices x 4 edges)")
+    if result["resetClearsSelect"] or result["resetClearsBlank"]:
+        problems.append(f"expected Reset to clear both the edge-assignment select and the blank checkbox, got select={result['resetClearsSelect']!r} blank={result['resetClearsBlank']}")
+    if result["savedPresetBlanks"] != {"left": [2]}:
+        problems.append(f"expected Save As to capture edgeBlanks:{{left:[2]}} into the preset, got {result['savedPresetBlanks']}")
+    if result["loadedSelect"] != "left3" or not result["loadedBlank"]:
+        problems.append(f"expected Load to repopulate both the edge-assignment select and the blank checkbox from the preset, got select={result['loadedSelect']!r} blank={result['loadedBlank']}")
+    if not result["reopenedBlank"]:
+        problems.append("expected reopening Remap on the same view to pre-fill the blank checkbox from view.remapLastOptions.edgeBlanks, same as edgeAssignment already does")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The Remap dialog's Edge Assignment select now offers 5 numbered slots per edge (grouped, 21 options total), correctly normalizes a legacy bare-edge-name value to slot 1 on pre-fill, and its new Blank Slots checkbox grid round-trips through Reset, Save As/Load, and per-view remembered settings exactly like every other field"
 
 
 def check_remap_selected_only(page):
@@ -11794,6 +12012,8 @@ CHECKS = [
     check_stream_template_shared_default,
     check_remap_options_persist_across_views,
     check_remap_edge_assignment_and_layout_optimization,
+    check_remap_edge_assignment_numbered_slots_and_blanks,
+    check_remap_edge_assignment_dialog_numbered_ui,
     check_remap_preset_dialog_and_local_persistence,
     check_remap_view_remembers_own_settings,
     check_remap_selected_only,

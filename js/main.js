@@ -268,6 +268,29 @@ function addRecentFile(name, content) {
  * guard can never drift out of sync with which patterns actually exist. */
 const REMAP_PATTERNS = ['default', 'none', 'layered', 'force', 'clusters', 'custom'];
 
+/** The 4 Edge Assignment edges, each with 5 numbered slots (1 = closest to that
+ * physical edge, 5 = closest to the middle grid — see parseEdgeAssignmentValue,
+ * commands.js). Shared by promptRemap's per-type edge-select markup, its Blank Slots
+ * grid, and both fields' collect/apply helpers, so the two can never drift apart. */
+const EDGE_ASSIGNMENT_EDGES = ['top', 'bottom', 'left', 'right'];
+const EDGE_ASSIGNMENT_INDICES = [1, 2, 3, 4, 5];
+
+/** A bare edge name with no digit ('left', not 'left1') is the pre-v0.899 convention —
+ * still what every already-saved document/preset has stored. Normalizes it to index 1
+ * so pre-filling the dialog's <select> (whose <option>s are now only 'left1'..'left5',
+ * never bare 'left') selects the right thing instead of silently falling through to
+ * "— (normal grid)". Mirrors commands.js's own parseEdgeAssignmentValue fallback. */
+function normalizeEdgeAssignmentValue(value) {
+  return value && /^(top|bottom|left|right)$/.test(value) ? `${value}1` : (value || '');
+}
+
+/** The shared <option>s for one element type's edge-assignment <select> — grouped by
+ * edge, 5 numbered slots each, alongside the default "normal grid" choice. */
+function edgeAssignmentOptionsHtml() {
+  const groupHtml = (edge) => `<optgroup label="${edge[0].toUpperCase()}${edge.slice(1)}">${EDGE_ASSIGNMENT_INDICES.map((i) => `<option value="${edge}${i}">${edge[0].toUpperCase()}${edge.slice(1)} ${i}</option>`).join('')}</optgroup>`;
+  return `<option value="">— (normal grid)</option>${EDGE_ASSIGNMENT_EDGES.map(groupHtml).join('')}`;
+}
+
 /** Scans `code` (store.batchScriptCode) for every top-level `function CustomRemap_Foo(`
  * declaration and returns their names — same technique dataAutoFill/main() extraction
  * uses to find a function BY NAME, just listing every match instead of one specific
@@ -808,8 +831,13 @@ class App {
             <tr><td><code>remap(app, tab, options)</code></td><td>options: <code>sortKeys, templateName</code>,
               <code>pattern</code> (<code>'default'|'none'|'layered'|'force'|'clusters'</code>),
               <code>limitColumnsToView, visiblePartVmIds, forcePreferRight, forceGroupRows</code>,
-              <code>edgeAssignment</code> (<code>{elementType: 'top'|'bottom'|'left'|'right'}</code>,
-              Default/None/Layered patterns only), <code>minimizeCrossings, minimizeConnectorLength</code>
+              <code>edgeAssignment</code> (<code>{elementType: 'top1'..'top5'|'bottom1'..'bottom5'|'left1'..'left5'|'right1'..'right5'}</code>
+              — 1 = the slot closest to that edge, 5 = closest to the middle grid; a bare
+              <code>'top'|'bottom'|'left'|'right'</code> with no digit means index 1,
+              Default/None/Layered patterns only), <code>edgeBlanks</code>
+              (<code>{top|bottom|left|right: [1-5, ...]}</code> — forces specific slot
+              numbers to stay reserved-but-empty instead of being skipped/compacted away,
+              Default/None/Layered only), <code>minimizeCrossings, minimizeConnectorLength</code>
               (both boolean, Default/None/Layered only) — all optional, same defaults as the Remap dialog.</td></tr>
             <tr><td><code>smartCheckView(app, tab, options)</code></td><td>options: <code>missingConnectors,
               missingConnectorsAndNodes, levels, syncWithInventory, deriveConnectors</code> (links two
@@ -2332,16 +2360,17 @@ class App {
         </div>
       </div>
       <div id="rm-edge-section" style="margin-top:10px;">
-        <div style="font-size:12px; color:var(--text-muted);">Edge Assignment — pin an element type to an edge of the layout instead of its normal row/column, ordered within that edge by Sort priority above</div>
+        <div style="font-size:12px; color:var(--text-muted);">Edge Assignment — pin an element type to a numbered slot along an edge of the layout instead of its normal row/column (1 = closest to that edge, 5 = closest to the middle grid), ordered within that slot by Sort priority above</div>
         <div id="rm-edge-list" style="max-height:160px; overflow-y:auto; border:1px solid var(--border); border-radius:5px; padding:6px 8px; margin-top:4px;">
-          ${typesInView.length ? typesInView.map((t) => `<div class="prop-row"><label style="flex:0 0 160px;">${escapeHtml(t.title)}</label><select class="rm-edge-select" data-type="${escapeHtml(t.type)}">
-            <option value="">— (normal grid)</option>
-            <option value="top">Top</option>
-            <option value="bottom">Bottom</option>
-            <option value="left">Left</option>
-            <option value="right">Right</option>
-          </select></div>`).join('') : '<div class="empty-hint">No parts placed on this view yet.</div>'}
+          ${typesInView.length ? typesInView.map((t) => `<div class="prop-row"><label style="flex:0 0 160px;">${escapeHtml(t.title)}</label><select class="rm-edge-select" data-type="${escapeHtml(t.type)}">${edgeAssignmentOptionsHtml()}</select></div>`).join('') : '<div class="empty-hint">No parts placed on this view yet.</div>'}
         </div>
+        <div style="font-size:12px; color:var(--text-muted); margin-top:8px;">Blank slots — force a numbered slot to stay reserved-but-empty even if no type is assigned there (an unforced gap between used slots is skipped/compacted instead)</div>
+        <table id="rm-edge-blanks" style="margin-top:4px; font-size:11px; border-collapse:collapse;">
+          <thead><tr><th></th>${EDGE_ASSIGNMENT_INDICES.map((i) => `<th style="padding:0 6px;">${i}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${EDGE_ASSIGNMENT_EDGES.map((edge) => `<tr><td style="padding-right:8px;">${edge[0].toUpperCase()}${edge.slice(1)}</td>${EDGE_ASSIGNMENT_INDICES.map((i) => `<td style="text-align:center;"><input type="checkbox" class="rm-edge-blank" data-edge="${edge}" data-index="${i}" /></td>`).join('')}</tr>`).join('')}
+          </tbody>
+        </table>
       </div>
       <div class="modal-actions"><button class="reset" style="margin-right:auto;">Reset</button><button class="cancel">Cancel</button><button class="primary submit">Remap</button></div>
     `;
@@ -2407,13 +2436,28 @@ class App {
       return out;
     };
     const applyEdgeAssignment = (edgeAssignment) => {
-      box.querySelectorAll('.rm-edge-select').forEach((sel) => { sel.value = (edgeAssignment && edgeAssignment[sel.dataset.type]) || ''; });
+      box.querySelectorAll('.rm-edge-select').forEach((sel) => { sel.value = normalizeEdgeAssignmentValue(edgeAssignment && edgeAssignment[sel.dataset.type]); });
     };
-    // Pre-fill Edge Assignment from this view's own last-used settings (viewLast, see
-    // above) — the same "this view wins" precedent as every other field in this
-    // dialog, just applied one render-cycle later since the selects don't exist until
-    // the innerHTML above runs.
+    const collectEdgeBlanks = () => {
+      const out = {};
+      box.querySelectorAll('.rm-edge-blank:checked').forEach((cb) => {
+        const edge = cb.dataset.edge;
+        (out[edge] = out[edge] || []).push(Number(cb.dataset.index));
+      });
+      return out;
+    };
+    const applyEdgeBlanks = (edgeBlanks) => {
+      box.querySelectorAll('.rm-edge-blank').forEach((cb) => {
+        const indices = (edgeBlanks && edgeBlanks[cb.dataset.edge]) || [];
+        cb.checked = indices.includes(Number(cb.dataset.index));
+      });
+    };
+    // Pre-fill Edge Assignment/Blank Slots from this view's own last-used settings
+    // (viewLast, see above) — the same "this view wins" precedent as every other field
+    // in this dialog, just applied one render-cycle later since the selects/checkboxes
+    // don't exist until the innerHTML above runs.
     if (viewLast.edgeAssignment) applyEdgeAssignment(viewLast.edgeAssignment);
+    if (viewLast.edgeBlanks) applyEdgeBlanks(viewLast.edgeBlanks);
 
     box.querySelector('.reset').addEventListener('click', () => {
       // restores the app's built-in defaults, not this view's previously-remembered
@@ -2429,6 +2473,7 @@ class App {
       box.querySelector('#rm-force-group-rows').checked = false;
       if (customFnNames.length) box.querySelector('#rm-custom-function').value = customFnNames[0];
       applyEdgeAssignment({});
+      applyEdgeBlanks({});
       orderedKeys.splice(0, orderedKeys.length, ...DEFAULT_REMAP_SORT_KEYS, ...REMAP_SORT_KEYS.filter((k) => !DEFAULT_REMAP_SORT_KEYS.includes(k)));
       renderPriorityList();
       updatePatternVisibility();
@@ -2454,6 +2499,7 @@ class App {
       orderedKeys.splice(0, orderedKeys.length, ...presetKeys, ...REMAP_SORT_KEYS.filter((k) => !presetKeys.includes(k)));
       renderPriorityList();
       applyEdgeAssignment(preset.edgeAssignment || {});
+      applyEdgeBlanks(preset.edgeBlanks || {});
       updatePatternVisibility();
       this.toast(`Preset "${name}" loaded.`);
     });
@@ -2476,6 +2522,7 @@ class App {
             forcePreferRight: box.querySelector('#rm-force-prefer-right').checked,
             forceGroupRows: box.querySelector('#rm-force-group-rows').checked,
             edgeAssignment: collectEdgeAssignment(),
+            edgeBlanks: collectEdgeBlanks(),
             minimizeCrossings: box.querySelector('#rm-minimize-crossings').checked,
             minimizeConnectorLength: box.querySelector('#rm-minimize-length').checked,
             customFunctionName: box.querySelector('#rm-custom-function').value || null,
@@ -2506,6 +2553,7 @@ class App {
       forcePreferRight: box.querySelector('#rm-force-prefer-right').checked,
       forceGroupRows: box.querySelector('#rm-force-group-rows').checked,
       edgeAssignment: collectEdgeAssignment(),
+      edgeBlanks: collectEdgeBlanks(),
       sortKeys: [...orderedKeys],
       customFunctionName: box.querySelector('#rm-custom-function').value || null,
     });
@@ -2513,7 +2561,7 @@ class App {
     box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
     wireCopyCallOnRightClick(this, box.querySelector('.submit'), () => `remap(app, tab, ${JSON.stringify(collectRemapOptions(), null, 2)});`);
     box.querySelector('.submit').addEventListener('click', () => {
-      const { templateName, pattern, limitColumnsToView, filteredOnly, selectedOnly, minimizeCrossings, minimizeConnectorLength, forcePreferRight, forceGroupRows, edgeAssignment, sortKeys, customFunctionName } = collectRemapOptions();
+      const { templateName, pattern, limitColumnsToView, filteredOnly, selectedOnly, minimizeCrossings, minimizeConnectorLength, forcePreferRight, forceGroupRows, edgeAssignment, edgeBlanks, sortKeys, customFunctionName } = collectRemapOptions();
       overlay.remove();
 
       setCachedStreamTemplate(templateName);
@@ -2542,7 +2590,7 @@ class App {
         const selectedPartVmIds = new Set([...tab.selection].filter((id) => this.store.findViewMember(id)?.objectType === 'part'));
         visiblePartVmIds = visiblePartVmIds ? new Set([...visiblePartVmIds].filter((id) => selectedPartVmIds.has(id))) : selectedPartVmIds;
       }
-      remap(this, tab, { sortKeys, templateName, pattern, limitColumnsToView, filteredOnly, selectedOnly, visiblePartVmIds, forcePreferRight, forceGroupRows, edgeAssignment, minimizeCrossings, minimizeConnectorLength, customFunctionName });
+      remap(this, tab, { sortKeys, templateName, pattern, limitColumnsToView, filteredOnly, selectedOnly, visiblePartVmIds, forcePreferRight, forceGroupRows, edgeAssignment, edgeBlanks, minimizeCrossings, minimizeConnectorLength, customFunctionName });
     });
   }
 
