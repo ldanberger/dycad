@@ -4410,4 +4410,67 @@
 // tests/README.md updated; no end-user-visible description changed (Edge Assignment's
 // own instructions.html paragraph already described the INTENDED behavior this fixes
 // toward), so public/instructions.html untouched. Full suite 160/160.
-export const APP_VERSION = '0.903';
+// v0.904: reported directly: "in remap: add option default enabled to align columns
+// or rows by section, or to cluster by section. For example if business organization
+// unit 'continuous improvement functions' is on first row, then function 'continuous
+// improvement functions' matches section so should have priority for being below (or
+// nearby for clusters) (if edges configured as such)." New `alignBySection` option
+// (default true, commands.js). For the grid patterns (Default/None/Layered): a new
+// `alignRowsBySection` function runs as its own pass, right after minimizeRowCrossings
+// (if that ran) and before minimizeConnectorLengthPass -- for every REAL connector
+// between ADJACENT rows whose two endpoints share the same non-blank part.section
+// ("if edges configured as such" -- matching section alone with no connector never
+// creates a pull), swaps adjacent same-row columns, bubble-sort style, to bring a
+// misaligned pair into the same column. Deliberately a SEPARATE pass rather than a new
+// criterion folded into minimizeRowCrossings' own barycenter+transpose search -- an
+// earlier version tried exactly that and real-data regression testing on the actual
+// generateIndustry -> insertSmartStream -> smartCheckView -> remap pipeline
+// (check_remap_layered_avoids_node_occlusion) caught two distinct regressions:
+// interleaving section-driven swaps into that search's own trajectory changed which
+// local optimum it converged to, at one point REINTRODUCING the node-on-connector
+// occlusion defect a previous fix (v0.899-era work) had eliminated, even though each
+// individual swap's own local delta check never allowed occlusion to get worse (a
+// step's opportunity cost on LATER steps isn't visible to a per-swap delta); and
+// folding alignBySection into minimizeRowCrossings' own trigger gate made its general
+// barycenter sort run even with Minimize Crossings left off (alignBySection defaults
+// ON), silently reordering rows the user asked to leave alone
+// (check_remap_edge_assignment_and_layout_optimization). Splitting into its own pass
+// fixed both -- minimizeRowCrossings itself is now byte-for-byte identical to before
+// this feature existed. alignRowsBySection's own per-swap guard also rejects any swap
+// that would increase same-row occlusion, but a diagonal INTER-row connector can still
+// drift through an unrelated node's box as a side effect of column reordering (found
+// on a real dataset where nearly every node shared one section, so section-alignment
+// pressure was maximal) -- rather than modeling every diagonal-geometry edge case into
+// the per-swap guard, the pass ends with an all-or-nothing global safety net: the real
+// geometric occlusion count (every connector's straight-line path against every other
+// node's actual bounding box, the same check the Playwright regression itself uses) is
+// compared before/after: if the pass's own result is geometrically worse, the ENTIRE
+// pass is discarded (not partially unwound) and the starting row order is restored
+// untouched. For the 'clusters' pattern specifically ("nearby for clusters" naming the
+// pattern, not clustering generically): new `sectionPackingBonusEdges` (commands.js)
+// filters edgesForLayout down to already-connected, section-matching pairs, threaded
+// into computeHubClusterGridLayout/packClustersOnGrid (layout.js) as a new
+// packingBonusEdges option -- a purely additive nudge to the existing bridge-weight
+// shelf-packing order (v0.90x connectivity-aware packing feature), never real graph
+// structure. Deliberately excludes 'force': its clusters ARE connected components, and
+// two different components never share a real edge by definition, so a same-section
+// boost keyed on "an already-existing edge" would be a permanent structural no-op
+// there -- the Remap dialog hides the new "Align by section" checkbox (relabeled
+// "Cluster by section" for 'clusters') for 'force'/'custom' accordingly. Three new
+// tests (tests/run_all.py): check_remap_align_by_section_grid (the exact reported
+// shape, an org-unit/function pair matched by section against an adversarial
+// alphabetical-sort ordering; off/on/default-omitted/no-connector-unaffected cases,
+// all proven via TEMP BREAK), check_remap_align_by_section_clusters (reuses the
+// existing P/Q/R connectivity-aware-packing fixture, adding a shared section on the
+// P<->R bridge to break an otherwise-tied packing order in R's favor; also proves
+// 'force' stays completely unaffected), and check_remap_align_by_section_dialog_wiring
+// (real-DOM dialog test: default-checked, label swap per pattern, visibility per
+// pattern, Reset restoring checked unlike every other checkbox here, Save As/Load
+// round-trip including an old-shaped preset with no such field at all). Every
+// pre-existing test needed no changes -- all still pass unmodified, including the two
+// this feature initially regressed and then fixed against
+// (check_remap_layered_avoids_node_occlusion, check_remap_edge_assignment_and_
+// layout_optimization). DESIGN_DOCUMENT.md SS6.1a, tests/README.md, and
+// public/instructions.html (new "Align by section" paragraph, Preset field list)
+// updated. Full suite 163/163.
+export const APP_VERSION = '0.904';

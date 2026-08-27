@@ -172,6 +172,17 @@ otherwise get. Both are heuristics, not guaranteed-optimal, but they noticeably 
 views — and combine well, since crossing reduction decides ordering first and length minimization then
 tightens the actual spacing. None of the three options do anything on the Force-directed, Centralize in
 Clusters, or Custom patterns, or a section-based view, since none of them have a free row/column to bias.</p>
+<p><strong>Align by section</strong> is on by default, for every pattern except Force-directed and Custom
+(where it's hidden — see below). Between two parts connected by a real connector that share the same Section
+(e.g. a Business Organization Unit and a Function it's assigned to), it prioritizes placing them in the same
+column, one row apart — matching section alone, with no connector between the two parts, never pulls them
+together. For Default/None/Layered this runs as its own pass right after Minimize Crossings (if that's also
+checked) and before Minimize Connector Length, and never places a node directly on top of an unrelated
+connector to achieve it — if aligning by section would create that kind of overlap, that specific change is
+skipped rather than fixing the section pairing at the cost of a broken-looking diagram. For Centralize in
+Clusters the checkbox relabels itself <strong>Cluster by section</strong>: since that pattern places nodes by
+connectivity rather than rows/columns, matching section instead nudges an already-connected pair of clusters
+to land shelf-adjacent to each other, ahead of an equally-connected but non-matching pair.</p>
 <p>Remap's own choices (pattern, options, sort priority order) are remembered as your defaults the next
 time you open it on any view — and reopening it on the SAME view you last ran it on brings back that view's
 own settings specifically (pattern, both minimize checkboxes, Edge Assignment, template, which Custom
@@ -179,7 +190,7 @@ function was selected — not just sort order), ahead of the general cross-view 
 falls back to. The Stream Template you pick is remembered too, and shared as the default across every dialog
 that offers one (Remap, Generate Stream, Smart Check View's Auto-Complete Streams) — so you only have to pick
 it once. A Preset row at the top of the dialog can also save the current field values — including Edge
-Assignment, Minimize Crossings, Minimize Connector Length, and the selected Custom function — as a named,
+Assignment, Minimize Crossings, Minimize Connector Length, Align by section, and the selected Custom function — as a named,
 reusable preset (<strong>Save As…</strong>) or load one back in
 (<strong>Load</strong>). Presets are Local Settings, not part of the model — like Insert Smart Stream's own
 presets, they never end up in a saved JSON file, but do travel with File &gt; Save/Load Local Settings and

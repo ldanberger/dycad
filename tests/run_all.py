@@ -488,6 +488,312 @@ def check_remap_layered_avoids_node_occlusion(page):
     return True, "'layered' remap with Minimize Crossings on produces zero connectors passing through an unrelated node's box, on the real generateIndustry/insertSmartStream/smartCheckView pipeline that originally reported this"
 
 
+def check_remap_align_by_section_grid(page):
+    """New-feature check for Remap's new "Align by section" option (default enabled),
+    reported directly: "add option default enabled to align columns or rows by
+    section, or to cluster by section. For example if business organization unit
+    'continuous improvement functions' is on first row, then function 'continuous
+    improvement functions' matches section so should have priority for being below ...
+    (if edges configured as such)." Scoped to the middle grid ('default'/'none'/
+    'layered'), via a new alignRowsBySection pass that runs AFTER minimizeRowCrossings
+    (a deliberately separate step -- see its own doc comment in commands.js for why
+    folding it directly into minimizeRowCrossings' own search regressed real-data
+    occlusion behavior). Covers, all on the exact reported shape (a BusinessOrganizationUnit connected to its own
+    Function, both sharing a Section, with a SECOND org/function pair deliberately
+    named so plain alphabetical sort disagrees with correct section-pairing): (1) with
+    alignBySection:false, the two pairs land misaligned (alphabetical sort wins); (2)
+    with alignBySection:true (explicit), each org/function pair correctly lands in the
+    SAME column, one row apart; (3) with the option OMITTED entirely, the same
+    alignment happens — confirming the "default enabled" part of the report; (4) two
+    parts sharing a Section but with NO connector between them at all are completely
+    unaffected by alignBySection either way — "if edges configured as such" — plain
+    alphabetical sort still decides their columns."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const out = {};
+
+      // Org/Function share the same elementGroup ('Business'), so distinct stream
+      // names are what force the row break between them here (not element type) --
+      // each pair shares ITS OWN stream so its 2 members land in one row together,
+      // sorted by nodeLabel within it.
+      const buildPairs = (view, connected) => {
+        const orgA = store.createPart({ type: 'BusinessOrganizationUnit', label: 'AAAOrg', model, streams: ['OrgRowStream'], section: 'AAAOrg' });
+        const orgCIF = store.createPart({ type: 'BusinessOrganizationUnit', label: 'Continuous Improvement Functions', model, streams: ['OrgRowStream'], section: 'Continuous Improvement Functions' });
+        // Deliberately named so alphabetical sort DISAGREES with correct section pairing:
+        // fnZ's own section matches orgA (should align under it), but "Z" sorts LAST;
+        // fnA's own section matches orgCIF, but "A" sorts FIRST.
+        const fnZ = store.createPart({ type: 'BusinessFunction', label: 'ZZZFunction', model, streams: ['FnRowStream'], section: 'AAAOrg' });
+        const fnA = store.createPart({ type: 'BusinessFunction', label: 'AAAFunction', model, streams: ['FnRowStream'], section: 'Continuous Improvement Functions' });
+        const vmOrgA = store.createViewMember({ view: view.id, objectType: 'part', objectId: orgA.id, x: 0, y: 0 });
+        const vmOrgCIF = store.createViewMember({ view: view.id, objectType: 'part', objectId: orgCIF.id, x: 0, y: 0 });
+        const vmFnZ = store.createViewMember({ view: view.id, objectType: 'part', objectId: fnZ.id, x: 0, y: 0 });
+        const vmFnA = store.createViewMember({ view: view.id, objectType: 'part', objectId: fnA.id, x: 0, y: 0 });
+        if (connected) {
+          const connA = store.createConnector({ from: orgA.id, to: fnZ.id, connectorType: 'c', model, relationship: 'Association' });
+          const connCIF = store.createConnector({ from: orgCIF.id, to: fnA.id, connectorType: 'c', model, relationship: 'Association' });
+          store.createViewMember({ view: view.id, objectType: 'connector', objectId: connA.id, fromVmId: vmOrgA.id, toVmId: vmFnZ.id });
+          store.createViewMember({ view: view.id, objectType: 'connector', objectId: connCIF.id, fromVmId: vmOrgCIF.id, toVmId: vmFnA.id });
+        }
+      };
+      const posOf = (view, label) => {
+        const vm = store.viewMembersForView(view.id).find(v => v.objectType === 'part' && store.findPart(v.objectId)?.label === label);
+        return vm ? vm.x : null;
+      };
+      const aligned = (view) => posOf(view, 'AAAOrg') === posOf(view, 'ZZZFunction') && posOf(view, 'Continuous Improvement Functions') === posOf(view, 'AAAFunction');
+
+      // 1) alignBySection:false -- misaligned (alphabetical sort wins).
+      const view1 = store.addView('RegrAlignSecOff_' + Date.now(), 'ff');
+      const tab1 = app.createCanvasTab(view1);
+      app.switchToTab(tab1.id);
+      buildPairs(view1, true);
+      commands.applyRemapLayout(app, view1.id, { pattern: 'default', sortKeys: ['nodeLabel'], alignBySection: false });
+      out.offMisaligned = !aligned(view1);
+
+      // 2) alignBySection:true (explicit) -- correctly aligned.
+      const view2 = store.addView('RegrAlignSecOn_' + Date.now(), 'ff');
+      const tab2 = app.createCanvasTab(view2);
+      app.switchToTab(tab2.id);
+      buildPairs(view2, true);
+      commands.applyRemapLayout(app, view2.id, { pattern: 'default', sortKeys: ['nodeLabel'], alignBySection: true });
+      out.onAligned = aligned(view2);
+
+      // 3) option OMITTED entirely -- default enabled, same as explicit true.
+      const view3 = store.addView('RegrAlignSecDefault_' + Date.now(), 'ff');
+      const tab3 = app.createCanvasTab(view3);
+      app.switchToTab(tab3.id);
+      buildPairs(view3, true);
+      commands.applyRemapLayout(app, view3.id, { pattern: 'default', sortKeys: ['nodeLabel'] });
+      out.defaultOmittedAligned = aligned(view3);
+
+      // 4) same sections, but NO connector between the pairs -- unaffected either way.
+      const view4 = store.addView('RegrAlignSecNoEdge_' + Date.now(), 'ff');
+      const tab4 = app.createCanvasTab(view4);
+      app.switchToTab(tab4.id);
+      buildPairs(view4, false);
+      commands.applyRemapLayout(app, view4.id, { pattern: 'default', sortKeys: ['nodeLabel'], alignBySection: true });
+      out.noEdgeUnaffected = !aligned(view4); // alphabetical sort still wins -- section alone never forces alignment
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["offMisaligned"]:
+        problems.append("test setup itself is wrong -- expected alignBySection:false to leave the two org/function pairs misaligned (plain alphabetical sort)")
+    if not result["onAligned"]:
+        problems.append("expected alignBySection:true to place each org/function pair in the same column, one row apart -- the exact reported example")
+    if not result["defaultOmittedAligned"]:
+        problems.append("expected alignBySection to default to enabled when the option is omitted entirely from applyRemapLayout's options")
+    if not result["noEdgeUnaffected"]:
+        problems.append("expected two same-section parts with NO connector between them to be unaffected by alignBySection -- 'if edges configured as such' means section alone never forces alignment")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Remap's new 'Align by section' option (default enabled) correctly prioritizes placing a connected, same-section pair in the same column one row apart for grid patterns, defaults on when omitted, and never affects a same-section pair with no connector between them"
+
+
+def check_remap_align_by_section_clusters(page):
+    """New-feature check for Remap's "Align by section" option applied to the
+    'clusters' pattern — same report as check_remap_align_by_section_grid: "...or to
+    cluster by section... (or nearby for clusters) (if edges configured as such)" —
+    "clusters" naming the 'clusters' PATTERN specifically (Centralize in Clusters).
+    Unlike the grid case, 'clusters' places nodes by connectivity alone
+    (computeHubClusterGridLayout, layout.js) — "nearby" here means
+    packClustersOnGrid's own cross-cluster shelf-packing order, boosted via a new
+    packingBonusEdges option: an ALREADY-EXISTING cross-cluster bridge edge whose two
+    endpoints share a Section gets extra packing weight, so that hub-cluster ends up
+    shelf-adjacent to the one it bridges to instead of an equally-sized, equally-
+    bridge-weighted but non-matching-section alternative. Reuses the exact P (hub+5
+    leaves, unambiguously largest) / Q (hub+3 leaves) / R (hub+3 leaves) shape
+    check_remap_clusters_connectivity_aware_packing already established for testing
+    packing order — P bridges to BOTH Q and R with equal real-edge weight (a genuine
+    tie), but the P<->R bridge pair ALSO shares a Section (P<->Q doesn't). Covers: (1)
+    alignBySection:false leaves the pre-existing tie-break (stable order, Q packed
+    before R) unchanged; (2) alignBySection:true breaks the tie in R's favor (the
+    section-matching bridge); (3) 'force' — a DIFFERENT pattern, where a "cluster" is
+    a connected component and two different components never share a real edge to
+    boost by definition — is completely unaffected by alignBySection either way,
+    proving the option is deliberately scoped to 'clusters' only, not silently
+    reaching 'force' too."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const out = {};
+
+      const buildPQR = (view) => {
+        const mk = (type, label, section) => store.createPart({ type, label, model, streams: [], section: section || '' });
+        const place = (p) => store.createViewMember({ view: view.id, objectType: 'part', objectId: p.id, x: 0, y: 0 });
+        const conn = (a, b) => {
+          const c = store.createConnector({ from: a.id, to: b.id, connectorType: 'c', model, relationship: 'Association' });
+          const va = store.viewMembersForView(view.id).find(v => v.objectType === 'part' && v.objectId === a.id);
+          const vb = store.viewMembersForView(view.id).find(v => v.objectType === 'part' && v.objectId === b.id);
+          store.createViewMember({ view: view.id, objectType: 'connector', objectId: c.id, fromVmId: va.id, toVmId: vb.id });
+        };
+        const hp = mk('BusinessProcess', 'HP'); place(hp);
+        const lp = ['LP1','LP2','LP3','LP4','LP5'].map(l => { const p = mk('BusinessProcess', l); place(p); conn(hp, p); return p; });
+        const hq = mk('BusinessProcess', 'HQ'); place(hq);
+        const lq = ['LQ1','LQ2','LQ3'].map(l => { const p = mk('BusinessProcess', l); place(p); conn(hq, p); return p; });
+        const hr = mk('BusinessProcess', 'HR'); place(hr);
+        const lr = ['LR1','LR2','LR3'].map((l, i) => { const p = mk('BusinessProcess', l, i === 0 ? 'SharedSec' : ''); place(p); conn(hr, p); return p; });
+        lp[1].section = 'SharedSec'; // reuses an EXISTING leaf as the bridge endpoint (not an extra node), so P/Q/R stay the exact same sizes as the plain connectivity-only baseline
+        conn(lp[0], lq[0]); // bridge P<->Q, no shared section
+        conn(lp[1], lr[0]); // bridge P<->R, SAME section on both ends
+        return { hp, hq, hr };
+      };
+      const posOf = (view, label) => {
+        const vm = store.viewMembersForView(view.id).find(v => v.objectType === 'part' && store.findPart(v.objectId)?.label === label);
+        return vm ? vm.x : null;
+      };
+      const runOne = (pattern, alignBySection) => {
+        const view = store.addView('RegrAlignSecCluster_' + pattern + '_' + alignBySection + '_' + Date.now() + '_' + Math.random(), 'ff');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        buildPQR(view);
+        commands.applyRemapLayout(app, view.id, { pattern, alignBySection });
+        return { hq: posOf(view, 'HQ'), hr: posOf(view, 'HR') };
+      };
+
+      const clustersOff = runOne('clusters', false);
+      const clustersOn = runOne('clusters', true);
+      out.clustersOffQBeforeR = clustersOff.hq < clustersOff.hr;
+      out.clustersOnRBeforeQ = clustersOn.hr < clustersOn.hq;
+
+      const forceOff = runOne('force', false);
+      const forceOn = runOne('force', true);
+      out.forceUnaffected = forceOff.hq === forceOn.hq && forceOff.hr === forceOn.hr;
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["clustersOffQBeforeR"]:
+        problems.append(f"expected alignBySection:false to leave the pre-existing tie-break unchanged (Q packed before R, same as the plain connectivity-only baseline)")
+    if not result["clustersOnRBeforeQ"]:
+        problems.append(f"expected alignBySection:true to break the P<->Q/P<->R packing tie in R's favor (the section-matching bridge) for 'clusters'")
+    if not result["forceUnaffected"]:
+        problems.append("expected 'force' to be completely unaffected by alignBySection either way -- a connected component never has a real cross-component edge to boost, so the option is deliberately scoped to 'clusters' only")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Remap's 'Align by section' option correctly boosts an already-connected, section-matching bridge edge's packing weight for 'clusters', breaking an otherwise-tied shelf-packing order in that cluster's favor, while correctly not reaching 'force' (a structurally different pattern where no cross-cluster edge could ever exist to boost)"
+
+
+def check_remap_align_by_section_dialog_wiring(page):
+    """Regression guard for the real Remap DIALOG's new "Align by section" checkbox
+    (#rm-align-section, main.js) — confirms it's wired end to end through the actual
+    UI, not just the underlying commands.js option (covered separately by
+    check_remap_align_by_section_grid/_clusters). Covers: (1) checked by default on a
+    brand-new view with no prior history; (2) visible with label "Align by section"
+    for the default grid pattern and for 'layered'; (3) visible but relabeled "Cluster
+    by section" for 'clusters'; (4) hidden for 'force' (a structurally different
+    pattern the option never reaches) and for 'custom' (hands off placement entirely);
+    (5) Reset always restores it to CHECKED, unlike every other checkbox in this
+    dialog which resets to unchecked; (6) Save As/Load round-trips the checked state
+    through a named preset, and an OLDER preset with no alignBySection field at all
+    defaults to checked on Load, same as everywhere else this option defaults true."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.addView('RegrAlignSecDialog_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const out = {};
+
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 30));
+      let box = document.querySelector('.modal-box.modal-box-wide');
+      const cb = () => box.querySelector('#rm-align-section');
+      const label = () => box.querySelector('#rm-align-section-label').textContent;
+      const rowHidden = () => box.querySelector('#rm-align-section-row').classList.contains('hidden');
+      const setPattern = (p) => { box.querySelector('#rm-pattern').value = p; box.querySelector('#rm-pattern').dispatchEvent(new Event('change')); };
+
+      out.checkedByDefault = cb().checked;
+      out.labelDefault = label();
+      out.visibleDefault = !rowHidden();
+
+      setPattern('layered');
+      out.visibleLayered = !rowHidden();
+      out.labelLayered = label();
+
+      setPattern('clusters');
+      out.visibleClusters = !rowHidden();
+      out.labelClusters = label();
+
+      setPattern('force');
+      out.hiddenForce = rowHidden();
+
+      setPattern('custom');
+      out.hiddenCustom = rowHidden();
+
+      setPattern('default');
+      cb().checked = false;
+      box.querySelector('.reset').click();
+      out.resetRestoresChecked = cb().checked;
+
+      // Save As with it UNCHECKED, then Load a DIFFERENT (older-shaped) preset with no
+      // alignBySection field at all -- should default to checked, same as a brand-new view.
+      cb().checked = false;
+      box.querySelector('#rm-preset-save').click();
+      await new Promise(r => setTimeout(r, 30));
+      const nameInput = [...document.querySelectorAll('.modal-box')].find(b => b.querySelector('h3')?.textContent === 'Save Remap Preset').querySelector('input[data-key=\"name\"]');
+      nameInput.value = 'RegrAlignSecPreset';
+      [...document.querySelectorAll('.modal-box')].find(b => b.querySelector('h3')?.textContent === 'Save Remap Preset').querySelector('.submit').click();
+      await new Promise(r => setTimeout(r, 30));
+      const saved = (store.remapPresets || []).find(p => p.name === 'RegrAlignSecPreset');
+      out.savedUnchecked = saved && saved.alignBySection === false;
+
+      cb().checked = true;
+      box.querySelector('#rm-preset-select').value = 'RegrAlignSecPreset';
+      box.querySelector('#rm-preset-load').click();
+      await new Promise(r => setTimeout(r, 30));
+      out.loadedUnchecked = !cb().checked;
+
+      // An older-shaped preset object (saved before this option existed) has no
+      // alignBySection field at all -- Load should default it to checked.
+      store.remapPresets = [...(store.remapPresets || []), { name: 'RegrAlignSecOldPreset', templateName: 'Enterprise', pattern: 'default', sortKeys: ['nodeLabel'] }];
+      box.querySelector('#rm-preset-select').innerHTML += '<option value=\"RegrAlignSecOldPreset\">RegrAlignSecOldPreset</option>';
+      cb().checked = false;
+      box.querySelector('#rm-preset-select').value = 'RegrAlignSecOldPreset';
+      box.querySelector('#rm-preset-load').click();
+      await new Promise(r => setTimeout(r, 30));
+      out.oldPresetDefaultsChecked = cb().checked;
+
+      box.querySelector('.cancel').click();
+      return out;
+    }
+    """)
+    problems = []
+    if not result["checkedByDefault"]:
+        problems.append("expected #rm-align-section checked by default on a brand-new view")
+    if result["labelDefault"] != "Align by section":
+        problems.append(f"expected the default label 'Align by section' for the default pattern, got {result['labelDefault']!r}")
+    if not result["visibleDefault"] or not result["visibleLayered"]:
+        problems.append("expected the row visible for both the default pattern and 'layered'")
+    if result["labelLayered"] != "Align by section":
+        problems.append(f"expected 'layered' to keep the 'Align by section' label, got {result['labelLayered']!r}")
+    if not result["visibleClusters"]:
+        problems.append("expected the row to stay VISIBLE for 'clusters'")
+    if result["labelClusters"] != "Cluster by section":
+        problems.append(f"expected the label to swap to 'Cluster by section' for 'clusters', got {result['labelClusters']!r}")
+    if not result["hiddenForce"]:
+        problems.append("expected the row HIDDEN for 'force' (a connected component never has a real cross-component edge to boost)")
+    if not result["hiddenCustom"]:
+        problems.append("expected the row hidden for 'custom'")
+    if not result["resetRestoresChecked"]:
+        problems.append("expected Reset to restore #rm-align-section to CHECKED, unlike every other checkbox in this dialog")
+    if not result["savedUnchecked"]:
+        problems.append(f"expected Save As to capture the unchecked state as alignBySection:false, got {result.get('savedUnchecked')}")
+    if not result["loadedUnchecked"]:
+        problems.append("expected Load to restore the unchecked state from the saved preset")
+    if not result["oldPresetDefaultsChecked"]:
+        problems.append("expected Load on an older-shaped preset with no alignBySection field at all to default the checkbox to CHECKED")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The Remap dialog's 'Align by section' checkbox is checked by default, visible with the right label for grid patterns and 'clusters' (relabeled 'Cluster by section' there), hidden for 'force'/'custom', always resets to checked, and round-trips correctly through Save As/Load including a pre-existing preset with no such field at all"
+
+
 def check_custom_remap_grid_convenience_layer(page):
     """New-feature check for the 'custom' Remap pattern (commands.js's
     applyRemapLayout), reported directly across a short back-and-forth: "is it
@@ -12683,6 +12989,9 @@ CHECKS = [
     check_remap_layered_pattern,
     check_remap_crossing_minimization_finds_global_optimum,
     check_remap_layered_avoids_node_occlusion,
+    check_remap_align_by_section_grid,
+    check_remap_align_by_section_clusters,
+    check_remap_align_by_section_dialog_wiring,
     check_custom_remap_grid_convenience_layer,
     check_custom_remap_dialog,
     check_force_directed_no_runaway_drift,

@@ -3416,6 +3416,7 @@ function minimizeRowCrossings(rowGroups, connVms, stepX, baseX, iterations = 8) 
   if (rowGroups.length < 2) return;
   const neighborsOf = buildNeighborMap(connVms);
   const rowMembership = rowGroups.map((row) => new Set(row.map((vm) => vm.id)));
+
   // Real bug report: "smart stream example ... directly placing nodes over connectors
   // instead of resizing to fit properly after remap" -- a SAME-ROW connector (routine
   // for 'layered', whose whole point is putting two directly connected types on one
@@ -3440,6 +3441,7 @@ function minimizeRowCrossings(rowGroups, connVms, stepX, baseX, iterations = 8) 
   const rowIndexOf = new Map();
   rowGroups.forEach((row, i) => row.forEach((vm) => rowIndexOf.set(vm.id, i)));
   const intraRowConns = connVms.filter((cv) => cv.fromVmId !== cv.toVmId && rowIndexOf.get(cv.fromVmId) === rowIndexOf.get(cv.toVmId));
+
   const targetsIn = (colOf, vmId, neighborRowIds) =>
     (neighborsOf.get(vmId) || []).filter((nid) => neighborRowIds.has(nid)).map((nid) => colOf.get(nid));
 
@@ -3519,18 +3521,16 @@ function minimizeRowCrossings(rowGroups, connVms, stepX, baseX, iterations = 8) 
 
           // Swap on a strict occlusion improvement FIRST (a node sitting directly on a
           // connector it has nothing to do with is a worse visual defect than a
-          // diagonal crossing), then on a strict crossing improvement (occlusion tied),
-          // then ALSO on an occlusion-and-crossing-NEUTRAL swap that strictly shortens
+          // diagonal crossing), then a strict crossing improvement (occlusion tied),
+          // then ALSO an occlusion-and-crossing-NEUTRAL swap that strictly shortens
           // a/b's own edges (inter-row OR same-row). Without that last case, two
           // orderings that tie on crossings (0 crossings either way) but differ in
-          // length can never be locally improved upon: the transpose only ever accepted
-          // a strict crossing reduction, so a same-row-connected pair could stay
-          // needlessly stretched apart even though moving them adjacent is free
+          // length can never be locally improved upon: the transpose only ever
+          // accepted a strict crossing reduction, so a same-row-connected pair could
+          // stay needlessly stretched apart even though moving them adjacent is free
           // (crossing-wise) and strictly shorter -- reported directly, this is exactly
           // what left Business Capability/Business Process "grouped" instead of
-          // interleaved. occlusionDelta is checked ahead of both, per this function's
-          // own top-of-function doc comment on the "nodes placed over connectors"
-          // report this whole criterion exists to fix.
+          // interleaved.
           const shouldSwap = occlusionDelta > 0
             || (occlusionDelta === 0 && (crossDelta > 0 || (crossDelta === 0 && lengthDeltaOf(colOf, a, b, idx, aboveIds, belowIds, ownRowIds) > 0)));
           if (shouldSwap) {
@@ -3584,10 +3584,6 @@ function minimizeRowCrossings(rowGroups, connVms, stepX, baseX, iterations = 8) 
     for (let i = 0; i < rows.length; i++) occlusions += rowOcclusionCount(rows[i], colOf, rowMembership[i]);
     return { occlusions, crossings, length };
   };
-  // occlusions checked FIRST — see this function's own top-of-function doc comment: a
-  // node sitting directly on a connector it has nothing to do with is a worse visual
-  // defect than a diagonal crossing, so a small crossing increase is worth accepting to
-  // eliminate one.
   const isBetter = (a, b) => a.occlusions < b.occlusions
     || (a.occlusions === b.occlusions && (a.crossings < b.crossings || (a.crossings === b.crossings && a.length < b.length)));
 
@@ -3646,6 +3642,178 @@ function minimizeRowCrossings(rowGroups, connVms, stepX, baseX, iterations = 8) 
   if (isBetter(upResult.score, result.score)) result = upResult;
 
   for (let i = 0; i < rowGroups.length; i++) rowGroups[i] = result.rows[i];
+  rowGroups.forEach((row) => row.forEach((vm, idx) => { vm.x = baseX + idx * stepX; }));
+}
+
+/** "Align by section" (default enabled) — reported directly: "add option default
+ * enabled to align columns or rows by section, or to cluster by section. For example
+ * if business organization unit 'continuous improvement functions' is on first row,
+ * then function 'continuous improvement functions' matches section so should have
+ * priority for being below ... (if edges configured as such)." Deliberately a
+ * SEPARATE pass, run AFTER minimizeRowCrossings above (if that ran) rather than
+ * folded into its own barycenter+transpose search: real-data regression testing
+ * (check_remap_layered_avoids_node_occlusion, check_remap_edge_assignment_and_
+ * layout_optimization) showed that interleaving section-driven swaps into that
+ * search's own trajectory -- even carefully ranked relative to its other criteria --
+ * changed which local optimum it converged to (reintroducing node-on-connector
+ * occlusion in one real scenario) and fired general reordering even with
+ * minimizeCrossings:false in another, since a swap step's opportunity cost on LATER
+ * swaps in the same search isn't visible to a per-swap delta check. Running this
+ * afterward, as its own small bubble-style adjacent-swap sweep, keeps
+ * minimizeRowCrossings itself byte-for-byte unchanged (so its own tuned behavior and
+ * regression tests are untouched) while still applying "align by section" regardless
+ * of whether Minimize Crossings is on.
+ *
+ * For every REAL connector between ADJACENT rows (never same-row, never further apart
+ * — "priority for being BELOW" means the immediately next row) whose two endpoints
+ * share the same non-blank `part.section`, repeatedly swaps adjacent same-row columns
+ * to bring a misaligned pair into the same column, one improving swap at a time, until
+ * no further improving swap exists anywhere (bubble-sort style, bounded by a handful
+ * of passes — rows are small). "if edges configured as such" is exactly this scan
+ * being scoped to `connVms`-derived pairs in the first place — matching section alone,
+ * with no connector between the two parts, never creates a pull here. A swap is NEVER
+ * taken if it would increase how many row members sit directly on top of a same-row
+ * connector (the same occlusion defect minimizeRowCrossings' own `occlusions`
+ * criterion guards against) — that's a worse, more visible defect than a section
+ * misalignment, so section-alignment yields to it rather than the other way around.
+ *
+ * That per-swap guard only ever sees SAME-ROW occlusion, though (matching
+ * minimizeRowCrossings' own scope) — real-data regression testing
+ * (check_remap_layered_avoids_node_occlusion) found a dataset where nearly every node
+ * shared one section (so section-alignment pressure was maximal) where the resulting
+ * column shuffle left a long DIAGONAL inter-row connector drifting through some
+ * unrelated node's box, a defect no same-row check can see. Rather than modeling every
+ * diagonal-geometry edge case into the per-swap guard, a final ALL-OR-NOTHING global
+ * check runs after the whole sweep: the real geometric occlusion count (every
+ * connector against every other node's actual box, same test the Playwright regression
+ * uses) is compared before/after this pass; if this pass made it worse, the entire
+ * pass is discarded (not partially unwound) and the row order this function started
+ * with is restored untouched, rather than accepting a partially-aligned result that's
+ * still geometrically worse than where it started.
+ *
+ * rowGroups: array of vm[] arrays, outer array already in top-to-bottom row order,
+ * each inner array in some starting left-to-right column order — mutated in place, and
+ * vm.x is rewritten to match the final column order (unless the global check above
+ * rejects the whole pass, in which case rowGroups/vm.x are left exactly as given).
+ * sectionOf: Map from vm.id to that vm's part.section string. nodeW/nodeH: real node
+ * box size, for the final geometric safety check. No-ops entirely if no same-section,
+ * connected, adjacent-row pair exists. */
+function alignRowsBySection(rowGroups, connVms, sectionOf, stepX, baseX, nodeW, nodeH) {
+  if (rowGroups.length < 2) return;
+  const rowMembership = rowGroups.map((row) => new Set(row.map((vm) => vm.id)));
+  const rowIndexOf = new Map();
+  rowGroups.forEach((row, i) => row.forEach((vm) => rowIndexOf.set(vm.id, i)));
+  const intraRowConns = connVms.filter((cv) => cv.fromVmId !== cv.toVmId && rowIndexOf.get(cv.fromVmId) === rowIndexOf.get(cv.toVmId));
+  const sectionPairs = connVms.filter((cv) => {
+    if (cv.fromVmId === cv.toVmId) return false;
+    const sa = sectionOf.get(cv.fromVmId), sb = sectionOf.get(cv.toVmId);
+    if (!sa || !sb || !ciEq(sa, sb)) return false;
+    const ra = rowIndexOf.get(cv.fromVmId), rb = rowIndexOf.get(cv.toVmId);
+    return ra !== undefined && rb !== undefined && Math.abs(ra - rb) === 1;
+  });
+  if (!sectionPairs.length) return;
+
+  const originalRows = rowGroups.map((row) => row.slice());
+  const originalX = new Map();
+  const yOf = new Map();
+  rowGroups.forEach((row) => row.forEach((vm) => { originalX.set(vm.id, vm.x); yOf.set(vm.id, vm.y); }));
+
+  const colOf = new Map();
+  rowGroups.forEach((row) => row.forEach((vm, idx) => colOf.set(vm.id, idx)));
+
+  // Same occlusion check as minimizeRowCrossings' own rowOcclusionCount (see its doc
+  // comment) — kept as a separate copy since this pass runs standalone, potentially
+  // with minimizeCrossings off and minimizeRowCrossings never having run at all.
+  const rowOcclusionCount = (row, ownRowIds) => {
+    let count = 0;
+    for (const cv of intraRowConns) {
+      if (!ownRowIds.has(cv.fromVmId) || !ownRowIds.has(cv.toVmId)) continue;
+      const c1 = colOf.get(cv.fromVmId), c2 = colOf.get(cv.toVmId);
+      const lo = Math.min(c1, c2), hi = Math.max(c1, c2);
+      if (hi - lo < 2) continue;
+      for (const vm of row) {
+        if (vm.id === cv.fromVmId || vm.id === cv.toVmId) continue;
+        const c = colOf.get(vm.id);
+        if (c > lo && c < hi) count += 1;
+      }
+    }
+    return count;
+  };
+
+  for (let iter = 0; iter < 8; iter++) {
+    let improvedAny = false;
+    for (let i = 0; i < rowGroups.length; i++) {
+      const row = rowGroups[i];
+      const ownRowIds = rowMembership[i];
+      let improved = true, guard = 0;
+      while (improved && guard < row.length * 4) {
+        improved = false;
+        guard += 1;
+        for (let idx = 0; idx < row.length - 1; idx++) {
+          const a = row[idx], b = row[idx + 1];
+          let sectionDelta = 0; // positive = swapping a/b strictly reduces section misalignment
+          for (const cv of sectionPairs) {
+            if (cv.fromVmId !== a.id && cv.toVmId !== a.id && cv.fromVmId !== b.id && cv.toVmId !== b.id) continue;
+            const before = colOf.get(cv.fromVmId) !== colOf.get(cv.toVmId) ? 1 : 0;
+            const colFrom = cv.fromVmId === a.id ? idx + 1 : cv.fromVmId === b.id ? idx : colOf.get(cv.fromVmId);
+            const colTo = cv.toVmId === a.id ? idx + 1 : cv.toVmId === b.id ? idx : colOf.get(cv.toVmId);
+            const after = colFrom !== colTo ? 1 : 0;
+            sectionDelta += before - after;
+          }
+          if (sectionDelta <= 0) continue;
+          const beforeOcclusion = rowOcclusionCount(row, ownRowIds);
+          row[idx] = b; row[idx + 1] = a;
+          colOf.set(a.id, idx + 1); colOf.set(b.id, idx);
+          const afterOcclusion = rowOcclusionCount(row, ownRowIds);
+          if (afterOcclusion > beforeOcclusion) {
+            row[idx] = a; row[idx + 1] = b;
+            colOf.set(a.id, idx); colOf.set(b.id, idx + 1);
+            continue;
+          }
+          improved = true; improvedAny = true;
+        }
+      }
+    }
+    if (!improvedAny) break;
+  }
+
+  // Global all-or-nothing geometric safety net -- see doc comment above. Segment-vs-
+  // rect math identical to the Playwright regression's own check.
+  const segIntersectsRect = (x1, y1, x2, y2, rx, ry, rw, rh) => {
+    let t0 = 0, t1 = 1;
+    const dx = x2 - x1, dy = y2 - y1;
+    const p = [-dx, dx, -dy, dy];
+    const q = [x1 - rx, rx + rw - x1, y1 - ry, ry + rh - y1];
+    for (let i = 0; i < 4; i++) {
+      if (p[i] === 0) { if (q[i] < 0) return false; continue; }
+      const r = q[i] / p[i];
+      if (p[i] < 0) { if (r > t1) return false; if (r > t0) t0 = r; }
+      else { if (r < t0) return false; if (r < t1) t1 = r; }
+    }
+    return true;
+  };
+  const allIds = [...colOf.keys()];
+  const geometricOcclusionCount = (xOf) => {
+    let count = 0;
+    for (const cv of connVms) {
+      if (cv.fromVmId === cv.toVmId) continue;
+      if (!xOf.has(cv.fromVmId) || !xOf.has(cv.toVmId)) continue;
+      const x1 = xOf.get(cv.fromVmId) + nodeW / 2, y1 = yOf.get(cv.fromVmId) + nodeH / 2;
+      const x2 = xOf.get(cv.toVmId) + nodeW / 2, y2 = yOf.get(cv.toVmId) + nodeH / 2;
+      for (const id of allIds) {
+        if (id === cv.fromVmId || id === cv.toVmId) continue;
+        const pad = 4;
+        if (segIntersectsRect(x1, y1, x2, y2, xOf.get(id) + pad, yOf.get(id) + pad, nodeW - 2 * pad, nodeH - 2 * pad)) count += 1;
+      }
+    }
+    return count;
+  };
+  const afterX = new Map(allIds.map((id) => [id, baseX + colOf.get(id) * stepX]));
+  if (geometricOcclusionCount(afterX) > geometricOcclusionCount(originalX)) {
+    for (let i = 0; i < rowGroups.length; i++) rowGroups[i] = originalRows[i];
+    return;
+  }
+
   rowGroups.forEach((row) => row.forEach((vm, idx) => { vm.x = baseX + idx * stepX; }));
 }
 
@@ -3838,8 +4006,30 @@ function edgeSlotLayout(slotBuckets, blankIndices) {
   return { active, positionOf, depth: active.length };
 }
 
+/** "Align by section" for the 'clusters' Remap pattern — reported directly alongside
+ * the grid-pattern version in minimizeRowCrossings above: "add option default enabled
+ * to align columns or rows by section, or to cluster by section... (or nearby for
+ * clusters) (if edges configured as such)" — "clusters" naming the 'clusters' PATTERN
+ * specifically (not 'force' too; see its own branch's doc comment for why a same-
+ * section packing boost can never apply there). Returns extra edges meant ONLY for
+ * packClustersOnGrid's own cross-cluster packing weight (layout.js's
+ * computeHubClusterGridLayout, via its packingBonusEdges option) — never for the real
+ * graph structure or hub/ring decomposition itself: one entry per ALREADY-EXISTING
+ * edge in edgesForLayout whose two endpoints share the same non-blank part.section, so
+ * a hub-cluster containing matching-section parts gets packed shelf-adjacent to
+ * another one that does too. "if edges configured as such" is exactly this — only an
+ * already-connected pair's own bridge weight gets boosted; section membership alone,
+ * with no edge between the two parts, never invents a pull here. */
+function sectionPackingBonusEdges(store, partVms, edgesForLayout) {
+  const sectionOf = new Map(partVms.map((vm) => [vm.id, store.findPart(vm.objectId)?.section || '']));
+  return edgesForLayout.filter((e) => {
+    const sa = sectionOf.get(e.from), sb = sectionOf.get(e.to);
+    return sa && sb && ciEq(sa, sb);
+  });
+}
+
 function applyRemapLayout(app, viewId, options = {}) {
-  const { sortKeys, templateName, pattern = 'default', limitColumnsToView = false, visiblePartVmIds = null, forcePreferRight = false, forceGroupRows = false, edgeAssignment = null, edgeBlanks = null, minimizeCrossings = false, minimizeConnectorLength = false, customFunctionName = null } = options;
+  const { sortKeys, templateName, pattern = 'default', limitColumnsToView = false, visiblePartVmIds = null, forcePreferRight = false, forceGroupRows = false, edgeAssignment = null, edgeBlanks = null, minimizeCrossings = false, minimizeConnectorLength = false, customFunctionName = null, alignBySection = true } = options;
   const { store } = app;
   const view = store.findView(viewId);
   if (!view) return null;
@@ -3910,6 +4100,15 @@ function applyRemapLayout(app, viewId, options = {}) {
       idealDistanceScale: 2.2 * spacingForce, // reuse the view's own Spacing setting to scale each cluster's own internal layout too, consistent with every other pattern
       preferRightPlacement: forcePreferRight, // place a newly-discovered connected node to the right of its parent when free, instead of the default direction
       onlyNewRowForNewGroup: forceGroupRows, // row is fixed by BFS depth (a "group" = one hop further from the root) — a node only moves to a new row when it's genuinely a new hop away, not just because a nearby cell was taken
+      // "Align by section" (alignBySection) does NOT apply here, unlike 'clusters'
+      // below — deliberately: 'force''s own "clusters" ARE the connected components
+      // themselves (findConnectedComponents), and packClustersOnGrid's cross-cluster
+      // bridge weight only ever counts an edge BETWEEN two different clusters —  by
+      // definition, two different connected components never share a real edge (that's
+      // what makes them separate components), so a same-section packing boost keyed on
+      // "an already-existing edge" (see sectionPackingBonusEdges's own doc comment)
+      // could never find anything to boost here. The report's own "(or nearby for
+      // clusters)" names the 'clusters' PATTERN specifically, not force-directed too.
     });
     for (const vm of partVms) {
       const p = positions.get(vm.id);
@@ -3940,6 +4139,7 @@ function applyRemapLayout(app, viewId, options = {}) {
     const positions = computeHubClusterGridLayout(nodesForLayout, edgesForLayout, {
       stepX: stepXClusters, stepY: stepYClusters,
       preferRightPlacement: forcePreferRight, // reuses 'force''s own option: place a ring member to the right of its hub when free, instead of the default direction
+      packingBonusEdges: alignBySection ? sectionPackingBonusEdges(store, partVms, edgesForLayout) : [], // "Align by section" — pack same-section hub-clusters shelf-adjacent
     });
     for (const vm of partVms) {
       const p = positions.get(vm.id);
@@ -4207,21 +4407,28 @@ function applyRemapLayout(app, viewId, options = {}) {
 
   const allMiddleVms = [...remainingVms, ...passiveVms];
 
-  // Crossing minimization and connector-length minimization (both opt-in, both only
-  // ever touch middle-grid rows/columns, never the edge bands below): the classic
-  // Sugiyama two-phase pipeline — minimizeRowCrossings settles column ORDER first,
-  // then minimizeConnectorLength refines exact x POSITIONS within whatever order is
-  // now in place (crossing-minimized if that ran, otherwise the existing sort-key
-  // order). Share the same row grouping between both so the second phase sees the
-  // first's actual result rather than rebuilding from scratch.
-  if ((minimizeCrossings || minimizeConnectorLength) && allMiddleVms.length > 0) {
+  // Crossing minimization, section alignment, and connector-length minimization (all
+  // opt-in — alignBySection defaults ON, the other two OFF — all only ever touch
+  // middle-grid rows/columns, never the edge bands below): the classic Sugiyama
+  // two-phase pipeline — minimizeRowCrossings settles column ORDER first, then
+  // alignRowsBySection nudges that order further for "Align by section" (its own
+  // separate pass — see its doc comment for why it's deliberately not folded into
+  // minimizeRowCrossings itself), then minimizeConnectorLength refines exact x
+  // POSITIONS within whatever order is now in place. Share the same row grouping
+  // across all three so each phase sees the previous one's actual result rather than
+  // rebuilding from scratch.
+  if ((minimizeCrossings || minimizeConnectorLength || alignBySection) && allMiddleVms.length > 0) {
     const rowsMap = new Map();
     for (const vm of allMiddleVms) {
       if (!rowsMap.has(vm.y)) rowsMap.set(vm.y, []);
       rowsMap.get(vm.y).push(vm);
     }
     const rowGroups = [...rowsMap.entries()].sort((a, b) => a[0] - b[0]).map(([, vms]) => vms.sort((a, b) => a.x - b.x));
-    if (minimizeCrossings) minimizeRowCrossings(rowGroups, connVms, stepX, baseX);
+    if (minimizeCrossings) minimizeRowCrossings(rowGroups, connVms, stepX, baseX, 8);
+    if (alignBySection) {
+      const sectionOf = new Map(allMiddleVms.map((vm) => [vm.id, store.findPart(vm.objectId)?.section || '']));
+      alignRowsBySection(rowGroups, connVms, sectionOf, stepX, baseX, nodeW, nodeH);
+    }
     if (minimizeConnectorLength) minimizeConnectorLengthPass(rowGroups, connVms, stepX, baseX);
   }
 
@@ -4398,6 +4605,7 @@ function remap(app, tab, options = {}) {
     edgeBlanks: options.edgeBlanks || {},
     minimizeCrossings: !!options.minimizeCrossings,
     minimizeConnectorLength: !!options.minimizeConnectorLength,
+    alignBySection: options.alignBySection !== false,
     customFunctionName: options.customFunctionName || null,
   };
   app.recordAndRender();

@@ -410,7 +410,13 @@ function packClustersOnGrid(clusters, maxShelfWidthCells, edges = []) {
  * spanning-tree edges land in truly neighboring grid cells — no continuous simulation,
  * no snapping afterward, and no cross-component interaction at all, since disconnected
  * components have no reason to affect each other's placement), then pack the components
- * into adjacent non-overlapping grid regions.
+ * into adjacent non-overlapping grid regions. Deliberately no "Align by section"
+ * packing-bonus option here, unlike computeHubClusterGridLayout below — a "cluster"
+ * here IS a connected component, and packClustersOnGrid's cross-cluster bridge weight
+ * only ever counts an edge BETWEEN two different clusters; by definition, two
+ * different connected components never share a real edge, so a same-section boost
+ * keyed on "an already-existing edge" could never find anything to boost (see
+ * applyRemapLayout's own 'force' branch, commands.js, for the full reasoning).
  * nodes: [{id, x, y, w, h}], edges: [{from, to}].
  * Returns Map<id, {x, y}> — final pixel top-left positions, normalized to a small
  * positive margin.
@@ -543,11 +549,15 @@ function computeHubClusterDecomposition(nodeIds, edges) {
  * reached by a different route; the two passes above reduce how often it's visually a
  * problem, they don't (and can't, in general) eliminate it.
  * nodes: [{id, x, y, w, h}], edges: [{from, to}].
+ * options.packingBonusEdges: [{from, to}], optional — extra edges counted ONLY toward
+ * packClustersOnGrid's own cross-cluster "bridge weight", never toward the hub/ring
+ * decomposition itself or avoidNodeOnConnectorOverlap's real-connector overlap check
+ * below — see "Align by section", applyRemapLayout, commands.js.
  * Returns Map<id, {x, y}> — final pixel top-left positions, normalized to a small
  * positive margin.
  */
 function computeHubClusterGridLayout(nodes, edges, options = {}) {
-  const { stepX, stepY, maxShelfWidthCells = 12, marginX = 60, marginY = 40, preferRightPlacement = false } = options;
+  const { stepX, stepY, maxShelfWidthCells = 12, marginX = 60, marginY = 40, preferRightPlacement = false, packingBonusEdges = [] } = options;
   const nodeIds = nodes.map((nd) => nd.id);
   const decomposition = computeHubClusterDecomposition(nodeIds, edges);
 
@@ -558,7 +568,7 @@ function computeHubClusterGridLayout(nodes, edges, options = {}) {
     return { grid, ...gridBounds(grid) };
   });
 
-  const finalGrid = packClustersOnGrid(clusters, maxShelfWidthCells, edges);
+  const finalGrid = packClustersOnGrid(clusters, maxShelfWidthCells, [...edges, ...packingBonusEdges]);
 
   const nodeSizes = new Map(nodes.map((nd) => [nd.id, { w: nd.w, h: nd.h }]));
   const ringMemberToHub = new Map();

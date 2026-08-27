@@ -839,7 +839,11 @@ class App {
               (<code>{top|bottom|left|right: [1-5, ...]}</code> — forces specific slot
               numbers to stay reserved-but-empty instead of being skipped/compacted away,
               Default/None/Layered only), <code>minimizeCrossings, minimizeConnectorLength</code>
-              (both boolean, Default/None/Layered only) — all optional, same defaults as the Remap dialog.</td></tr>
+              (both boolean, Default/None/Layered only), <code>alignBySection</code>
+              (boolean, default <code>true</code> — between two parts connected by a real edge
+              that share the same <code>part.section</code>, prioritizes the same column one
+              row apart for Default/None/Layered, or packs them shelf-adjacent for
+              Clusters; not used by Force/Custom) — all optional, same defaults as the Remap dialog.</td></tr>
             <tr><td><code>smartCheckView(app, tab, options)</code></td><td>options: <code>missingConnectors,
               missingConnectorsAndNodes, levels, syncWithInventory, deriveConnectors</code> (links two
               on-view nodes directly when only connected via a chain of not-shown parts; creates both a
@@ -2366,8 +2370,10 @@ class App {
           <div class="prop-row checkbox"><input type="checkbox" id="rm-selected-only" ${rOpt('selectedOnly') ? 'checked' : ''} /><label for="rm-selected-only">Only remap selected nodes and their connectors</label></div>
           <div class="prop-row checkbox" id="rm-minimize-crossings-row"><input type="checkbox" id="rm-minimize-crossings" ${rOpt('minimizeCrossings') ? 'checked' : ''} /><label for="rm-minimize-crossings">Minimize connector crossings</label></div>
           <div class="prop-row checkbox" id="rm-minimize-length-row"><input type="checkbox" id="rm-minimize-length" ${rOpt('minimizeConnectorLength') ? 'checked' : ''} /><label for="rm-minimize-length">Minimize connector length</label></div>
-          <div id="rm-force-note" class="hidden" style="margin-top:10px; font-size:12px; color:var(--text-muted);">Force-directed placement clusters connected nodes together and reduces total edge length — it doesn't use sort order, column limits, Edge Assignment, or crossing/length minimization, so those are hidden while this pattern is selected.</div>
-          <div id="rm-clusters-note" class="hidden" style="margin-top:10px; font-size:12px; color:var(--text-muted);">Centralize in Clusters repeatedly centers each locally most-connected node with its own single-connection neighbors around it, tiling the resulting clusters together — like force-directed, it doesn't use sort order, column limits, Edge Assignment, or crossing/length minimization. A node that connects to more than one cluster (a "bridge") can't be guaranteed adjacent to every cluster it touches — an inherent limit of any 2D grid layout, same as force-directed's own cycle-edge case.</div>
+          <div class="prop-row checkbox" id="rm-align-section-row"><input type="checkbox" id="rm-align-section" ${rOpt('alignBySection') === false ? '' : 'checked'} /><label for="rm-align-section" id="rm-align-section-label">Align by section</label></div>
+          <div id="rm-align-section-note" style="margin-top:-4px; margin-bottom:10px; font-size:12px; color:var(--text-muted);">On by default. Between two parts connected by a real edge that share the same Section (e.g. a Business Organization Unit and a Function it's assigned to), prioritizes placing them in the same column, one row apart — nearby (packed shelf-adjacent) for Centralize in Clusters instead. Not available for Force-directed.</div>
+          <div id="rm-force-note" class="hidden" style="margin-top:10px; font-size:12px; color:var(--text-muted);">Force-directed placement clusters connected nodes together and reduces total edge length — it doesn't use sort order, column limits, Edge Assignment, crossing/length minimization, or Align by section (a "cluster" here is a connected component, and two different components never share a connector to prioritize), so those are hidden while this pattern is selected.</div>
+          <div id="rm-clusters-note" class="hidden" style="margin-top:10px; font-size:12px; color:var(--text-muted);">Centralize in Clusters repeatedly centers each locally most-connected node with its own single-connection neighbors around it, tiling the resulting clusters together — like force-directed, it doesn't use sort order, column limits, Edge Assignment, or crossing/length minimization (Cluster by section still applies, see above). A node that connects to more than one cluster (a "bridge") can't be guaranteed adjacent to every cluster it touches — an inherent limit of any 2D grid layout, same as force-directed's own cycle-edge case.</div>
           <div id="rm-custom-note" class="hidden" style="margin-top:10px; font-size:12px; color:var(--text-muted);">Runs the selected CustomRemap_&lt;Name&gt; function from the Script Console (Advanced menu) against this view's own parts/connectors — like force-directed/clusters, it doesn't use sort order, column limits, Edge Assignment, or crossing/length minimization; the function decides every position itself. Add one by editing the Script Console text.</div>
           <div class="prop-row checkbox hidden" id="rm-force-prefer-right-row"><input type="checkbox" id="rm-force-prefer-right" ${rOpt('forcePreferRight') ? 'checked' : ''} /><label for="rm-force-prefer-right">Prefer placing connected nodes to the right when a cell is available</label></div>
           <div class="prop-row checkbox hidden" id="rm-force-group-rows-row"><input type="checkbox" id="rm-force-group-rows" ${rOpt('forceGroupRows') ? 'checked' : ''} /><label for="rm-force-group-rows">Only start a new row when a node is a new hop away (keep same-hop nodes on one row)</label></div>
@@ -2434,6 +2440,18 @@ class App {
       box.querySelector('#rm-edge-section').classList.toggle('hidden', ownsPlacementItself);
       box.querySelector('#rm-minimize-crossings-row').classList.toggle('hidden', ownsPlacementItself);
       box.querySelector('#rm-minimize-length-row').classList.toggle('hidden', ownsPlacementItself);
+      // "Align by section" is the one option 'clusters' DOESN'T hide, unlike every
+      // other sort-order/Edge-Assignment/crossing-length control above — it has its
+      // own meaningful behavior there (pack same-section hub-clusters shelf-adjacent,
+      // applyRemapLayout's sectionPackingBonusEdges). 'force' hides it same as
+      // 'custom': a "cluster" there IS a connected component, and two different
+      // components never share a real edge to boost by definition — see
+      // computeClusteredGridLayout's own doc comment, layout.js. Label text swaps to
+      // name whichever behavior actually applies.
+      const hidesAlignBySection = isForce || isCustom;
+      box.querySelector('#rm-align-section-row').classList.toggle('hidden', hidesAlignBySection);
+      box.querySelector('#rm-align-section-note').classList.toggle('hidden', hidesAlignBySection);
+      box.querySelector('#rm-align-section-label').textContent = isClusters ? 'Cluster by section' : 'Align by section';
       box.querySelector('#rm-force-note').classList.toggle('hidden', !isForce);
       box.querySelector('#rm-clusters-note').classList.toggle('hidden', !isClusters);
       box.querySelector('#rm-custom-note').classList.toggle('hidden', !isCustom);
@@ -2487,6 +2505,7 @@ class App {
       box.querySelector('#rm-selected-only').checked = false;
       box.querySelector('#rm-minimize-crossings').checked = false;
       box.querySelector('#rm-minimize-length').checked = false;
+      box.querySelector('#rm-align-section').checked = true; // defaults ON, unlike every other checkbox here
       box.querySelector('#rm-force-prefer-right').checked = false;
       box.querySelector('#rm-force-group-rows').checked = false;
       if (customFnNames.length) box.querySelector('#rm-custom-function').value = customFnNames[0];
@@ -2510,6 +2529,7 @@ class App {
       box.querySelector('#rm-selected-only').checked = !!preset.selectedOnly;
       box.querySelector('#rm-minimize-crossings').checked = !!preset.minimizeCrossings;
       box.querySelector('#rm-minimize-length').checked = !!preset.minimizeConnectorLength;
+      box.querySelector('#rm-align-section').checked = preset.alignBySection !== false; // absent (a preset saved before this option existed) defaults to ON, same as everywhere else
       box.querySelector('#rm-force-prefer-right').checked = !!preset.forcePreferRight;
       box.querySelector('#rm-force-group-rows').checked = !!preset.forceGroupRows;
       if (preset.customFunctionName && customFnNames.includes(preset.customFunctionName)) box.querySelector('#rm-custom-function').value = preset.customFunctionName;
@@ -2543,6 +2563,7 @@ class App {
             edgeBlanks: collectEdgeBlanks(),
             minimizeCrossings: box.querySelector('#rm-minimize-crossings').checked,
             minimizeConnectorLength: box.querySelector('#rm-minimize-length').checked,
+            alignBySection: box.querySelector('#rm-align-section').checked,
             customFunctionName: box.querySelector('#rm-custom-function').value || null,
           };
           const list = [...(store.remapPresets || [])];
@@ -2568,6 +2589,7 @@ class App {
       selectedOnly: box.querySelector('#rm-selected-only').checked,
       minimizeCrossings: box.querySelector('#rm-minimize-crossings').checked,
       minimizeConnectorLength: box.querySelector('#rm-minimize-length').checked,
+      alignBySection: box.querySelector('#rm-align-section').checked,
       forcePreferRight: box.querySelector('#rm-force-prefer-right').checked,
       forceGroupRows: box.querySelector('#rm-force-group-rows').checked,
       edgeAssignment: collectEdgeAssignment(),
@@ -2579,11 +2601,11 @@ class App {
     box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
     wireCopyCallOnRightClick(this, box.querySelector('.submit'), () => `remap(app, tab, ${JSON.stringify(collectRemapOptions(), null, 2)});`);
     box.querySelector('.submit').addEventListener('click', () => {
-      const { templateName, pattern, limitColumnsToView, filteredOnly, selectedOnly, minimizeCrossings, minimizeConnectorLength, forcePreferRight, forceGroupRows, edgeAssignment, edgeBlanks, sortKeys, customFunctionName } = collectRemapOptions();
+      const { templateName, pattern, limitColumnsToView, filteredOnly, selectedOnly, minimizeCrossings, minimizeConnectorLength, alignBySection, forcePreferRight, forceGroupRows, edgeAssignment, edgeBlanks, sortKeys, customFunctionName } = collectRemapOptions();
       overlay.remove();
 
       setCachedStreamTemplate(templateName);
-      setCachedRemapOptions({ pattern, limitColumnsToView, filteredOnly, selectedOnly, forcePreferRight, forceGroupRows, sortKeys, minimizeCrossings, minimizeConnectorLength, customFunctionName });
+      setCachedRemapOptions({ pattern, limitColumnsToView, filteredOnly, selectedOnly, forcePreferRight, forceGroupRows, sortKeys, minimizeCrossings, minimizeConnectorLength, alignBySection, customFunctionName });
 
       let visiblePartVmIds = null;
       if (filteredOnly && isAnyVisibilityFilterActive(tab)) {
@@ -2608,7 +2630,7 @@ class App {
         const selectedPartVmIds = new Set([...tab.selection].filter((id) => this.store.findViewMember(id)?.objectType === 'part'));
         visiblePartVmIds = visiblePartVmIds ? new Set([...visiblePartVmIds].filter((id) => selectedPartVmIds.has(id))) : selectedPartVmIds;
       }
-      remap(this, tab, { sortKeys, templateName, pattern, limitColumnsToView, filteredOnly, selectedOnly, visiblePartVmIds, forcePreferRight, forceGroupRows, edgeAssignment, edgeBlanks, minimizeCrossings, minimizeConnectorLength, customFunctionName });
+      remap(this, tab, { sortKeys, templateName, pattern, limitColumnsToView, filteredOnly, selectedOnly, visiblePartVmIds, forcePreferRight, forceGroupRows, edgeAssignment, edgeBlanks, minimizeCrossings, minimizeConnectorLength, alignBySection, customFunctionName });
     });
   }
 

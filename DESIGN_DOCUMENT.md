@@ -737,6 +737,72 @@ EVERY connector's straight-line path against EVERY other node's bounding box for
 genuine geometric intersection — proven via TEMP BREAK to reproduce all 4 real
 overlaps before this criterion existed, then reverted.
 
+**Align by section** (`alignBySection`, default `true`, `commands.js`): reported
+directly — *"add option default enabled to align columns or rows by section, or to
+cluster by section. For example if business organization unit 'continuous improvement
+functions' is on first row, then function 'continuous improvement functions' matches
+section so should have priority for being below (or nearby for clusters) (if edges
+configured as such)."* For the grid patterns (`'default'`/`'none'`/`'layered'`), a new
+`alignRowsBySection` function runs as its own pass, right after `minimizeRowCrossings`
+(if that ran) and before `minimizeConnectorLengthPass`: for every REAL connector
+between ADJACENT rows whose two endpoints share the same non-blank `part.section`
+("if edges configured as such" — matching section alone with no connector between the
+two parts never creates a pull), it repeatedly swaps adjacent same-row columns,
+bubble-sort style, to bring a misaligned same-section pair into the same column —
+"priority for being below."
+
+This is deliberately a *separate* pass rather than a new criterion folded into
+`minimizeRowCrossings`'s own barycenter+transpose search (an earlier version tried
+exactly that, ranking a new `sectionMisalignment` score between `occlusions` and
+`crossings`). Real-data regression testing on the actual `generateIndustry` →
+`insertSmartStream` → `smartCheckView` → remap pipeline (`check_remap_layered_avoids_
+node_occlusion`) found two separate problems with interleaving: (1) letting section
+swaps interleave with the crossing-minimization search's own swap sequence changed
+which local optimum it converged to, at one point *reintroducing* the exact
+node-on-connector occlusion the previous fix eliminated, even though each individual
+section swap's own local delta check never allowed occlusion to get worse — a step's
+opportunity cost on *later* steps isn't visible to a per-swap delta; (2) folding
+`alignBySection` into the same gate that triggers `minimizeRowCrossings` at all
+(`if (minimizeCrossings || alignBySection)`) made the pass's general-purpose barycenter
+sort run even when the user explicitly left `minimizeCrossings` off (`alignBySection`
+defaults **on**), silently reordering rows they'd asked to leave alone
+(`check_remap_edge_assignment_and_layout_optimization`). Splitting into its own pass —
+run unconditionally when `alignBySection` is on, entirely independent of
+`minimizeCrossings` — fixed both: `minimizeRowCrossings` itself is now byte-for-byte
+identical to before this feature existed (so its own tuned behavior and regression
+tests are untouched), and `alignRowsBySection`'s own per-swap guard rejects any swap
+that would increase *same-row* occlusion (the same `rowOcclusionCount` concept
+`minimizeRowCrossings` uses).
+
+Same-row occlusion isn't the whole story, though: a diagonal INTER-row connector can
+still drift through an unrelated node's box as a side effect of column reordering, a
+defect no same-row check can see — found on a real dataset where nearly every node
+shared one section (maximal section-alignment pressure). Rather than modeling every
+diagonal-geometry edge case into the per-swap guard, `alignRowsBySection` ends with an
+**all-or-nothing global safety net**: the real geometric occlusion count (every
+connector's straight-line path against every other node's actual bounding box — the
+same segment-vs-rect check `check_remap_layered_avoids_node_occlusion` itself uses) is
+computed for the row order this pass started with and for its own final result; if the
+final result is geometrically worse, the *entire* pass is discarded (not partially
+unwound) and the starting row order is restored untouched, rather than keep a
+partially-aligned result that's still worse than where it started.
+
+For the `'clusters'` pattern specifically ("nearby for clusters" in the report) —
+structurally different from the grid patterns, since `packClustersOnGrid`'s clusters
+are hub-and-spoke decompositions of one connected component (`computeHubClusterDecomp
+osition`) rather than the disjoint connected components `'force'` clusters into (see
+§6.1c) — `sectionPackingBonusEdges` filters `edgesForLayout` down to pairs whose
+endpoints share a non-blank matching section, and this extra edge list is passed
+alongside the real edges into `packClustersOnGrid`'s existing bridge-weight packing
+logic (from the connectivity-aware packing feature, below) as `packingBonusEdges`: a
+purely additive nudge to which already-connected cluster gets placed shelf-adjacent
+first, never real graph structure. `'force'` is deliberately excluded — its clusters
+*are* connected components, and by definition two different connected components never
+share a real edge, so a same-section boost keyed on "an already-existing edge" is a
+permanent structural no-op there; the Remap dialog hides the "Align by section"
+checkbox for `'force'`/`'custom'` accordingly (relabeling it "Cluster by section" for
+`'clusters'`).
+
 Two further pieces of state, separate from the layout algorithm itself:
 `view.remapLastOptions` (set by `remap()` on every successful run, alongside the
 pre-existing `view.remapSortKeys`) records every OTHER dialog field — pattern,
