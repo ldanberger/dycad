@@ -2741,6 +2741,106 @@ def check_section_rowcount_realigns_nodes(page):
     return True, "nodes in a later section stayed correctly aligned after an earlier section's rowCount shrank"
 
 
+def check_toolbox_drag_to_canvas(page):
+    """Regression guard for dragging a toolkit tile onto the canvas. Reported directly:
+    "drag from toolkit to freeform canvas does not allow drop, mouse cursor stuck on
+    hand symbol" -- traced to native HTML5 drag-and-drop (dragstart/dragover/drop),
+    whose cursor feedback and drop delivery are notoriously OS/compositor-dependent (the
+    app's only use of it), being replaced with a self-contained pointerdown/pointermove/
+    pointerup drag (wireToolboxTileDrag, render.js) -- the same mechanism node-dragging/
+    connect-drag/resize handles already use everywhere else in the app. Covers: a real
+    drag (past the 3px threshold) onto the freeform canvas creates a part of the
+    dragged element's type roughly at the drop point; a `.toolbox-drag-ghost` follows
+    the cursor and `document.body`'s cursor becomes 'grabbing' mid-drag, both clearing
+    on release; a plain click with no movement creates nothing; and releasing over the
+    toolbox panel itself (never entering the canvas) creates nothing either."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      if (!store.defaultModel) store.defaultModel = 'ToolboxDragTestModel';
+      const view = store.addView('ToolboxDragTest_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+
+      const tile = document.querySelector('#elements-grid .el-tile');
+      const tileBox = tile.getBoundingClientRect();
+      const scroll = document.querySelector('.canvas-scroll');
+      const scrollBox = scroll.getBoundingClientRect();
+      const startX = tileBox.left + tileBox.width / 2, startY = tileBox.top + tileBox.height / 2;
+      const dropX = scrollBox.left + 200, dropY = scrollBox.top + 150;
+
+      const results = {};
+
+      // A genuine drag (past the movement threshold) onto the canvas.
+      const partsBefore = store.doc.parts.length;
+      tile.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: startX, clientY: startY, button: 0 }));
+      document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: startX + 10, clientY: startY + 10 }));
+      await new Promise(r => setTimeout(r, 20));
+      const ghostMid = document.querySelector('.toolbox-drag-ghost');
+      results.ghostVisibleMidDrag = !!ghostMid;
+      results.ghostTextMidDrag = ghostMid ? ghostMid.textContent : null;
+      results.bodyCursorMidDrag = document.body.style.cursor;
+      results.expectedGhostText = tile.title;
+      document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: dropX, clientY: dropY }));
+      document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: dropX, clientY: dropY }));
+      await new Promise(r => setTimeout(r, 50));
+      results.ghostGoneAfterDrop = !document.querySelector('.toolbox-drag-ghost');
+      results.bodyCursorResetAfterDrop = document.body.style.cursor === '';
+      const partsAfterDrag = store.doc.parts.length;
+      results.dragCreatedOnePart = partsAfterDrag === partsBefore + 1;
+      const newPart = store.doc.parts[store.doc.parts.length - 1];
+      const newVm = newPart ? store.viewMembersForView(view.id).find(v => v.objectType === 'part' && v.objectId === newPart.id) : null;
+      results.newPartNearDropPoint = newVm ? (Math.abs(newVm.x - (200 - 60)) < 150 && Math.abs(newVm.y - (150 - 20)) < 150) : false;
+
+      // A sub-3px jitter should stay below the drag-start threshold -- no ghost yet --
+      // and the eventual click (still over the tile, well clear of the canvas) creates
+      // nothing.
+      const partsBeforeClick = store.doc.parts.length;
+      tile.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: startX, clientY: startY, button: 0 }));
+      document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: startX + 1, clientY: startY }));
+      await new Promise(r => setTimeout(r, 10));
+      results.noGhostForSubThresholdJitter = !document.querySelector('.toolbox-drag-ghost');
+      document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: startX + 1, clientY: startY }));
+      await new Promise(r => setTimeout(r, 30));
+      results.plainClickCreatedNothing = store.doc.parts.length === partsBeforeClick;
+
+      // Releasing back over the toolbox itself (never reaching the canvas) creates nothing.
+      const partsBeforeOutside = store.doc.parts.length;
+      tile.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: startX, clientY: startY, button: 0 }));
+      document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: startX + 20, clientY: startY + 5 }));
+      document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: startX + 20, clientY: startY + 5 }));
+      await new Promise(r => setTimeout(r, 30));
+      results.releaseOutsideCanvasCreatedNothing = store.doc.parts.length === partsBeforeOutside;
+
+      return results;
+    }
+    """)
+    problems = []
+    if not result["ghostVisibleMidDrag"] or result["ghostTextMidDrag"] != result["expectedGhostText"]:
+        problems.append(f"expected a .toolbox-drag-ghost showing the dragged tile's title mid-drag (got visible={result['ghostVisibleMidDrag']}, text={result['ghostTextMidDrag']!r}, expected={result['expectedGhostText']!r})")
+    if result["bodyCursorMidDrag"] != "grabbing":
+        problems.append(f"expected document.body's cursor to be 'grabbing' mid-drag, got {result['bodyCursorMidDrag']!r}")
+    if not result["ghostGoneAfterDrop"]:
+        problems.append("expected the drag ghost to be removed after drop")
+    if not result["bodyCursorResetAfterDrop"]:
+        problems.append("expected document.body's cursor to be reset after drop")
+    if not result["dragCreatedOnePart"]:
+        problems.append("expected a real drag onto the freeform canvas to create exactly one new part")
+    if not result["newPartNearDropPoint"]:
+        problems.append("expected the new part to land near the drop point")
+    if not result["plainClickCreatedNothing"]:
+        problems.append("expected a plain click (sub-threshold jitter) on a toolkit tile to create nothing")
+    if not result["noGhostForSubThresholdJitter"]:
+        problems.append("expected sub-3px movement to stay below the drag-start threshold and never show a ghost")
+    if not result["releaseOutsideCanvasCreatedNothing"]:
+        problems.append("expected releasing outside the canvas (still over the toolbox) to create nothing")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "dragging a toolkit tile onto the freeform canvas (custom pointer-event drag, not native HTML5 DnD) shows a following ghost + grabbing cursor, creates the right part near the drop point, and correctly creates nothing on a plain click or a release outside the canvas"
+
+
 def check_new_content_sized_and_non_overlapping(page):
     """Regression guard: Populate From Template, Generate Industry, and double-click-
     to-new-view all left nodes at whatever size the view previously had, requiring a
@@ -11655,6 +11755,7 @@ CHECKS = [
     check_mutation_toasts_log_to_message_log,
     check_keyboard_focus_visible,
     check_section_rowcount_realigns_nodes,
+    check_toolbox_drag_to_canvas,
     check_new_content_sized_and_non_overlapping,
     check_smart_check_view_default_levels_unlimited,
     check_smart_check_view_dialog_derive_checkbox_wiring,

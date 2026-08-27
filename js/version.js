@@ -4191,4 +4191,31 @@
 // DESIGN_DOCUMENT.md SS5.3, tests/README.md, and public/instructions.html (Script
 // Console's own Run paragraph + the Ctrl+Enter shortcut row) updated. Full suite
 // 151/151.
-export const APP_VERSION = '0.897';
+// v0.898: reported directly: "drag from toolkit to freeform canvas does not allow
+// drop, mouse cursor stuck on hand symbol." Traced to native HTML5 drag-and-drop
+// (draggable=true + dragstart/dragover/drop) -- the app's ONLY use of that mechanism;
+// every other click-and-drag gesture in DyCAD (node repositioning, connect-drag,
+// resize handles, canvas lasso-select) is already a self-contained pointerdown/
+// pointermove/pointerup sequence. Native DnD's cursor feedback and drop delivery are
+// notoriously OS/compositor-dependent (a known failure mode on Linux/GTK-based
+// browsers in particular -- the reported symptom matches: the browser never
+// transitions off the source element's own CSS cursor:grabbing because no real drag
+// session ever started, so drop never fires either). Rather than chase a
+// platform-specific native-DnD quirk, replaced the whole mechanism with the same
+// pointer-event pattern already proven everywhere else: new wireToolboxTileDrag
+// (render.js) starts tracking on a tile's pointerdown, only begins "dragging" past a
+// 3px threshold (forcing document.body's cursor to 'grabbing' and showing a new
+// floating .toolbox-drag-ghost that follows the cursor, both restored/removed on
+// release), and on pointerup tests the release point against the active canvas's own
+// .canvas-scroll bounding rect -- outside it creates nothing, inside it converts to
+// canvas-local coordinates (same scrollLeft/scrollTop/zoom math the old native drop
+// handler used) and calls the completely-unchanged app.dropNewPart. canvas.js's old
+// dragover/drop listeners removed. New check_toolbox_drag_to_canvas (tests/
+// run_all.py): a real drag onto a fresh freeform view creates one part near the drop
+// point with ghost+grabbing cursor present mid-drag and cleared after; a sub-3px
+// jitter shows no ghost and creates nothing; a release that never leaves the toolbox
+// panel creates nothing -- both the threshold guard and the out-of-bounds guard proven
+// via TEMP BREAK, reverted. DESIGN_DOCUMENT.md new SS5.8 and tests/README.md updated;
+// no end-user-visible behavior change (still click-hold-drag-release), so
+// public/instructions.html untouched. Full suite 152/152.
+export const APP_VERSION = '0.898';

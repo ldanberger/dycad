@@ -473,6 +473,49 @@ New `check_smart_check_model_detection_and_fix_precedence` (pure logic, the abov
 above Smart Check View, no-tab-required reachability, per-row uncheck-then-fix, and
 Cancel making zero changes) in `tests/run_all.py`.
 
+### 5.8 Toolkit drag-and-drop (`wireToolboxTileDrag`, `render.js`)
+
+Dragging a toolkit tile (`#elements-grid .el-tile`) onto the active canvas creates a
+new part there (`App.dropNewPart`, `main.js`). Reported directly: *"drag from toolkit
+to freeform canvas does not allow drop, mouse cursor stuck on hand symbol."* This used
+to be native HTML5 drag-and-drop (`draggable=true` + `dragstart`/`dragover`/`drop`) —
+the app's ONLY use of that mechanism; every other click-and-drag gesture in DyCAD
+(node repositioning, connect-drag, panel/section resize handles, canvas lasso-select)
+is a self-contained `pointerdown`/`pointermove`/`pointerup` sequence instead. Native
+DnD's cursor feedback and drop delivery are notoriously OS/compositor-dependent (a
+known failure mode on Linux/GTK-based browsers in particular — the reported symptom
+matches exactly: the browser never transitions off the source element's own CSS
+`cursor: grabbing` because no real drag session ever started, so no `drop` ever fires
+either). Rather than chase a platform-specific native-DnD quirk, `wireToolboxTileDrag`
+replaces the whole mechanism with the same pointer-event pattern already proven
+everywhere else in the app:
+
+- `pointerdown` on a tile starts tracking; nothing else happens until the pointer moves
+  past a 3px threshold (same threshold convention as node-dragging's own `moved` flag,
+  `canvas.js`) — so a plain click is inert, matching a `dragstart` never firing on a
+  sub-threshold native drag.
+- Past the threshold, `document.body.style.cursor` is forced to `'grabbing'` (restored
+  to whatever it was on release) and a small floating `.toolbox-drag-ghost` (fixed
+  position, `pointer-events:none`, the tile's own title as its text) is created and
+  repositioned on every `pointermove` — replacing the drag image a native `dragstart`
+  would otherwise supply.
+- On `pointerup`, the release point is tested against `.page-view.active
+  .canvas-scroll`'s own `getBoundingClientRect()` — outside those bounds (still over
+  the toolbox panel, or any other UI) creates nothing, mirroring `dragover`'s old
+  implicit "not a valid drop target" behavior. Inside them, the same
+  scrollLeft/scrollTop/zoom math the old native `drop` handler used converts the
+  release point to canvas-local coordinates and calls `app.dropNewPart(tab,
+  el.type, x, y)` — `dropNewPart` itself is completely unchanged; only how its
+  `x`/`y` arguments get produced changed.
+
+New `check_toolbox_drag_to_canvas` (`tests/run_all.py`): a real drag (past threshold)
+onto a fresh freeform view's canvas creates one new part near the drop point, with the
+ghost/`grabbing` cursor both present mid-drag and cleared after release; a sub-3px
+jitter shows no ghost and creates nothing; and a release that never leaves the toolbox
+panel creates nothing either — the threshold guard and the out-of-bounds guard both
+proven via TEMP BREAK (removing each independently reproduces its specific failure),
+then reverted.
+
 ## 6. Layout and rendering algorithms
 
 ### 6.1 Force-directed Remap (`layout.js`)

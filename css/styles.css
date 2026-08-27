@@ -256,6 +256,11 @@ button, select, input { font-family: inherit; font-size: inherit; color: inherit
 .el-tile:hover { background: var(--accent-soft); }
 .el-tile:active { cursor: grabbing; }
 .el-tile svg, .el-icon-img { width: 34px; height: 20px; display: block; }
+.toolbox-drag-ghost {
+  position: fixed; z-index: 200; pointer-events: none; background: var(--panel-bg);
+  border: 1px solid var(--border-strong); border-radius: 5px; box-shadow: var(--shadow-lg);
+  padding: 3px 8px; font-size: 11px; color: var(--text); white-space: nowrap;
+}
 
 .selection-info { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .commands-list { display: flex; flex-wrap: wrap; gap: 6px; }

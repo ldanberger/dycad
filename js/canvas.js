@@ -1099,7 +1099,6 @@ function wireCanvasInteractions(app, tab, scroll, surface, svg, edgeLayer, nodeE
     app.showCanvasContextMenu(e.clientX, e.clientY, { x: (e.clientX - rect.left) / z, y: (e.clientY - rect.top) / z });
   });
 
-  // drop from toolbox
   // mouse position indicator (left panel, model/canvas-space coordinates)
   const posEl = document.getElementById('mouse-position');
   scroll.addEventListener('pointermove', (e) => {
@@ -1111,18 +1110,9 @@ function wireCanvasInteractions(app, tab, scroll, surface, svg, edgeLayer, nodeE
   });
   scroll.addEventListener('pointerleave', () => { if (posEl) posEl.textContent = 'x: —, y: —'; });
 
-  scroll.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
-  scroll.addEventListener('drop', (e) => {
-    e.preventDefault();
-    const raw = e.dataTransfer.getData('application/json');
-    if (!raw) return;
-    const payload = JSON.parse(raw);
-    const scrollRect = scroll.getBoundingClientRect();
-    const z = zoom();
-    const x = (e.clientX - scrollRect.left + scroll.scrollLeft) / z;
-    const y = (e.clientY - scrollRect.top + scroll.scrollTop) / z;
-    app.dropNewPart(tab, payload.elementType, x, y);
-  });
+  // Drop from the toolbox lands here — but as the COMPLETION of a custom
+  // pointerdown/pointermove/pointerup drag (render.js's wireToolboxTileDrag), not a
+  // native HTML5 'drop' event. See wireToolboxTileDrag's own doc comment for why.
 }
 
 /**

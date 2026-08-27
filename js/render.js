@@ -298,6 +298,64 @@ function renderGroupFilters(app) {
   }
 }
 
+/** Drag a toolkit tile onto the active canvas to create a new part there. Deliberately a
+ * custom pointer-event drag (pointerdown/pointermove/pointerup on `document`, same
+ * pattern node-dragging/connect-drag/resize handles already use throughout this app)
+ * rather than native HTML5 drag-and-drop (dragstart/dragover/drop) — the app's ONLY
+ * prior use of native DnD. Reported directly: "drag from toolkit to freeform canvas
+ * does not allow drop, mouse cursor stuck on hand symbol" — native HTML5 DnD's cursor
+ * feedback and drop delivery are notoriously OS/compositor-dependent (a known failure
+ * mode on Linux/GTK-based browsers in particular), so this switches the interaction to
+ * the same reliable, self-contained mechanism already proven for every other
+ * click-and-drag gesture in the app, rather than trying to patch native DnD's own
+ * cross-platform quirks. */
+function wireToolboxTileDrag(app, tile, el) {
+  tile.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY;
+    let dragging = false;
+    let ghost = null;
+    const prevCursor = document.body.style.cursor;
+
+    const positionGhost = (clientX, clientY) => {
+      if (ghost) { ghost.style.left = `${clientX + 12}px`; ghost.style.top = `${clientY + 12}px`; }
+    };
+    const onMove = (ev) => {
+      if (!dragging) {
+        if (Math.abs(ev.clientX - startX) < 3 && Math.abs(ev.clientY - startY) < 3) return;
+        dragging = true;
+        document.body.style.cursor = 'grabbing';
+        ghost = document.createElement('div');
+        ghost.className = 'toolbox-drag-ghost';
+        ghost.textContent = el.title;
+        document.body.appendChild(ghost);
+      }
+      positionGhost(ev.clientX, ev.clientY);
+    };
+    const onUp = (ev) => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.body.style.cursor = prevCursor;
+      if (ghost) ghost.remove();
+      if (!dragging) return;
+
+      const dropTab = app.store.activeTab();
+      if (!dropTab || dropTab.type !== 'canvas') return;
+      const scroll = document.querySelector('.page-view.active .canvas-scroll');
+      if (!scroll) return;
+      const rect = scroll.getBoundingClientRect();
+      if (ev.clientX < rect.left || ev.clientX > rect.right || ev.clientY < rect.top || ev.clientY > rect.bottom) return;
+      const z = dropTab.viewport?.zoom || 1;
+      const x = (ev.clientX - rect.left + scroll.scrollLeft) / z;
+      const y = (ev.clientY - rect.top + scroll.scrollTop) / z;
+      app.dropNewPart(dropTab, el.type, x, y);
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  });
+}
+
 function renderToolbox(app) {
   renderLibraryFilters(app);
   renderGroupFilters(app);
@@ -332,13 +390,9 @@ function renderToolbox(app) {
 
     const tile = document.createElement('div');
     tile.className = 'el-tile';
-    tile.draggable = true;
     tile.title = el.title;
     tile.innerHTML = iconSvgFor(app, el);
-    tile.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('application/json', JSON.stringify({ kind, label: el.title, elementType: el.type }));
-      e.dataTransfer.effectAllowed = 'copy';
-    });
+    wireToolboxTileDrag(app, tile, el);
     grid.appendChild(tile);
   }
 }
