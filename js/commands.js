@@ -1022,6 +1022,118 @@ function levelUpEntityDetails(app, tab, vmId) {
   app.toast(`Created Data Entity "${parentPart.label}" (Level Up), linked to "${part.label}".`, false, true);
 }
 
+// ===================== LEVEL IT =====================
+/**
+ * "Level It" (freeform views only, right-click a single node): reported directly —
+ * "when an existing datadataentity is added and connected to a businessprocess, the
+ * level-it command will replace the datadataentity since stream template does not
+ * have its type connected directly to a businessprocess, and will replace it with
+ * applicationcapability since in the stream template 'path' that is the next valid
+ * element between it and the target datadataentity. Silently (no user prompt) replace
+ * the view dataentity node with existing applicationcapability node of that named
+ * stream." Fixes a node that's connected DIRECTLY (on this view) to a neighbor
+ * several steps away in the current stream template's chain (template.value[]) by
+ * replacing it with the type that actually belongs immediately next to that neighbor
+ * — reusing an EXISTING part of that type already tagged with one of the node's own
+ * streams (never creates a new one; aborts with a toast if none exists).
+ *
+ * Deliberately conservative and VIEW-scoped, matching this command's own "silently
+ * replace the VIEW node" framing: neither the original node's Part nor the connector
+ * it ran through are ever deleted from the model (either may still be legitimate
+ * elsewhere) — only this view's own viewMembers for them are removed, and a NEW
+ * connector is found-or-created between the replacement part and the neighbor via
+ * findOrCreateStreamConnector (above) — the exact same "connect chain-adjacent parts"
+ * mechanism createStream's own main loop already uses, always oriented in the
+ * template's own earlier-index -> later-index direction (regardless of which way the
+ * original connector ran) so the new connector reads the same direction every
+ * genuinely template-generated stream connector already does.
+ *
+ * With a single node selected, if more than one of its connectors on this view shows
+ * a template-chain gap, only the FIRST one found (in this view's own viewMember
+ * order) is corrected — running the command again addresses the next one.
+ */
+function levelIt(app, tab, vmId) {
+  const { store } = app;
+  const view = store.findView(tab.viewId);
+  if (!view || isSectionViewType(view.viewType)) return; // freeform views only
+  const vm = store.findViewMember(vmId);
+  const part = vm && vm.objectType === 'part' ? store.findPart(vm.objectId) : null;
+  if (!part) return;
+
+  const templateName = store.doc.industryTemplateName || 'Enterprise';
+  const template = (store.settings.streamTemplates || []).find((t) => ciEq(t.name, templateName));
+  if (!template || !Array.isArray(template.value)) { app.toast(`Level It: stream template "${templateName}" not found.`, true); return; }
+
+  const typeIndex = (type) => template.value.findIndex((v) => ciEq(v, type));
+  const nodeIdx = typeIndex(part.type);
+  if (nodeIdx === -1) { app.toast(`Level It: "${part.type}" isn't part of stream template "${template.name}"'s chain.`, true); return; }
+
+  const connVms = store.viewMembersForView(view.id).filter((v) => v.objectType === 'connector' && (ciEq(v.fromVmId, vm.id) || ciEq(v.toVmId, vm.id)));
+
+  for (const connVm of connVms) {
+    const neighborVmId = ciEq(connVm.fromVmId, vm.id) ? connVm.toVmId : connVm.fromVmId;
+    const neighborVm = store.findViewMember(neighborVmId);
+    const neighborPart = neighborVm && store.findPart(neighborVm.objectId);
+    if (!neighborPart) continue;
+    const neighborIdx = typeIndex(neighborPart.type);
+    if (neighborIdx === -1) continue;
+
+    const neighborComesFirst = neighborIdx < nodeIdx;
+    const gap = neighborComesFirst ? nodeIdx - neighborIdx : neighborIdx - nodeIdx;
+    if (gap <= 1) continue; // already adjacent (or same position) in the chain -- not the mis-leveled connector
+
+    const replacementIdx = neighborComesFirst ? neighborIdx + 1 : neighborIdx - 1;
+    const rawReplacementType = template.value[replacementIdx];
+    const el = elementByType(store, rawReplacementType);
+    const resolvedType = el?.type || rawReplacementType;
+
+    // Find an EXISTING part of the replacement type sharing one of THIS node's own
+    // streams — tried in the node's own streams[] order, first match wins. Never
+    // creates a new one: "replace ... with EXISTING <type> node of that named stream."
+    const nodeStreams = part.streams || [];
+    let replacementPart = null, matchedStreamName = null;
+    for (const streamName of nodeStreams) {
+      const found = store.doc.parts.find((p) => p.id !== part.id && ciEq(p.type, resolvedType) && ciEq(p.model, part.model) && (p.streams || []).includes(streamName));
+      if (found) { replacementPart = found; matchedStreamName = streamName; break; }
+    }
+    if (!replacementPart) {
+      app.toast(`Level It: no existing "${resolvedType}" node found for "${part.label}"'s own stream${nodeStreams.length === 1 ? '' : 's'}.`, true);
+      return;
+    }
+
+    // Find-or-create the replacement part's viewMember on THIS view — reuse one
+    // already placed here, otherwise place it exactly where the old node was.
+    let replacementVm = store.doc.viewMembers.find((v) => v.objectType === 'part' && ciEq(v.objectId, replacementPart.id) && ciEq(v.view, view.id));
+    if (!replacementVm) {
+      replacementVm = store.createViewMember({
+        view: view.id, objectType: 'part', objectId: replacementPart.id,
+        x: vm.x, y: vm.y, fillColor: elementGroupFill(store, replacementPart.type),
+      });
+    }
+
+    const [fromPart, fromVmForConn, toPart, toVmForConn] = neighborComesFirst
+      ? [neighborPart, neighborVm, replacementPart, replacementVm]
+      : [replacementPart, replacementVm, neighborPart, neighborVm];
+    findOrCreateStreamConnector(store, view, fromPart, toPart, fromVmForConn, toVmForConn, part.model, matchedStreamName, 'Stream', undefined, null, true);
+
+    // Remove the OLD connector's viewMember from this view only — the underlying
+    // Connector and both Parts stay untouched in the model, since either may still be
+    // legitimate elsewhere (a different view, or genuinely valid outside this template).
+    store.doc.viewMembers = store.doc.viewMembers.filter((v) => v.id !== connVm.id);
+
+    // Only drop the original node's own viewMember if nothing else on this view still
+    // references it — it may legitimately have other connectors here too.
+    const stillReferenced = store.viewMembersForView(view.id).some((v) => v.objectType === 'connector' && (ciEq(v.fromVmId, vm.id) || ciEq(v.toVmId, vm.id)));
+    if (!stillReferenced) store.doc.viewMembers = store.doc.viewMembers.filter((v) => v.id !== vm.id);
+
+    app.recordAndRender();
+    app.toast(`Level It: replaced "${part.label}" (${part.type}) with "${replacementPart.label}" (${replacementPart.type}) on this view.`, false, true);
+    return;
+  }
+
+  app.toast(`Level It: no stream-template gap found among "${part.label}"'s connectors on this view.`, true);
+}
+
 // ===================== LEVEL DOWN =====================
 /**
  * Single-node variant used by double-click when a node has no linkedViewName yet:
@@ -4731,4 +4843,4 @@ function createDetectedConnectors(app, candidates) {
   return { created, placements, unplaced };
 }
 
-export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors };
+export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors };

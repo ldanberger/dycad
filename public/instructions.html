@@ -256,6 +256,14 @@ canvas. Availability depends on what's selected — greyed out means the current
     neighbors carry down too, as external context nodes. A structural Composition link (parent part &rarr; new
     anchor) is created behind the scenes so Smart Check View/Node can keep the two levels in sync later — see
     below.</td></tr>
+    <tr><td><strong>Level It</strong></td><td>Freeform views only. Fixes a node that's connected directly to a
+    neighbor several steps away in the current stream template's chain — e.g. a Data Data Entity wired straight
+    to a Business Process, skipping the Application Capability that actually belongs between them. Silently (no
+    dialog) replaces the selected node with an EXISTING node of the correct in-between type that shares one of
+    its own streams — never creates a new one; if none exists, nothing changes and a toast explains why. Works
+    either direction: right-click whichever of the two connected nodes is out of place. The original node and
+    connector are never deleted from the model (only removed from this view), and the original node stays if it
+    still has other connectors here too.</td></tr>
     <tr><td><strong>Merge</strong></td><td>Combines two or more selected nodes into one, keeping their
     combined connections.</td></tr>
     <tr><td><strong>Copy / Paste</strong></td><td>Standard copy-paste for selected nodes, within or across

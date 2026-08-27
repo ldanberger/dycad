@@ -1755,6 +1755,59 @@ special-cases exactly one selected `DataEntityDetails` ViewMember.
   `DataEntityDetails` node is selected, so the toolbar/context-menu button itself
   reflects which behavior will actually run.
 
+**"Level It"** (`js/commands.js`'s new `levelIt`; `getCommandDefs`/`CMD_ICONS`,
+`render.js`; dispatched from `runCommand`'s new `'levelIt'` branch, `main.js` — a
+freeform-views-only right-click/toolbar command, distinct from Level Up/Level Down's
+own decomposition concept above despite the similar name) — reported directly: *"when
+in a free form view, add a new right-click level-it command. Use case: when an
+existing datadataentity is added and connected to a businessprocess, the level-it
+command will replace the datadataentity since stream template does not have its type
+connected directly to a businessprocess, and will replace it with applicationcapability
+since in the stream template 'path' that is the next valid element between it and the
+target datadataentity. Silently (no user prompt) replace the view dataentity node with
+existing applicationcapability node of that named stream."* Fixes a node that's
+connected DIRECTLY, on this view, to a neighbor several steps away in the current
+stream template's chain (`template.value[]`, the same ordered-type-array `createStream`
+itself walks — §7.2) — the exact reported example uses the real shipped "Enterprise"
+template, where `BusinessProcess` sits 5 slots before `DataDataEntity` with
+`ApplicationCapability` immediately after `BusinessProcess`.
+- Which template: `store.doc.industryTemplateName || 'Enterprise'` — the same default
+  `generateIndustry` itself resolves to, so this command needs no dialog of its own
+  (*"Silently (no user prompt)"*) and stays consistent with whatever template this
+  document's own data actually came from.
+- With a single node selected, scans its own connectors on this view (in viewMember
+  order) for the first one whose OTHER endpoint's type sits more than one position away
+  from this node's own type in `template.value[]` — a genuine "gap." Both ends' types
+  must actually be found in the chain; a type absent from it (e.g. `'Unknown'`) can't
+  be reasoned about, so that connector is skipped, not treated as a gap. The command is
+  bidirectional: whichever of the two nodes is later in the chain gets replaced with
+  the type sitting immediately adjacent to the EARLIER one — so right-clicking the
+  later node (the reported example) replaces IT with the type just after the earlier
+  neighbor, while right-clicking the earlier node instead replaces IT with the type
+  just before the later neighbor. Only the first connector with a genuine gap is acted
+  on per invocation; running the command again addresses the next one.
+- The replacement is always an EXISTING part — never created — found by walking the
+  original node's own `streams[]` in order and taking the first stream that already has
+  a part of the replacement type tagged with it (`store.doc.parts`, matched by
+  type+model+`streams.includes(...)`). No match on ANY of the node's streams aborts
+  with a toast naming the type and label; nothing changes.
+- Deliberately conservative and VIEW-scoped, matching *"replace the VIEW dataentity
+  node"*: neither the original node's Part nor the connector it ran through are ever
+  deleted from the model (either may still be legitimate elsewhere, e.g. another view)
+  — only this view's own viewMembers for them are removed. The replacement part's own
+  viewMember on this view is found-or-created (reusing one already placed here, else a
+  new one at the OLD node's exact position, so nothing visually jumps), and the new
+  connector between the replacement and the neighbor is found-or-created via
+  `findOrCreateStreamConnector` (§7.2's own shared chain-building helper) — the exact
+  same "connect chain-adjacent parts" mechanism `createStream`'s own main loop already
+  uses, always oriented in the template's earlier-index → later-index direction
+  regardless of which way the ORIGINAL connector happened to run (verified as a real,
+  not just theoretical, distinction via TEMP BREAK — a naive "keep the original
+  connector's own from/to direction" implementation produces a backwards Stream
+  connector whenever the original ran opposite the template's own order). The original
+  node's own viewMember is only removed if nothing else on this view still references
+  it — it may legitimately have other connectors here too.
+
 **DDL import/export** (`js/ddl.js`, a new pure-logic module alongside `sfce.js`/
 `archimate.js` — no DOM dependency, testable under plain `node`): a deliberately
 *scoped* `CREATE TABLE` subset (MySQL/Postgres-flavored: column definitions, inline or

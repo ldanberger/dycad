@@ -9901,6 +9901,311 @@ def check_auto_detect_connectors_dialog(page):
     return True, "Auto-Detect Connectors... dialog (Data Modeling menu) opens with a DDL textarea, Detect Connectors populates a checked-by-default preview list, unchecking a row excludes exactly that candidate from what Create Selected Connectors actually creates, and Cancel closes without creating anything"
 
 
+def check_level_it_replaces_across_template_gap(page):
+    """Regression guard/new-feature check for the new "Level It" command
+    (levelIt, commands.js — freeform views only), reported directly: "when in a free
+    form view, add a new right-click level-it command. Use case: when an existing
+    datadataentity is added and connected to a businessprocess, the level-it command
+    will replace the datadataentity since stream template does not have its type
+    connected directly to a businessprocess, and will replace it with
+    applicationcapability since in the stream template 'path' that is the next valid
+    element between it and the target datadataentity. Silently (no user prompt)
+    replace the view dataentity node with existing applicationcapability node of that
+    named stream." Uses the REAL shipped "Enterprise" template
+    (BusinessProcess sits 5 slots before DataDataEntity in its value[] chain, with
+    ApplicationCapability immediately after BusinessProcess — the exact reported
+    example, not a synthetic one). Covers: (1) the exact reported scenario — a
+    DataDataEntity directly connected to a BusinessProcess gets silently replaced (on
+    this view only) with an EXISTING ApplicationCapability node sharing the
+    DataDataEntity's own stream, with a new 's' (+ companion 'c') Stream connector
+    linking BusinessProcess -> ApplicationCapability in the template's own
+    earlier-to-later direction; (2) that direction holds even when the ORIGINAL
+    connector ran the opposite way (DataDataEntity -> BusinessProcess); (3) the
+    original connector's viewMember is removed from this view but the underlying
+    Connector and both original Parts are left completely untouched in the model
+    (never deleted — may still be legitimate elsewhere); (4) already-adjacent types
+    (no gap) make no changes; (5) a type not part of the template's chain (e.g.
+    'Unknown') makes no changes; (6) no existing replacement part for the node's own
+    stream aborts with no changes (never creates a new one); (7) if the replaced
+    node still has ANOTHER connector on this view afterward, its own viewMember
+    survives (not unconditionally removed); (8) a section-based view makes no changes
+    even when called directly."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      store.doc.industryTemplateName = 'Enterprise';
+      const out = {};
+      const freshFf = (name) => {
+        const view = store.addView(name + '_' + Date.now() + '_' + Math.random(), 'ff');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        return { view, tab };
+      };
+
+      // 1) The exact reported scenario.
+      {
+        const bp = store.createPart({ type: 'BusinessProcess', label: 'RegrLevelItBP', model, streams: ['RegrLevelItStream'] });
+        const dde = store.createPart({ type: 'DataDataEntity', label: 'RegrLevelItDDE', model, streams: ['RegrLevelItStream'] });
+        const appCap = store.createPart({ type: 'ApplicationCapability', label: 'RegrLevelItCap', model, streams: ['RegrLevelItStream'] });
+        const origConn = store.createConnector({ from: bp.id, to: dde.id, connectorType: 'c', model, relationship: 'Association' });
+        const { view, tab } = freshFf('RegrLevelIt1');
+        const vmBp = store.createViewMember({ view: view.id, objectType: 'part', objectId: bp.id, x: 60, y: 60 });
+        const vmDde = store.createViewMember({ view: view.id, objectType: 'part', objectId: dde.id, x: 300, y: 60 });
+        const vmConn = store.createViewMember({ view: view.id, objectType: 'connector', objectId: origConn.id, fromVmId: vmBp.id, toVmId: vmDde.id });
+
+        commands.levelIt(app, tab, vmDde.id);
+        const vmsAfter = store.viewMembersForView(view.id);
+        out.ddeVmGone = !vmsAfter.some(v => v.objectType === 'part' && v.objectId === dde.id);
+        out.appCapVmPresent = vmsAfter.some(v => v.objectType === 'part' && v.objectId === appCap.id);
+        out.appCapVmAtOldPos = (() => { const v = vmsAfter.find(v => v.objectType === 'part' && v.objectId === appCap.id); return v && v.x === 300 && v.y === 60; })();
+        out.origConnVmGone = !vmsAfter.some(v => v.objectType === 'connector' && v.objectId === origConn.id);
+        out.origConnStillInModel = !!store.findConnector(origConn.id);
+        out.ddePartStillInModel = !!store.findPart(dde.id);
+        const newS = store.doc.connectors.find(c => c.connectorType === 's' && c.from === bp.id && c.to === appCap.id);
+        out.newStreamConnCorrectDirection = !!newS;
+        out.newStreamConnHasStream = newS && (newS.streams || []).includes('RegrLevelItStream');
+        out.newCompanionExists = store.doc.connectors.some(c => c.connectorType === 'c' && c.from === bp.id && c.to === appCap.id);
+      }
+
+      // 2) Bidirectionality: right-click the EARLIER node this time (BusinessProcess,
+      // template index 3) directly connected to the LATER neighbor (DataDataEntity,
+      // index 8) -- should replace BusinessProcess itself with ApplicationPhysical
+      // Component (index 7, immediately before DataDataEntity), not touch DataDataEntity.
+      // The ORIGINAL connector deliberately runs DataDataEntity -> BusinessProcess
+      // (backwards relative to template order) to prove the new connector's direction
+      // comes from the template's own chain position, not from the original
+      // connector's from/to fields.
+      {
+        const bp = store.createPart({ type: 'BusinessProcess', label: 'RegrLevelItBP2', model, streams: ['RegrLevelItStream2'] });
+        const dde = store.createPart({ type: 'DataDataEntity', label: 'RegrLevelItDDE2', model, streams: ['RegrLevelItStream2'] });
+        const apc = store.createPart({ type: 'ApplicationPhysicalComponent', label: 'RegrLevelItApc2', model, streams: ['RegrLevelItStream2'] });
+        const origConn = store.createConnector({ from: dde.id, to: bp.id, connectorType: 'c', model, relationship: 'Association' }); // backwards vs. template order
+        const { view, tab } = freshFf('RegrLevelIt2');
+        const vmDde = store.createViewMember({ view: view.id, objectType: 'part', objectId: dde.id, x: 60, y: 60 });
+        const vmBp = store.createViewMember({ view: view.id, objectType: 'part', objectId: bp.id, x: 300, y: 60 });
+        store.createViewMember({ view: view.id, objectType: 'connector', objectId: origConn.id, fromVmId: vmDde.id, toVmId: vmBp.id });
+
+        commands.levelIt(app, tab, vmBp.id);
+        const vmsAfter2 = store.viewMembersForView(view.id);
+        out.earlierNodeReplaced = !vmsAfter2.some(v => v.objectType === 'part' && v.objectId === bp.id);
+        out.laterNeighborUntouched = vmsAfter2.some(v => v.objectType === 'part' && v.objectId === dde.id);
+        out.apcVmPresent = vmsAfter2.some(v => v.objectType === 'part' && v.objectId === apc.id);
+        // Direction should be ApplicationPhysicalComponent -> DataDataEntity (template order), NOT the reverse.
+        out.earlierCaseCorrectDirection = store.doc.connectors.some(c => c.connectorType === 's' && c.from === apc.id && c.to === dde.id);
+        out.earlierCaseNoBackwardsConn = !store.doc.connectors.some(c => c.connectorType === 's' && c.from === dde.id && c.to === apc.id);
+      }
+
+      // 4) Already adjacent -- no changes. A SECOND ApplicationCapability part sharing
+      // the same stream also exists, so this genuinely proves the adjacency guard
+      // itself is what's skipping the connector -- without it, the "find an existing
+      // node of the (self-)same type" step would still find THIS other part and
+      // wrongly swap in a same-type replacement.
+      {
+        const bp = store.createPart({ type: 'BusinessProcess', label: 'RegrLevelItAdjBP', model, streams: ['S1'] });
+        const cap = store.createPart({ type: 'ApplicationCapability', label: 'RegrLevelItAdjCap', model, streams: ['S1'] });
+        store.createPart({ type: 'ApplicationCapability', label: 'RegrLevelItAdjCapDecoy', model, streams: ['S1'] });
+        const conn = store.createConnector({ from: bp.id, to: cap.id, connectorType: 'c', model, relationship: 'Association' });
+        const { view, tab } = freshFf('RegrLevelIt4');
+        const vmBp = store.createViewMember({ view: view.id, objectType: 'part', objectId: bp.id, x: 0, y: 0 });
+        const vmCap = store.createViewMember({ view: view.id, objectType: 'part', objectId: cap.id, x: 100, y: 0 });
+        store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn.id, fromVmId: vmBp.id, toVmId: vmCap.id });
+        const before = store.viewMembersForView(view.id).length;
+        commands.levelIt(app, tab, vmCap.id);
+        out.adjacentNoChange = store.viewMembersForView(view.id).length === before;
+      }
+
+      // 5) Type not in the template's chain -- no changes.
+      {
+        const u = store.createPart({ type: 'Unknown', label: 'RegrLevelItUnk', model, streams: ['S1'] });
+        const { view, tab } = freshFf('RegrLevelIt5');
+        const vmU = store.createViewMember({ view: view.id, objectType: 'part', objectId: u.id, x: 0, y: 0 });
+        const before = store.viewMembersForView(view.id).length;
+        commands.levelIt(app, tab, vmU.id);
+        out.unknownTypeNoChange = store.viewMembersForView(view.id).length === before;
+      }
+
+      // 6) No existing replacement part for the node's stream -- no changes.
+      {
+        const bp = store.createPart({ type: 'BusinessProcess', label: 'RegrLevelItNoReplBP', model, streams: ['S6'] });
+        const dde = store.createPart({ type: 'DataDataEntity', label: 'RegrLevelItNoReplDDE', model, streams: ['S6'] });
+        const conn = store.createConnector({ from: bp.id, to: dde.id, connectorType: 'c', model, relationship: 'Association' });
+        const { view, tab } = freshFf('RegrLevelIt6');
+        const vmBp = store.createViewMember({ view: view.id, objectType: 'part', objectId: bp.id, x: 0, y: 0 });
+        const vmDde = store.createViewMember({ view: view.id, objectType: 'part', objectId: dde.id, x: 100, y: 0 });
+        store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn.id, fromVmId: vmBp.id, toVmId: vmDde.id });
+        const before = store.viewMembersForView(view.id).length;
+        commands.levelIt(app, tab, vmDde.id);
+        out.noReplacementNoChange = store.viewMembersForView(view.id).length === before;
+      }
+
+      // 7) The replaced node still has ANOTHER connector on this view -- survives.
+      {
+        const bp = store.createPart({ type: 'BusinessProcess', label: 'RegrLevelItKeepBP', model, streams: ['S7'] });
+        const dde = store.createPart({ type: 'DataDataEntity', label: 'RegrLevelItKeepDDE', model, streams: ['S7'] });
+        store.createPart({ type: 'ApplicationCapability', label: 'RegrLevelItKeepCap', model, streams: ['S7'] });
+        const other = store.createPart({ type: 'DataDataEntity', label: 'RegrLevelItKeepOther', model, streams: [] });
+        const conn1 = store.createConnector({ from: bp.id, to: dde.id, connectorType: 'c', model, relationship: 'Association' });
+        const conn2 = store.createConnector({ from: dde.id, to: other.id, connectorType: 'c', model, relationship: 'Association' });
+        const { view, tab } = freshFf('RegrLevelIt7');
+        const vmBp = store.createViewMember({ view: view.id, objectType: 'part', objectId: bp.id, x: 0, y: 0 });
+        const vmDde = store.createViewMember({ view: view.id, objectType: 'part', objectId: dde.id, x: 100, y: 0 });
+        const vmOther = store.createViewMember({ view: view.id, objectType: 'part', objectId: other.id, x: 200, y: 0 });
+        store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn1.id, fromVmId: vmBp.id, toVmId: vmDde.id });
+        store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn2.id, fromVmId: vmDde.id, toVmId: vmOther.id });
+        commands.levelIt(app, tab, vmDde.id);
+        out.originalVmSurvivesWithOtherConn = store.viewMembersForView(view.id).some(v => v.objectType === 'part' && v.objectId === dde.id);
+      }
+
+      // 8) Section-based view -- no changes even called directly.
+      {
+        const view = store.addView('RegrLevelIt8_' + Date.now(), 'org');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        const bp = store.createPart({ type: 'BusinessProcess', label: 'RegrLevelItSecBP', model, streams: ['S8'] });
+        const dde = store.createPart({ type: 'DataDataEntity', label: 'RegrLevelItSecDDE', model, streams: ['S8'] });
+        store.createPart({ type: 'ApplicationCapability', label: 'RegrLevelItSecCap', model, streams: ['S8'] });
+        const conn = store.createConnector({ from: bp.id, to: dde.id, connectorType: 'c', model, relationship: 'Association' });
+        const vmBp = store.createViewMember({ view: view.id, objectType: 'part', objectId: bp.id, x: 0, y: 0, sectionId: '' });
+        const vmDde = store.createViewMember({ view: view.id, objectType: 'part', objectId: dde.id, x: 100, y: 0, sectionId: '' });
+        store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn.id, fromVmId: vmBp.id, toVmId: vmDde.id });
+        const before = store.viewMembersForView(view.id).length;
+        commands.levelIt(app, tab, vmDde.id);
+        out.sectionViewNoChange = store.viewMembersForView(view.id).length === before;
+      }
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["ddeVmGone"]:
+        problems.append("expected the DataDataEntity's own viewMember to be removed from this view after replacement")
+    if not result["appCapVmPresent"]:
+        problems.append("expected an ApplicationCapability viewMember to be placed on this view")
+    if not result["appCapVmAtOldPos"]:
+        problems.append("expected the replacement node to land exactly where the old DataDataEntity node was")
+    if not result["origConnVmGone"]:
+        problems.append("expected the original connector's viewMember to be removed from this view")
+    if not result["origConnStillInModel"]:
+        problems.append("expected the original Connector to remain untouched in the model (never deleted)")
+    if not result["ddePartStillInModel"]:
+        problems.append("expected the original DataDataEntity Part to remain untouched in the model (never deleted)")
+    if not result["newStreamConnCorrectDirection"]:
+        problems.append("expected a new 's' Stream connector from BusinessProcess to the ApplicationCapability")
+    if not result["newStreamConnHasStream"]:
+        problems.append("expected the new Stream connector to carry the DataDataEntity's own stream name")
+    if not result["newCompanionExists"]:
+        problems.append("expected a companion 'c' connector to also be created alongside the new 's' connector")
+    if not result["earlierNodeReplaced"]:
+        problems.append("expected right-clicking the EARLIER node (BusinessProcess) to replace IT, not the later neighbor")
+    if not result["laterNeighborUntouched"]:
+        problems.append("expected the later neighbor (DataDataEntity) to remain untouched when the earlier node is the one being replaced")
+    if not result["apcVmPresent"]:
+        problems.append("expected BusinessProcess to be replaced with ApplicationPhysicalComponent (template index 7, immediately before DataDataEntity)")
+    if not result["earlierCaseCorrectDirection"]:
+        problems.append("expected the new connector to run ApplicationPhysicalComponent -> DataDataEntity (template order) even though the ORIGINAL connector ran DataDataEntity -> BusinessProcess")
+    if not result["earlierCaseNoBackwardsConn"]:
+        problems.append("expected no backwards (DataDataEntity -> ApplicationPhysicalComponent) Stream connector to be created")
+    if not result["adjacentNoChange"]:
+        problems.append("expected already-adjacent template positions to produce no changes")
+    if not result["unknownTypeNoChange"]:
+        problems.append("expected a type not part of the template's chain to produce no changes")
+    if not result["noReplacementNoChange"]:
+        problems.append("expected no existing replacement part for the node's own stream to abort with no changes (never create a new one)")
+    if not result["originalVmSurvivesWithOtherConn"]:
+        problems.append("expected the original node's own viewMember to survive when it still has another connector on this view")
+    if not result["sectionViewNoChange"]:
+        problems.append("expected a section-based view to produce no changes even when levelIt is called directly")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Level It replaces a node directly connected across a stream-template chain gap with an existing node of the correct intermediate type (view-scoped, direction-correct, never deleting model data, never creating new replacement parts), and correctly no-ops on adjacency/unknown-type/no-replacement/section-view cases"
+
+
+def check_level_it_context_menu_and_toolbar_wiring(page):
+    """Regression guard for the real UI wiring of the new "Level It" command
+    (getCommandDefs/CMD_ICONS, render.js; runCommand, main.js) — confirms it's reached
+    end to end through the actual right-click context menu and toolbar, not just the
+    underlying commands.js function (covered separately by
+    check_level_it_replaces_across_template_gap). Covers: (1) right-clicking a single
+    node on a freeform view shows an enabled 'Level It' item, and clicking it performs
+    the real replacement through runCommand; (2) the same command also appears as a
+    toolbar button (getCommandDefs backs both surfaces, same as every other command);
+    (3) right-clicking a node on a SECTION-based view shows 'Level It' disabled (or
+    absent) — freeform views only, per the report."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      store.doc.industryTemplateName = 'Enterprise';
+      const out = {};
+
+      const bp = store.createPart({ type: 'BusinessProcess', label: 'RegrLevelItUiBP', model, streams: ['RegrLevelItUiStream'] });
+      const dde = store.createPart({ type: 'DataDataEntity', label: 'RegrLevelItUiDDE', model, streams: ['RegrLevelItUiStream'] });
+      const appCap = store.createPart({ type: 'ApplicationCapability', label: 'RegrLevelItUiCap', model, streams: ['RegrLevelItUiStream'] });
+      const conn = store.createConnector({ from: bp.id, to: dde.id, connectorType: 'c', model, relationship: 'Association' });
+      const view = store.addView('RegrLevelItUi_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const vmBp = store.createViewMember({ view: view.id, objectType: 'part', objectId: bp.id, x: 60, y: 60 });
+      const vmDde = store.createViewMember({ view: view.id, objectType: 'part', objectId: dde.id, x: 300, y: 60 });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn.id, fromVmId: vmBp.id, toVmId: vmDde.id });
+      app.render();
+      await new Promise(r => setTimeout(r, 80));
+
+      const ddeEl = document.querySelector(`.fnode[data-vm-id="${vmDde.id}"]`);
+      const box = ddeEl.getBoundingClientRect();
+      ddeEl.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: box.left + 10, clientY: box.top + 10 }));
+      await new Promise(r => setTimeout(r, 60));
+      const menuItem = [...document.querySelectorAll('.cmd-context-item')].find(el => el.textContent.includes('Level It'));
+      out.contextMenuHasLevelIt = !!menuItem;
+      out.contextMenuLevelItEnabled = !!menuItem && !menuItem.classList.contains('disabled');
+
+      menuItem.click();
+      await new Promise(r => setTimeout(r, 100));
+      const vmsAfter = store.viewMembersForView(view.id);
+      out.realClickReplaced = vmsAfter.some(v => v.objectType === 'part' && v.objectId === appCap.id) && !vmsAfter.some(v => v.objectType === 'part' && v.objectId === dde.id);
+
+      const bpEl = document.querySelector(`.fnode[data-vm-id="${vmBp.id}"]`);
+      bpEl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      out.toolbarHasLevelIt = [...document.querySelectorAll('#commands-list button')].some(b => (b.title || '').includes('Level It'));
+
+      const view2 = store.addView('RegrLevelItUiSection_' + Date.now(), 'org');
+      const tab2 = app.createCanvasTab(view2);
+      app.switchToTab(tab2.id);
+      const bp2 = store.createPart({ type: 'BusinessProcess', label: 'RegrLevelItUiBP2', model, streams: [] });
+      const vmBp2 = store.createViewMember({ view: view2.id, objectType: 'part', objectId: bp2.id, x: 0, y: 0, sectionId: '' });
+      app.render();
+      await new Promise(r => setTimeout(r, 80));
+      const bp2El = document.querySelector(`.fnode[data-vm-id="${vmBp2.id}"]`);
+      const box2 = bp2El.getBoundingClientRect();
+      bp2El.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: box2.left + 10, clientY: box2.top + 10 }));
+      await new Promise(r => setTimeout(r, 60));
+      const menuItem2 = [...document.querySelectorAll('.cmd-context-item')].find(el => el.textContent.includes('Level It'));
+      out.sectionViewLevelItDisabled = !menuItem2 || menuItem2.classList.contains('disabled');
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["contextMenuHasLevelIt"]:
+        problems.append("expected a 'Level It' item in the right-click context menu for a single node on a freeform view")
+    if not result["contextMenuLevelItEnabled"]:
+        problems.append("expected 'Level It' to be enabled for this exact scenario")
+    if not result["realClickReplaced"]:
+        problems.append("expected clicking the real context menu item to perform the actual replacement via runCommand")
+    if not result["toolbarHasLevelIt"]:
+        problems.append("expected a 'Level It' button in the Commands toolbar too (getCommandDefs backs both surfaces)")
+    if not result["sectionViewLevelItDisabled"]:
+        problems.append("expected 'Level It' to be disabled or absent on a section-based view")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The real right-click context menu and Commands toolbar both offer 'Level It' for a single node on a freeform view, correctly perform the replacement when clicked, and correctly disable it on a section-based view"
+
+
 def check_level_up_creates_data_data_entity(page):
     """Regression guard/new-feature check, reported directly: "Enhancement: when a
     single dataentitydetail is selected and user selects 'level-up' command, create
@@ -12350,6 +12655,8 @@ CHECKS = [
     check_auto_detect_connectors_detection_and_creation,
     check_auto_detect_connectors_dialog,
     check_level_up_creates_data_data_entity,
+    check_level_it_replaces_across_template_gap,
+    check_level_it_context_menu_and_toolbar_wiring,
     check_smart_check_composition_top_down,
     check_smart_check_composition_bottom_up,
     check_smart_check_node_composition_redirect,

@@ -4334,4 +4334,46 @@
 // under default routing with no obstacle. DESIGN_DOCUMENT.md SS9's own export bullet
 // list, tests/README.md, and public/instructions.html (Export View as Image's own
 // paragraph) updated. Full suite 157/157.
-export const APP_VERSION = '0.901';
+// v0.902: reported directly: "when in a free form view, add a new right-click level-it
+// command. Use case: when an existing datadataentity is added and connected to a
+// businessprocess, the level-it command will replace the datadataentity since stream
+// template does not have its type connected directly to a businessprocess, and will
+// replace it with applicationcapability since in the stream template 'path' that is
+// the next valid element between it and the target datadataentity. Silently (no user
+// prompt) replace the view dataentity node with existing applicationcapability node of
+// that named stream." Asked two clarifying questions (trigger point: right-click the
+// node itself vs. the connector; which stream to search when the node has more than
+// one) before building -- user picked right-click-the-node, and "just use the node's
+// own stream(s), try each in order." New levelIt (commands.js, freeform views only):
+// scans the right-clicked node's own connectors on this view for the first one whose
+// other endpoint's type sits more than one position away in the current stream
+// template's value[] chain (store.doc.industryTemplateName || 'Enterprise', same
+// default generateIndustry itself uses -- no dialog needed). Bidirectional: whichever
+// of the two nodes is LATER in the chain gets replaced with the type immediately
+// adjacent to the EARLIER one, regardless of which node was right-clicked or which way
+// the original connector ran. The replacement is always an EXISTING part (found by
+// walking the node's own streams[] in order, first match wins) -- never created;
+// aborts with a toast if none exists. View-scoped and conservative: the original
+// node's Part and its connector are never deleted from the model, only this view's own
+// viewMembers for them -- a new connector to the replacement is found-or-created via
+// the existing findOrCreateStreamConnector (same mechanism createStream's own chain-
+// building already uses), always oriented in the template's own earlier->later
+// direction. The original node's viewMember only gets removed if nothing else on this
+// view still references it. New 'levelIt' command in getCommandDefs/CMD_ICONS
+// (render.js, enabled only on freeform views with a single node selected -- appears in
+// both the right-click context menu and the Commands toolbar, same as every other
+// command) and runCommand's new 'levelIt' branch (main.js). New
+// check_level_it_replaces_across_template_gap (commands-level, using the REAL shipped
+// Enterprise template -- the exact reported BusinessProcess/ApplicationCapability/
+// DataDataEntity example -- plus bidirectionality, direction-independence from the
+// original connector, adjacency/unknown-type/no-replacement/still-referenced/section-
+// view no-ops) and check_level_it_context_menu_and_toolbar_wiring (real right-click
+// menu + toolbar + section-view disabling) -- every key assertion proven via TEMP
+// BREAK, including a genuine early miss (the first "adjacent connector" TEMP BREAK
+// attempt didn't actually exercise the guard, since a coincidental second failure mode
+// masked it -- caught by checking the diff still passed under the break, fixed by
+// adding a decoy same-type part so removing the guard visibly changes the outcome).
+// DESIGN_DOCUMENT.md (new "Level It" bullet, same section as Level Up's own
+// DataEntityDetails special case), tests/README.md, and public/instructions.html (new
+// Commands table row) updated. Full suite 159/159.
+export const APP_VERSION = '0.902';

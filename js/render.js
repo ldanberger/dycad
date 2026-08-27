@@ -471,6 +471,7 @@ const CMD_ICONS = {
   splitNode: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="10" r="2"/><circle cx="16" cy="4" r="2"/><circle cx="16" cy="16" r="2"/><path d="M6 10h2a2 2 0 0 1 2-2l4-2M8 10a2 2 0 0 1 2 2l4 2"/></svg>',
   levelUp: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="14" height="6" rx="1"/><path d="M10 9V2M6 5l4-4 4 4"/></svg>',
   levelDown: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="14" height="6" rx="1"/><path d="M10 11v7M6 15l4 4 4-4"/></svg>',
+  levelIt: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="16" r="2"/><circle cx="16" cy="4" r="2"/><path d="M6 16h5a3 3 0 0 0 3-3V6"/></svg>',
   generate: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.5 4.5l2 2M13.5 13.5l2 2M4.5 15.5l2-2M13.5 6.5l2-2"/><circle cx="10" cy="10" r="2.2"/></svg>',
   copy: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M13 7V4.5A1.5 1.5 0 0 0 11.5 3H4.5A1.5 1.5 0 0 0 3 4.5v7A1.5 1.5 0 0 0 4.5 13H7"/></svg>',
   paste: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="10" height="14" rx="1.5"/><path d="M8 4V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1"/><path d="M8 10h4M8 13h4"/></svg>',
@@ -491,12 +492,15 @@ function getCommandDefs(app) {
   const singlePart = singleVm && singleVm.objectType === 'part' ? app.store.findPart(singleVm.objectId) : null;
   const hasNodeSelection = isCanvas && [...tab.selection].some((id) => app.store.findViewMember(id)?.objectType === 'part');
   const nodeSelectionCount = isCanvas ? [...tab.selection].filter((id) => app.store.findViewMember(id)?.objectType === 'part').length : 0;
+  const view = isCanvas ? app.store.findView(tab.viewId) : null;
+  const isFreeformCanvas = isCanvas && view && !isSectionViewType(view.viewType);
 
   return [
     { key: 'duplicateStream', label: 'Duplicate Stream', hint: 'Duplicate Stream — clone a stream to a new name', enabled: !!singlePart && (singlePart.streams || []).length > 0 },
     { key: 'splitNode', label: 'Split Node', hint: 'Split Node — create a sibling, rewire outgoing edges', enabled: !!singlePart },
     { key: 'levelUp', label: 'Level Up', hint: (singlePart && ciEq(singlePart.type, 'DataEntityDetails')) ? 'Level Up — create (or open) this table\'s Data Entity parent' : 'Level Up — open a new parent view containing this view\'s nodes', enabled: isCanvas },
     { key: 'levelDown', label: 'Level Down', hint: 'Level Down — push 2+ selected nodes into a sub-view', enabled: selCount >= 2 },
+    { key: 'levelIt', label: 'Level It', hint: 'Level It — replace this node with the correct stream-template type where it directly connects across a gap (freeform views only)', enabled: isFreeformCanvas && !!singlePart },
     { key: 'generate', label: 'Generate Stream', hint: 'Generate Stream — build a stream from a template', enabled: isCanvas },
     { key: 'copy', label: 'Copy', hint: 'Copy — copy the selected nodes', enabled: hasNodeSelection },
     { key: 'paste', label: 'Paste', hint: 'Paste — paste copied nodes into this view', enabled: isCanvas && !!app.clipboard },
