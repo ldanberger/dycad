@@ -794,6 +794,136 @@ def check_remap_align_by_section_dialog_wiring(page):
     return True, "The Remap dialog's 'Align by section' checkbox is checked by default, visible with the right label for grid patterns and 'clusters' (relabeled 'Cluster by section' there), hidden for 'force'/'custom', always resets to checked, and round-trips correctly through Save As/Load including a pre-existing preset with no such field at all"
 
 
+def check_remap_align_by_section_edge_bands(page):
+    """Direct follow-up bug report against check_remap_align_by_section_grid/_clusters
+    above: "didn't fix problem. reproduce problem by running console script, generate
+    inventory view. remap with business organization unit on top 1 and business
+    function on top 2, the nodes are not aligned by section nor by connector
+    priority." Root cause: BOTH check_remap_align_by_section_grid and the underlying
+    minimizeRowCrossings/alignRowsBySection machinery only ever apply to the MIDDLE
+    grid (allMiddleVms) -- when an Edge Assignment pins BOTH a section's
+    BusinessOrganizationUnit and its BusinessFunction to DIFFERENT numbered slots on
+    the SAME edge (Top 1 and Top 2), neither ever reaches allMiddleVms at all, so
+    "Align by section" silently never applied there. Fixed by generalizing
+    alignRowsBySection with an `axis` parameter ('x' for top/bottom bands, whose
+    members sit side by side; 'y' for left/right, which stack vertically) and calling
+    it a second time, once per edge, directly on each edge's own stacked slot arrays
+    (topSlots/bottomSlots/leftSlots/rightSlots) -- adjacent slots on one edge are
+    structurally identical to adjacent middle-grid rows.
+
+    That alone wasn't enough on further real-data testing against the real
+    generateIndustry/generateInventoryView pipeline this was reported against, which
+    exposed two more, deeper bugs fixed alongside this one: (1) `sectionDelta`'s
+    original swap-acceptance rule was a BINARY aligned/misaligned flag, which can only
+    ever show an improvement on the EXACT swap that lands a pair in the same column --
+    a pair starting MORE than one column apart (routine on a real edge holding dozens
+    of parts) could never take even one step toward each other, since every
+    intermediate swap showed "still misaligned before, still misaligned after" = zero
+    delta. Fixed by switching to a continuous column-DISTANCE delta (matching
+    lengthDeltaOf's own established pattern), plus a new barycenter-style SORT phase
+    each iteration (same two-phase shape minimizeRowCrossings already uses) so a vm
+    can move any distance in one step instead of only ever walking there one adjacent
+    swap at a time, which real-data testing found could get blocked indefinitely on a
+    dense, contested row. (2) Minimize Connector Length, when also on, independently
+    repositions each band/row member toward the barycenter of ALL its real
+    connections -- since `part.section` propagates to an ENTIRE generated chain (every
+    Capability/Process/Entity spawned from one Function, not just its own reified
+    Organization Unit), a Function can have several real, same-section neighbors, so
+    even a section-aware average still diluted the position away from the one specific
+    adjacent-band pairing "Align by section" targets. Fixed by having Minimize
+    Connector Length (minimizeConnectorLengthPass for the middle grid, alignBand for
+    Edge Assignment bands) consult the SAME sectionPriorityPartners scan
+    alignRowsBySection uses -- an UNAMBIGUOUS (mutual 1:1) partner exclusively decides
+    "desired" position, skipping the plain average entirely, but only when neither side
+    is shared with a third row member (an org with several functions falls back to the
+    ordinary average instead of forcing a hard multi-way tie that would cascade through
+    the whole band via resolveSpacedPositions' single-chain spacing sweep).
+
+    Exercises applyRemapLayout directly (not through the dialog) with a real 2-pair
+    scenario matching the report's own shape (an Organization Unit and its Function,
+    connected by a real Assignment-style connector, sharing a Section) — TWO such pairs
+    with deliberately adversarial naming (alphabetical sort disagrees with correct
+    section pairing, and starts them MORE than one column apart, proving the
+    binary-vs-distance fix) — on BOTH a top1/top2 Edge Assignment (the exact reported
+    shape) and, separately, a left1/left2 one (axis 'y', proving the fix isn't
+    top/bottom-specific). Each function also carries a real connector to an unrelated
+    middle-grid Capability, so Minimize Crossings + Minimize Connector Length running
+    together (the report's own "generate inventory view... remap with..." scenario,
+    which always has both on) exercises the sectionPriorityPartners fix, not just the
+    ordering fix alone. Every assertion proven via TEMP BREAK (commenting out the new
+    edge-band alignRowsBySection calls in applyRemapLayout, confirming this test's own
+    alignment assertions fail), then reverted."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const out = {};
+
+      const buildPairs = (view, edgeAssignment) => {
+        const mk = (type, label, section) => store.createPart({ type, label, model, streams: ['S'], section: section || '' });
+        const place = (part) => store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: 0, y: 0 });
+        const conn = (fromVm, toVm, fromP, toP) => {
+          const c = store.createConnector({ from: fromP.id, to: toP.id, connectorType: 'c', model, relationship: 'Association' });
+          store.createViewMember({ view: view.id, objectType: 'connector', objectId: c.id, fromVmId: fromVm.id, toVmId: toVm.id });
+        };
+        // Adversarial naming: alphabetical sort (AAAOrg < ZZZOrg) disagrees with
+        // correct section pairing, AND starts the two matched pairs more than one
+        // column apart from each other -- proving both the ordering fix and the
+        // binary-vs-distance sectionDelta fix.
+        const orgA = mk('BusinessOrganizationUnit', 'AAAOrg', 'AAAOrg'), orgZ = mk('BusinessOrganizationUnit', 'ZZZOrg', 'ZZZOrg');
+        const fnA = mk('BusinessFunction', 'AAAFn', 'ZZZOrg'), fnZ = mk('BusinessFunction', 'ZZZFn', 'AAAOrg');
+        const capA = mk('BusinessCapability', 'CapA' + edgeAssignment), capZ = mk('BusinessCapability', 'CapZ' + edgeAssignment);
+        const vmOrgA = place(orgA), vmOrgZ = place(orgZ), vmFnA = place(fnA), vmFnZ = place(fnZ), vmCapA = place(capA), vmCapZ = place(capZ);
+        conn(vmOrgA, vmFnZ, orgA, fnZ);
+        conn(vmOrgZ, vmFnA, orgZ, fnA);
+        conn(vmFnA, vmCapA, fnA, capA);
+        conn(vmFnZ, vmCapZ, fnZ, capZ);
+      };
+      const posOf = (view, label, axis) => {
+        const vm = store.viewMembersForView(view.id).find(v => v.objectType === 'part' && store.findPart(v.objectId)?.label === label);
+        return vm ? vm[axis] : null;
+      };
+      const runOne = (edgeAssignment, alignBySection, axis) => {
+        const view = store.addView('RegrAlignSecBand_' + JSON.stringify(edgeAssignment) + '_' + alignBySection + '_' + Date.now() + '_' + Math.random(), 'ff');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        buildPairs(view, JSON.stringify(edgeAssignment));
+        commands.remap(app, tab, {
+          templateName: 'Enterprise', pattern: 'default', sortKeys: ['nodeLabel'],
+          edgeAssignment, minimizeCrossings: true, minimizeConnectorLength: true, alignBySection,
+        });
+        return {
+          orgAeqFnZ: posOf(view, 'AAAOrg', axis) === posOf(view, 'ZZZFn', axis),
+          orgZeqFnA: posOf(view, 'ZZZOrg', axis) === posOf(view, 'AAAFn', axis),
+        };
+      };
+
+      // Top/bottom bands arrange members side by side (axis 'x' decides alignment);
+      // left/right bands stack them vertically instead (axis 'y' decides it) -- same
+      // convention orderBand/alignBand themselves use.
+      const topOn = runOne({ BusinessOrganizationUnit: 'top1', BusinessFunction: 'top2' }, true, 'x');
+      out.topOnAligned = topOn.orgAeqFnZ && topOn.orgZeqFnA;
+      const topOff = runOne({ BusinessOrganizationUnit: 'top1', BusinessFunction: 'top2' }, false, 'x');
+      out.topOffUnaligned = !(topOff.orgAeqFnZ && topOff.orgZeqFnA);
+      const leftOn = runOne({ BusinessOrganizationUnit: 'left1', BusinessFunction: 'left2' }, true, 'y');
+      out.leftOnAligned = leftOn.orgAeqFnZ && leftOn.orgZeqFnA;
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["topOnAligned"]:
+        problems.append("expected the reported shape (Organization Unit on Top 1, Function on Top 2) with alignBySection:true to align each matched pair into the same column, with Minimize Crossings and Minimize Connector Length also on (as the report's own 'generate inventory view... remap with...' scenario always has)")
+    if not result["topOffUnaligned"]:
+        problems.append("test setup itself is wrong -- expected alignBySection:false to leave the adversarially-named pairs unaligned (sanity check that the scenario isn't accidentally self-aligning)")
+    if not result["leftOnAligned"]:
+        problems.append("expected the same fix to apply to a left1/left2 Edge Assignment (axis 'y'), not just top/bottom")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "\"Align by section\" now correctly applies WITHIN an edge's own stacked Edge Assignment slots (e.g. Organization Unit on Top 1, its Function on Top 2 -- the exact reported shape), including with Minimize Crossings and Minimize Connector Length both also on, and on left/right bands too"
+
+
 def check_custom_remap_grid_convenience_layer(page):
     """New-feature check for the 'custom' Remap pattern (commands.js's
     applyRemapLayout), reported directly across a short back-and-forth: "is it
@@ -12992,6 +13122,7 @@ CHECKS = [
     check_remap_align_by_section_grid,
     check_remap_align_by_section_clusters,
     check_remap_align_by_section_dialog_wiring,
+    check_remap_align_by_section_edge_bands,
     check_custom_remap_grid_convenience_layer,
     check_custom_remap_dialog,
     check_force_directed_no_runaway_drift,

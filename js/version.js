@@ -4473,4 +4473,78 @@
 // layout_optimization). DESIGN_DOCUMENT.md SS6.1a, tests/README.md, and
 // public/instructions.html (new "Align by section" paragraph, Preset field list)
 // updated. Full suite 163/163.
-export const APP_VERSION = '0.904';
+// v0.905: direct follow-up bug report against v0.904's "Align by section": "didn't fix
+// problem. reproduce problem by running console script, generate inventory view.
+// remap with business organization unit on top 1 and business function on top 2, the
+// nodes are not aligned by section nor by connector priority." Root cause:
+// alignRowsBySection only ever ran against the middle grid (allMiddleVms) -- when an
+// Edge Assignment pins BOTH a section's Organization Unit and its Function to
+// different numbered slots on the SAME edge, neither ever reaches allMiddleVms at all,
+// so "Align by section" silently never applied there. Fixed by generalizing
+// alignRowsBySection with an `axis` parameter ('x' for top/bottom bands, whose members
+// sit side by side; 'y' for left/right, which stack vertically) and calling it a
+// second time, once per edge, directly on each edge's own stacked slot arrays
+// (topSlots/bottomSlots/leftSlots/rightSlots) -- adjacent slots on one edge are
+// structurally identical to adjacent middle-grid rows.
+//
+// Real-data testing against the actual generateIndustry/generateInventoryView pipeline
+// this was reported against exposed two more, deeper bugs fixed alongside this one:
+// (1) `sectionDelta`'s original swap-acceptance rule was a BINARY aligned/misaligned
+// flag, which can only ever show an improvement on the EXACT swap that lands a pair in
+// the same column -- a pair starting more than one column apart (routine on a real
+// edge holding dozens of parts) could never take even one step toward each other.
+// Fixed by switching to a continuous column-DISTANCE delta (matching lengthDeltaOf's
+// own established pattern), plus a new barycenter-style SORT phase each iteration
+// (same two-phase shape minimizeRowCrossings already uses) so a vm can move any
+// distance in one step instead of only ever walking there one adjacent swap at a time
+// -- real-data testing found the swap-only version could get blocked indefinitely on a
+// dense, contested row. (2) Minimize Connector Length, when also on, independently
+// repositions each band/row member toward the barycenter of ALL its real connections
+// -- since part.section propagates to an ENTIRE generated chain (every Capability/
+// Process/Entity spawned from one Function, not just its own reified Organization
+// Unit), a Function can have several real, same-section neighbors, so even a
+// section-aware average still diluted the position away from the one specific
+// adjacent-band pairing "Align by section" targets. Fixed with a new shared helper,
+// sectionPriorityPartners (commands.js) -- the same adjacent-row/band, same-section
+// connector scan alignRowsBySection itself uses -- consulted by both
+// minimizeConnectorLengthPass (middle grid) and alignBand (Edge Assignment bands): an
+// UNAMBIGUOUS (mutual 1:1) partner exclusively decides "desired" position, skipping
+// the plain average entirely, but only when neither side is shared with a third row
+// member -- an Organization Unit with several Functions falls back to the ordinary
+// average instead of forcing a hard multi-way tie that would cascade a large
+// compromise through the WHOLE band via resolveSpacedPositions' single-chain spacing
+// sweep, dragging even unrelated, otherwise-perfectly-alignable pairs out of position.
+// A same-row occlusion guard (per-swap, matching minimizeRowCrossings' own scope) also
+// turned out insufficient on its own real-data testing: a global all-or-nothing final
+// geometric check (compare real occlusion before/after the WHOLE pass, discard
+// entirely if worse) regressed on a large, real Edge Assignment band, discarding every
+// correct alignment along with a handful of unavoidable side effects -- fixed by
+// checking the same real geometry (segment-vs-rect against every other row-group
+// member's actual box) PER CANDIDATE SWAP/SORT instead, so only the specific change
+// that would itself increase occlusion is rejected.
+//
+// New check_remap_align_by_section_edge_bands (tests/run_all.py): two adversarially-
+// named 1:1 Organization-Unit/Function pairs (proving both the ordering fix and the
+// binary-vs-distance fix) on a top1/top2 Edge Assignment (the exact reported shape)
+// and, separately, a left1/left2 one, with Minimize Crossings and Minimize Connector
+// Length both on (the report's own scenario always has both) -- each function also
+// carries a real connector to an unrelated middle-grid Capability, exercising the
+// sectionPriorityPartners fix specifically. Both new fixes proven via TEMP BREAK
+// (reverting the edge-band alignRowsBySection calls, and separately alignBand's
+// priority-partner lookup, each confirmed to make this test fail), then reverted.
+// Every pre-existing test needed no changes -- all still pass unmodified, including
+// the three v0.904 regression guards this fix's own predecessor attempts initially
+// broke and then had to fix against in turn (check_remap_layered_avoids_node_
+// occlusion, check_remap_edge_assignment_and_layout_optimization,
+// check_remap_align_by_section_grid/_clusters). Known, accepted limitation: on a
+// SEVERELY oversubscribed section (many Functions sharing one Organization Unit, an
+// inherent many-to-one imbalance no algorithm can perfectly satisfy) Minimize
+// Connector Length's spacing cascade can still leave some otherwise-clean pairs
+// elsewhere in the same crowded band imperfectly positioned -- verified this doesn't
+// affect the ordinary, non-oversubscribed case (including the reported scenario
+// itself) via a clean synthetic reproduction. DESIGN_DOCUMENT.md SS6.1a and
+// tests/README.md updated; no end-user-visible behavior CHANGED beyond fixing the bug
+// itself (instructions.html's existing "Align by section" paragraph already described
+// the intended behavior this restores), so public/instructions.html untouched. Full
+// suite 164/164.
+export const APP_VERSION = '0.905';
