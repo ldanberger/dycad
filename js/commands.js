@@ -4307,10 +4307,31 @@ function applyRemapLayout(app, viewId, options = {}) {
     const leftSlots = orderedSlotsFor(leftLayout, edgeBuckets.left, 'y');
     const rightSlots = orderedSlotsFor(rightLayout, edgeBuckets.right, 'y');
 
+    // Reported directly: "when calculating bottom row or right column, the bottom row
+    // or right column to use is not including the rows or columns created due to remap
+    // layout. Currently when 15 nodes are placed in first column which results in 15
+    // rows, the 'last row' calculation uses just remaining nodes and is lower, so
+    // placement on 'last row' or last row 2 etc. are not actually on the last rows."
+    // Left/right bands each start at middleMinY and grow DOWNWARD one row per member
+    // (i*stepY below), same as top/bottom bands each start at middleMinX and grow
+    // RIGHTWARD one column per member (i*stepX) — so a tall left/right band, or a wide
+    // top/bottom band, can extend well past the plain middle grid's own middleMaxY/
+    // middleMaxX (computed from allMiddleVms alone, above) whenever it has more members
+    // than the middle grid has rows/columns. Bottom needs to start BELOW whichever is
+    // actually lower — the middle grid or the tallest left/right band — and Right needs
+    // to start to the RIGHT of whichever is actually further right — the middle grid or
+    // the widest top/bottom band. Top and Left are unaffected: they're anchored at the
+    // near edge (rowBaseY/baseX or middleMinX/middleMinY), which left/right/top/bottom
+    // bands only ever grow away from, never past.
+    const maxLeftOrRightCount = Math.max(0, ...leftSlots.map((vms) => vms.length), ...rightSlots.map((vms) => vms.length));
+    const maxTopOrBottomCount = Math.max(0, ...topSlots.map((vms) => vms.length), ...bottomSlots.map((vms) => vms.length));
+    const bottomBaseY = maxLeftOrRightCount > 0 ? Math.max(middleMaxY, middleMinY + (maxLeftOrRightCount - 1) * stepY) : middleMaxY;
+    const rightBaseX = maxTopOrBottomCount > 0 ? Math.max(middleMaxX, middleMinX + (maxTopOrBottomCount - 1) * stepX) : middleMaxX;
+
     topSlots.forEach((vms, p) => vms.forEach((vm, i) => { vm.x = middleMinX + i * stepX; vm.y = rowBaseY + p * stepY; }));
-    bottomSlots.forEach((vms, p) => vms.forEach((vm, i) => { vm.x = middleMinX + i * stepX; vm.y = middleMaxY + (bottomLayout.depth - p) * stepY; }));
+    bottomSlots.forEach((vms, p) => vms.forEach((vm, i) => { vm.x = middleMinX + i * stepX; vm.y = bottomBaseY + (bottomLayout.depth - p) * stepY; }));
     leftSlots.forEach((vms, p) => vms.forEach((vm, i) => { vm.x = baseX + p * stepX; vm.y = middleMinY + i * stepY; }));
-    rightSlots.forEach((vms, p) => vms.forEach((vm, i) => { vm.x = middleMaxX + (rightLayout.depth - p) * stepX; vm.y = middleMinY + i * stepY; }));
+    rightSlots.forEach((vms, p) => vms.forEach((vm, i) => { vm.x = rightBaseX + (rightLayout.depth - p) * stepX; vm.y = middleMinY + i * stepY; }));
 
     // Minimize Connector Length also aligns each band's CROSS axis (x for top/bottom,
     // y for left/right) toward whatever its members are actually connected to — the

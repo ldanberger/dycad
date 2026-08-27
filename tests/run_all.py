@@ -5087,6 +5087,167 @@ def check_remap_edge_assignment_numbered_slots_and_blanks(page):
     return True, "Edge Assignment's numbered slots (1-5 per edge) place different element types into separate, correctly-ordered columns/rows, auto-compact around an untouched gap, and correctly reserve a real empty gap when edgeBlanks explicitly forces one -- consistently for all four edges"
 
 
+def check_remap_edge_assignment_bottom_right_account_for_other_bands(page):
+    """Regression guard, reported directly: "when calculating bottom row or right
+    column, the bottom row or right column to use is not including the rows or columns
+    created due to remap layout. Currently when 15 nodes are placed in first column
+    which results in 15 rows, the 'last row' calculation uses just remaining nodes and
+    is lower, so placement on 'last row' or last row 2 etc. are not actually on the
+    last rows." Root cause: applyRemapLayout's Edge Assignment placement computed
+    bottom/right bands' own starting position (middleMaxY/middleMaxX) from ONLY the
+    plain middle grid (allMiddleVms) -- but a left or right band with more members than
+    the middle grid has rows grows DOWNWARD past middleMaxY (each band starts at
+    middleMinY and adds one row per member), and a top or bottom band with more members
+    than the middle grid has columns grows RIGHTWARD past middleMaxX the same way — so
+    a tall left/right band, or a wide top/bottom band, could reach further than the
+    middle grid itself, and Bottom/Right needs to start beyond WHICHEVER is actually
+    furthest, not just the middle grid's own extent. Top and Left are unaffected (both
+    anchored at the near edge, which every band only ever grows away from). Covers: (1)
+    the exact reported shape — a Left band with 15 members (15 rows, taller than a
+    2-node middle grid) — Bottom now lands below the Left band's own lowest member, not
+    just below the middle grid; (2) the symmetric Right-band-taller case also fixes
+    Bottom; (3) a Top-band-wider case fixes Right; (4) a Bottom-band-wider case ALSO
+    fixes Right (both top and bottom bands can reach past middleMaxX); (5) a left band
+    SMALLER than the middle grid changes nothing (Bottom still correctly anchors on the
+    middle grid, same as before this fix); (6) with Left 1 AND Left 2 at different
+    depths, Bottom correctly anchors on the DEEPER of the two slots, not their sum."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const mk = (type, label) => store.createPart({ type, label, model, streams: [] });
+      const freshView = (name) => {
+        const view = store.addView(name + '_' + Date.now() + '_' + Math.random(), 'ff');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        return view;
+      };
+      const place = (view, parts) => { for (const p of parts) store.createViewMember({ view: view.id, objectType: 'part', objectId: p.id, x: 0, y: 0 }); };
+      const posOf = (view, label) => {
+        const vm = store.viewMembersForView(view.id).find(v => v.objectType === 'part' && store.findPart(v.objectId)?.label === label);
+        return vm ? { x: vm.x, y: vm.y } : null;
+      };
+      const out = {};
+
+      // 1) The exact reported shape: Left 1 with 15 members (15 rows), a small 2-node
+      // middle grid, Bottom 1 assigned too.
+      {
+        const view = freshView('RegrBottomRight1');
+        const actors = [];
+        for (let i = 0; i < 15; i++) actors.push(mk('BusinessActor', 'A' + i));
+        place(view, actors);
+        const p1 = mk('BusinessProcess', 'Mid1'), p2 = mk('BusinessProcess', 'Mid2');
+        place(view, [p1, p2]);
+        const bnode = mk('ApplicationCapability', 'Bottom1Node');
+        place(view, [bnode]);
+        commands.applyRemapLayout(app, view.id, { pattern: 'default', sortKeys: ['nodeLabel'], edgeAssignment: { BusinessActor: 'left1', ApplicationCapability: 'bottom1' } });
+        const trueMaxY = Math.max(...actors.map(a => posOf(view, a.label).y), posOf(view, 'Mid1').y, posOf(view, 'Mid2').y);
+        out.reportedShapeFixed = posOf(view, 'Bottom1Node').y > trueMaxY;
+      }
+
+      // 2) Right band taller than the middle grid also fixes Bottom.
+      {
+        const view = freshView('RegrBottomRight2');
+        const actors = [];
+        for (let i = 0; i < 10; i++) actors.push(mk('GeneralActor', 'R' + i));
+        place(view, actors);
+        const p1 = mk('BusinessProcess', 'RMid1');
+        place(view, [p1]);
+        const bnode = mk('ApplicationCapability', 'RBottomNode');
+        place(view, [bnode]);
+        commands.applyRemapLayout(app, view.id, { pattern: 'default', sortKeys: ['nodeLabel'], edgeAssignment: { GeneralActor: 'right1', ApplicationCapability: 'bottom1' } });
+        const trueMaxY = Math.max(...actors.map(a => posOf(view, a.label).y), posOf(view, 'RMid1').y);
+        out.rightTallerFixesBottom = posOf(view, 'RBottomNode').y > trueMaxY;
+      }
+
+      // 3) Top band wider than the middle grid fixes Right.
+      {
+        const view = freshView('RegrBottomRight3');
+        const actors = [];
+        for (let i = 0; i < 10; i++) actors.push(mk('GeneralActor', 'T' + i));
+        place(view, actors);
+        const p1 = mk('BusinessProcess', 'TMid1');
+        place(view, [p1]);
+        const rnode = mk('ApplicationCapability', 'TRightNode');
+        place(view, [rnode]);
+        commands.applyRemapLayout(app, view.id, { pattern: 'default', sortKeys: ['nodeLabel'], edgeAssignment: { GeneralActor: 'top1', ApplicationCapability: 'right1' } });
+        const trueMaxX = Math.max(...actors.map(a => posOf(view, a.label).x), posOf(view, 'TMid1').x);
+        out.topWiderFixesRight = posOf(view, 'TRightNode').x > trueMaxX;
+      }
+
+      // 4) Bottom band wider than the middle grid ALSO fixes Right.
+      {
+        const view = freshView('RegrBottomRight4');
+        const actors = [];
+        for (let i = 0; i < 10; i++) actors.push(mk('GeneralActor', 'B' + i));
+        place(view, actors);
+        const p1 = mk('BusinessProcess', 'BMid1');
+        place(view, [p1]);
+        const rnode = mk('ApplicationCapability', 'BRightNode');
+        place(view, [rnode]);
+        commands.applyRemapLayout(app, view.id, { pattern: 'default', sortKeys: ['nodeLabel'], edgeAssignment: { GeneralActor: 'bottom1', ApplicationCapability: 'right1' } });
+        const trueMaxX = Math.max(...actors.map(a => posOf(view, a.label).x), posOf(view, 'BMid1').x);
+        out.bottomWiderFixesRight = posOf(view, 'BRightNode').x > trueMaxX;
+      }
+
+      // 5) A SMALLER left band changes nothing -- Bottom still anchors on the (taller) middle grid.
+      {
+        const view = freshView('RegrBottomRight5');
+        const actor = mk('BusinessActor', 'SmAct');
+        place(view, [actor]);
+        const procs = [];
+        for (let i = 0; i < 8; i++) { const pr = mk('BusinessProcess', 'SmProc' + i); pr.streams = ['S' + i]; procs.push(pr); }
+        place(view, procs);
+        const bnode = mk('ApplicationCapability', 'SmBottomNode');
+        place(view, [bnode]);
+        commands.applyRemapLayout(app, view.id, { pattern: 'default', sortKeys: ['nodeLabel'], edgeAssignment: { BusinessActor: 'left1', ApplicationCapability: 'bottom1' } });
+        const trueMaxY = Math.max(...procs.map(pr => posOf(view, pr.label).y));
+        out.smallerLeftBandUnaffected = posOf(view, 'SmBottomNode').y > trueMaxY;
+      }
+
+      // 6) Left 1 (2 members) + Left 2 (6 members, deeper) -- Bottom anchors on the DEEPER slot.
+      {
+        const view = freshView('RegrBottomRight6');
+        const left1 = [mk('BusinessActor', 'L1a'), mk('BusinessActor', 'L1b')];
+        const left2 = [];
+        for (let i = 0; i < 6; i++) left2.push(mk('GeneralActor', 'L2_' + i));
+        place(view, [...left1, ...left2]);
+        const p1 = mk('BusinessProcess', 'MSMid1');
+        place(view, [p1]);
+        const bnode = mk('ApplicationCapability', 'MSBottomNode');
+        place(view, [bnode]);
+        commands.applyRemapLayout(app, view.id, { pattern: 'default', sortKeys: ['nodeLabel'], edgeAssignment: { BusinessActor: 'left1', GeneralActor: 'left2', ApplicationCapability: 'bottom1' } });
+        const stepY = posOf(view, 'L2_1').y - posOf(view, 'L2_0').y;
+        const trueMaxY = Math.max(...left2.map(a => posOf(view, a.label).y), posOf(view, 'MSMid1').y);
+        // Exact equality, not just ">" -- a "sum the two slots' depths" bug would ALSO
+        // land past trueMaxY (just further than necessary), so only an exact match
+        // against the one-step-past-the-deepest-slot expectation actually distinguishes
+        // "deepest slot" from "sum of slots".
+        out.deepestSlotWins = posOf(view, 'MSBottomNode').y === trueMaxY + stepY;
+      }
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["reportedShapeFixed"]:
+        problems.append("expected Bottom 1 to land below a 15-member Left 1 band's own lowest member, not just below the (much smaller) middle grid -- the exact reported shape")
+    if not result["rightTallerFixesBottom"]:
+        problems.append("expected a Right band taller than the middle grid to ALSO push Bottom's own starting position down past it")
+    if not result["topWiderFixesRight"]:
+        problems.append("expected a Top band wider than the middle grid to push Right's own starting position past it")
+    if not result["bottomWiderFixesRight"]:
+        problems.append("expected a Bottom band wider than the middle grid to ALSO push Right's own starting position past it")
+    if not result["smallerLeftBandUnaffected"]:
+        problems.append("expected a left band SMALLER than the middle grid to leave Bottom anchored on the middle grid, unaffected")
+    if not result["deepestSlotWins"]:
+        problems.append("expected Bottom to anchor on the DEEPER of two left slots (Left 1 + Left 2 at different depths), not their sum or the shallower one")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "applyRemapLayout's Bottom/Right Edge Assignment bands now correctly start beyond whichever is actually furthest out -- the plain middle grid, or a taller left/right band (for Bottom) / a wider top/bottom band (for Right) -- instead of only ever considering the middle grid's own (potentially much smaller) extent"
+
+
 def check_remap_preset_dialog_and_local_persistence(page):
     """Regression guard for Remap's named presets (store.remapPresets, main.js's
     promptRemap Preset row) — reported directly: "let's add similar load/save settings
@@ -12602,6 +12763,7 @@ CHECKS = [
     check_remap_options_persist_across_views,
     check_remap_edge_assignment_and_layout_optimization,
     check_remap_edge_assignment_numbered_slots_and_blanks,
+    check_remap_edge_assignment_bottom_right_account_for_other_bands,
     check_remap_edge_assignment_dialog_numbered_ui,
     check_remap_preset_dialog_and_local_persistence,
     check_remap_view_remembers_own_settings,

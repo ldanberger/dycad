@@ -4376,4 +4376,38 @@
 // DESIGN_DOCUMENT.md (new "Level It" bullet, same section as Level Up's own
 // DataEntityDetails special case), tests/README.md, and public/instructions.html (new
 // Commands table row) updated. Full suite 159/159.
-export const APP_VERSION = '0.902';
+// v0.903: reported directly: "remap problem: when calculating bottom row or right
+// column, the bottom row or right column to use is not including the rows or columns
+// created due to remap layout. Currently when 15 nodes are placed in first column
+// which results in 15 rows, the 'last row' calculation uses just remaining nodes and
+// is lower, so placement on 'last row' or last row 2 etc. are not actually on the
+// last rows." Root cause found via direct repro (a synthetic "15 nodes, 1 distinct
+// stream each" case matching the literal description did NOT reproduce a bug -- had
+// to try a second, more revealing shape): every left/right Edge Assignment slot grows
+// DOWNWARD from middleMinY one row per member, and every top/bottom slot grows
+// RIGHTWARD from middleMinX one column per member -- so a left/right band with more
+// members than the middle grid has rows (or a top/bottom band with more members than
+// the middle grid has columns) can reach past middleMaxY/middleMaxX entirely
+// independent of the middle grid's own size, but Bottom/Right's own starting position
+// was always the bare middleMaxY/middleMaxX, ignoring this. Fixed in
+// applyRemapLayout (commands.js): new maxLeftOrRightCount/maxTopOrBottomCount (the
+// largest member count across every active left-or-right / top-or-bottom slot,
+// computed right after the four orderedSlotsFor calls) feed new bottomBaseY/
+// rightBaseX (Math.max against middleMaxY/middleMaxX), replacing the bare middleMaxY/
+// middleMaxX in the Bottom/Right .forEach placement lines only -- Top/Left need no
+// equivalent fix, both anchored at the near edge every band only ever grows away
+// from. New check_remap_edge_assignment_bottom_right_account_for_other_bands (tests/
+// run_all.py): the exact reported shape (15-member Left 1 vs. a 2-node middle grid);
+// the symmetric Right-band-taller case fixing Bottom; Top-band-wider and
+// Bottom-band-wider cases both fixing Right; a left band SMALLER than the middle grid
+// left unaffected; and Left 1 + Left 2 at different depths anchoring on the DEEPER
+// slot, not their sum -- every scenario proven via TEMP BREAK, including catching that
+// the sum-vs-max distinction needed an exact-equality assertion (the weaker "moved
+// somewhere lower" check a sum-based bug still passes). Every pre-existing Edge
+// Assignment test needed no changes -- all still pass unmodified (this fix is a
+// strict no-op whenever no band exceeds the middle grid's own extent, the common
+// case every existing test already covers). DESIGN_DOCUMENT.md SS6.1a and
+// tests/README.md updated; no end-user-visible description changed (Edge Assignment's
+// own instructions.html paragraph already described the INTENDED behavior this fixes
+// toward), so public/instructions.html untouched. Full suite 160/160.
+export const APP_VERSION = '0.903';

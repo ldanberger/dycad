@@ -601,6 +601,42 @@ directly determines its row/column offset from either the true edge (top/left) o
 middle grid's own far side (bottom/right, which never needs to shift the grid itself,
 exactly as before).
 
+**Bottom/Right must also account for Left/Right/Top/Bottom's own reach, not just the
+middle grid.** Reported directly: *"when calculating bottom row or right column, the
+bottom row or right column to use is not including the rows or columns created due to
+remap layout. Currently when 15 nodes are placed in first column which results in 15
+rows, the 'last row' calculation uses just remaining nodes and is lower, so placement
+on 'last row' or last row 2 etc. are not actually on the last rows."* Every left/right
+slot starts at `middleMinY` and grows DOWNWARD one row per member (`middleMinY +
+i*stepY`); every top/bottom slot starts at `middleMinX` and grows RIGHTWARD one column
+per member (`middleMinX + i*stepX`) — so a left or right band with more members than
+the middle grid has ROWS reaches past `middleMaxY`, and a top or bottom band with more
+members than the middle grid has COLUMNS reaches past `middleMaxX`, entirely
+independent of the middle grid's own size. Bottom's own starting Y (previously always
+`middleMaxY`) and Right's own starting X (previously always `middleMaxX`) didn't know
+this — a tall left/right band, or a wide top/bottom band, could silently overlap the
+Bottom/Right band instead of sitting genuinely beyond it. Fixed by computing, right
+after the four `orderedSlotsFor` calls (so every slot's own member COUNT is already
+known) but before any position is assigned: `maxLeftOrRightCount` = the largest member
+count across every active left OR right slot, and `maxTopOrBottomCount` = the same
+across every active top OR bottom slot. `bottomBaseY` becomes `Math.max(middleMaxY,
+middleMinY + (maxLeftOrRightCount - 1) * stepY)` (only when a left/right band actually
+exists), and `rightBaseX` the symmetric `Math.max(middleMaxX, middleMinX +
+(maxTopOrBottomCount - 1) * stepX)` — replacing the old bare `middleMaxY`/`middleMaxX`
+in the Bottom/Right `.forEach` placement lines only. Top and Left are unaffected by
+this bug and need no equivalent fix: both anchor at the NEAR edge (`rowBaseY`/`baseX`,
+or `middleMinX`/`middleMinY`), which every band's own `i*step` growth only ever moves
+AWAY from (larger i), never past. Verified via TEMP BREAK on two separate details: (1)
+reverting `bottomBaseY`/`rightBaseX` back to the bare `middleMaxY`/`middleMaxX`
+reproduces the exact reported symptom (a 15-member Left 1 band vs. a 2-node middle
+grid — Bottom lands barely past the tiny middle grid, deep inside the Left band's own
+lower rows); (2) computing `maxLeftOrRightCount` as the SUM of every left/right slot's
+member count instead of their `Math.max` still "fixes" the reported symptom (any
+extra distance downward still clears the middle grid) but overshoots past the true
+deepest slot whenever 2+ slots are populated at different depths — caught only by an
+exact-equality assertion (`bottomY === trueMaxY + stepY`), not the weaker "moved
+somewhere lower" check the other scenarios use.
+
 `minimizeCrossings`/`minimizeConnectorLength` (both `boolean`) are the two phases of
 the classic Sugiyama layered-graph-drawing pipeline, run in that order (ordering, then
 coordinates) over the *middle* grid only, both immediately after it's built and before
