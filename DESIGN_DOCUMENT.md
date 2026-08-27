@@ -262,7 +262,16 @@ rendering/export/inventory treatment like any hand-drawn one. Its `note` field a
 records which hidden element type(s)/part(s) it passes through
 (`Derived — implied via <Type1, Type2, ...> (not shown)`), and it's styled after the
 *first* real hop's relationship (the "topmost parent" convention used elsewhere in this
-codebase, e.g. `mirrorCompositionChildConnectorsUp`).
+codebase, e.g. `mirrorCompositionChildConnectorsUp`). Reported directly: *"when
+deriving connectors, add flag in connectors that it is derived, in addition to the
+existing note addition."* Every derived connector also gets `isDerived: true`
+(`Connector.isDerived`, `state.js`'s `createConnector` — genuine document/model data,
+round-tripping through `store.toJSON()`/`loadFromJSON()` like any other connector
+field, no special-casing needed) — a real, machine-checkable field alongside the
+human-readable `note` text, rather than something that has to be inferred by parsing
+`note`'s own string. This is what lets `smartCheckView`'s own "Include existing derived
+connectors" option (below) tell an existing derived connector apart from an ordinary
+one.
 
 Two shared helpers do the work, both used by both commands below:
 - **`findDerivedPairsForType(store, connectorType, presentPartIdSet, levels)`** —
@@ -324,6 +333,26 @@ longer counts as hidden and won't get spuriously bridged. Every created connecto
 placed as a viewMember here (unlike `mirrorCompositionChildConnectorsUp`, which mirrors
 onto a *different*, parent view and so never places anything) — both endpoints are, by
 definition, already on this view.
+
+**"Include existing derived connectors"** (`includeDerivedConnectors` option, off by
+default) is the companion checkbox to "Derive hidden connections," addressing the other
+half of the same report: *"In smart check view, add a checkbox (default disabled) for
+include/exclude existing derived connectors for the options so that connectors derived
+for other views are not automatically added to the current view unless user enables
+it."* Without this option, `smartCheckView`'s own `missingConnectors` pull-in (both the
+plain single pass and the per-hop phase-2 pass inside `missingConnectorsAndNodes`) would
+happily grab ANY connector — derived or not — the instant both its endpoints happen to
+already be present on the CURRENT view, regardless of which view's own Smart Check run
+(or `insertSmartStream` call) actually derived it in the first place. A derived
+connector genuinely belongs to the model as a whole (same as any other connector), but a
+person working on view B usually doesn't want view A's own "bridge the gap" edges
+silently appearing just because both nodes happen to also live on view B — so both
+pull-in loops now `continue` past any `conn.isDerived` connector unless this checkbox is
+checked, leaving every ORDINARY (non-derived) connector's pull-in completely unaffected.
+Freshly-created derived connectors from THIS SAME run's own "Derive hidden connections"
+checkbox are unaffected by this option too — they're placed through their own dedicated
+code path (`createDerivedConnectorPairs`'s returned list, above), never through the
+`missingConnectors` pull-in loops this option gates.
 
 ### 5.6 The Filters panel (right column)
 

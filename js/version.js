@@ -4267,4 +4267,42 @@
 // SS6.1a, tests/README.md, and public/instructions.html (Edge Assignment's own
 // paragraph + the Script Console reference table's remap() row) updated. Full suite
 // 154/154.
-export const APP_VERSION = '0.899';
+// v0.900: reported directly: "when deriving connectors, add flag in connectors that
+// it is derived, in addition to the existing note addition. In smart check view, add
+// a checkbox (default disabled) for include/exclude existing derived connectors for
+// the options so that connectors derived for other views are not automatically added
+// to the current view unless user enables it." createDerivedConnectorPairs
+// (commands.js, shared by Smart Check View's "Derive hidden connections" and
+// insertSmartStream's own derived-connector creation) now sets isDerived:true
+// (state.js's createConnector, new field, genuine document data -- round-trips
+// through store.toJSON()/loadFromJSON() automatically) on every connector it creates,
+// alongside the existing note text. New smartCheckView option
+// includeDerivedConnectors (default false): both of its "missing connectors" pull-in
+// loops (the plain missingConnectors pass and the per-hop phase-2 pass inside
+// missingConnectorsAndNodes) now skip any conn.isDerived connector unless this option
+// is on -- so a connector derived for one view no longer silently spreads onto every
+// OTHER view that happens to already show both its endpoints. Freshly-created derived
+// connectors from THIS SAME run's own "Derive hidden connections" checkbox are
+// unaffected (placed through their own dedicated code path, never the
+// missingConnectors pull-in loops this option gates), and an ordinary (non-derived)
+// connector's pull-in is completely unaffected either way. Scoped to smartCheckView
+// only, per the report -- smartCheckNode has no deriveConnectors/includeDerived
+// Connectors option today, unchanged. main.js's promptSmartCheckView: new
+// #scv-include-derived checkbox (default unchecked), its row visible only while
+// Missing connectors or Missing connectors and nodes is checked, collected into
+// collectSmartCheckViewOptions and passed through to smartCheckView. New
+// check_derived_connector_isDerived_flag_and_include_option (commands-level: flag set
+// on derived/absent on ordinary, exclude-by-default across BOTH pull-in loops,
+// include when enabled, ordinary connectors unaffected) and
+// check_smart_check_view_dialog_include_derived_checkbox_wiring (real dialog: default
+// unchecked, row visibility, exclude/include via the actual Check button) -- every key
+// assertion proven via TEMP BREAK (omitting isDerived, removing each pull-in loop's
+// own guard independently, defaulting the checkbox to checked), reverted. Every
+// pre-existing derived-connector test (check_smart_check_view_derive_connectors,
+// check_smart_check_view_dialog_derive_checkbox_wiring,
+// check_derived_connector_relationship_fallback,
+// check_insert_smart_stream_derived_connections) needed NO changes -- still pass
+// unmodified. DESIGN_DOCUMENT.md SS5.5, tests/README.md, and public/instructions.html
+// (Smart Check View's own table row + the Script Console reference table's
+// smartCheckView() row) updated. Full suite 156/156.
+export const APP_VERSION = '0.900';

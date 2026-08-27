@@ -649,13 +649,14 @@ class Store {
   /** Same as touchPart, for connectors. */
   touchConnector(conn) { if (conn) conn.updatedAt = nowStamp(); }
 
-  createConnector({ from, to, model, connectorType = 'c', relationship = '', streams = [], note = '', mirrorOf = null, fromAttribute = '', toAttribute = '', fromCardinality = '', toCardinality = '' }) {
+  createConnector({ from, to, model, connectorType = 'c', relationship = '', streams = [], note = '', mirrorOf = null, fromAttribute = '', toAttribute = '', fromCardinality = '', toCardinality = '', isDerived = false }) {
     const styleFields = connectorStyleFields(relationship, this.settings);
     const stamp = nowStamp();
     const connector = {
       id: newId(), from, to, model, streams, note, mirrorOf,
       connectorType,
       fromAttribute, toAttribute, fromCardinality, toCardinality,
+      isDerived,
       ...styleFields,
       createdAt: stamp, updatedAt: stamp,
     };

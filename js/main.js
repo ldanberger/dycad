@@ -842,7 +842,11 @@ class App {
             <tr><td><code>smartCheckView(app, tab, options)</code></td><td>options: <code>missingConnectors,
               missingConnectorsAndNodes, levels, syncWithInventory, deriveConnectors</code> (links two
               on-view nodes directly when only connected via a chain of not-shown parts; creates both a
-              'c' and an 's' connector; uses <code>levels</code> too).</td></tr>
+              'c' and an 's' connector, each with <code>isDerived: true</code>; uses <code>levels</code> too),
+              <code>includeDerivedConnectors</code> (default <code>false</code> — whether the
+              <code>missingConnectors</code>/<code>missingConnectorsAndNodes</code> pull-in also brings in an
+              already-existing connector that's marked <code>isDerived</code>, e.g. one derived for a
+              different view).</td></tr>
             <tr><td><code>smartCheckNode(app, tab, partId, options)</code></td><td>options: same as
               smartCheckView, plus <code>upstream, downstream, byStream, streams</code>.</td></tr>
             <tr><td><code>insertSmartStream(app, tab, options)</code></td><td>freeform views only; options:
@@ -1993,6 +1997,7 @@ class App {
     box.className = 'modal-box';
     box.innerHTML = `<h3>Smart Check View</h3>
       <div class="prop-row checkbox"><input type="checkbox" id="scv-missing-connectors" checked /><label for="scv-missing-connectors">Missing connectors — add connectors between nodes already on this view</label></div>
+      <div class="prop-row checkbox" id="scv-include-derived-row" style="margin-left:22px;"><input type="checkbox" id="scv-include-derived" /><label for="scv-include-derived">Include existing derived connectors — also pull in a connector derived for another view (unchecked: derived connectors are skipped unless already on this view)</label></div>
       <div class="prop-row checkbox"><input type="checkbox" id="scv-missing-connectors-nodes" /><label for="scv-missing-connectors-nodes">Missing connectors and nodes — also pull in connected nodes not yet on this view</label></div>
       <div class="prop-row" id="scv-levels-row" style="margin-left:22px;"><label>Levels</label><input type="number" id="scv-levels-input" class="tb-select" style="width:60px;" min="0" step="1" value="" placeholder="All" title="How many hops of missing connected nodes to pull in. Blank = unlimited." /></div>
       <div class="prop-row checkbox"><input type="checkbox" id="scv-autocomplete" /><label for="scv-autocomplete">Auto-complete streams in model — find existing stream names and fill in any missing parts/nodes for them, following a stream template</label></div>
@@ -2003,6 +2008,7 @@ class App {
     overlay.appendChild(box);
     root.appendChild(overlay);
 
+    const missingConnectorsCheckbox = box.querySelector('#scv-missing-connectors');
     const nodesCheckbox = box.querySelector('#scv-missing-connectors-nodes');
     const deriveCheckbox = box.querySelector('#scv-derive-connectors');
     const levelsRow = box.querySelector('#scv-levels-row');
@@ -2010,6 +2016,14 @@ class App {
     nodesCheckbox.addEventListener('change', updateLevelsVisibility);
     deriveCheckbox.addEventListener('change', updateLevelsVisibility);
     updateLevelsVisibility();
+
+    // "Include existing derived connectors" only matters while "Missing connectors" (or
+    // "...and nodes", which implies it) is actually pulling anything in at all.
+    const includeDerivedRow = box.querySelector('#scv-include-derived-row');
+    const updateIncludeDerivedVisibility = () => includeDerivedRow.classList.toggle('hidden', !missingConnectorsCheckbox.checked && !nodesCheckbox.checked);
+    missingConnectorsCheckbox.addEventListener('change', updateIncludeDerivedVisibility);
+    nodesCheckbox.addEventListener('change', updateIncludeDerivedVisibility);
+    updateIncludeDerivedVisibility();
 
     const autoCompleteCheckbox = box.querySelector('#scv-autocomplete');
     const autoCompleteTemplateRow = box.querySelector('#scv-autocomplete-template-row');
@@ -2026,11 +2040,12 @@ class App {
     const collectSmartCheckViewOptions = () => {
       const rawLevels = box.querySelector('#scv-levels-input').value.trim();
       return {
-        missingConnectors: box.querySelector('#scv-missing-connectors').checked,
+        missingConnectors: missingConnectorsCheckbox.checked,
         missingConnectorsAndNodes: nodesCheckbox.checked,
         levels: rawLevels === '' ? null : Math.max(0, Math.floor(Number(rawLevels)) || 0),
         syncWithInventory: box.querySelector('#scv-sync-inventory').checked,
         deriveConnectors: deriveCheckbox.checked,
+        includeDerivedConnectors: box.querySelector('#scv-include-derived').checked,
       };
     };
 
@@ -2041,7 +2056,7 @@ class App {
     // above).
     wireCopyCallOnRightClick(this, box.querySelector('.submit'), () => `smartCheckView(app, tab, ${JSON.stringify(collectSmartCheckViewOptions(), null, 2)});`);
     box.querySelector('.submit').addEventListener('click', () => {
-      const { missingConnectors, missingConnectorsAndNodes, levels, syncWithInventory, deriveConnectors } = collectSmartCheckViewOptions();
+      const { missingConnectors, missingConnectorsAndNodes, levels, syncWithInventory, deriveConnectors, includeDerivedConnectors } = collectSmartCheckViewOptions();
       const doAutoComplete = autoCompleteCheckbox.checked;
       const autoCompleteTemplate = box.querySelector('#scv-autocomplete-template').value;
       overlay.remove();
@@ -2049,7 +2064,7 @@ class App {
       if (!missingConnectors && !missingConnectorsAndNodes && !doAutoComplete && !syncWithInventory && !deriveConnectors) { this.toast('Nothing selected to check.'); return; }
 
       if (missingConnectors || missingConnectorsAndNodes || syncWithInventory || deriveConnectors) {
-        const result = smartCheckView(this, tab, { missingConnectors, missingConnectorsAndNodes, levels, syncWithInventory, deriveConnectors });
+        const result = smartCheckView(this, tab, { missingConnectors, missingConnectorsAndNodes, levels, syncWithInventory, deriveConnectors, includeDerivedConnectors });
         if (!result) { this.toast('Smart Check failed — view not found.', true); return; }
         this.recordAndRender();
         const parts = [];

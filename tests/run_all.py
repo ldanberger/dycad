@@ -11021,6 +11021,184 @@ def check_smart_check_view_derive_connectors(page):
     return True, "Smart Check View's 'Derive hidden connections' checkbox is off by default, bridges two on-view parts linked only through an off-view chain by creating and placing both a 'c' and 's' Connector, respects the shared Levels hop limit, correctly runs after missingConnectorsAndNodes so a newly-pulled-in part is no longer treated as hidden, and is idempotent on re-run"
 
 
+def check_derived_connector_isDerived_flag_and_include_option(page):
+    """Regression guard/new-feature check, reported directly: "when deriving
+    connectors, add flag in connectors that it is derived, in addition to the existing
+    note addition. In smart check view, add a checkbox (default disabled) for include/
+    exclude existing derived connectors for the options so that connectors derived for
+    other views are not automatically added to the current view unless user enables
+    it." Covers: (1) createDerivedConnectorPairs (commands.js, shared by Smart Check
+    View's "Derive hidden connections" and insertSmartStream's own derived-connector
+    creation) now sets isDerived:true on every connector it creates, alongside the
+    existing note text; (2) a genuinely ORDINARY connector (created directly, not
+    derived) never gets isDerived set; (3) Smart Check View's new
+    includeDerivedConnectors option (default false) — a derived connector already
+    sitting in the model inventory from a run against a DIFFERENT view is NOT silently
+    pulled onto a second view via the plain "Missing connectors" pass just because both
+    its endpoints happen to be present there too; (4) includeDerivedConnectors:true
+    pulls it in, same as any other missing connector; (5) the SAME gating applies to
+    the missingConnectorsAndNodes hop-based pull-in phase, not just the plain
+    missingConnectors pass; (6) an ordinary (non-derived) connector between two present
+    parts is still pulled in regardless of includeDerivedConnectors — only derived ones
+    are ever gated by it."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const mk = (type, label) => store.createPart({ type, label, model, streams: [] });
+      const freshView = (name) => {
+        const view = store.addView(name + '_' + Date.now(), 'ff');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        return { view, tab };
+      };
+      const place = (view, parts) => { for (const p of parts) store.createViewMember({ view: view.id, objectType: 'part', objectId: p.id, x: 0, y: 0 }); };
+      const out = {};
+
+      // 1+2) isDerived flag: set true on a derived connector, absent/false on an ordinary one.
+      const a = mk('BusinessFunction', 'FlagA'), hidden = mk('BusinessProcess', 'FlagHidden'), b = mk('ApplicationCapability', 'FlagB');
+      store.createConnector({ from: a.id, to: hidden.id, connectorType: 'c', model, relationship: 'Association' });
+      store.createConnector({ from: hidden.id, to: b.id, connectorType: 'c', model, relationship: 'Association' });
+      const { view: v1, tab: t1 } = freshView('RegrIsDerivedFlag');
+      place(v1, [a, b]);
+      commands.smartCheckView(app, t1, { missingConnectors: false, deriveConnectors: true, levels: null });
+      const derivedConn = store.doc.connectors.find(c => c.from === a.id && c.to === b.id && c.connectorType === 'c');
+      out.derivedHasFlag = derivedConn ? derivedConn.isDerived === true : null;
+
+      const x = mk('BusinessActor', 'OrdX'), y = mk('GeneralActor', 'OrdY');
+      const ordinaryConn = store.createConnector({ from: x.id, to: y.id, connectorType: 'c', model, relationship: 'Association' });
+      out.ordinaryHasNoFlag = !ordinaryConn.isDerived;
+
+      // 3+4) include/exclude an EXISTING derived connector when pulling into a DIFFERENT view.
+      const { view: v2, tab: t2 } = freshView('RegrExcludeByDefault');
+      place(v2, [a, b]);
+      const r2 = commands.smartCheckView(app, t2, { missingConnectors: true, includeDerivedConnectors: false });
+      out.excludedByDefault = { added: r2.connectorsAdded, placed: store.viewMembersForView(v2.id).some(vm => vm.objectType === 'connector' && vm.objectId === derivedConn.id) };
+
+      const { view: v3, tab: t3 } = freshView('RegrIncludeWhenEnabled');
+      place(v3, [a, b]);
+      const r3 = commands.smartCheckView(app, t3, { missingConnectors: true, includeDerivedConnectors: true });
+      out.includedWhenEnabled = { added: r3.connectorsAdded, placed: store.viewMembersForView(v3.id).some(vm => vm.objectType === 'connector' && vm.objectId === derivedConn.id) };
+
+      // 5) same gating applies to the missingConnectorsAndNodes hop-based phase-2 pull-in.
+      const anchor = mk('BusinessFunction', 'HopAnchor');
+      store.createConnector({ from: anchor.id, to: a.id, connectorType: 'c', model, relationship: 'Association' });
+      const { view: v4, tab: t4 } = freshView('RegrHopExcludeByDefault');
+      place(v4, [anchor]);
+      const r4 = commands.smartCheckView(app, t4, { missingConnectors: false, missingConnectorsAndNodes: true, levels: 3, includeDerivedConnectors: false });
+      // anchor->a pulls a's node in via hop 1 (ordinary connector); a<->b's derived
+      // connector should then be excluded by default even though both are now on-view.
+      out.hopExcludedByDefault = !store.viewMembersForView(v4.id).some(vm => vm.objectType === 'connector' && vm.objectId === derivedConn.id);
+
+      // 6) an ordinary connector is still pulled in regardless of includeDerivedConnectors.
+      const { view: v5, tab: t5 } = freshView('RegrOrdinaryStillPulledIn');
+      place(v5, [x, y]);
+      const r5 = commands.smartCheckView(app, t5, { missingConnectors: true, includeDerivedConnectors: false });
+      out.ordinaryStillPulledIn = r5.connectorsAdded === 1;
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["derivedHasFlag"]:
+        problems.append("expected a connector created by 'Derive hidden connections' to have isDerived:true")
+    if not result["ordinaryHasNoFlag"]:
+        problems.append("expected a genuinely ordinary connector to NOT have isDerived set")
+    if result["excludedByDefault"]["added"] != 0 or result["excludedByDefault"]["placed"]:
+        problems.append(f"expected includeDerivedConnectors:false (the default) to skip pulling an existing derived connector into a different view, got {result['excludedByDefault']}")
+    if result["includedWhenEnabled"]["added"] == 0 or not result["includedWhenEnabled"]["placed"]:
+        problems.append(f"expected includeDerivedConnectors:true to pull the existing derived connector in like any other missing connector, got {result['includedWhenEnabled']}")
+    if not result["hopExcludedByDefault"]:
+        problems.append("expected the missingConnectorsAndNodes hop-based pull-in to ALSO respect includeDerivedConnectors:false, not just the plain missingConnectors pass")
+    if not result["ordinaryStillPulledIn"]:
+        problems.append("expected an ordinary (non-derived) connector to still be pulled in even with includeDerivedConnectors:false")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "createDerivedConnectorPairs now flags every connector it creates with isDerived:true (leaving ordinary connectors untouched), and Smart Check View's new includeDerivedConnectors option (default false) keeps an existing derived connector from silently spreading onto other views via either missing-connector pull-in pass, while never affecting ordinary connectors"
+
+
+def check_smart_check_view_dialog_include_derived_checkbox_wiring(page):
+    """Regression guard for the real Smart Check View DIALOG's new "Include existing
+    derived connectors" checkbox (#scv-include-derived, main.js) -- confirms it's wired
+    end to end through the actual UI, not just the underlying commands.js option
+    (covered separately by check_derived_connector_isDerived_flag_and_include_option).
+    Checks: (1) unchecked by default; (2) its row is visible whenever either "Missing
+    connectors" or "Missing connectors and nodes" is checked, and hidden when neither
+    is; (3) submitting with it left unchecked genuinely excludes an existing derived
+    connector via the real Check button, not just via a direct function call; (4)
+    checking it and submitting again genuinely includes it."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const a = store.createPart({ type: 'BusinessFunction', label: 'RegrInclDlg_A', model, streams: [] });
+      const hidden = store.createPart({ type: 'BusinessProcess', label: 'RegrInclDlg_Hidden', model, streams: [] });
+      const b = store.createPart({ type: 'ApplicationCapability', label: 'RegrInclDlg_B', model, streams: [] });
+      store.createConnector({ from: a.id, to: hidden.id, connectorType: 'c', model, relationship: 'Association' });
+      store.createConnector({ from: hidden.id, to: b.id, connectorType: 'c', model, relationship: 'Association' });
+
+      // Derive the A->B connector via a throwaway view first, so it already exists in
+      // the model inventory (marked isDerived) before the dialog test even starts.
+      const seedView = store.addView('RegrInclDlg_seed', 'ff');
+      const seedTab = app.createCanvasTab(seedView);
+      app.switchToTab(seedTab.id);
+      store.createViewMember({ view: seedView.id, objectType: 'part', objectId: a.id, x: 0, y: 0 });
+      store.createViewMember({ view: seedView.id, objectType: 'part', objectId: b.id, x: 0, y: 0 });
+      commands.smartCheckView(app, seedTab, { missingConnectors: false, deriveConnectors: true, levels: null });
+      const derivedConn = store.doc.connectors.find(c => c.from === a.id && c.to === b.id && c.connectorType === 'c');
+
+      const view = store.addView('RegrInclDlg_view', 'ff');
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: a.id, x: 40, y: 40 });
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: b.id, x: 300, y: 40 });
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const out = {};
+      app.promptSmartCheckView();
+      await new Promise(r => setTimeout(r, 30));
+      const inclCb = document.getElementById('scv-include-derived');
+      const inclRow = document.getElementById('scv-include-derived-row');
+      out.uncheckedByDefault = inclCb.checked;
+      out.rowVisibleWithMissingConnectorsChecked = !inclRow.classList.contains('hidden');
+
+      document.getElementById('scv-missing-connectors').checked = false;
+      document.getElementById('scv-missing-connectors').dispatchEvent(new Event('change', { bubbles: true }));
+      out.rowHiddenWhenNeitherChecked = inclRow.classList.contains('hidden');
+      document.getElementById('scv-missing-connectors').checked = true;
+      document.getElementById('scv-missing-connectors').dispatchEvent(new Event('change', { bubbles: true }));
+
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 60));
+      out.excludedViaRealButton = !store.viewMembersForView(view.id).some(vm => vm.objectType === 'connector' && vm.objectId === derivedConn.id);
+
+      app.promptSmartCheckView();
+      await new Promise(r => setTimeout(r, 30));
+      document.getElementById('scv-include-derived').checked = true;
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 60));
+      out.includedViaRealButton = store.viewMembersForView(view.id).some(vm => vm.objectType === 'connector' && vm.objectId === derivedConn.id);
+
+      return out;
+    }
+    """)
+    problems = []
+    if result["uncheckedByDefault"]:
+        problems.append("expected #scv-include-derived unchecked by default")
+    if not result["rowVisibleWithMissingConnectorsChecked"]:
+        problems.append("expected the Include Derived row visible while Missing connectors is checked")
+    if not result["rowHiddenWhenNeitherChecked"]:
+        problems.append("expected the Include Derived row hidden when neither Missing connectors nor Missing connectors and nodes is checked")
+    if not result["excludedViaRealButton"]:
+        problems.append("expected the real Check button, with Include existing derived connectors left unchecked, to exclude the existing derived connector")
+    if not result["includedViaRealButton"]:
+        problems.append("expected checking Include existing derived connectors and submitting again to genuinely include the derived connector")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The Smart Check View dialog's new 'Include existing derived connectors' checkbox is unchecked by default, its row visibility tracks the Missing Connectors checkboxes, and it genuinely gates whether an existing derived connector gets pulled in through the real Check button"
+
+
 def check_derived_connector_relationship_fallback(page):
     """Regression guard, direct follow-up: "when a derived connector is created, if a
     default relationship or valid relationship is not available, use 'o' Association
@@ -12077,6 +12255,8 @@ CHECKS = [
     check_insert_smart_stream_dialog,
     check_insert_smart_stream_derived_connections,
     check_smart_check_view_derive_connectors,
+    check_derived_connector_isDerived_flag_and_include_option,
+    check_smart_check_view_dialog_include_derived_checkbox_wiring,
     check_derived_connector_relationship_fallback,
     check_smart_check_model_detection_and_fix_precedence,
     check_smart_check_model_dialog,

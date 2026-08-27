@@ -1899,6 +1899,13 @@ function findDerivedPairsForType(store, connectorType, presentPartIdSet, levels)
  * panel's own relationship dropdown enforces), else falls back to that pair's own
  * data-defined default relation, else 'Association' (key 'o') — the exact same
  * "default, else Association" fallback createCompanionConnector already uses (above).
+ *
+ * Every created connector gets `isDerived: true` (createConnector, state.js) — a real
+ * document field, not just the human-readable `note` text — reported directly: "when
+ * deriving connectors, add flag in connectors that it is derived, in addition to the
+ * existing note addition." This is what lets Smart Check View's own "Include existing
+ * derived connectors" checkbox (below) distinguish an already-in-the-model derived
+ * connector from an ordinary one when deciding what to silently pull into a view.
  */
 function createDerivedConnectorPairs(store, derivedPairs, log, describePart) {
   const created = [];
@@ -1921,7 +1928,7 @@ function createDerivedConnectorPairs(store, derivedPairs, log, describePart) {
           connRelationship = defaultRel?.name || 'Association';
         }
       }
-      const conn = store.createConnector({ from, to, model: modelName, connectorType, relationship: connRelationship, note });
+      const conn = store.createConnector({ from, to, model: modelName, connectorType, relationship: connRelationship, note, isDerived: true });
       created.push(conn);
       if (log) log(`Derived connector: ${describePart(from)} -> ${describePart(to)} (${connectorType === 'c' ? 'Connector' : 'Stream'}), implied via ${viaText}.`);
     }
@@ -2123,7 +2130,7 @@ function applySmartCheckModelFixes(app, fixes) {
 }
 
 function smartCheckView(app, tab, options = {}) {
-  const { missingConnectors = true, missingConnectorsAndNodes = false, levels = null, syncWithInventory = false, deriveConnectors = false } = options;
+  const { missingConnectors = true, missingConnectorsAndNodes = false, levels = null, syncWithInventory = false, deriveConnectors = false, includeDerivedConnectors = false } = options;
   const { store } = app;
   const viewId = tab.viewId;
   const view = store.findView(viewId);
@@ -2153,6 +2160,15 @@ function smartCheckView(app, tab, options = {}) {
     for (const conn of store.doc.connectors) {
       if (placedConnectorIds.has(conn.id)) continue;
       if (!onViewPartIds.has(conn.from) || !onViewPartIds.has(conn.to)) continue;
+      // "Include existing derived connectors" (default OFF) — reported directly: "add a
+      // checkbox (default disabled) for include/exclude existing derived connectors ...
+      // so that connectors derived for other views are not automatically added to the
+      // current view unless user enables it." A derived connector (isDerived: true,
+      // state.js's createConnector) sitting in the inventory from some OTHER view's own
+      // "Derive hidden connections" run (or insertSmartStream) would otherwise get
+      // silently pulled in here too, the moment both its endpoints happen to be present
+      // on this view — which is exactly the surprise this option exists to prevent.
+      if (conn.isDerived && !includeDerivedConnectors) continue;
       store.createViewMember({
         view: viewId, objectType: 'connector', objectId: conn.id,
         fromVmId: partIdToVmId.get(conn.from), toVmId: partIdToVmId.get(conn.to),
@@ -2228,6 +2244,7 @@ function smartCheckView(app, tab, options = {}) {
         if (placedConnectorIds.has(conn.id)) continue;
         if (!partIdToVmId.has(conn.from) || !partIdToVmId.has(conn.to)) continue;
         if (!nextFrontier.has(conn.from) && !nextFrontier.has(conn.to)) continue;
+        if (conn.isDerived && !includeDerivedConnectors) continue; // see the "Include existing derived connectors" comment above
         store.createViewMember({
           view: viewId, objectType: 'connector', objectId: conn.id,
           fromVmId: partIdToVmId.get(conn.from), toVmId: partIdToVmId.get(conn.to),

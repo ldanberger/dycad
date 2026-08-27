@@ -309,7 +309,11 @@ canvas. Availability depends on what's selected — greyed out means the current
     underlying model: adds any connector that should exist between two nodes already on the view, and
     optionally pulls in nodes connected to what's already there (with a Levels setting for how many hops to
     follow). Every change it makes is written to the Message Log, and it notes what it created directly on the
-    connector. A third option, <strong>Auto-complete streams in model</strong>, instead finds every stream name
+    connector. A connector <strong>Derive hidden connections</strong> (below) created elsewhere — on a
+    different view — is marked internally as "derived," and is skipped by this connector pull-in UNLESS
+    <strong>Include existing derived connectors</strong> (off by default, right below Missing connectors) is
+    checked — so a connector implied for one view doesn't silently spread onto every other view that happens
+    to already show both its endpoints. A third option, <strong>Auto-complete streams in model</strong>, instead finds every stream name
     already tagged on a part in the current model and checks each one against a chosen stream template — it
     shows a review list of every missing (stream, type, label) position with checkboxes for Part and View (a
     node can't be created without its part, so unchecking Part also unchecks and disables View); nothing is
@@ -331,7 +335,8 @@ canvas. Availability depends on what's selected — greyed out means the current
     concept Insert Smart Stream uses (see above), creating both a Connector ('c') and a Stream ('s') version and
     noting which off-view type(s) it stands in for. Since it runs after the other options' own additions, a node
     that Missing connectors and nodes just pulled in this same run no longer counts as "hidden" and won't get
-    bridged.</td></tr>
+    bridged. Every connector it creates is flagged internally as derived — see Include existing derived
+    connectors, above.</td></tr>
     <tr><td><strong>Smart Check Node</strong></td><td>(Advanced menu, or right-click a single node) The
     single-node version of Smart Check View — same "missing connectors" / "missing connectors and nodes, N
     levels" idea (including the same Composition-awareness described above), but starting from just the node
