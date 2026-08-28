@@ -4717,4 +4717,23 @@
 // updated; public/instructions.html gets a new Stream Templates bullet (SS4) and a
 // CommonScript_Sim mention alongside CommonScript_Example's own (Script Console
 // section). Every pre-existing test needed no changes. Full suite 172/172.
-export const APP_VERSION = '0.910';
+// v0.911: reported directly, "on the remap dialog form, it is too long. Can you
+// remove the 'Align by sector' related text that starts with 'On by default' and
+// show it as a tool tip or some other approach that removes it from the form and
+// shows only when user requests." The always-visible #rm-align-section-note
+// paragraph (shown for every pattern except force/custom -- present most of the
+// time, unlike this dialog's OTHER pattern-specific notes, which stay hidden unless
+// their one specific pattern is picked) is gone; its full original text now lives as
+// a plain title attribute on #rm-align-section-row (the checkbox+label row itself) --
+// a native hover-only tooltip, using the same bare title= convention already used
+// elsewhere in this dialog (the row-reorder up/down buttons) and across the app
+// (e.g. the toolbar's Highlight/Connector Type filter buttons) -- no new tooltip
+// component needed. New check_remap_align_section_explanation_is_tooltip
+// (tests/run_all.py): the note element no longer exists in the DOM; the row's title
+// holds the full original explanation verbatim; the dialog's own always-visible text
+// no longer includes it -- proven via TEMP BREAK. DESIGN_DOCUMENT.md SS6.1a and
+// tests/README.md updated; no public/instructions.html change needed (it documents
+// Align by section's own behavior separately from this in-dialog note, and that
+// behavior is unchanged). Every pre-existing test needed no changes. Full suite
+// 173/173.
+export const APP_VERSION = '0.911';

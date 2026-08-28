@@ -794,6 +794,54 @@ def check_remap_align_by_section_dialog_wiring(page):
     return True, "The Remap dialog's 'Align by section' checkbox is checked by default, visible with the right label for grid patterns and 'clusters' (relabeled 'Cluster by section' there), hidden for 'force'/'custom', always resets to checked, and round-trips correctly through Save As/Load including a pre-existing preset with no such field at all"
 
 
+def check_remap_align_section_explanation_is_tooltip(page):
+    """Regression guard/new-feature check, reported directly: "on the remap dialog
+    form, it is too long. Can you remove the 'Align by sector' related text that
+    starts with 'On by default' and show it as a tool tip or some other approach that
+    removes it from the form and shows only when user requests." The always-visible
+    #rm-align-section-note paragraph (main.js) — shown for every pattern except
+    force/custom, so present on the dialog most of the time, unlike the OTHER pattern-
+    specific notes here (force/clusters/custom) which stay hidden unless that one
+    specific pattern is picked — is gone; its full original text now lives as a plain
+    `title` attribute on #rm-align-section-row (the checkbox + label row itself), a
+    native browser tooltip that only shows on hover, matching the same title-attribute
+    convention already used elsewhere in this dialog (e.g. the row-reorder ▲/▼
+    buttons) and across the app (e.g. the toolbar's Highlight/Connector Type filter
+    buttons). Covers: the #rm-align-section-note element no longer exists in the DOM
+    at all; #rm-align-section-row's title attribute contains the full original
+    explanation text (verbatim, including "On by default" and "Not available for
+    Force-directed"); and the dialog's own visible text (modal-box.innerText, which
+    title attributes never contribute to) no longer includes that text at all."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      app.promptRemap(homeTab);
+      await new Promise(r => setTimeout(r, 30));
+      const box = document.querySelector('.modal-box.modal-box-wide');
+      const row = box.querySelector('#rm-align-section-row');
+      const out = {
+        noteElementGone: !box.querySelector('#rm-align-section-note'),
+        rowTitle: row ? row.title : null,
+        visibleTextHasNote: box.innerText.includes('On by default'),
+      };
+      box.querySelector('.cancel').click();
+      return out;
+    }
+    """)
+    problems = []
+    if not result["noteElementGone"]:
+        problems.append("expected #rm-align-section-note to no longer exist in the DOM")
+    if not result["rowTitle"] or "On by default" not in result["rowTitle"] or "Force-directed" not in result["rowTitle"]:
+        problems.append(f"expected #rm-align-section-row's title attribute to hold the full original explanation, got {result['rowTitle']!r}")
+    if result["visibleTextHasNote"]:
+        problems.append("expected the explanation text to no longer be part of the dialog's always-visible text")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The Remap dialog's 'Align by section' explanation is no longer permanently visible text -- it's now a hover-only title tooltip on the checkbox row, and the note element itself is gone from the DOM"
+
+
 def check_remap_align_by_section_edge_bands(page):
     """Direct follow-up bug report against check_remap_align_by_section_grid/_clusters
     above: "didn't fix problem. reproduce problem by running console script, generate
@@ -13739,6 +13787,7 @@ CHECKS = [
     check_remap_align_by_section_grid,
     check_remap_align_by_section_clusters,
     check_remap_align_by_section_dialog_wiring,
+    check_remap_align_section_explanation_is_tooltip,
     check_remap_align_by_section_edge_bands,
     check_custom_remap_grid_convenience_layer,
     check_custom_remap_dialog,

@@ -1018,6 +1018,23 @@ permanent structural no-op there; the Remap dialog hides the "Align by section"
 checkbox for `'force'`/`'custom'` accordingly (relabeling it "Cluster by section" for
 `'clusters'`).
 
+**Dialog-length follow-up (UI only, no algorithm change)**: reported directly — *"on
+the remap dialog form, it is too long. Can you remove the 'Align by sector' related
+text that starts with 'On by default' and show it as a tool tip or some other approach
+that removes it from the form and shows only when user requests."* The explanatory
+paragraph above the checkbox (`#rm-align-section-note`) was shown for every pattern
+except `'force'`/`'custom'` — i.e. present on the dialog most of the time, unlike the
+OTHER pattern-specific notes in this same dialog (force/clusters/custom), which stay
+hidden unless that one specific pattern is actually picked. Removed the element
+entirely and moved its full original text, verbatim, onto a plain `title` attribute on
+`#rm-align-section-row` (the checkbox+label row itself) — a native hover tooltip,
+shown only on request, using the same bare `title=` convention already used elsewhere
+in this same dialog (the row-reorder ▲/▼ buttons) and across the app generally (e.g.
+the toolbar's Highlight/Connector Type filter buttons) — no new tooltip component
+needed. New `check_remap_align_section_explanation_is_tooltip` (`tests/run_all.py`):
+the note element is gone from the DOM; the row's `title` holds the full original text;
+the dialog's own always-visible text no longer includes it — proven via TEMP BREAK.
+
 Two further pieces of state, separate from the layout algorithm itself:
 `view.remapLastOptions` (set by `remap()` on every successful run, alongside the
 pre-existing `view.remapSortKeys`) records every OTHER dialog field — pattern,
