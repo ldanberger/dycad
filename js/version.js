@@ -4678,4 +4678,43 @@
 // the inner sub-panel's now-unconditional Section hide proven via TEMP BREAK.
 // DESIGN_DOCUMENT.md SS5.6 and tests/README.md updated; no public/instructions.html
 // changes needed. Full suite 170/170.
-export const APP_VERSION = '0.909';
+// v0.910: two direct requests. (1) "At end of console script after function
+// CustomRemap_Example create a new function ... function CommonScript_Sim(ctx) {
+// switch (ctx.part.type.toLowerCase()) { case 'generalactor': ... default: ... } }
+// and extend case statement to all known element types identified in streamTemplates
+// where name = 'Enterprise', and add generic return statement with value, state,
+// response, and badge settings as needed by node script return values." New
+// CommonScript_Sim(ctx) (state.js, DEFAULT_BATCH_SCRIPT_CODE, right after
+// CustomRemap_Example) -- a second CommonScript_<Name> example, meant to be copied
+// into (or called from) a part's own script field directly. Covers all 12 element
+// types "Enterprise" (public/custom.json, settings.streamTemplates) actually uses: 9
+// from its own value[] chain (GeneralActor, BusinessService, BusinessCapability,
+// BusinessProcess, ApplicationCapability, ApplicationProcess,
+// ApplicationLogicalComponent, ApplicationPhysicalComponent, DataDataEntity) plus 3
+// more its passive[] pairs introduce (BusinessFunction, ApplicationApplication,
+// BusinessOrganizationUnit). The example return statement demonstrates the full
+// { value, state, response, badge } shape (see simulation.js's own script-contract
+// comment) -- value defaults to the part's own label with no input, state increments
+// a ticksSeen counter, response is only set once ctx.inputs.length > 0, badge returns
+// a real {text, color}. New check_common_script_sim_covers_enterprise_types
+// (tests/run_all.py) -- drives a real part per element type through an actual
+// sim.stepSimulation() call, not a text scan; proven via TEMP BREAK (a removed case,
+// and a stripped badge).
+// (2) "In Catalogs menu after SFCCE create a new separation line and then a new item
+// 'Stream Templates' and command to open new form -- create a new read only form that
+// shows user the contents of streamTemplate templates in an easy to read format. This
+// includes a sorted selector for streamtemplate name (default Enterprise), and all
+// the attributes for the selected stream template." New App.promptStreamTemplates
+// (main.js) -- a read-only modal (not a table tab like Catalogs > SFCCE, since a
+// template is one named object with scalar fields plus two differently-shaped
+// sub-structures, not a flat list of rows): #st-template-select lists every
+// settings.streamTemplates name, alphabetically sorted, defaulting to "Enterprise";
+// the details area renders Pattern/Capability Name Begin/Application Capability Name
+// Begin/Entity Name Begin as scalar rows, value[] as a numbered ordered-chain table,
+// and passive[] as a From/To table. New check_stream_templates_catalog_dialog
+// (tests/run_all.py), the default-selection and scalar-field-rendering assertions
+// proven via TEMP BREAK. DESIGN_DOCUMENT.md SS8 (new paragraphs) and tests/README.md
+// updated; public/instructions.html gets a new Stream Templates bullet (SS4) and a
+// CommonScript_Sim mention alongside CommonScript_Example's own (Script Console
+// section). Every pre-existing test needed no changes. Full suite 172/172.
+export const APP_VERSION = '0.910';

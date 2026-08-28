@@ -4318,6 +4318,90 @@ def check_sfce_catalog_page(page):
     return True, f"SFCE Catalog opened with {result['rowCount']} rows and all {len(expectedCols)} id/description columns"
 
 
+def check_stream_templates_catalog_dialog(page):
+    """Regression guard/new-feature check, reported directly: "In Catalogs menu after
+    SFCCE create a new separation line and then a new item 'Stream Templates' and
+    command to open new form -- create a new read only form that shows user the
+    contents of streamTemplate templates in an easy to read format. This includes a
+    sorted selector for streamtemplate name (default Enterprise), and all the
+    attributes for the selected stream template." Covers: (1) the Catalogs menu's own
+    innerHTML has a SECOND separator after SFCCE, followed by a 'Stream Templates'
+    item; (2) App.promptStreamTemplates() opens a real modal with a #st-template-select
+    populated with every settings.streamTemplates name, alphabetically sorted; (3)
+    defaults to "Enterprise" when present; (4) the details area for "Enterprise" shows
+    its Pattern/Capability Name Begin/Entity Name Begin scalar fields, its full 9-type
+    value[] chain in order, and its 3 passive[] from/to pairs; (5) switching the
+    selector to a different template ("SFCCE", which additionally has
+    applicationCapabilityNameBegin) re-renders the details to match; (6) Close removes
+    the dialog. Purely read-only -- no submit button, no store mutation of any kind."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const menuHtml = document.getElementById('catalogs-menu').innerHTML;
+      const sfcceIdx = menuHtml.indexOf('data-action=\\"sfce\\"');
+      const streamTemplatesIdx = menuHtml.indexOf('data-action=\\"streamTemplates\\"');
+      const separatorCount = (menuHtml.match(/dd-separator/g) || []).length;
+
+      app.promptStreamTemplates();
+      await new Promise(r => setTimeout(r, 60));
+      const select = document.getElementById('st-template-select');
+      const options = select ? [...select.options].map(o => o.value) : [];
+      const sortedMatches = JSON.stringify(options) === JSON.stringify([...options].sort((a, b) => a.localeCompare(b)));
+      const defaultSelection = select.value;
+      const detailsHtml1 = document.getElementById('st-details').innerText;
+
+      const enterpriseTemplate = (store.settings.streamTemplates || []).find(t => t.name === 'Enterprise');
+
+      select.value = 'SFCCE';
+      select.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 30));
+      const detailsHtml2 = document.getElementById('st-details').innerText;
+
+      document.querySelector('.modal-box .cancel').click();
+      await new Promise(r => setTimeout(r, 30));
+      const closedAfterCancel = !document.querySelector('.modal-box');
+
+      return {
+        menuOrderOk: sfcceIdx !== -1 && streamTemplatesIdx !== -1 && streamTemplatesIdx > sfcceIdx,
+        separatorCount,
+        options,
+        sortedMatches,
+        defaultSelection,
+        detailsHasPattern1: detailsHtml1.includes('Pattern'),
+        detailsHasAllValueTypes: (enterpriseTemplate?.value || []).every(v => detailsHtml1.includes(v)),
+        detailsHasPassiveFrom: detailsHtml1.includes('BusinessFunction') && detailsHtml1.includes('BusinessOrganizationUnit'),
+        detailsChangedOnSwitch: detailsHtml2 !== detailsHtml1,
+        detailsHasAppCapBegin2: detailsHtml2.includes('Application Capability Name Begin'),
+        closedAfterCancel,
+      };
+    }
+    """)
+    problems = []
+    if not result["menuOrderOk"]:
+        problems.append("expected a 'Stream Templates' item after 'SFCCE' in the Catalogs menu")
+    if result["separatorCount"] < 2:
+        problems.append(f"expected at least 2 separators in the Catalogs menu (one before SFCCE, one before Stream Templates), got {result['separatorCount']}")
+    if not result["sortedMatches"]:
+        problems.append(f"expected the template select's options to be alphabetically sorted, got {result['options']}")
+    if result["defaultSelection"] != "Enterprise":
+        problems.append(f"expected the dialog to default-select 'Enterprise', got {result['defaultSelection']!r}")
+    if not result["detailsHasPattern1"]:
+        problems.append("expected the details area to show a 'Pattern' field")
+    if not result["detailsHasAllValueTypes"]:
+        problems.append("expected the details area to list every element type in Enterprise's own value[] chain")
+    if not result["detailsHasPassiveFrom"]:
+        problems.append("expected the details area to include passive[] pair types not in value[] (BusinessFunction, BusinessOrganizationUnit)")
+    if not result["detailsChangedOnSwitch"]:
+        problems.append("expected switching the template selector to re-render the details area")
+    if not result["detailsHasAppCapBegin2"]:
+        problems.append("expected SFCCE's own details to include its Application Capability Name Begin field")
+    if not result["closedAfterCancel"]:
+        problems.append("expected Close to remove the dialog")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, f"Catalogs > Stream Templates opens a read-only dialog with a sorted template selector ({len(result['options'])} templates, defaulting to Enterprise) and correctly rendered, switchable details"
+
+
 def check_sfce_catalog_section_description_fallback(page):
     """Regression guard/new-feature check, reported directly: "when I open catalog
     SFCCE I don't see these section descriptions. please add." Each row's own
@@ -4968,6 +5052,85 @@ def check_common_script_callable_from_part_script(page):
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
     return True, "a part's own script can call ANY function store.batchScriptCode defines -- both the shipped CommonScript_Example(ctx) (logging 'called by <type> <label> <model>') and a person's own custom addition -- while an ordinary part script with no such dependency behaves exactly as before"
+
+
+def check_common_script_sim_covers_enterprise_types(page):
+    """Regression guard/new-feature check for the shipped CommonScript_Sim(ctx) example
+    (DEFAULT_BATCH_SCRIPT_CODE, state.js, right after CustomRemap_Example), reported
+    directly with a starter shape ("switch (ctx.part.type.toLowerCase()) { case
+    'generalactor': ctx.log(...); break; default: ctx.log(...) }") to extend to "all
+    known element types identified in streamTemplates where name = 'Enterprise'," plus
+    "a generic return statement with value, state, response, and badge settings."
+    "Enterprise" (public/custom.json, settings.streamTemplates) uses 9 element types in
+    its own value[] chain (GeneralActor, BusinessService, BusinessCapability,
+    BusinessProcess, ApplicationCapability, ApplicationProcess,
+    ApplicationLogicalComponent, ApplicationPhysicalComponent, DataDataEntity) plus 3
+    more its passive[] pairs introduce (BusinessFunction, ApplicationApplication,
+    BusinessOrganizationUnit) -- 12 total. Covers, via real simulation ticks (not just
+    scanning the text): every one of the 12 types logs its own "received .. <Type>"
+    message via a real part whose script calls CommonScript_Sim(ctx); an unrecognized
+    type falls through to the default "received unknown .. <Type>" case; and the
+    example's own return statement actually works end to end with no simulation
+    error -- value defaults to the part's own label when there's no input, state
+    increments a ticksSeen counter tick over tick, response is only set once
+    ctx.inputs.length > 0, and badge is a real { text, color } object."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+      const model = store.defaultModel;
+      const enterpriseTypes = ['GeneralActor', 'BusinessService', 'BusinessCapability', 'BusinessProcess',
+        'ApplicationCapability', 'ApplicationProcess', 'ApplicationLogicalComponent',
+        'ApplicationPhysicalComponent', 'DataDataEntity', 'BusinessFunction',
+        'ApplicationApplication', 'BusinessOrganizationUnit'];
+
+      const parts = enterpriseTypes.map((t) => store.createPart({
+        type: t, label: 'SimCover_' + t, model, script: 'return CommonScript_Sim(ctx);', scriptEnabled: true,
+      }));
+      const unknownPart = store.createPart({
+        type: 'TotallyUnknownElementType', label: 'SimCoverUnknown', model, script: 'return CommonScript_Sim(ctx);', scriptEnabled: true,
+      });
+
+      const before = store.messageLog.length;
+      sim.stepSimulation(app, model);
+      const rt1 = store.simRuntime.get(model);
+      const newLines = store.messageLog.slice(before).map((e) => e.message);
+      const errors = [...parts, unknownPart].map((p) => rt1.values.get(p.id)?.lastError).filter(Boolean);
+
+      const loggedForEachType = enterpriseTypes.every((t) => newLines.some((m) => m.includes('received .. ' + t)));
+      const loggedUnknown = newLines.some((m) => m.includes('received unknown .. TotallyUnknownElementType'));
+
+      const entry1 = rt1.values.get(parts[0].id);
+      const valueDefaultsToLabel = entry1?.value === 'SimCover_GeneralActor';
+      const stateAfterTick1 = entry1?.state?.ticksSeen;
+      const badgeOk = entry1?.badge && entry1.badge.text === 'GeneralActor' && typeof entry1.badge.color === 'string';
+      const noResponseWithNoInput = entry1?.response === undefined;
+
+      sim.stepSimulation(app, model);
+      const rt2 = store.simRuntime.get(model);
+      const stateAfterTick2 = rt2.values.get(parts[0].id)?.state?.ticksSeen;
+
+      return { errors, loggedForEachType, loggedUnknown, valueDefaultsToLabel, stateAfterTick1, stateAfterTick2, badgeOk, noResponseWithNoInput };
+    }
+    """)
+    problems = []
+    if result["errors"]:
+        return False, f"expected every CommonScript_Sim(ctx) call to run without error, got {result['errors']}"
+    if not result["loggedForEachType"]:
+        problems.append("expected every one of the 12 Enterprise element types to log its own 'received .. <Type>' message")
+    if not result["loggedUnknown"]:
+        problems.append("expected an unrecognized element type to fall through to the default 'received unknown .. <Type>' case")
+    if not result["valueDefaultsToLabel"]:
+        problems.append(f"expected the example return's value to default to the part's own label with no input, got {result['valueDefaultsToLabel']}")
+    if result["stateAfterTick1"] != 1 or result["stateAfterTick2"] != 2:
+        problems.append(f"expected the example return's state.ticksSeen to increment each tick (1, then 2), got {result['stateAfterTick1']}, {result['stateAfterTick2']}")
+    if not result["badgeOk"]:
+        problems.append("expected the example return's badge to be a real {text, color} object matching the part's own type")
+    if not result["noResponseWithNoInput"]:
+        problems.append("expected the example return's response to be omitted when ctx.inputs is empty")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "CommonScript_Sim(ctx) logs a distinct message for all 12 element types the Enterprise stream template uses (plus a default for anything else), and its example return statement's value/state/response/badge all work correctly across real simulation ticks"
 
 
 def check_smart_stream_preset_local_persistence(page):
@@ -13640,6 +13803,7 @@ CHECKS = [
     check_generate_industry_place_on_view_defaults_unchecked,
     check_dropdown_scrollable,
     check_sfce_catalog_page,
+    check_stream_templates_catalog_dialog,
     check_sfce_catalog_section_description_fallback,
     check_boot_loader_wires_section_id_and_order,
     check_routing_style_per_connector_type,
@@ -13650,6 +13814,7 @@ CHECKS = [
     check_local_secrets_settings_split,
     check_batch_script_code_persists_with_local_settings,
     check_common_script_callable_from_part_script,
+    check_common_script_sim_covers_enterprise_types,
     check_smart_stream_preset_local_persistence,
     check_smart_stream_preset_dialog_save_and_load,
     check_instructions_closed_persists_across_reload,

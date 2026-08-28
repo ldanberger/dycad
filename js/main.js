@@ -1901,6 +1901,65 @@ class App {
     return tab;
   }
 
+  /** Catalogs > Stream Templates (after SFCCE, its own separator): a read-only viewer
+   * for settings.streamTemplates (custom.json) — the data Generate Stream/Populate From
+   * Template/insertSmartStream/Level It all read by name (templateName) but that a
+   * person otherwise has no in-app way to actually SEE. A dialog rather than a table tab
+   * (unlike Catalogs > SFCCE, above) since a template isn't a flat list of rows — it's
+   * one named object with a handful of scalar fields plus two differently-shaped
+   * sub-structures (an ORDERED chain, `value[]`, and a set of `passive` from/to pairs),
+   * which reads far more clearly as its own small layout than forced into generic table
+   * columns. Template select is sorted alphabetically, defaulting to "Enterprise" when
+   * present (else the first one) — same "known, most commonly referenced default"
+   * precedent Remap/Generate Stream's own template pickers already follow. */
+  promptStreamTemplates() {
+    const templates = this.store.settings.streamTemplates || [];
+    if (templates.length === 0) { this.toast('No stream templates defined in settings.', true); return; }
+    const sortedNames = [...templates].map((t) => t.name).sort((a, b) => a.localeCompare(b));
+
+    const root = document.getElementById('modal-root');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal-box modal-box-wide';
+    box.innerHTML = `<h3>Stream Templates</h3>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Read-only — the named stream templates (settings.streamTemplates) that Generate Stream, Populate From Template, Insert Smart Stream, and Level It all reference by name.</div>
+      <div class="prop-row"><label>Template</label><select id="st-template-select">${sortedNames.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('')}</select></div>
+      <div id="st-details" style="max-height:55vh;overflow-y:auto;"></div>
+      <div class="modal-actions"><button class="cancel">Close</button></div>`;
+    overlay.appendChild(box);
+    root.appendChild(overlay);
+
+    const detailsEl = box.querySelector('#st-details');
+    const renderDetails = (name) => {
+      const t = templates.find((tt) => tt.name === name);
+      if (!t) { detailsEl.innerHTML = '<div class="empty-hint">Template not found.</div>'; return; }
+      const scalarRow = (label, value) => value ? `<div class="prop-row"><label>${escapeHtml(label)}</label><div style="padding:4px 0;">${escapeHtml(String(value))}</div></div>` : '';
+      const valueChain = Array.isArray(t.value) ? t.value : [];
+      const passivePairs = Array.isArray(t.passive) ? t.passive : [];
+      detailsEl.innerHTML = `
+        ${scalarRow('Pattern', t.pattern)}
+        ${scalarRow('Capability Name Begin', t.capabilityNameBegin)}
+        ${scalarRow('Application Capability Name Begin', t.applicationCapabilityNameBegin)}
+        ${scalarRow('Entity Name Begin', t.entityNameBegin)}
+        <div style="font-size:12px;color:var(--text-muted);font-weight:600;margin:10px 0 4px;">Value Chain (${valueChain.length} element type${valueChain.length === 1 ? '' : 's'}, in order)</div>
+        ${valueChain.length ? `<table class="docs-table"><thead><tr><th style="width:40px;">#</th><th>Element Type</th></tr></thead><tbody>
+          ${valueChain.map((v, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(v)}</td></tr>`).join('')}
+        </tbody></table>` : '<div class="empty-hint">(none)</div>'}
+        <div style="font-size:12px;color:var(--text-muted);font-weight:600;margin:10px 0 4px;">Passive Pairs (${passivePairs.length})</div>
+        ${passivePairs.length ? `<table class="docs-table"><thead><tr><th>From</th><th>To</th></tr></thead><tbody>
+          ${passivePairs.map((p) => `<tr><td>${escapeHtml(p.from || '')}</td><td>${escapeHtml(p.to || '')}</td></tr>`).join('')}
+        </tbody></table>` : '<div class="empty-hint">(none)</div>'}`;
+    };
+
+    const select = box.querySelector('#st-template-select');
+    select.value = sortedNames.includes('Enterprise') ? 'Enterprise' : sortedNames[0];
+    renderDetails(select.value);
+    select.addEventListener('change', () => renderDetails(select.value));
+
+    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+  }
+
   /** Smart Check Model (Advanced menu, above Smart Check View): the whole-document
    * counterpart to Smart Check View/Node below — those two repair gaps within ONE
    * view's own placed content; this one scans the entire model for data-hygiene issues
@@ -4942,10 +5001,14 @@ function wireGlobalEvents(app) {
   ];
   const catalogsMenu = document.getElementById('catalogs-menu');
   catalogsMenu.innerHTML = CATALOGS.map((c) => `<div class="dd-item" data-type="${c.type}" data-label="${c.label}">${c.label}</div>`).join('')
-    + '<div class="dd-separator"></div><div class="dd-item" data-action="sfce">SFCCE</div>';
+    + '<div class="dd-separator"></div><div class="dd-item" data-action="sfce">SFCCE</div>'
+    // Reported directly: "In Catalogs menu after SFCCE create a new separation line
+    // and then a new item 'Stream Templates'."
+    + '<div class="dd-separator"></div><div class="dd-item" data-action="streamTemplates">Stream Templates</div>';
   catalogsMenu.querySelectorAll('.dd-item').forEach((item) => {
     item.addEventListener('click', () => {
       if (item.dataset.action === 'sfce') { app.promptSfceCatalog(); catalogsMenu.classList.add('hidden'); return; }
+      if (item.dataset.action === 'streamTemplates') { app.promptStreamTemplates(); catalogsMenu.classList.add('hidden'); return; }
       app.openOrSwitchCatalog(item.dataset.type, `${item.dataset.label} Catalog`);
       catalogsMenu.classList.add('hidden');
     });

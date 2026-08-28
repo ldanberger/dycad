@@ -2274,6 +2274,61 @@ script with no `batchScriptCode` dependency at all behaves exactly as before (pu
 additive) — proven via TEMP BREAK reverting the prepend, which fails with
 "CommonScript_Example is not defined".
 
+**`CommonScript_Sim(ctx)`** (`state.js`, shipped default, right after
+`CustomRemap_Example`): a second `CommonScript_<Name>` example, this one meant to be
+copied into (or called from) a PART's own `script` field directly rather than only
+called from another script — reported directly with a starter shape (a
+`switch (ctx.part.type.toLowerCase())` logging a per-type message, `default` logging an
+"unknown" variant) to extend to *"all known element types identified in streamTemplates
+where name = 'Enterprise', and add generic return statement with value, state,
+response, and badge settings."* "Enterprise" (`public/custom.json`,
+`settings.streamTemplates`) uses 12 element types total once its `passive[]` pairs are
+counted alongside its own ordered `value[]` chain: `value[]` itself has 9 (GeneralActor,
+BusinessService, BusinessCapability, BusinessProcess, ApplicationCapability,
+ApplicationProcess, ApplicationLogicalComponent, ApplicationPhysicalComponent,
+DataDataEntity); `passive[]` introduces 3 more that never appear in `value[]`
+(BusinessFunction, ApplicationApplication, BusinessOrganizationUnit) — see Catalogs >
+Stream Templates, directly below, for a live way to confirm this instead of
+hand-cross-referencing the JSON. The function's own return statement demonstrates the
+full `{ value, state, response, badge }` shape a real part script can use: `value`
+defaults to the part's own label when there's no input to forward; `state` increments a
+`ticksSeen` counter, showing the "merges forward automatically" behavior in a way a
+person can actually observe tick over tick; `response` is only set once
+`ctx.inputs.length > 0` (omitted otherwise, matching the contract's own "single value,
+not a queue" semantics); `badge` returns a real `{ text, color }` object. New
+`check_common_script_sim_covers_enterprise_types` (`tests/run_all.py`): drives a real
+part per element type through an actual `sim.stepSimulation()` call (not a text scan) to
+confirm each one logs its own message, an unrecognized type falls through to the default
+case, and the example return's four fields all behave as documented across two real
+ticks — proven via TEMP BREAK (both a removed case and a stripped `badge`).
+
+**Catalogs > Stream Templates** (`App.promptStreamTemplates`, `main.js`): reported
+directly, immediately after the above — *"In Catalogs menu after SFCCE create a new
+separation line and then a new item 'Stream Templates' and command to open new form --
+create a new read only form that shows user the contents of streamTemplate templates in
+an easy to read format. This includes a sorted selector for streamtemplate name (default
+Enterprise), and all the attributes for the selected stream template."* A read-only
+modal — unlike Catalogs > SFCCE (`promptSfceCatalog`, just above), which opens a full
+table TAB — since a stream template isn't a flat list of interchangeable rows: it's ONE
+named object with a few scalar fields (`pattern`, `capabilityNameBegin`,
+`applicationCapabilityNameBegin`, `entityNameBegin`) plus two differently-shaped
+sub-structures (an ORDERED chain, `value[]`, rendered as a numbered table so the sequence
+itself is visible; and `passive[]`, a set of `{from, to}` pairs, rendered as its own
+From/To table) — a dedicated small layout reads far more clearly here than forcing this
+shape into generic table columns. `#st-template-select` lists every
+`settings.streamTemplates` name, alphabetically sorted, defaulting to "Enterprise" when
+present (else the first name alphabetically) — the same "known, most commonly
+referenced default" precedent Remap/Generate Stream/Populate From Template's own
+template pickers already follow elsewhere. Purely read-only: no submit button, no store
+mutation of any kind, just a Close. New `check_stream_templates_catalog_dialog`
+(`tests/run_all.py`): the Catalogs menu's own second separator/item ordering after SFCCE;
+the selector's alphabetical sort and Enterprise default; Enterprise's own scalar fields,
+full `value[]` chain, and `passive[]` pairs (including a type like BusinessFunction that
+only appears in `passive[]`) all rendering correctly; switching to a differently-shaped
+template ("SFCCE," which additionally has `applicationCapabilityNameBegin`) re-rendering
+the details; and Close removing the dialog — the default-selection and scalar-field
+rendering both proven via TEMP BREAK.
+
 ## 9. The 3D View subsystem (`view3d.js`)
 
 A rotatable/zoomable WebGL scene over `store.doc.parts`/`connectors` directly —

@@ -610,6 +610,10 @@ there disabled and confusing.</p>
   column shows its rank (①②③...) and direction. Shift+click an already-active column again to flip just its
   own direction; a plain click on any column resets back to a single-column sort. The same multi-column sort
   works in the SFCCE preview table (Catalogs &gt; SFCE) too.</li>
+  <li><strong>Catalogs &gt; Stream Templates</strong> — a read-only viewer for the named stream templates
+  (Generate Stream, Populate From Template, Insert Smart Stream, and Level It all reference one by name).
+  Pick a template from the sorted selector (defaults to "Enterprise") to see its Pattern/Capability Name
+  Begin/Entity Name Begin fields, its full element-type chain in order, and its passive from/to pairs.</li>
 </ul>
 <p><strong>Explore &gt; 3D View</strong> — a rotatable/zoomable 3D scene over your Parts and Connectors
 directly, covering the whole document by default (not any one 2D view's placement of them) — unless you
@@ -855,7 +859,12 @@ to the Message Log using the CALLING part's own <code>ctx.part</code> — a part
 <code>CommonScript_&lt;Name&gt;</code>, kept visually distinct from <code>BatchScript_&lt;Name&gt;</code>
 (<code>main()</code>) and <code>dataAutoFill</code> (Autofill). A common function you write this way can use
 anything its own <code>ctx</code> parameter provides — it has no access to <code>app</code>/<code>store</code>
-directly, the same restriction any part script already has.</p>
+directly, the same restriction any part script already has. A second shipped example,
+<code>CommonScript_Sim(ctx)</code>, is meant to be copied into (or called from) a part's own script field
+directly: it switches on <code>ctx.part.type</code>, logging a distinct message for every element type the
+"Enterprise" stream template uses (see Catalogs &gt; Stream Templates above to browse that same data), and its
+own return statement is a working example of every field a part script's return can set —
+<code>value</code>, <code>state</code>, <code>response</code>, and <code>badge</code>.</p>
 <p>A fourth kind of function belongs here too: a user-designed <strong>Remap layout</strong> (see "Remap" above),
 picked interactively from that dialog's Pattern dropdown ("Custom" reveals a second dropdown listing every
 matching function found here) rather than called from <code>main()</code>, a menu item, or a part script. The

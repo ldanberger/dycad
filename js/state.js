@@ -34,7 +34,12 @@
  * text ahead of a part's script before compiling it, so CommonScript_Example is
  * callable BY NAME from any part's own script, using that script's own `ctx`. Naming
  * convention for future additions meant to be called this way:
- * `CommonScript_<Name>`.
+ * `CommonScript_<Name>`. `CommonScript_Sim()` (below, right after `CustomRemap_Example`)
+ * is a second example of this same kind — meant to be copied into (or called from) a
+ * part's own script field directly, demonstrating a type-switch covering every element
+ * type the "Enterprise" stream template uses, plus the full `{ value, state, response,
+ * badge }` return shape (see Catalogs > Stream Templates, `App.promptStreamTemplates`
+ * in main.js, for a live read-only browser of the template data this switches over).
  *
  * `CustomRemap_Example()` (below, after CommonScript_Example) is a FOURTH kind of
  * entry point, reported directly: "is it possible to build a small framework for user
@@ -341,6 +346,81 @@ function CustomRemap_Example(ctx) {
   });
   if (types.length > 1) ctx.setRowGap(0, 30); // extra space below the first row
   return positions;
+}
+
+// Common script: a second example, this one meant to be copied into (or called from) a
+// PART's own script field directly, rather than called from another script the way
+// CommonScript_Example above is -- reported directly: request for a case-statement
+// example covering every element type the "Enterprise" stream template actually uses,
+// plus a generic example return statement. Switches on ctx.part.type.toLowerCase()
+// (case-insensitive, matching every other element-type comparison in this codebase) --
+// covers the "Enterprise" streamTemplate's (public/custom.json, settings.streamTemplates)
+// own value[] chain (GeneralActor -> BusinessService -> BusinessCapability ->
+// BusinessProcess -> ApplicationCapability -> ApplicationProcess ->
+// ApplicationLogicalComponent -> ApplicationPhysicalComponent -> DataDataEntity) plus the
+// 3 extra element types its passive[] pairs introduce (BusinessFunction,
+// ApplicationApplication, BusinessOrganizationUnit) -- see Catalogs > Stream Templates
+// for a live, read-only browser of this same template data instead of hand-cross-
+// referencing custom.json. The return statement afterward demonstrates the full
+// { value, state, response, badge } shape a part script's return can use -- see
+// simulation.js's own script-contract comment for exactly what each field does; response
+// and badge are both optional, this just shows a real, working example of each.
+function CommonScript_Sim(ctx) {
+  switch (ctx.part.type.toLowerCase()) {
+    case 'generalactor':
+      ctx.log('received .. ' + ctx.part.type);
+      break;
+    case 'businessservice':
+      ctx.log('received .. ' + ctx.part.type);
+      break;
+    case 'businesscapability':
+      ctx.log('received .. ' + ctx.part.type);
+      break;
+    case 'businessprocess':
+      ctx.log('received .. ' + ctx.part.type);
+      break;
+    case 'businessfunction':
+      ctx.log('received .. ' + ctx.part.type);
+      break;
+    case 'businessorganizationunit':
+      ctx.log('received .. ' + ctx.part.type);
+      break;
+    case 'applicationcapability':
+      ctx.log('received .. ' + ctx.part.type);
+      break;
+    case 'applicationprocess':
+      ctx.log('received .. ' + ctx.part.type);
+      break;
+    case 'applicationlogicalcomponent':
+      ctx.log('received .. ' + ctx.part.type);
+      break;
+    case 'applicationphysicalcomponent':
+      ctx.log('received .. ' + ctx.part.type);
+      break;
+    case 'applicationapplication':
+      ctx.log('received .. ' + ctx.part.type);
+      break;
+    case 'datadataentity':
+      ctx.log('received .. ' + ctx.part.type);
+      break;
+    default:
+      ctx.log('received unknown .. ' + ctx.part.type);
+  }
+
+  // Example return -- value passes through to every downstream connector's target as
+  // its ctx.inputs[i].value next tick; state persists across ticks (merged forward
+  // automatically), here just counting how many times this part's script has run;
+  // response broadcasts back, one tick later, to whichever node(s) sent an input THIS
+  // tick (only meaningful once ctx.inputs.length > 0); badge drives the node's second,
+  // independent bottom-right badge (any text + any CSS color), shown only while the
+  // view's "Show Right Badge" toggle is on, and only for the tick a script actually
+  // returns one.
+  return {
+    value: ctx.inputs[0]?.value ?? ctx.part.label,
+    state: { ticksSeen: (ctx.state.ticksSeen || 0) + 1 },
+    response: ctx.inputs.length > 0 ? 'ack:' + ctx.part.label : undefined,
+    badge: { text: ctx.part.type, color: '#3b5bfd' },
+  };
 }
 `;
 
