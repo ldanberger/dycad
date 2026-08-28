@@ -4647,4 +4647,35 @@
 // BREAK. DESIGN_DOCUMENT.md SS5.6 and tests/README.md updated for both reports; no
 // public/instructions.html changes needed (it never described the old always-visible
 // behavior). Full suite 169/169.
-export const APP_VERSION = '0.908';
+// v0.909: direct follow-up broadening v0.908's own view-display-filters-only fix:
+// "the 'FILTERS' property panel still shows when user clicks on a view freeform node;
+// as it is not specific to the selected node it should not be appearing. Filter
+// section in property panel should only appear when view is clicked in canvas not on
+// a node, connector, or section or other canvas object." v0.908 only hid the NESTED
+// #view-display-filters-wrap; the OUTER [data-panel-id="filters"] panel itself (its
+// header and all 8 tab-scoped controls -- Stream/Type/Section/Connector Type/View
+// Scope/Layer Order/Highlight/Levels) stayed visible regardless of selection, so a
+// selected node's Properties still sat under a visible "Filters" section showing
+// unrelated canvas-wide controls. New shared canvasHasObjectSelected(tab) helper
+// (render.js -- true for a canvas tab with tab.selection.size > 0 or
+// tab.selectedSectionId set) now used by BOTH renderToolbar (the outer panel) and
+// renderViewDisplayFilters (the nested sub-panel), so the two conditions can't drift
+// apart -- and since this also folds Section selection into the SAME condition, the
+// nested sub-panel's own earlier "stays visible during Section selection" carve-out
+// (v0.908) became unreachable dead code (an already-hidden ancestor wins regardless
+// of a descendant's own class) and was removed. Scoped to canvas tabs only --
+// deliberately does NOT extend to a 3D tab's own part selection
+// (tab.selectedCatalogRow), since that wasn't part of this report and would fight
+// deselectAndShowViewFilters's own established "empty click brings Filters up" flow;
+// the Filters panel is 3D's real "view properties" equivalent, unlike 2D canvas which
+// has its own renderViewProperties. New check_filters_panel_hidden_when_canvas_
+// object_selected (tests/run_all.py); check_view_display_filters_hidden_when_node_
+// selected's own Section assertion flipped from "stays shown" to "also hides," AND
+// its setup fixed to build a real store.addView(name, 'org') section instead of the
+// wrong store.doc.sections (tab.selectedSectionId actually indexes view.sections, a
+// section-VIEW's own header list, not a whole-document catalog) -- meaning that
+// assertion had silently never run until fixed here. Both the outer-panel hide and
+// the inner sub-panel's now-unconditional Section hide proven via TEMP BREAK.
+// DESIGN_DOCUMENT.md SS5.6 and tests/README.md updated; no public/instructions.html
+// changes needed. Full suite 170/170.
+export const APP_VERSION = '0.909';

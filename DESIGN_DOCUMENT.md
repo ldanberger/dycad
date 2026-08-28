@@ -513,25 +513,53 @@ panels were visibly colliding — Properties showing a node's own fields while, 
 above it, the view-display Filters panel kept showing the VIEW's own display settings,
 implying two different objects' properties were open for editing at once.
 `renderViewDisplayFilters` (`render.js`) now hides `#view-display-filters-wrap` (clearing
-`#view-display-filters-body`) the moment `tab.selection.size > 0`, in addition to its
-existing "no view" check — the exact same condition `renderProperties` itself already
-uses to decide whether to render `renderViewProperties` vs. a node/connector's own
-panel, so the two functions now agree on when "the view itself" (rather than one of its
-members) is the thing being edited. Selecting a Section (`tab.selectedSectionId`) is
-deliberately NOT treated the same as a node/connector — the report's own wording ("not
-clicking on connector or node") doesn't cover it, and `renderSectionProperties` doesn't
-occupy the same visual slot the view-display Filters panel would otherwise fill. Note
-this is narrower than the outer `[data-panel-id="filters"]` panel's own 8 tab-scoped
-controls (Stream/Type/Section/Connector Type/View Scope/Layer Order/Highlight/Levels,
-earlier in this section) — those stay visible regardless of selection, since they filter
-what's currently DRAWN on the canvas and remain just as relevant while something is
-selected; only the 9 view-DOCUMENT display toggles below them got this treatment.
+`#view-display-filters-body`) via a new shared `canvasHasObjectSelected(tab)` helper
+(`true` for a canvas tab with `tab.selection.size > 0` or `tab.selectedSectionId` set),
+in addition to its existing "no view" check — the exact same condition `renderProperties`
+itself already uses to decide whether to render `renderViewProperties` vs. a
+node/connector's own panel, so the two functions now agree on when "the view itself"
+(rather than one of its members) is the thing being edited. (An earlier version of this
+fix deliberately kept Section selection carved out — see the broader follow-up
+immediately below for why that carve-out was removed.)
 `check_view_display_filters_moved_to_filters_panel` (the original relocation guard) had
 its own "stays visible with a node selected" assertion removed since that's no longer
-true; a new `check_view_display_filters_hidden_when_node_selected` (`tests/run_all.py`)
-covers the reversed behavior — shown with nothing selected, hidden for both a selected
-node and a selected connector, shown again after deselecting, and still shown while a
-Section is selected — proven via TEMP BREAK.
+true; `check_view_display_filters_hidden_when_node_selected` (`tests/run_all.py`) covers
+the reversed behavior, proven via TEMP BREAK.
+
+**Broader reversal: the whole Filters panel, not just the view-display sub-panel.**
+Direct follow-up, once the fix above still left a visible collision: *"the 'FILTERS'
+property panel still shows when user clicks on a view freeform node; as it is not
+specific to the selected node it should not be appearing. Filter section in property
+panel should only appear when view is clicked in canvas not on a node, connector, or
+section or other canvas object."* The fix above only hid the NESTED
+`#view-display-filters-wrap`; the OUTER `[data-panel-id="filters"]` panel itself — its
+`<h3>Filters</h3>` header and all 8 tab-scoped controls (Stream/Type/Section/Connector
+Type/View Scope/Layer Order/Highlight/Levels) — stayed visible regardless of selection,
+so a selected node's Properties still sat directly under a visible "Filters ▾" section
+showing unrelated canvas-wide controls. `renderToolbar` (`render.js`) now ALSO hides the
+whole panel (`filtersSection.classList.toggle('hidden', !anyFilterApplies ||
+canvasHasObjectSelected(tab))`) using the SAME shared helper `renderViewDisplayFilters`
+uses, so the two conditions can never drift apart again — and since `canvasHasObjectSelected`
+now includes `selectedSectionId`, the nested sub-panel's own earlier Section carve-out
+became unreachable dead code the moment its ancestor started hiding for Section
+selection too (an already-hidden ancestor wins regardless of a descendant's own class),
+so it was removed there rather than left as confusing, never-taken special-casing.
+Scoped to canvas tabs only — `canvasHasObjectSelected` is unconditionally `false` for a
+3D tab, deliberately NOT extending to a 3D tab's own part selection
+(`tab.selectedCatalogRow`): that wasn't part of this report, and hiding Filters there
+would fight `deselectAndShowViewFilters`'s own established "empty click brings the
+Filters panel up" flow (`view3d.js`, earlier in this section) — the Filters panel IS 3D's
+real "view properties" equivalent, unlike a 2D canvas view which has its own dedicated
+`renderViewProperties`. New `check_filters_panel_hidden_when_canvas_object_selected`
+(`tests/run_all.py`): shown with nothing selected; hidden for a selected node, a selected
+connector, and a selected Section (built via a real `store.addView(name, 'org')`, not a
+whole-document `store.doc.sections` lookup — `tab.selectedSectionId` actually indexes
+`view.sections`, a section-VIEW's own header list, a different concept the ORIGINAL
+Section assertion in `check_view_display_filters_hidden_when_node_selected` had gotten
+wrong, meaning it silently never ran until fixed here too); shown again after
+deselecting; and unchanged on a 3D tab, both before and after selecting a part there.
+Both the outer-panel hide and the inner sub-panel's now-unconditional Section hide
+proven via TEMP BREAK.
 
 **Select All/Exclude All consistency.** Reported directly: *"Any form with multiple
 select checkboxes should also have select all/deselect all checkboxes."* An audit

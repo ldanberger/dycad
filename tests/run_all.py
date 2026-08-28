@@ -7856,22 +7856,26 @@ def check_view_display_filters_hidden_when_node_selected(page):
     selected on canvas (ie not clicking on connector or node), current problem is the
     view filters are shown as well as the node properties when a node or connector is
     selected." renderViewDisplayFilters (render.js) now hides #view-display-filters-
-    wrap the moment tab.selection is non-empty (a node OR a connector selected),
-    mirroring exactly when renderProperties itself switches away from
-    renderViewProperties — the two panels no longer show two different things'
-    settings/fields at once. Covers: shown with nothing selected; hidden once a part
-    (node) is selected, with Properties showing the node's own fields; hidden once a
-    connector is selected; shown again after deselecting; and — the one carve-out the
-    report's own wording implies ("not clicking on connector or node") — STILL shown
-    while a Section is selected (tab.selectedSectionId), since a section isn't a node
-    or connector and Section Properties doesn't compete with this panel for space."""
+    wrap via the shared canvasHasObjectSelected(tab) helper (also used by the outer
+    Filters panel itself — see check_filters_panel_hidden_when_canvas_object_selected,
+    below, for a later, broader follow-up against THAT panel), mirroring exactly when
+    renderProperties itself switches away from renderViewProperties. Covers: shown
+    with nothing selected; hidden once a part (node) is selected, with Properties
+    showing the node's own fields; hidden once a connector is selected; shown again
+    after deselecting; and hidden once a Section is selected on a real section-based
+    ('org') view too — an earlier version of this same check had a carve-out keeping
+    it visible during Section selection (matching an earlier, narrower report), since
+    superseded by the broader follow-up; that earlier assertion used the wrong data
+    source entirely (store.doc.sections, a whole-document catalog concept, when
+    tab.selectedSectionId actually indexes view.sections, a section-VIEW's own header
+    list) so it silently never even ran — fixed here to build a genuine 'org' view via
+    store.addView(name, 'org') and select one of its real, auto-seeded sections."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
       const homeTab = store.tabs.find(t => t.type === 'canvas');
       app.switchToTab(homeTab.id);
       homeTab.selection = new Set();
-      homeTab.selectedSectionId = null;
       app.render();
       await new Promise(r => setTimeout(r, 60));
       const wrapHidden = () => document.getElementById('view-display-filters-wrap').classList.contains('hidden');
@@ -7902,15 +7906,17 @@ def check_view_display_filters_hidden_when_node_selected(page):
       await new Promise(r => setTimeout(r, 60));
       out.shownAgainAfterDeselect = !wrapHidden();
 
-      const sections = store.doc.sections || [];
+      const orgView = store.addView('RegrOrgSectionTest_' + Date.now(), 'org');
+      const orgTab = app.createCanvasTab(orgView);
+      app.switchToTab(orgTab.id);
+      const sections = orgView.sections || [];
       if (sections.length) {
-        homeTab.selectedSectionId = sections[0].id;
+        orgTab.selectedSectionId = sections[0].id;
         app.render();
         await new Promise(r => setTimeout(r, 60));
-        out.shownWithSectionSelected = !wrapHidden();
-        homeTab.selectedSectionId = null;
+        out.hiddenWithSectionSelected = wrapHidden();
       } else {
-        out.shownWithSectionSelected = null; // no sections in this model -- skip, not a failure
+        out.hiddenWithSectionSelected = null; // no seeded 'org' sections in settings -- skip, not a failure
       }
 
       return out;
@@ -7927,11 +7933,115 @@ def check_view_display_filters_hidden_when_node_selected(page):
         problems.append("expected the view-display Filters panel to HIDE once a connector is selected")
     if not result["shownAgainAfterDeselect"]:
         problems.append("expected the view-display Filters panel to reappear after deselecting")
-    if result["shownWithSectionSelected"] is False:
-        problems.append("expected the view-display Filters panel to stay visible while a Section (not a node/connector) is selected")
+    if result["hiddenWithSectionSelected"] is False:
+        problems.append("expected the view-display Filters panel to ALSO hide once a Section is selected")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "The view-display Filters panel now hides whenever a node or connector is selected (matching Properties' own switch to that item's fields), reappears once deselected, and stays visible while a Section is selected instead"
+    return True, "The view-display Filters panel hides whenever a node, connector, or section is selected (matching Properties' own switch away from view-level fields), and reappears once deselected"
+
+
+def check_filters_panel_hidden_when_canvas_object_selected(page):
+    """Regression guard, direct follow-up broadening check_view_display_filters_
+    hidden_when_node_selected's own narrower fix: "the 'FILTERS' property panel still
+    shows when user clicks on a view freeform node; as it is not specific to the
+    selected node it should not be appearing. Filter section in property panel should
+    only appear when view is clicked in canvas not on a node, connector, or section or
+    other canvas object." That earlier fix only hid the NESTED #view-display-filters-
+    wrap sub-panel; the OUTER Filters panel itself
+    (.panel-section[data-panel-id="filters"], containing the 8 tab-scoped controls —
+    View Scope/Stream/Types/Section/Connector Type/Layer Order/Highlight/Levels — plus
+    that nested sub-panel) stayed visible regardless of selection, so a node's own
+    Properties still sat directly under a visible "Filters ▾" header showing unrelated
+    canvas-wide controls. renderToolbar (render.js) now ALSO hides the whole panel via
+    the same canvasHasObjectSelected(tab) helper renderViewDisplayFilters uses (shared
+    so the two conditions can't drift), scoped to canvas tabs only — deliberately does
+    NOT extend to a 3D tab selecting a part (tab.selectedCatalogRow), since 3D's own
+    established empty-click-shows-Filters flow
+    (check_view3d_empty_click_deselects_and_shows_filters) wasn't part of this report
+    and the Filters panel IS 3D's real "view properties" equivalent (§5.6,
+    DESIGN_DOCUMENT.md). Covers: shown with nothing selected; hidden for a selected
+    node, a selected connector, and a selected Section (a real 'org' view section, not
+    just tab.selection); shown again after deselecting; and UNCHANGED on a 3D tab —
+    still shown both before and after selecting a part there."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      homeTab.selection = new Set();
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      const filtersHidden = () => document.querySelector('.panel-section[data-panel-id="filters"]').classList.contains('hidden');
+      const out = {};
+      out.shownWithNothingSelected = !filtersHidden();
+
+      const view = store.findView(homeTab.viewId);
+      const part = store.createPart({ type: 'BusinessFunction', label: 'RegrFiltersPanelSel', model: store.defaultModel, streams: [] });
+      const partVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: 40, y: 40 });
+      const part2 = store.createPart({ type: 'BusinessFunction', label: 'RegrFiltersPanelSel2', model: store.defaultModel, streams: [] });
+      const part2Vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: part2.id, x: 140, y: 40 });
+      const conn = store.createConnector({ from: part.id, to: part2.id, model: store.defaultModel, connectorType: 'c' });
+      const connVm = store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn.id, fromVmId: partVm.id, toVmId: part2Vm.id });
+
+      homeTab.selection = new Set([partVm.id]);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      out.hiddenWithNodeSelected = filtersHidden();
+
+      homeTab.selection = new Set([connVm.id]);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      out.hiddenWithConnectorSelected = filtersHidden();
+
+      homeTab.selection = new Set();
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      out.shownAgainAfterDeselect = !filtersHidden();
+
+      const orgView = store.addView('RegrFiltersPanelOrgSection_' + Date.now(), 'org');
+      const orgTab = app.createCanvasTab(orgView);
+      app.switchToTab(orgTab.id);
+      const sections = orgView.sections || [];
+      if (sections.length) {
+        orgTab.selectedSectionId = sections[0].id;
+        app.render();
+        await new Promise(r => setTimeout(r, 60));
+        out.hiddenWithSectionSelected = filtersHidden();
+      } else {
+        out.hiddenWithSectionSelected = null;
+      }
+
+      // 3D: selecting a part must NOT hide the Filters panel (unchanged, established flow)
+      app.openOrSwitch3DView();
+      await new Promise(r => setTimeout(r, 400));
+      const tab3d = store.tabs.find(t => t.type === '3d');
+      out.shownOn3DBeforeSelect = !filtersHidden();
+      tab3d.selectedCatalogRow = { type: 'part', id: part.id };
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      out.shownOn3DWithPartSelected = !filtersHidden();
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["shownWithNothingSelected"]:
+        problems.append("expected the outer Filters panel visible with nothing selected on a canvas tab")
+    if not result["hiddenWithNodeSelected"]:
+        problems.append("expected the outer Filters panel to HIDE once a node is selected")
+    if not result["hiddenWithConnectorSelected"]:
+        problems.append("expected the outer Filters panel to HIDE once a connector is selected")
+    if not result["shownAgainAfterDeselect"]:
+        problems.append("expected the outer Filters panel to reappear after deselecting")
+    if result["hiddenWithSectionSelected"] is False:
+        problems.append("expected the outer Filters panel to HIDE once a Section is selected")
+    if not result["shownOn3DBeforeSelect"]:
+        problems.append("expected the outer Filters panel shown on a 3D tab before selecting a part")
+    if not result["shownOn3DWithPartSelected"]:
+        problems.append("expected the outer Filters panel to STAY shown on a 3D tab even after selecting a part (unchanged, established 3D flow)")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The whole Filters panel (all 8 tab-scoped controls, not just the nested view-display sub-panel) now hides whenever a node, connector, or section is selected on a canvas tab, reappears once deselected, and stays visible on a 3D tab regardless of part selection"
 
 
 def check_filters_properties_alignment_and_row_spacing(page):
@@ -13486,6 +13596,7 @@ CHECKS = [
     check_view3d_empty_click_deselects_and_shows_filters,
     check_view_display_filters_moved_to_filters_panel,
     check_view_display_filters_hidden_when_node_selected,
+    check_filters_panel_hidden_when_canvas_object_selected,
     check_filters_properties_alignment_and_row_spacing,
     check_script_console_runs_main_function,
     check_script_console_run_function_picker,

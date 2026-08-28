@@ -87,6 +87,18 @@ function renderTabs(app) {
   }
 }
 
+/** True when a canvas tab currently has a node, connector, or section selected —
+ * "a specific canvas object is being edited right now" as opposed to the view itself.
+ * Shared by the Filters panel's own visibility (renderToolbar, below) and its nested
+ * view-display sub-panel (renderViewDisplayFilters, below) so the two conditions can
+ * never drift apart — see both functions' own doc comments for why this exists.
+ * Always false for a non-canvas tab (selection/selectedSectionId are canvas-only
+ * concepts; a 3D tab's own part selection, tab.selectedCatalogRow, is deliberately NOT
+ * included here — see renderToolbar's comment for why). */
+function canvasHasObjectSelected(tab) {
+  return !!(tab && tab.type === 'canvas' && (tab.selection.size > 0 || tab.selectedSectionId));
+}
+
 // ===================== TOOLBAR =====================
 function renderToolbar(app) {
   const { store } = app;
@@ -249,8 +261,22 @@ function renderToolbar(app) {
   // empty "Filters ▾" header with nothing under it.
   const filterGroupIds = ['view3d-scope-group', 'stream-filter-group', 'element-type-filter-group', 'section-filter-group', 'connector-type-filter-group', 'view3d-layer-order-group', 'highlight-type-filter-group', 'connector-levels-group'];
   const anyFilterApplies = filterGroupIds.some((id) => !document.getElementById(id).classList.contains('hidden'));
+  // Direct follow-up, once the two panels had visibly collided: "the 'FILTERS'
+  // property panel still shows when user clicks on a view freeform node; as it is not
+  // specific to the selected node it should not be appearing. Filter section in
+  // property panel should only appear when view is clicked in canvas not on a node,
+  // connector, or section or other canvas object." The whole Filters panel (all 8
+  // tab-scoped controls, not just the nested view-display sub-panel — see
+  // renderViewDisplayFilters below, which already had its OWN narrower fix) now hides
+  // for a canvas tab the instant anything on it is selected — canvasHasObjectSelected,
+  // above, shared with renderViewDisplayFilters so the two conditions can't drift.
+  // Scoped to canvas tabs only: a 3D tab has no per-object Properties panel competing
+  // for the same space the way a canvas node/connector/section does, and hiding
+  // Filters there would fight deselectAndShowViewFilters's own established "empty
+  // click brings the Filters panel up" flow (view3d.js), which this report didn't ask
+  // to change.
   const filtersSection = document.querySelector('.panel-section[data-panel-id="filters"]');
-  if (filtersSection) filtersSection.classList.toggle('hidden', !anyFilterApplies);
+  if (filtersSection) filtersSection.classList.toggle('hidden', !anyFilterApplies || canvasHasObjectSelected(tab));
 }
 
 // ===================== TOOLBOX =====================
@@ -1278,22 +1304,24 @@ function renderViewProperties(app, tab) {
  * selected on canvas (ie not clicking on connector or node), current problem is the
  * view filters are shown as well as the node properties when a node or connector is
  * selected." So this panel is now shown exactly when renderProperties (above) would
- * show renderViewProperties for the SAME tab — nothing selected (tab.selection empty)
- * — and hidden the moment a node or connector is selected (tab.selection.size > 0),
- * matching Properties' own switch away from view-level fields at that exact point;
- * hidden entirely for every other tab type, including 3D, since these are genuine
- * View DOCUMENT properties, not tab-scoped session filters, and a 3D tab isn't backed
- * by any single view. Selecting a SECTION (tab.selectedSectionId) is deliberately NOT
- * treated the same as a node/connector here — a section isn't "a node or connector"
- * per the report's own wording, and Section Properties doesn't compete for the same
- * space this panel would otherwise fill. */
+ * show renderViewProperties for the SAME tab — nothing selected — and hidden the
+ * moment anything is, via the same canvasHasObjectSelected(tab) the outer Filters
+ * panel's own visibility now uses (renderToolbar, above this file) — a later, broader
+ * follow-up against that SAME outer panel: "should only appear when view is clicked
+ * in canvas not on a node, connector, or section or other canvas object" — so a
+ * selected Section now hides this nested sub-panel too (it used to be a deliberate
+ * carve-out here; superseded once the OUTER panel started hiding for section
+ * selection as well — keeping this one narrower would just be silently unreachable,
+ * confusing dead code once its ancestor is already hidden). Hidden entirely for every
+ * other tab type, including 3D, since these are genuine View DOCUMENT properties, not
+ * tab-scoped session filters, and a 3D tab isn't backed by any single view. */
 function renderViewDisplayFilters(app) {
   const wrap = document.getElementById('view-display-filters-wrap');
   const container = document.getElementById('view-display-filters-body');
   if (!wrap || !container) return;
   const tab = app.store.activeTab();
   const view = tab && tab.type === 'canvas' ? app.store.findView(tab.viewId) : null;
-  if (!view || tab.selection.size > 0) {
+  if (!view || canvasHasObjectSelected(tab)) {
     wrap.classList.add('hidden');
     container.innerHTML = '';
     return;
