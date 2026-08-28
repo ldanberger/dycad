@@ -1,5 +1,5 @@
 // canvas.js — the interactive canvas: nodes (viewMembers of type 'part'), edges (viewMembers of type 'connector')
-import { ciEq } from './state.js';
+import { ciEq, isUIDashboardType } from './state.js';
 import { escapeHtml, groupFill, iconSvgFor, isAttributeForeignKey } from './render.js';
 import { elementByType } from './rules.js';
 import { isSectionViewType, computeSectionLayout, pixelToNearestGrid, isTypeAllowedInSection, findFreeCellOrGrowSection, CELL_W, CELL_H, rescaleSectionPositions } from './sections.js';
@@ -701,11 +701,23 @@ function buildNodeEl(app, tab, vm, part) {
   }
 
   let simBadgeHtml = '';
-  if (view?.chkShowSimValues) {
+  // UI dashboard Output widgets (UITextOutput/UINumericOutput) always show their
+  // value badge regardless of chkShowSimValues -- the badge IS the widget's entire
+  // reason for existing, unlike a real architecture part where it's a secondary
+  // annotation a person opts into per view. A fresh view's own chkShowSimValues
+  // defaults to false, so relying on that toggle here would leave a brand-new
+  // dashboard looking completely broken until someone finds and enables "Show Left
+  // Badge" in Filters.
+  const isUIOutput = ciEq(part.type, 'UITextOutput') || ciEq(part.type, 'UINumericOutput');
+  if (view?.chkShowSimValues || isUIOutput) {
     // Badges reflect the PART's shared simulation state (scoped to its own model), not
     // anything view/tab-specific — every viewMember referencing the same part shows the
     // identical value, in every view, regardless of which model is currently selected in
-    // the Simulation toolbar.
+    // the Simulation toolbar. A UI Output widget's own "value" is written here as a
+    // SIDE EFFECT of its bound target part's own tick (runTick, simulation.js) — see
+    // that function's own ctx.ui comment — so this lookup needs no special case at all,
+    // it's the exact same store.simRuntime.get(part.model).values.get(part.id) shape
+    // any other scripted part's badge already uses.
     const runtime = app.store.simRuntime.get(part.model);
     const entry = runtime ? runtime.values.get(part.id) : null;
     if (entry) {
@@ -716,6 +728,12 @@ function buildNodeEl(app, tab, vm, part) {
       // there's no error, so a node can't show both states confusingly at once.
       const stateClass = hasError ? ' error' : (entry.changed ? ' changed' : '');
       simBadgeHtml = `<div class="fnode-sim-badge${stateClass}" title="${escapeHtml(title)}">${escapeHtml(display)}</div>`;
+    } else if (isUIOutput) {
+      // Reported directly: "If UI element is connected to a part but the part script
+      // does not set a value, it stays as null or similar" -- a visible placeholder
+      // (rather than no badge at all) so an unset/not-yet-bound widget still reads as
+      // "a working widget with nothing to show yet," not as broken/unrendered.
+      simBadgeHtml = `<div class="fnode-sim-badge" title="No value set yet">—</div>`;
     }
   }
 

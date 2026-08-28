@@ -4790,4 +4790,103 @@
 // assertion. DESIGN_DOCUMENT.md SS8 (new paragraph) and tests/README.md updated;
 // public/instructions.html gets a new paragraph on the Default Model selector's
 // Add/Remove/Copy buttons. Full suite 174/174.
-export const APP_VERSION = '0.913';
+// v0.914: the "UI dashboard elements" feature itself (v0.913's Model Copy was its
+// first piece, built as testing infrastructure for this). Reported directly: "create
+// a new group 'UI' of elements text_out, text_in, numeric_out, numeric_in, that will
+// be used for simple dashboards. Each will have an attribute for selecting a specific
+// part. _out will act like badges where they display a specific value, while _in will
+// provide ability to update values available in script. These are to be refreshed or
+// retrieved as part of each sim tick." (graph_out parked for later.) Final naming:
+// UITextOutput/UITextInput/UINumericOutput/UINumericInput -- four ordinary Part types
+// (reusing placement/rendering/undo/save-load/model-tagging for free, rather than a
+// separate catalog) under a new "UI" elementGroup.
+//
+// Storage: two new Part fields, uiTargetPartId (which part this widget binds to) and
+// uiInputValue (Input types only) -- added to Store.createPart AND, critically, to
+// migrateDoc's own explicit field allow-list (state.js), which rebuilds every loaded
+// Part field-by-field rather than spreading the source object; a field only added to
+// createPart would be silently stripped on every File > Load even for a document
+// saved WITH it -- caught during manual verification, before any save/load test ran.
+//
+// Binding: reported directly, "These may not be the same values passed through
+// connectors so are not related to connectors" -- a new "Bound Part" selector field
+// (uiTargetPartId) on the property panel, a genuinely new field TYPE this app didn't
+// have before (a part-picker), built as a merged/filtered spec object
+// (renderPartProperties, render.js -- same technique filteredViewSpec already
+// established) rather than touching custom.json's shared showFields.part.fields,
+// since these fields are meaningless for every other type. The picker lists every
+// OTHER part in the WHOLE document (not scoped to model/view), labeled with its own
+// type AND model so a cross-model bind is a deliberate, visible choice, excluding the
+// 4 UI types themselves. Script/Script Enabled are dropped entirely from a UI
+// widget's Root Properties (they're inert).
+//
+// ctx.ui: a fourth data-flow channel a script can use, alongside inputs/responses/
+// create*/find*. An early proposal imagined bare script-global variables
+// (UINumericOutput = UINumericInput + 5) -- rejected once worked through concretely:
+// a script's own local reassignment of a bare variable/parameter can never be
+// observed by the caller after the call returns (only object MUTATION survives), so
+// ctx.ui is instead { UITextInput, UITextOutput, UINumericInput, UINumericOutput },
+// each a plain object KEYED BY THE BOUND WIDGET'S OWN LABEL (settled once "multiple
+// inputs and outputs per part" was confirmed wanted -- not capped at one each):
+// ctx.ui.UINumericOutput['Total Cost'] = ctx.ui.UINumericInput['Base Price'] + 5.
+// Inputs are read live from uiInputValue (a plain document field, no runtime concept
+// at all); Outputs start EMPTY each tick and are the script's own to mutate --
+// queueUIOutputWrites then queues one {widgetId, widgetModel, value} write per bound
+// widget, value being `undefined` (not `null`) for an unaddressed label, so
+// canvas.js's formatSimValue renders it identically to a widget with no runtime
+// entry at all -- one consistent "-" placeholder regardless of cause (reported
+// directly: "it stays as null or similar" -- undefined is the "or similar").
+// runTick's main per-part loop excludes all 4 UI types entirely -- a widget never
+// computes its own value the ordinary way, it's purely a side effect of whatever
+// it's bound to writes.
+//
+// Writes are QUEUED, not applied immediately, and applied once at the very end,
+// strictly after runtime.values = nextValues -- because a bound widget can live in a
+// DIFFERENT model than the part being ticked (deliberately supported), and writing
+// into another model's runtime mid-tick, or into this tick's own map before its
+// single atomic commit, risks leaking into another part's ctx.inputs snapshot this
+// SAME tick (the single-commit-per-tick guarantee this whole engine is built on).
+// Also queued on EVERY successful tick, even when a label goes unaddressed --
+// otherwise a stale cross-model value would sit untouched forever, since that other
+// model's runtime is never otherwise touched by this tick.
+//
+// Errors deliberately do NOT get "keep the last good value" -- that rule (for the
+// erroring part's own value) exists to stop cascading through OTHER real parts'
+// ctx.inputs; a UI widget has no such downstream (nothing reads it via a real
+// connector), so a thrown error just means no write is queued this tick -- every
+// bound widget reads exactly like an unaddressed label, not a stale number.
+//
+// Badges: reported directly, "_out will act like badges" -- reuses canvas.js's
+// EXISTING value badge (.fnode-sim-badge) with one addition: Output widgets show it
+// regardless of the view's own chkShowSimValues toggle (defaults false on a new
+// view), since for these two types the badge IS the reason they exist, not a
+// secondary annotation; an unset Output widget shows "-" rather than nothing.
+//
+// Exclusion from streams/industry generation/Level Up-Down needed no active gating
+// at all -- every one of those mechanisms is driven by real Connectors (which a
+// widget never has) or explicit allow-list data that simply never names these types.
+//
+// Confirmed end-to-end scenario: "at the end of this user can create sim in one
+// model, copy it to a new model, and then create a new view that can show UIs from
+// both models in the same view and values changing as both model sims run." Verified
+// directly -- nothing in this app scopes a View to one model, so one view can already
+// hold widgets bound across two models; a widget's OWN .model field decides which
+// model's simRuntime its value lands in, independent of which model computed it.
+// v0.913's copyModel updated to also copy uiInputValue and remap uiTargetPartId
+// (through the same part-id map already built for connector endpoints) -- a
+// same-model binding lands on the new copy's own counterpart, an external/cross-model
+// binding is preserved unchanged.
+//
+// New check_ui_dashboard_element_types_and_toolkit, check_ui_dashboard_property_
+// panel, check_ui_dashboard_ctx_ui_engine (via real sim.stepSimulation() calls, not a
+// static scan), check_ui_dashboard_output_badge_visibility,
+// check_copy_model_remaps_ui_bindings, check_ui_dashboard_cross_model_binding
+// (tests/run_all.py) -- cross-model routing, ctx.ui wiring, the badge override,
+// copyModel's binding remap, and the property panel field injection all proven via
+// TEMP BREAK. Also fixed a pre-existing test's own now-incomplete data:
+// check_view3d_all_template_covers_all_elements's "All" streamTemplate needed the 4
+// new types added to stay in 1:1 correspondence with settings.elements. DESIGN_
+// DOCUMENT.md SS8 (continuing v0.913's own forward reference) and tests/README.md
+// updated; public/instructions.html gets a new "UI dashboard elements" subsection
+// (Simulation Scripting). Full suite 180/180.
+export const APP_VERSION = '0.914';

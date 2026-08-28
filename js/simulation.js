@@ -1,4 +1,4 @@
-import { ciEq } from './state.js';
+import { ciEq, isUIDashboardType } from './state.js';
 import { isSectionViewType, createSectionPlacer } from './sections.js';
 
 // ===================== NODE SCRIPTING / SIMULATION =====================
@@ -147,6 +147,28 @@ import { isSectionViewType, createSectionPlacer } from './sections.js';
 //       positions that genuinely both resolved, never bridged/guessed). Find-or-create:
 //       returns the EXISTING edge unchanged if this connector already has one on this
 //       view, same as createNode.
+//     - ui: { UITextInput, UITextOutput, UINumericInput, UINumericOutput } — the "UI
+//       dashboard elements" feature (a new element group for simple sim-driven
+//       dashboards; see isUIDashboardType, state.js). UITextInput/UINumericInput are
+//       plain objects to READ, keyed by each bound widget's own current LABEL (a
+//       UITextInput/UINumericInput Part whose own `uiTargetPartId` field points at
+//       THIS part) — the value is whatever's currently in that widget's own "Value"
+//       property field, e.g. `ctx.ui.UINumericInput['Discount %']`. UITextOutput/
+//       UINumericOutput are plain objects to WRITE INTO (mutating one, e.g.
+//       `ctx.ui.UINumericOutput['Total Cost'] = 108;` — NOT reassigning a bare
+//       variable, which a script's own local reassignment could never make visible
+//       back to the engine) — every UITextOutput/UINumericOutput widget whose own
+//       `uiTargetPartId` points at THIS part, keyed the same way by that WIDGET's own
+//       label, picks up whatever this script wrote under its label this tick, shown
+//       as that widget's own value badge (canvas.js) — not carried over: a label this
+//       script doesn't address this tick reads as `null` on its widget next tick,
+//       same "fresh every tick" rule `response`/`badge` already follow. Binding is a
+//       plain document field (uiTargetPartId), not a connector — deliberately, so a
+//       widget can bind across models (see Model Copy's own design comment,
+//       commands.js, for why that's a supported scenario) without needing a real edge
+//       in the graph at all. A binding with no matching widget just does nothing
+//       (silent, both directions); a widget bound to a part whose script never runs
+//       (unscripted, disabled, or simply never addresses that label) reads/shows null.
 //   Must return { value, state, response, badge } — response and badge are both
 //   optional (see below), or the
 //   whole call may throw — caught per-node, see below.
@@ -210,6 +232,55 @@ function pushMessageLog(store, message) {
 function findPartsForScript(store, query) {
   const { type, model } = query || {};
   return store.doc.parts.filter((p) => (!type || ciEq(p.type, type)) && (!model || ciEq(p.model, model)));
+}
+
+/** Exposed to scripts as ctx.ui.UITextInput/ctx.ui.UINumericInput (read) and
+ * ctx.ui.UITextOutput/ctx.ui.UINumericOutput (write) — see runTick's own ctx.ui
+ * comment, below, for the full design. Builds the READ side: every UI widget of
+ * `type` bound to `targetPartId` (its own uiTargetPartId field — NOT a connector,
+ * deliberately, see commands.js's copyModel comment for why cross-model binding is a
+ * supported scenario this can't route through the connector graph), keyed by the
+ * widget's own current label so multiple bound widgets of the same type never
+ * collide into one scalar. A widget's "value" is just a plain, always-current
+ * document field (part.uiInputValue) — not simulation-computed, so no per-model
+ * runtime lookup is needed here at all, unlike the write side below. */
+function collectUIInputs(store, targetPartId, type) {
+  const obj = {};
+  for (const p of store.doc.parts) {
+    if (ciEq(p.type, type) && p.uiTargetPartId === targetPartId) obj[p.label] = p.uiInputValue ?? null;
+  }
+  return obj;
+}
+
+/** Builds the WRITE side: queues one pending runtime-entry write per UI Output widget
+ * (of `type`) bound to `sourcePartId`, keyed by the widget's own label against
+ * whatever the script wrote into `writtenObj` this tick — a widget the script didn't
+ * address this tick gets `undefined` (Step 34's response/badge already establish
+ * this "fresh every tick, not carried over automatically" rule; this follows the
+ * same one — reported directly as "it stays as null or similar," and `undefined` is
+ * the "or similar" that makes canvas.js's own formatSimValue render it as the same
+ * "—" placeholder an entirely absent entry already gets, e.g. after a thrown script
+ * error — one consistent "nothing to show" visual regardless of which of the two
+ * caused it). Still queued (never skipped) even when unaddressed, unlike the error
+ * path below, which skips queueing entirely — this one distinction matters for a
+ * bound widget living in a DIFFERENT model than sourcePartId's own: without an
+ * explicit write every successful tick, a stale value from some earlier tick would
+ * sit untouched in that other model's own runtime map (which THIS tick never
+ * otherwise touches), silently breaking "not carried over" for exactly the
+ * cross-model case this feature is built to support. Queued rather than written
+ * directly into runtime.values/nextValues, since that bound widget can be in a
+ * DIFFERENT model than sourcePartId's own (deliberately supported) — writing there
+ * immediately would either leak into the CURRENT model's own mid-tick "last
+ * committed snapshot" (which every other part's ctx.inputs this same tick reads
+ * from — the single-commit-per-tick guarantee this whole engine is built on) or,
+ * for a same-model widget, race the loop that's still processing other parts.
+ * runTick applies every queued write once, after its own model's commit. */
+function queueUIOutputWrites(store, sourcePartId, type, writtenObj, queue) {
+  for (const p of store.doc.parts) {
+    if (!ciEq(p.type, type) || p.uiTargetPartId !== sourcePartId) continue;
+    const value = Object.prototype.hasOwnProperty.call(writtenObj, p.label) ? writtenObj[p.label] : undefined;
+    queue.push({ widgetId: p.id, widgetModel: p.model, value });
+  }
 }
 
 /** Shared guard for ctx.createPart/ctx.createConnector — see the script-contract comment
@@ -332,9 +403,18 @@ function runTick(app, modelName) {
   if (!modelName) return;
   const runtime = ensureRuntime(store, modelName);
   const log = store.simLog.get(modelName);
-  const { parts, incoming, outgoing } = buildIncomingMap(store, modelName);
+  const { parts: allParts, incoming, outgoing } = buildIncomingMap(store, modelName);
+  // UI dashboard widgets (see isUIDashboardType, state.js) never compute their own
+  // value the way an ordinary part does -- an Output widget's value is purely a SIDE
+  // EFFECT of whatever OTHER part it's bound to writes via ctx.ui this tick (queued
+  // below, applied once at the very end); an Input widget has no runtime entry at
+  // all, just a plain document field. Excluded from the driving loop entirely so
+  // neither type gets a spurious "idle/pass-through" entry from the generic
+  // unscripted-part path below.
+  const parts = allParts.filter((p) => !isUIDashboardType(p.type));
 
   const nextValues = new Map();
+  const pendingUIWrites = []; // queued by queueUIOutputWrites, applied once after this model's own commit below
   for (const part of parts) {
     const inputs = (incoming.get(part.id) || []).map((e) => {
       const fromPart = store.findPart(e.fromPartId);
@@ -381,6 +461,24 @@ function runTick(app, modelName) {
     let lastError = null;
 
     if (part.scriptEnabled && part.script) {
+      // ctx.ui: reported directly (a new "UI" element group for simple sim-driven
+      // dashboards) — UITextInput/UINumericInput values, keyed by each bound widget's
+      // own label (collectUIInputs), and two plain objects a script WRITES INTO for
+      // UITextOutput/UINumericOutput (mutating an object is the only way a script's
+      // local assignment can be observed after the call returns — a reassigned bare
+      // variable/parameter can't be, which is why this isn't `let UINumericOutput = ...`
+      // in scope the way an early proposal put it). Built fresh every tick, even for a
+      // script that never references ctx.ui at all — cheap (a handful of doc.parts
+      // scans, same cost class as buildIncomingMap's own filters) and keeps this
+      // uniform rather than conditional on whether any widget happens to be bound.
+      const uiTextOut = {};
+      const uiNumericOut = {};
+      const ctxUi = {
+        UITextInput: collectUIInputs(store, part.id, 'UITextInput'),
+        UINumericInput: collectUIInputs(store, part.id, 'UINumericInput'),
+        UITextOutput: uiTextOut,
+        UINumericOutput: uiNumericOut,
+      };
       try {
         // Prepend the Script Console's own text (store.batchScriptCode) so every
         // function/const it defines -- CommonScript_Example, and anything else a
@@ -404,6 +502,7 @@ function runTick(app, modelName) {
           createConnector: (spec) => createConnectorForScript(store, part, spec),
           createNode: (spec) => createNodeForScript(store, store.currentView, spec),
           createNodeConnector: (spec) => createNodeConnectorForScript(store, store.currentView, spec),
+          ui: ctxUi,
         }) || {};
         resultValue = out.value;
         resultState = out.state || {};
@@ -412,6 +511,21 @@ function runTick(app, modelName) {
           resultBadge = { text: String(out.badge.text ?? ''), color: String(out.badge.color || '#666666') };
         }
         log.push({ tick: runtime.tick, partId: part.id, label: part.label, type: 'value', message: safeStringify(resultValue), ts: Date.now() });
+        // Queued, not written directly — see queueUIOutputWrites' own comment for why
+        // (a bound widget can be in a different model than `part`). Only queued on the
+        // SUCCESS path — a thrown script error means NO write is queued at all for any
+        // widget bound to `part` this tick, so it reads exactly like any other tick
+        // where its label just wasn't addressed (the "—" not-set placeholder,
+        // canvas.js), rather than preserving a stale last-good number. Deliberately
+        // NOT the same "keep the last good value" rule the erroring PART's own value
+        // gets (top-of-file comment) — that rule exists to stop a broken part's
+        // failure from cascading through OTHER real parts' ctx.inputs; a UI Output
+        // widget has no such downstream (nothing reads it via a real connector), so
+        // there's nothing to protect by holding onto a value that's no longer true —
+        // and the erroring target's OWN badge already shows "ERR" as the visible
+        // signal something's wrong.
+        queueUIOutputWrites(store, part.id, 'UITextOutput', uiTextOut, pendingUIWrites);
+        queueUIOutputWrites(store, part.id, 'UINumericOutput', uiNumericOut, pendingUIWrites);
       } catch (err) {
         lastError = (err && err.message) ? err.message : String(err);
         log.push({ tick: runtime.tick, partId: part.id, label: part.label, type: 'error', message: lastError, ts: Date.now() });
@@ -432,6 +546,23 @@ function runTick(app, modelName) {
   runtime.values = nextValues; // commit all outputs together, only once every part has run
   runtime.tick += 1;
   if (log.length > 500) log.splice(0, log.length - 500); // cap log growth for long runs
+
+  // Apply every queued UI Output widget write now that THIS model's own commit is
+  // done — a widget bound to a part in this SAME model lands in the runtime.values
+  // map we just committed above (ensureRuntime returns that exact object); a widget
+  // bound to a part in a DIFFERENT model (a deliberately supported cross-model
+  // dashboard scenario) lands in that other model's own runtime instead, which this
+  // tick never touched otherwise. Either way this happens strictly after the commit,
+  // so it can never leak into another part's own ctx.inputs snapshot this same tick.
+  for (const w of pendingUIWrites) {
+    const widgetRuntime = ensureRuntime(store, w.widgetModel);
+    const prevWidgetEntry = widgetRuntime.values.get(w.widgetId);
+    widgetRuntime.values.set(w.widgetId, {
+      value: w.value, state: {}, lastError: null, lastTick: runtime.tick - 1,
+      changed: prevWidgetEntry !== undefined && w.value !== prevWidgetEntry.value,
+      response: null, badge: null,
+    });
+  }
 }
 
 /** Shared tick-loop step, used by both startContinuousRun and continueContinuousRun so

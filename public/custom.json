@@ -474,6 +474,10 @@
     {
       "group": "Unknown",
       "fill": "#ff5e61"
+    },
+    {
+      "group": "UI",
+      "fill": "#dcdcdc"
     }
   ],
   "lineEnds": {
@@ -2798,6 +2802,50 @@
       "prefix": "",
       "suffix": "",
       "path": "M 11,18 H 29 M 14,18 V 12 M 20,18 V 3 M 26,18 V 9"
+    },
+    {
+      "type": "UITextOutput",
+      "title": "Text Output",
+      "group": "UI",
+      "tkDisplayOrder": 1,
+      "cornerRadius": 4,
+      "sources": "o",
+      "prefix": "",
+      "suffix": "",
+      "path": ""
+    },
+    {
+      "type": "UITextInput",
+      "title": "Text Input",
+      "group": "UI",
+      "tkDisplayOrder": 2,
+      "cornerRadius": 4,
+      "sources": "o",
+      "prefix": "",
+      "suffix": "",
+      "path": ""
+    },
+    {
+      "type": "UINumericOutput",
+      "title": "Numeric Output",
+      "group": "UI",
+      "tkDisplayOrder": 3,
+      "cornerRadius": 4,
+      "sources": "o",
+      "prefix": "",
+      "suffix": "",
+      "path": ""
+    },
+    {
+      "type": "UINumericInput",
+      "title": "Numeric Input",
+      "group": "UI",
+      "tkDisplayOrder": 4,
+      "cornerRadius": 4,
+      "sources": "o",
+      "prefix": "",
+      "suffix": "",
+      "path": ""
     }
   ],
   "streamTemplates": [
@@ -2963,7 +3011,8 @@
         "TechnologyCapability", "TechnologyFunction", "TechnologyLogicalComponent", "TechnologyPhysicalComponent", "TechnologyProcess", "TechnologyService", "CommunicationNetwork", "Device", "DistributionNetwork", "Equipment", "Facility", "Material", "Node", "Path", "SystemSoftware", "TechnologyEvent", "TechnologyInteraction", "TechnologyInterface",
         "DataDataEntity", "DataEntityDetails", "DataLogicalComponent", "DataPhysicalComponent",
         "Deliverable", "Gap", "ImplementationEvent", "Plateau", "WorkPackage",
-        "Unknown"
+        "Unknown",
+        "UITextOutput", "UITextInput", "UINumericOutput", "UINumericInput"
       ]
     }
   ],

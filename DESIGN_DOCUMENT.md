@@ -2384,6 +2384,155 @@ break (iterating the LIVE `store.doc.parts` array instead of a `.filter()`'d cop
 while also pushing new parts onto that same array mid-loop) hung the test outright
 rather than just failing an assertion, itself a real confirmation the filter matters.
 
+**UI dashboard elements** (`isUIDashboardType`, state.js; `ctx.ui`, simulation.js): a
+new element group for building simple sim-driven dashboards, reported directly —
+*"create a new group 'UI' of elements text_out, text_in, numeric_out, numeric_in ...
+Each will have an attribute for selecting a specific part. _out will act like badges
+where they display a specific value, while _in will provide ability to update values
+available in script. These are to be refreshed or retrieved as part of each sim
+tick."* Final naming (settled during design): `UITextOutput`, `UITextInput`,
+`UINumericOutput`, `UINumericInput` — four ordinary `Part` types (see below for why
+that, not a separate catalog), under a new `"UI"` `elementGroup` (`public/custom.json`
+`elementGroups`/`elements`, a plain `{group, fill}`/`{type, title, group, ...}` data
+addition — no `path` glyph, so they fall back to `iconSvgFor`'s own plain rounded-rect
+default) and added to the `"All"` streamTemplate's own `value[]` (the 3D View's
+reference type list — `check_view3d_all_template_covers_all_elements` requires every
+`settings.elements` type accounted for there).
+
+*Storage: ordinary Parts, not a separate catalog.* Considered and rejected — a
+separate catalog would mean rebuilding, in parallel, everything Parts already give for
+free: placement (`ViewMember`/`objectType`), canvas rendering, drag/select/delete/
+copy-paste, Undo/Redo snapshotting, Save/Load JSON, the property panel dispatch, and —
+the part that matters most given where this design ended up — `model` tagging and
+`ctx.findParts`-style lookup, which the binding mechanism (below) leans on directly.
+Two new Part fields, `uiTargetPartId` (which part this widget binds to) and
+`uiInputValue` (Input types only — what a person's typed), added to `Store.createPart`
+and, critically, to `migrateDoc`'s own explicit field allow-list (state.js) — the
+latter rebuilds every loaded Part field-by-field rather than spreading the source
+object, so a field only added to `createPart` and NOT to `migrateDoc` would be silently
+stripped on every File > Load, even for a document saved WITH it. Caught during this
+feature's own manual verification, before any test ever exercised a save/load
+round-trip — a good example of why `migrateDoc`'s allow-list needs updating in lockstep
+with any new Part field, not just `createPart`.
+
+*Binding: a plain field, not a connector.* Reported directly, once the alternative
+(reusing the connector graph, `ctx.inputs`) was raised and rejected: *"These may not be
+the same values passed through connectors so are not related to connectors."*
+`uiTargetPartId` is a new selector field ("Bound Part") on the property panel — a
+NEW field type this app didn't have before (a part-picker), built as a merged/filtered
+spec object (`renderPartProperties`, render.js, same `filteredViewSpec` technique the
+Filters panel already established) rather than touching `custom.json`'s shared
+`showFields.part.fields`, since these fields are meaningless for every other part type.
+The picker (`selectOptionsFor`'s new `uiTargetPartId` branch) lists every OTHER part in
+the WHOLE document — deliberately unrestricted to the current model or view — labeled
+with its own type AND model, so a cross-model bind (see below) is a visible, deliberate
+choice rather than an accident; the 4 UI types themselves are excluded from the
+candidate list, so a widget can never bind to another widget. For the same reason
+Script/Script Enabled are dropped entirely from a UI widget's Root Properties (they're
+inert — no script/tick of their own; see `ctx.ui` below for why).
+
+*`ctx.ui`: the fourth data-flow channel a part script can use* (alongside `inputs`,
+`responses`, and the create*/find* mutators). An early proposal imagined bare
+script-global variables (`UINumericOutput = UINumericInput + 5;`) — rejected once
+worked through concretely: a script's own local reassignment of a bare variable/
+function-parameter can never be observed by the caller after the call returns (basic
+JS semantics — only object MUTATION survives a function call), so `ctx.ui` is instead
+`{ UITextInput, UITextOutput, UINumericInput, UINumericOutput }`, each a plain object
+KEYED BY THE BOUND WIDGET'S OWN LABEL (not a single scalar) — settled on once multiple
+inputs/outputs per part was confirmed wanted ("multiple inputs and outputs per part
+would be great"): `ctx.ui.UINumericOutput['Total Cost'] = ctx.ui.UINumericInput['Base
+Price'] + 5;`. The two Input objects are built fresh by `collectUIInputs` (a plain
+`store.doc.parts` scan for widgets whose `uiTargetPartId` points at this part) — read
+directly from `uiInputValue`, a live document field, no simulation/runtime concept
+involved at all, since it's just something a person typed. The two Output objects
+start EMPTY and are the script's own to mutate; after a successful call,
+`queueUIOutputWrites` walks every bound Output widget of that type and queues a
+`{widgetId, widgetModel, value}` write — `value` is `undefined` (not `null`) for a
+label the script didn't address this tick, so `canvas.js`'s own `formatSimValue`
+renders it identically to a widget with no runtime entry at all — one consistent "—"
+placeholder regardless of cause (reported directly: *"it stays as null or similar"* —
+`undefined` is the "or similar"). `runTick`'s main per-part loop EXCLUDES all 4 UI
+types entirely (`parts = allParts.filter((p) => !isUIDashboardType(p.type))`) — a
+widget never computes its own value the ordinary way; an Output widget's value is
+PURELY a side effect of whatever it's bound to writes, and an Input widget never gets a
+runtime entry of its own at all.
+
+*Why writes are queued, not applied immediately — the cross-model case.* A bound widget
+can live in a DIFFERENT model than the part being ticked (a deliberately supported
+scenario — see Model Copy, above, and the dashboard scenario below) — `runTick(app,
+modelName)` only ever holds `modelName`'s own `runtime` in scope, and writing into a
+DIFFERENT model's `ensureRuntime(...).values` mid-tick, or even into `modelName`'s own
+`nextValues`/`runtime.values` before this tick's single atomic commit, would risk
+leaking a change into another part's `ctx.inputs` snapshot this SAME tick — the
+single-commit-per-tick guarantee this whole engine is built on (top-of-file comment).
+So every write is queued in a local array across the WHOLE tick call and applied once,
+at the very end, strictly AFTER `runtime.values = nextValues` — a same-model widget's
+write lands in the map just committed (found via `ensureRuntime(store, w.widgetModel)`
+returning that same object); a cross-model widget's write lands in THAT OTHER model's
+own runtime instead, which this tick never otherwise touched. This also has to run on
+EVERY successful tick (not skipped when a label goes unaddressed), specifically because
+of the cross-model case: without an explicit `undefined` write every time, a stale
+value from some earlier tick would sit untouched in the other model's runtime map
+(which this tick doesn't otherwise touch at all), silently breaking "not carried over"
+for exactly the scenario this feature is built to support.
+
+*Errors: deliberately NOT "keep the last good value."* An erroring part's OWN value
+keeps its last-good reading (top-of-file comment) specifically to stop a broken part's
+failure from cascading through OTHER real parts' `ctx.inputs`. A UI Output widget has
+no such downstream — nothing reads it via a real connector, only a human looking at a
+badge — so `queueUIOutputWrites` is only ever called on the SUCCESS path; a thrown
+script error means NO write is queued at all this tick, so every bound widget reads
+exactly like an unaddressed label (the same "—" placeholder), not a stale number left
+over from before the target broke. The erroring target's own badge already shows "ERR"
+as the visible signal.
+
+*Badges: reusing the existing mechanism, with one override.* `_out` widgets were
+reported to *"act like badges"* — rather than a new rendering path, `canvas.js`'s
+EXISTING value badge (`.fnode-sim-badge`, `store.simRuntime.get(part.model).values.get
+(part.id)`) already does exactly the right lookup once a widget has a runtime entry —
+no canvas.js changes were needed for the lookup itself. The one addition: Output
+widgets show their badge regardless of the view's own `chkShowSimValues` toggle
+(`isUIOutput = ciEq(part.type,'UITextOutput') || ciEq(part.type,'UINumericOutput')`),
+since a fresh view defaults that toggle to `false` — relying on it here would leave a
+brand-new dashboard looking completely broken until someone found and enabled "Show
+Left Badge" in Filters, when for these two types the badge IS the widget's entire
+reason for existing, not a secondary annotation. An Output widget with no runtime entry
+at all shows a `"—"` placeholder rather than nothing, so it still reads as "a working
+widget with nothing to show yet."
+
+*Exclusion from streams/industry generation/Level Up-Down* (reported directly: *"These
+would not be part of streams, industry generation, level up/down etc."*) needed no
+active gating at all, on inspection — every one of those mechanisms is driven either by
+real Connectors (which a UI widget never has, under this design) or explicit allow-list
+data (stream templates, the SFCCE mapping) that simply never names these 4 types.
+`settings.elements`-wide scans elsewhere in the app (`commands.js`'s three
+`typeToFill` builders) are harmless type→color lookups, not generators — a new type
+existing there adds an unused map entry, nothing more.
+
+*The confirmed end-to-end scenario*: *"at the end of this user can create sim in one
+model, copy it to a new model, and then create a new view that can show UIs from both
+models in the same view and values changing as both model sims run."* Verified
+directly — nothing in this app scopes a View to one model (Model Copy's own comment,
+above), so a single freeform view can already hold widgets bound across two models; a
+widget's OWN `.model` field (inherited like any Part) decides which model's
+`simRuntime` its computed value lands in, independent of which model actually computed
+it — so two widgets on one view, each bound to a different model's own target, update
+completely independently exactly when their OWN model ticks. `copyModel` (above) copies
+`uiInputValue` verbatim and remaps `uiTargetPartId` through the same part-id map it
+already builds for connector endpoints — a same-model binding lands on the new copy's
+own counterpart; a binding to a part OUTSIDE the copied model (an existing cross-model
+bind) is left pointing at that same external part, since copying the model doesn't
+touch it.
+
+New tests (`tests/run_all.py`): `check_ui_dashboard_element_types_and_toolkit`,
+`check_ui_dashboard_property_panel`, `check_ui_dashboard_ctx_ui_engine` (the core
+read/write/label-keyed/not-carried-over/unbound/error-path behavior, via real
+`sim.stepSimulation()` calls, not a static scan), `check_ui_dashboard_output_badge_
+visibility`, `check_copy_model_remaps_ui_bindings`, and `check_ui_dashboard_cross_
+model_binding` (the exact confirmed scenario above) — the cross-model routing, the
+`ctx.ui` wiring itself, the badge override, `copyModel`'s binding remap, and the
+property panel field injection all proven via TEMP BREAK.
+
 ## 9. The 3D View subsystem (`view3d.js`)
 
 A rotatable/zoomable WebGL scene over `store.doc.parts`/`connectors` directly —

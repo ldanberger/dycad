@@ -5181,6 +5181,405 @@ def check_common_script_sim_covers_enterprise_types(page):
     return True, "CommonScript_Sim(ctx) logs a distinct message for all 12 element types the Enterprise stream template uses (plus a default for anything else), and its example return statement's value/state/response/badge all work correctly across real simulation ticks"
 
 
+def check_ui_dashboard_element_types_and_toolkit(page):
+    """Regression guard/new-feature check for the new "UI" element group, reported
+    directly: "create a new group 'UI' of elements text_out, text_in, numeric_out,
+    numeric_in, that will be used for simple dashboards" (final naming, confirmed in
+    the same exchange: UITextOutput/UITextInput/UINumericOutput/UINumericInput).
+    Covers: all four appear as real toolkit tiles (element-grid) with the right
+    titles; settings.elementGroups has a "UI" entry with its own fill color; and
+    isUIDashboardType (state.js) correctly identifies all four and nothing else."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const state = await import('./js/state.js');
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      app.render();
+      const titles = [...document.querySelectorAll('#elements-grid .el-tile')].map(t => t.title);
+      return {
+        hasTextOutput: titles.includes('Text Output'),
+        hasTextInput: titles.includes('Text Input'),
+        hasNumericOutput: titles.includes('Numeric Output'),
+        hasNumericInput: titles.includes('Numeric Input'),
+        uiGroupHasFill: !!(store.settings.elementGroups || []).find(g => g.group === 'UI')?.fill,
+        isUIDashboardTypeCorrect: state.isUIDashboardType('UITextOutput') && state.isUIDashboardType('UITextInput')
+          && state.isUIDashboardType('UINumericOutput') && state.isUIDashboardType('UINumericInput')
+          && !state.isUIDashboardType('BusinessFunction') && !state.isUIDashboardType(''),
+      };
+    }
+    """)
+    problems = []
+    if not (result["hasTextOutput"] and result["hasTextInput"] and result["hasNumericOutput"] and result["hasNumericInput"]):
+        problems.append(f"expected all 4 UI element toolkit tiles present, got {result}")
+    if not result["uiGroupHasFill"]:
+        problems.append("expected a 'UI' entry with a fill color in settings.elementGroups")
+    if not result["isUIDashboardTypeCorrect"]:
+        problems.append("expected isUIDashboardType to correctly identify all 4 UI types and reject a real element type")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The 4 UI dashboard element types (Text/Numeric Output/Input) appear as real toolkit tiles under a new 'UI' group, and isUIDashboardType correctly identifies them"
+
+
+def check_ui_dashboard_property_panel(page):
+    """Regression guard/new-feature check for the UI dashboard elements' property
+    panel, reported directly: "Each will have an attribute for selecting a specific
+    part." Covers: a UI widget's Root Properties shows a new "Bound Part" selector
+    (#sf-part-uiTargetPartId, populated from every OTHER part in the document,
+    labeled with type and model so a cross-model bind is a deliberate, visible
+    choice, excluding the 4 UI types themselves so a widget can never bind to
+    another widget) and, for the two Input types only, a "Value" field
+    (#sf-part-uiInputValue — a real number input for UINumericInput, text for
+    UITextInput); Script/Script Enabled are completely GONE for all 4 UI types
+    (they're inert, no script of their own); selecting/typing in these fields
+    actually writes part.uiTargetPartId/uiInputValue; and — the regression-safety
+    half — an ORDINARY part (BusinessFunction) is completely unaffected: still
+    shows Script/Script Enabled, has no Bound Part field at all."""
+    result = js(page, """
+    () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const target = store.createPart({ type: 'BusinessFunction', label: 'RegrUITarget', model });
+      const widget = store.createPart({ type: 'UINumericInput', label: 'RegrUIWidget', model });
+      const otherWidget = store.createPart({ type: 'UITextOutput', label: 'RegrUIOtherWidget', model });
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      const view = store.findView(homeTab.viewId);
+      const vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: widget.id, x: 40, y: 40 });
+      homeTab.selection = new Set([vm.id]);
+      app.render();
+
+      const html = document.getElementById('properties-body').innerHTML;
+      const out = {
+        hasBoundPartField: html.includes('Bound Part'),
+        hasValueField: !!document.getElementById('sf-part-uiInputValue'),
+        noScriptField: !html.includes('>Script<'),
+        noScriptEnabledField: !html.includes('Script Enabled'),
+      };
+
+      const select = document.getElementById('sf-part-uiTargetPartId');
+      out.selectExists = !!select;
+      const optionTexts = select ? [...select.options].map(o => o.textContent) : [];
+      out.showsTargetWithTypeAndModel = optionTexts.some(t => t.includes('RegrUITarget') && t.includes('BusinessFunction') && t.includes(model));
+      out.excludesOtherWidget = !optionTexts.some(t => t.includes('RegrUIOtherWidget'));
+
+      if (select) { select.value = target.id; select.dispatchEvent(new Event('change', { bubbles: true })); }
+      out.targetBindingWritten = widget.uiTargetPartId === target.id;
+
+      const valueInput = document.getElementById('sf-part-uiInputValue');
+      out.valueInputIsNumberType = valueInput && valueInput.type === 'number';
+      if (valueInput) { valueInput.value = '17'; valueInput.dispatchEvent(new Event('change', { bubbles: true })); }
+      out.valueWritten = widget.uiInputValue === 17;
+
+      const targetVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: target.id, x: 140, y: 40 });
+      homeTab.selection = new Set([targetVm.id]);
+      app.render();
+      const html2 = document.getElementById('properties-body').innerHTML;
+      out.normalPartHasScript = html2.includes('>Script<');
+      out.normalPartHasScriptEnabled = html2.includes('Script Enabled');
+      out.normalPartHasNoBoundPart = !html2.includes('Bound Part');
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["hasBoundPartField"] or not result["selectExists"]:
+        problems.append("expected a 'Bound Part' selector on a UI widget's Root Properties")
+    if not result["hasValueField"]:
+        problems.append("expected a 'Value' field for UINumericInput")
+    if not result["noScriptField"] or not result["noScriptEnabledField"]:
+        problems.append("expected Script/Script Enabled to be completely hidden for a UI widget")
+    if not result["showsTargetWithTypeAndModel"]:
+        problems.append("expected the Bound Part picker to list a candidate part with its type and model shown")
+    if not result["excludesOtherWidget"]:
+        problems.append("expected the Bound Part picker to exclude other UI widgets from its candidate list")
+    if not result["targetBindingWritten"]:
+        problems.append("expected selecting a target in the picker to write part.uiTargetPartId")
+    if not result["valueInputIsNumberType"]:
+        problems.append("expected UINumericInput's Value field to be a real <input type=number>")
+    if not result["valueWritten"]:
+        problems.append("expected typing into the Value field to write part.uiInputValue (as a number)")
+    if not result["normalPartHasScript"] or not result["normalPartHasScriptEnabled"]:
+        problems.append("expected an ORDINARY part (BusinessFunction) to still show Script/Script Enabled — regression")
+    if not result["normalPartHasNoBoundPart"]:
+        problems.append("expected an ORDINARY part to have no Bound Part field at all")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "UI dashboard elements get a Bound Part picker (+ Value field for Input types) instead of Script/Script Enabled, both fields actually write through, and ordinary part types are completely unaffected"
+
+
+def check_ui_dashboard_ctx_ui_engine(page):
+    """Regression guard/new-feature check for the core ctx.ui simulation wiring,
+    reported directly: "Each will have an attribute for selecting a specific part.
+    _out will act like badges where they display a specific value, while _in will
+    provide ability to update values available in script. These are to be refreshed
+    or retrieved as part of each sim tick... If script sets a value but there is no
+    UI element, it goes quietly. If UI element is connected to a part but the part
+    script does not set a value, it stays as null or similar. These may not be the
+    same values passed through connectors so are not related to connectors." Final
+    shape (this exchange): ctx.ui.UITextInput/UINumericInput are plain objects to
+    READ, keyed by each bound widget's own LABEL; ctx.ui.UITextOutput/UINumericOutput
+    are plain objects to WRITE INTO (mutation, not bare-variable reassignment, which
+    can't propagate back to the caller in JS). Covers, via real sim.stepSimulation()
+    calls (not a text/static scan): a bound Input's current uiInputValue is readable
+    by label; a bound Output picks up whatever the script wrote under its label,
+    shown as that widget's own runtime value; an unbound Output widget stays
+    unset (no runtime entry, same as "no value yet"); a bound Input widget itself
+    gets NO runtime entry at all (it's a plain document field, not simulation
+    output); changing the Input's value and re-ticking updates the Output on the
+    very next tick; a tick where the target's script stops addressing a label goes
+    back to unset (NOT carried over, matching response/badge's own "fresh every
+    tick" rule) — proven via TEMP BREAK; and a target's script THROWING leaves its
+    bound Output widgets with no runtime entry at all for that tick (not a stale
+    preserved value — nothing downstream depends on a widget's value via a real
+    connector the way it would for an ordinary part, so there's no cascade to guard
+    against, and the erroring part's own badge already shows the error)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+      const model = store.defaultModel;
+
+      const target = store.createPart({
+        type: 'BusinessFunction', label: 'RegrCtxUiTarget', model, scriptEnabled: true,
+        script: "ctx.ui.UINumericOutput['Total'] = (ctx.ui.UINumericInput['Base'] || 0) + 5; ctx.ui.UITextOutput['Status'] = 'ok'; return { value: 1 };",
+      });
+      const inputWidget = store.createPart({ type: 'UINumericInput', label: 'Base', model, uiTargetPartId: target.id, uiInputValue: 10 });
+      const outputWidget = store.createPart({ type: 'UINumericOutput', label: 'Total', model, uiTargetPartId: target.id });
+      const textOutputWidget = store.createPart({ type: 'UITextOutput', label: 'Status', model, uiTargetPartId: target.id });
+      const unboundWidget = store.createPart({ type: 'UINumericOutput', label: 'Unbound', model });
+
+      sim.stepSimulation(app, model);
+      const rt1 = store.simRuntime.get(model);
+      const out = {
+        outputValue: rt1.values.get(outputWidget.id)?.value,
+        textOutputValue: rt1.values.get(textOutputWidget.id)?.value,
+        unboundHasNoEntry: !rt1.values.has(unboundWidget.id),
+        inputWidgetHasNoEntry: !rt1.values.has(inputWidget.id),
+      };
+
+      inputWidget.uiInputValue = 100;
+      sim.stepSimulation(app, model);
+      const rt2 = store.simRuntime.get(model);
+      out.outputValueAfterInputChange = rt2.values.get(outputWidget.id)?.value;
+
+      target.script = "return { value: 1 };"; // stops addressing ctx.ui entirely
+      sim.stepSimulation(app, model);
+      const rt3 = store.simRuntime.get(model);
+      out.outputUnsetWhenNotAddressed = rt3.values.get(outputWidget.id)?.value === undefined;
+
+      target.script = "throw new Error('boom');";
+      // re-arm the output with a real value first, to prove the error path drops it
+      target.script = "ctx.ui.UINumericOutput['Total'] = 42; return { value: 1 };";
+      sim.stepSimulation(app, model);
+      const rt4 = store.simRuntime.get(model);
+      out.outputValueBeforeError = rt4.values.get(outputWidget.id)?.value;
+      target.script = "throw new Error('boom');";
+      sim.stepSimulation(app, model);
+      const rt5 = store.simRuntime.get(model);
+      out.outputHasNoEntryAfterError = !rt5.values.has(outputWidget.id);
+      out.targetErrored = !!rt5.values.get(target.id)?.lastError;
+
+      return out;
+    }
+    """)
+    problems = []
+    if result["outputValue"] != 15:
+        problems.append(f"expected the Output widget to read 10 (Base) + 5 = 15, got {result['outputValue']}")
+    if result["textOutputValue"] != "ok":
+        problems.append(f"expected the Text Output widget to read 'ok', got {result['textOutputValue']!r}")
+    if not result["unboundHasNoEntry"]:
+        problems.append("expected an unbound Output widget to have no runtime entry")
+    if not result["inputWidgetHasNoEntry"]:
+        problems.append("expected an Input widget to never get a runtime entry of its own")
+    if result["outputValueAfterInputChange"] != 105:
+        problems.append(f"expected changing the Input's value and re-ticking to update the Output (100+5=105), got {result['outputValueAfterInputChange']}")
+    if not result["outputUnsetWhenNotAddressed"]:
+        problems.append("expected the Output widget to go back to unset once its label is no longer addressed by the script (not carried over)")
+    if result["outputValueBeforeError"] != 42:
+        problems.append(f"test setup: expected the Output widget to read 42 before the error tick, got {result['outputValueBeforeError']}")
+    if not result["outputHasNoEntryAfterError"]:
+        problems.append("expected a thrown script error to leave bound Output widgets with no runtime entry that tick (not a stale preserved value)")
+    if not result["targetErrored"]:
+        problems.append("test setup: expected the target part itself to show a real lastError")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "ctx.ui.UITextInput/UINumericInput (read, keyed by label) and ctx.ui.UITextOutput/UINumericOutput (write, keyed by label) work correctly across real simulation ticks: unbound/unaddressed/errored all correctly leave a widget unset, and a live input change flows through on the next tick"
+
+
+def check_ui_dashboard_output_badge_visibility(page):
+    """Regression guard/new-feature check for UI Output widgets' canvas badge,
+    reported directly: "_out will act like badges where they display a specific
+    value." Reuses the EXISTING value-badge mechanism (.fnode-sim-badge,
+    store.simRuntime.get(part.model).values.get(part.id)) rather than a new
+    rendering path, but Output widgets show it regardless of the view's own
+    chkShowSimValues toggle (which defaults to FALSE on a new view) — otherwise a
+    brand-new dashboard would look completely broken until someone found and
+    enabled "Show Left Badge" in Filters, since the badge IS the widget's entire
+    reason for existing rather than a secondary annotation. Covers: a bound,
+    ticked Output widget shows its real value as a badge even with
+    chkShowSimValues off; an unset Output widget shows a "—" placeholder rather
+    than nothing at all (reported directly: "If UI element is connected to a part
+    but the part script does not set a value, it stays as null or similar");
+    and — regression safety — an ORDINARY scripted part with chkShowSimValues off
+    shows NO badge at all, same as before this feature existed."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+      const model = store.defaultModel;
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      const view = store.findView(homeTab.viewId);
+      view.chkShowSimValues = false;
+
+      const target = store.createPart({ type: 'BusinessFunction', label: 'RegrBadgeTarget', model, scriptEnabled: true, script: "ctx.ui.UINumericOutput['V'] = 77; return { value: 1 };" });
+      const outputWidget = store.createPart({ type: 'UINumericOutput', label: 'V', model, uiTargetPartId: target.id });
+      const unboundWidget = store.createPart({ type: 'UINumericOutput', label: 'Unbound', model });
+      const targetVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: target.id, x: 40, y: 40 });
+      const outVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: outputWidget.id, x: 140, y: 40 });
+      const unboundVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: unboundWidget.id, x: 240, y: 40 });
+
+      sim.stepSimulation(app, model);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+
+      const badgeText = (vmId) => document.querySelector(`.fnode[data-vm-id="${vmId}"] .fnode-sim-badge`)?.textContent ?? null;
+      return {
+        viewChkShowSimValuesOff: !view.chkShowSimValues,
+        outputBadgeShown: badgeText(outVm.id) === '77',
+        unboundBadgeShowsPlaceholder: badgeText(unboundVm.id) === '—',
+        normalPartHasNoBadge: badgeText(targetVm.id) === null,
+      };
+    }
+    """)
+    problems = []
+    if not result["viewChkShowSimValuesOff"]:
+        problems.append("test setup: expected chkShowSimValues off")
+    if not result["outputBadgeShown"]:
+        problems.append("expected a bound, ticked Output widget to show its value as a badge even with chkShowSimValues off")
+    if not result["unboundBadgeShowsPlaceholder"]:
+        problems.append("expected an unset Output widget to show a '—' placeholder badge")
+    if not result["normalPartHasNoBadge"]:
+        problems.append("expected an ORDINARY scripted part to show NO badge with chkShowSimValues off — regression")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "UI Output widgets always show their value badge (with a '—' placeholder when unset) regardless of chkShowSimValues, while ordinary parts still correctly respect that view toggle"
+
+
+def check_copy_model_remaps_ui_bindings(page):
+    """Regression guard/new-feature check extending check_copy_model: copyModel must
+    also copy uiInputValue and correctly remap uiTargetPartId — a same-model
+    binding (both the widget and its target were copied together) should point at
+    the NEW copy's own target, not the original; a binding to a part OUTSIDE the
+    copied model (a deliberately supported cross-model dashboard scenario) should
+    be preserved exactly as-is, since copying this model doesn't touch that
+    external part at all."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const modelA = 'RegrCopyUIBindA_' + Date.now();
+      store.addModel(modelA);
+      const external = store.createPart({ type: 'BusinessFunction', label: 'External', model: modelA });
+
+      const modelSrc = 'RegrCopyUIBindSrc_' + Date.now();
+      store.addModel(modelSrc);
+      const target = store.createPart({ type: 'BusinessFunction', label: 'SrcTarget', model: modelSrc });
+      const inWidget = store.createPart({ type: 'UINumericInput', label: 'SrcIn', model: modelSrc, uiTargetPartId: target.id, uiInputValue: 33 });
+      const crossWidget = store.createPart({ type: 'UINumericOutput', label: 'SrcCross', model: modelSrc, uiTargetPartId: external.id });
+
+      commands.copyModel(store, modelSrc, 'RegrCopyUIBindDst');
+      const newTarget = store.doc.parts.find(p => p.model === 'RegrCopyUIBindDst' && p.label === 'SrcTarget');
+      const newInWidget = store.doc.parts.find(p => p.model === 'RegrCopyUIBindDst' && p.label === 'SrcIn');
+      const newCrossWidget = store.doc.parts.find(p => p.model === 'RegrCopyUIBindDst' && p.label === 'SrcCross');
+
+      return {
+        uiInputValueCopied: newInWidget.uiInputValue === 33,
+        sameModelBindingRemapped: newInWidget.uiTargetPartId === newTarget.id,
+        sameModelBindingNotOldTarget: newInWidget.uiTargetPartId !== target.id,
+        externalBindingPreserved: newCrossWidget.uiTargetPartId === external.id,
+      };
+    }
+    """)
+    problems = []
+    if not result["uiInputValueCopied"]:
+        problems.append("expected uiInputValue to be copied onto the new widget")
+    if not result["sameModelBindingRemapped"] or not result["sameModelBindingNotOldTarget"]:
+        problems.append("expected a same-model widget->target binding to be remapped onto the NEW copied target, not the original")
+    if not result["externalBindingPreserved"]:
+        problems.append("expected a binding to a part OUTSIDE the copied model to be preserved exactly as-is")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "copyModel copies uiInputValue and correctly remaps uiTargetPartId — same-model bindings onto the new copy, external/cross-model bindings preserved unchanged"
+
+
+def check_ui_dashboard_cross_model_binding(page):
+    """Regression guard/new-feature check for the full end-to-end scenario this
+    whole feature was confirmed against: "at the end of this user can create sim in
+    one model, copy it to a new model, and then create a new view that can show UIs
+    from both models in the same view and values changing as both model sims run."
+    Covers: a widget living in one model but bound (uiTargetPartId) to a target in
+    a DIFFERENT model gets its runtime entry stored in ITS OWN model's
+    store.simRuntime (not the target's) — confirmed by stepping ONLY the target's
+    model and checking the widget's OWN model's runtime map; stepping model A never
+    touches model B's own runtime state at all, and vice versa (the pre-existing,
+    structural per-model separation this whole design relies on); and, after
+    Model Copy, both the original and copied model can be ticked completely
+    independently, each driving its own same-labeled widget to its OWN target's own
+    computed value."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+      const commands = await import('./js/commands.js');
+
+      const modelA = 'RegrCrossDashA_' + Date.now();
+      store.addModel(modelA);
+      const targetA = store.createPart({ type: 'BusinessFunction', label: 'Calc', model: modelA, scriptEnabled: true, script: "ctx.ui.UINumericOutput['Result'] = 10; return { value: 1 };" });
+      const widgetA = store.createPart({ type: 'UINumericOutput', label: 'Result', model: modelA, uiTargetPartId: targetA.id });
+
+      commands.copyModel(store, modelA, 'RegrCrossDashB');
+      const targetB = store.doc.parts.find(p => p.model === 'RegrCrossDashB' && p.label === 'Calc');
+      const widgetB = store.doc.parts.find(p => p.model === 'RegrCrossDashB' && p.label === 'Result');
+      targetB.script = "ctx.ui.UINumericOutput['Result'] = 999; return { value: 1 };";
+
+      // Step only model B -- model A must be completely untouched
+      sim.stepSimulation(app, 'RegrCrossDashB');
+      const out = {};
+      out.widgetBValue = store.simRuntime.get('RegrCrossDashB').values.get(widgetB.id)?.value;
+      out.modelAUntouchedAfterBTick = !store.simRuntime.has(modelA) || !store.simRuntime.get(modelA).values.has(widgetA.id);
+
+      // Step model A independently -- its own widget reflects ITS OWN target
+      sim.stepSimulation(app, modelA);
+      out.widgetAValue = store.simRuntime.get(modelA).values.get(widgetA.id)?.value;
+
+      // A widget living in model B, but bound to model A's own target -- a genuine
+      // cross-model dashboard placement.
+      const crossWidget = store.createPart({ type: 'UINumericOutput', label: 'Result', model: 'RegrCrossDashB', uiTargetPartId: targetA.id });
+      sim.stepSimulation(app, modelA);
+      out.crossWidgetEntryLivesInOwnModelB = store.simRuntime.get('RegrCrossDashB').values.get(crossWidget.id)?.value === 10;
+      out.crossWidgetNotInModelARuntime = !store.simRuntime.get(modelA).values.has(crossWidget.id);
+
+      return out;
+    }
+    """)
+    problems = []
+    if result["widgetBValue"] != 999:
+        problems.append(f"expected model B's own widget to read model B's own target's value (999), got {result['widgetBValue']}")
+    if not result["modelAUntouchedAfterBTick"]:
+        problems.append("expected stepping model B to leave model A's own runtime completely untouched")
+    if result["widgetAValue"] != 10:
+        problems.append(f"expected model A's own widget to read model A's own target's value (10) once stepped independently, got {result['widgetAValue']}")
+    if not result["crossWidgetEntryLivesInOwnModelB"]:
+        problems.append("expected a widget living in model B but bound to model A's target to store its computed value in model B's OWN runtime")
+    if not result["crossWidgetNotInModelARuntime"]:
+        problems.append("expected that same cross-model widget to NOT appear in model A's own runtime map")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "A UI widget bound across models correctly stores its value in ITS OWN model's runtime; two models (including an original and its Model Copy) tick fully independently, each driving its own dashboard widgets from its own simulation"
+
+
 def check_smart_stream_preset_local_persistence(page):
     """Regression guard: Insert Smart Stream's named presets (store.smartStreamPresets)
     are Local Settings — reported directly: "Add ability to create and maintain a list
@@ -13984,6 +14383,12 @@ CHECKS = [
     check_batch_script_code_persists_with_local_settings,
     check_common_script_callable_from_part_script,
     check_common_script_sim_covers_enterprise_types,
+    check_ui_dashboard_element_types_and_toolkit,
+    check_ui_dashboard_property_panel,
+    check_ui_dashboard_ctx_ui_engine,
+    check_ui_dashboard_output_badge_visibility,
+    check_copy_model_remaps_ui_bindings,
+    check_ui_dashboard_cross_model_binding,
     check_smart_stream_preset_local_persistence,
     check_smart_stream_preset_dialog_save_and_load,
     check_instructions_closed_persists_across_reload,

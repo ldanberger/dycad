@@ -965,6 +965,38 @@ value, the error is logged, and every other part still runs normally that tick.<
 of which views currently show them — use the model selector next to the simulation Run/Pause/Step/Stop
 controls to choose which one you're running.</p>
 
+<h3>UI dashboard elements</h3>
+<p>A fourth toolkit group, <strong>UI</strong>, holds four element types for building a simple, sim-driven
+dashboard alongside your real architecture views: <strong>Text Output</strong>/<strong>Numeric Output</strong>
+display a value that some other part's script computes; <strong>Text Input</strong>/<strong>Numeric Input</strong>
+let you type a value directly into the property panel that a part's script can read back. Unlike everything
+else on a canvas, a UI element doesn't connect to its part with a line — select it and use the new
+<strong>Bound Part</strong> field in Root Properties to pick which part it mirrors or feeds (the list shows
+every part in the document, labeled with its type and model, so binding across two different models is a
+deliberate, visible choice — see "Model Copy" below). An Input element also gets a <strong>Value</strong>
+field there, for whatever you want to type in.</p>
+<p>A bound part's script reads and writes these through a new <code>ctx.ui</code> object, refreshed every
+simulation tick — four plain objects (<code>UITextInput</code>, <code>UITextOutput</code>,
+<code>UINumericInput</code>, <code>UINumericOutput</code>), each keyed by the BOUND ELEMENT'S OWN LABEL, so one
+part can have several inputs and outputs at once:</p>
+<pre class="docs-code">// Reads a Numeric Input element labeled "Base Price", writes a Numeric Output
+// element labeled "Total Cost" (and a Text Output labeled "Status").
+const base = ctx.ui.UINumericInput['Base Price'] || 0;
+ctx.ui.UINumericOutput['Total Cost'] = base + 5;
+ctx.ui.UITextOutput['Status'] = 'ok';
+return { value: 1 };</pre>
+<p>This is a separate channel from <code>ctx.inputs</code>/<code>ctx.value</code> — not related to connectors at
+all. A value a script writes with no matching UI element bound to it is simply ignored; a UI element bound to a
+part whose script never addresses its label reads back <code>undefined</code> (shown as a "—" placeholder, not
+carried over from an earlier tick — same as an ordinary value badge, an Output element's value always reflects
+what its part wrote THIS tick, nothing more). Output elements show their value as the same badge a scripted
+part's own value uses, but always visible regardless of the view's "Show Left Badge" setting, since for these
+elements the badge is the whole point.</p>
+<p><strong>Model Copy</strong> (the 📋 button next to the Default Model selector, top toolbar) clones every part
+and connector tagged with one model — including scripts and any UI element bindings — into a brand-new model
+with the same labels, letting you compare two versions of the same simulation side by side: build one dashboard
+view with elements bound into each model, then run or step them independently.</p>
+
 <h2 id="archimate">8. ArchiMate Import</h2>
 <p>Import a standard ArchiMate 3.0 Exchange Format file (File menu) to bring in its elements, relationships,
 and views as DyCAD parts/connectors/views. Notes on how it handles two ArchiMate conventions that don't map

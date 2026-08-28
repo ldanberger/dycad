@@ -1,5 +1,5 @@
 // render.js — header, toolbox, properties panel rendering (canvas rendering lives in canvas.js)
-import { ciEq, newId } from './state.js';
+import { ciEq, newId, isUIDashboardType } from './state.js';
 import { getAllowedTypesForView, isSectionViewType, rescaleSectionPositions } from './sections.js';
 import { redrawAndResolveLayout } from './canvas.js';
 import { validRelationOptions } from './rules.js';
@@ -640,6 +640,20 @@ function selectOptionsFor(app, entityKey, fieldName, currentValue, ctx) {
   }
   if ((entityKey === 'part' || entityKey === 'viewMember') && fieldName === 'model') {
     return (app.store.doc.models || []).map((m) => `<option value="${escapeHtml(m.modelName)}" ${ciEq(m.modelName, currentValue) ? 'selected' : ''}>${escapeHtml(m.modelName)}</option>`).join('');
+  }
+  // UI dashboard elements' "Bound Part" picker: every OTHER part in the document (not
+  // scoped to the current model — cross-model dashboards are a deliberately supported
+  // scenario, see Model Copy's own design comment, commands.js), excluding the 4 UI
+  // types themselves (a widget binds to a real data-bearing part, never to another
+  // widget). Each option names the part's own label/type/model so a cross-model bind
+  // is a visible, deliberate choice rather than an accidental one.
+  if (entityKey === 'part' && fieldName === 'uiTargetPartId') {
+    const candidates = app.store.doc.parts
+      .filter((p) => !isUIDashboardType(p.type))
+      .slice()
+      .sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+    const options = candidates.map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === currentValue ? 'selected' : ''}>${escapeHtml(p.label || p.id)} (${escapeHtml(p.type)}) — Model: ${escapeHtml(p.model)}</option>`).join('');
+    return `<option value="">(none)</option>${options}`;
   }
   if (entityKey === 'connector' && fieldName === 'connectorType') {
     const options = [
@@ -1643,6 +1657,17 @@ function renderPartProperties(app, vm) {
     scriptEnabled: { get: () => part.scriptEnabled, set: (v) => { part.scriptEnabled = v; app.store.touchPart(part); } },
     createdAt: { get: () => part.createdAt, set: () => {} },
     updatedAt: { get: () => part.updatedAt, set: () => {} },
+    // UI dashboard elements only (see isUIDashboardType, state.js) — which OTHER part
+    // this widget mirrors/feeds, and (Input types only) the value a person types here
+    // to feed that target's script next tick, via ctx.ui.* — see simulation.js's own
+    // script-contract comment for the full ctx.ui shape. Harmless to define for every
+    // part type (accessors with no matching spec field just never render, same as any
+    // other unused accessor), so no per-type branching needed here.
+    uiTargetPartId: { get: () => part.uiTargetPartId || '', set: (v) => { part.uiTargetPartId = v; app.store.touchPart(part); } },
+    uiInputValue: {
+      get: () => part.uiInputValue ?? '',
+      set: (v) => { part.uiInputValue = ciEq(part.type, 'UINumericInput') ? (Number(v) || 0) : v; app.store.touchPart(part); },
+    },
   };
 
   const tab = app.store.activeTab();
@@ -1657,7 +1682,33 @@ function renderPartProperties(app, vm) {
   body.appendChild(topContainer);
   renderShowFieldsPanel(app, tab, 'viewMember', vmAccessors, {}, topContainer, undefined, { pinGroup: 'node' });
 
-  renderRootPropertiesSection(app, 'part', partAccessors, body, undefined, { pinGroup: 'node' });
+  // UI dashboard elements (text_out/text_in/numeric_out/numeric_in, reported directly
+  // as "a new group 'UI' of elements ... used for simple dashboards") get a DIFFERENT
+  // Root Properties spec: script/scriptEnabled are meaningless for them (they're
+  // inert — no script/tick of their own, see isUIDashboardType's own comment) so
+  // they're dropped entirely rather than shown-but-nonfunctional, and a new "Bound
+  // Part" selector (uiTargetPartId — which other part this widget mirrors/feeds) plus,
+  // for the two Input types only, a "Value" field (uiInputValue — what a person types
+  // here becomes ctx.ui.UITextInput/UINumericInput on the bound target's next tick)
+  // are added. Built as a merged spec object (same technique filteredViewSpec, above,
+  // already established for the Filters panel) rather than touching custom.json's
+  // shared showFields.part.fields, since these two fields are meaningless for every
+  // OTHER part type — every other type's own Root Properties panel is completely
+  // unaffected.
+  let partSpec = 'part';
+  if (isUIDashboardType(part.type)) {
+    const baseFields = app.store.settings.showFields?.part?.fields || {};
+    const merged = {};
+    for (const [name, def] of Object.entries(baseFields)) {
+      if (name === 'script' || name === 'scriptEnabled') continue;
+      merged[name] = { ...def, __sourceEntityKey: 'part' };
+    }
+    merged.uiTargetPartId = { show: 's', access: 'w', label: 'Bound Part', __sourceEntityKey: 'part' };
+    if (ciEq(part.type, 'UITextInput')) merged.uiInputValue = { show: 't', access: 'w', label: 'Value', __sourceEntityKey: 'part' };
+    else if (ciEq(part.type, 'UINumericInput')) merged.uiInputValue = { show: 'n', access: 'w', label: 'Value', __sourceEntityKey: 'part' };
+    partSpec = merged;
+  }
+  renderRootPropertiesSection(app, partSpec, partAccessors, body, undefined, { pinGroup: 'node', idNamespace: 'part' });
 }
 
 function renderConnectorProperties(app, vm) {

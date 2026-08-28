@@ -480,6 +480,16 @@ function ciEq(a, b) {
   return String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
 }
 
+/** The four "UI dashboard element" types (public/custom.json's "UI" elementGroup) —
+ * inert Parts (no script/simulation of their own) that mirror or feed another part's
+ * `ctx.ui.*` values each tick, for building simple sim-driven dashboards. Shared
+ * across render.js (property panel field filtering, badge-always-visible rendering),
+ * simulation.js (ctx.ui wiring), and every place that scans "every element type" and
+ * needs to explicitly exclude these (stream templates, industry generation, Level
+ * Up/Down) so a widget never accidentally participates in real architecture flows. */
+const UI_DASHBOARD_TYPES = ['UITextInput', 'UITextOutput', 'UINumericInput', 'UINumericOutput'];
+function isUIDashboardType(type) { return UI_DASHBOARD_TYPES.some((t) => ciEq(t, type)); }
+
 // The base node box size (matches canvas.js's getNodeSize fallback and NODE_HALF_W/H)
 // BEFORE nodeSizeMultiplier is applied. Kept here, not exported, since only
 // defaultNodeSize below and Store's own view-creation code need it.
@@ -714,9 +724,15 @@ class Store {
   // computeStreamLanes/layoutTypeIntoLanes' grid entirely and renders at exactly this
   // position instead; Advanced > Reset Pinned 3D Positions clears every part's pin3D
   // back to null at once. Persisted (part of the document), so a pin survives Save/Load.
-  createPart({ type, label, model, streams = [], note = '', order = 0, other = {}, xIds = '', description = '', script = '', scriptEnabled = false, section = '', pin3D = null, attributes = [] }) {
+  createPart({ type, label, model, streams = [], note = '', order = 0, other = {}, xIds = '', description = '', script = '', scriptEnabled = false, section = '', pin3D = null, attributes = [], uiTargetPartId = '', uiInputValue = null }) {
     const stamp = nowStamp();
-    const part = { id: newId(), type, label: label ?? '', rawLabel: label ?? '', model, streams, note, order, other, xIds, description, script, scriptEnabled: !!scriptEnabled, section, pin3D, attributes, createdAt: stamp, updatedAt: stamp };
+    // uiTargetPartId/uiInputValue: UI dashboard elements only (isUIDashboardType,
+    // above) — which OTHER part this widget mirrors/feeds, and (Input types) the
+    // value a person types here, fed to that target's script via ctx.ui next tick
+    // (simulation.js). Present on every Part, same as pin3D/attributes are, even
+    // though only 4 types ever actually use them — never read/written for anything
+    // else.
+    const part = { id: newId(), type, label: label ?? '', rawLabel: label ?? '', model, streams, note, order, other, xIds, description, script, scriptEnabled: !!scriptEnabled, section, pin3D, attributes, uiTargetPartId, uiInputValue, createdAt: stamp, updatedAt: stamp };
     this.doc.parts.push(part);
     return part;
   }
@@ -1114,6 +1130,8 @@ function migrateDoc(obj, nodeSizeMultiplier = 1.2) {
       section: p.section ?? '',
       pin3D: p.pin3D ?? null,
       attributes: p.attributes ?? [],
+      uiTargetPartId: p.uiTargetPartId ?? '',
+      uiInputValue: p.uiInputValue ?? null,
       createdAt: p.createdAt ?? '', updatedAt: p.updatedAt ?? '',
     })),
     connectors: (obj.connectors || []).map((c) => ({
@@ -1175,4 +1193,4 @@ function connectorStyleFields(relationship, settings) {
   };
 }
 
-export { Store, newId, ciEq, migrateDoc, relationCodeFor, nowStamp };
+export { Store, newId, ciEq, migrateDoc, relationCodeFor, nowStamp, UI_DASHBOARD_TYPES, isUIDashboardType };

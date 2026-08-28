@@ -5046,15 +5046,29 @@ function copyModel(store, sourceModelName, newModelName) {
 
   const sourceParts = store.doc.parts.filter((p) => ciEq(p.model, sourceModelName));
   const partIdMap = new Map(); // old part id -> new part id
+  const newPartByOldId = new Map();
   for (const part of sourceParts) {
     const newPart = store.createPart({
       type: part.type, label: part.label, model: newModelName,
       streams: [...(part.streams || [])], note: part.note || '', order: part.order || 0,
       other: { ...(part.other || {}) }, xIds: part.xIds || '', description: part.description || '',
       script: part.script || '', scriptEnabled: !!part.scriptEnabled, section: part.section || '',
-      attributes: (part.attributes || []).map((a) => ({ ...a })),
+      attributes: (part.attributes || []).map((a) => ({ ...a })), uiInputValue: part.uiInputValue ?? null,
     });
     partIdMap.set(part.id, newPart.id);
+    newPartByOldId.set(part.id, newPart);
+  }
+  // uiTargetPartId (UI dashboard elements — isUIDashboardType, state.js) is a plain
+  // part-id reference, same remap-once-every-copy-exists shape as mirrorOf below, but
+  // NOT an all-or-nothing requirement the way a connector's endpoints are: a widget
+  // bound to a target OUTSIDE this model (a deliberately supported cross-model bind —
+  // see simulation.js's own ctx.ui comment) is left pointing at that SAME external
+  // part, unchanged, since copying this model doesn't touch it at all; only a
+  // same-model binding gets remapped onto its own new copy.
+  for (const part of sourceParts) {
+    if (!part.uiTargetPartId) continue;
+    const newPart = newPartByOldId.get(part.id);
+    newPart.uiTargetPartId = partIdMap.get(part.uiTargetPartId) || part.uiTargetPartId;
   }
 
   const sourceConnectors = store.doc.connectors.filter((c) => ciEq(c.model, sourceModelName));
