@@ -2346,6 +2346,44 @@ template ("SFCCE," which additionally has `applicationCapabilityNameBegin`) re-r
 the details; and Close removing the dialog — the default-selection and scalar-field
 rendering both proven via TEMP BREAK.
 
+**Model Copy** (`copyModel`, `commands.js` — first piece of a larger, in-progress "UI
+dashboard elements" feature; see the same section for the rest once built). Reported
+directly as testing infrastructure for that feature: *"We'll also need a model copy
+function, where everything identified for a specific model will be copied into a new
+model; which will also help in testing this."* "Everything for a model" is exactly the
+same `part.model`/`connector.model` tag every other model-scoped mechanism
+(`runTick`/`buildIncomingMap`, `ctx.findParts`) already keys off — deliberately NOT
+views/viewMembers, since nothing in this app scopes a View to one model at all (a
+single View can already hold viewMembers for parts from several different models —
+`generateInventoryView` names *itself* after one model purely as its own convention,
+and "Add Existing" places requested part ids onto the current view with no model check
+whatsoever), and NOT simulation runtime state (`store.simRuntime`/`simLog`), since a
+freshly copied model hasn't run a tick yet. `copyModel(store, sourceModelName,
+newModelName)` builds an old→new PART id map while cloning every part tagged with the
+source model (new id, but the SAME label — unlike `duplicateSection`'s own renaming,
+the whole point here is a same-labeled counterpart in a different model, so a
+dashboard or a person can compare "Model A: Revenue Total" against "Model B: Revenue
+Total" directly — `script`/`scriptEnabled`/`attributes` all copied verbatim, since the
+point is a working, testable duplicate of the sim itself), then a second pass clones
+every connector tagged with the source model whose BOTH endpoints were copied
+(endpoints remapped via the part-id map, same "skip if not both duplicated" rule
+`duplicateSection` already establishes), building its OWN old→new CONNECTOR id map,
+then a third pass remaps `mirrorOf` (a connector→connector reference — companion
+stream pairs, Level Down crossing links) using that connector map, leaving it blank
+if the connector it pointed at wasn't itself copied. `fromAttribute`/`toAttribute` (a
+`'d'` connector referencing an ATTRIBUTE id, not a part id) need no remapping at all,
+since `attributes` are deep-cloned with their original inner `id`s intact. The real
+UI (`#model-copy-btn`, next to the existing Add/Remove Model buttons) suggests a
+deduplicated `"<source> copy"` name and switches Default Model to the new copy on
+submit, matching Add Model's own convention. New `check_copy_model`
+(`tests/run_all.py`) exercises every one of these rules directly (script preservation,
+endpoint remapping, `mirrorOf` remapping, attribute-id preservation, exclusion of an
+unrelated model's parts, zero new viewMembers) plus the real button/dialog; the
+`mirrorOf` remap and the source-model filter both proven via TEMP BREAK — the latter's
+break (iterating the LIVE `store.doc.parts` array instead of a `.filter()`'d copy,
+while also pushing new parts onto that same array mid-loop) hung the test outright
+rather than just failing an assertion, itself a real confirmation the filter matters.
+
 ## 9. The 3D View subsystem (`view3d.js`)
 
 A rotatable/zoomable WebGL scene over `store.doc.parts`/`connectors` directly —

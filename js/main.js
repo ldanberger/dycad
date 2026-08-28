@@ -5,7 +5,7 @@ import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCo
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule, formatSimValue, segmentIntersectsRect } from './canvas.js';
 import { computeRoutedPath } from './routing.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
-import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors } from './commands.js';
+import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, copyModel, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors } from './commands.js';
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection, computeSectionLayout, getAllowedTypesForView } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
@@ -5093,6 +5093,27 @@ function wireGlobalEvents(app) {
       store.removeModel(store.defaultModel);
       app.render();
     }
+  });
+  // Reported directly: "We'll also need a model copy function, where everything
+  // identified for a specific model will be copied into a new model." Deliberately
+  // switches Default Model to the new copy afterward, same as Add Model above --
+  // matches the "you're about to work in what you just created" convention.
+  document.getElementById('model-copy-btn').addEventListener('click', () => {
+    const source = store.defaultModel;
+    let suggested = `${source} copy`, i = 2;
+    while (store.doc.models.some((m) => ciEq(m.modelName, suggested))) { suggested = `${source} copy ${i}`; i++; }
+    app.promptModal({
+      title: 'Copy Model',
+      fields: [{ key: 'name', label: 'New model name', value: suggested }],
+      onSubmit: (v) => {
+        if (!v.name) return;
+        if (store.doc.models.some((m) => ciEq(m.modelName, v.name))) { app.toast(`A model named "${v.name}" already exists.`, true); return; }
+        const { partCount, connectorCount } = copyModel(store, source, v.name);
+        store.defaultModel = v.name;
+        app.recordAndRender();
+        app.toast(`Copied model "${source}" to "${v.name}" (${partCount} part${partCount === 1 ? '' : 's'}, ${connectorCount} connector${connectorCount === 1 ? '' : 's'}).`, false, true);
+      },
+    });
   });
 
   document.getElementById('view-select').addEventListener('change', (e) => app.openOrSwitchView(e.target.value));

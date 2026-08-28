@@ -4763,4 +4763,31 @@
 // (no established precedent in this suite for testing instructions.html prose
 // content; verified instead via a live probe -- TOC/heading numbering correct, no
 // console errors fetching/parsing the file). Full suite unaffected, still 173/173.
-export const APP_VERSION = '0.912';
+// v0.913: first piece of a larger, in-progress "UI dashboard elements" feature
+// (a new group of Part types for simple sim-driven dashboards -- text/numeric
+// in/out widgets bound to a target part, values flowing through a new ctx.ui
+// namespace each tick; still to come). Reported directly as testing infrastructure
+// for it: "We'll also need a model copy function, where everything identified for a
+// specific model will be copied into a new model; which will also help in testing
+// this." New copyModel(store, sourceModelName, newModelName) (commands.js): clones
+// every part tagged with the source model (new id, SAME label -- unlike
+// duplicateSection's own renaming, the point is a same-labeled counterpart in a
+// different model, so parts/dashboards can compare "Model A: X" against
+// "Model B: X" directly -- script/scriptEnabled/attributes all preserved) and every
+// connector tagged with the source model whose both endpoints were copied (endpoints
+// remapped via an old->new part-id map, mirrorOf remapped via a second old->new
+// connector-id map in a later pass, fromAttribute/toAttribute needing no remapping
+// since attribute ids are preserved unchanged). Deliberately does NOT touch views/
+// viewMembers (nothing in this app scopes a View to one model -- confirmed by reading
+// generateInventoryView/addExistingPartsToView, neither of which enforces model
+// matching) or simulation runtime state (a freshly copied model hasn't ticked yet).
+// New #model-copy-btn (index.html, next to the existing Add/Remove Model buttons):
+// suggests a deduplicated "<source> copy" name, switches Default Model to the copy on
+// submit, same convention as Add Model. New check_copy_model (tests/run_all.py) --
+// the mirrorOf remap and the source-model filter both proven via TEMP BREAK, the
+// latter's break (iterating the live store.doc.parts array while also pushing new
+// parts onto it mid-loop) hanging the test outright rather than just failing an
+// assertion. DESIGN_DOCUMENT.md SS8 (new paragraph) and tests/README.md updated;
+// public/instructions.html gets a new paragraph on the Default Model selector's
+// Add/Remove/Copy buttons. Full suite 174/174.
+export const APP_VERSION = '0.913';

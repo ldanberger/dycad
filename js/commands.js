@@ -5013,6 +5013,77 @@ function duplicateSection(app, tab, sectionInstanceId) {
   app.toast(`Duplicated section "${originalName}" as "${newSection.name}" (${oldVmToNewVm.size} node${oldVmToNewVm.size === 1 ? '' : 's'}, ${connDupCount} connector${connDupCount === 1 ? '' : 's'}).`, false, true);
 }
 
+// ===================== MODEL COPY =====================
+/** Copies every Part and Connector tagged with `sourceModelName` into a brand-new
+ * model — reported directly, as testing infrastructure for the UI dashboard-element
+ * feature: "We'll also need a model copy function, where everything identified for a
+ * specific model will be copied into a new model; which will also help in testing
+ * this." Deliberately does NOT touch views/viewMembers or simulation runtime state
+ * (store.simRuntime/simLog) — a View has no model of its own (nothing in this app
+ * scopes a View to one model; ViewMember placement is independent), so the natural
+ * "everything for a model" scope is exactly the same `part.model`/`connector.model`
+ * tag every other model-scoped feature (simulation, findParts, ...) already keys off,
+ * and a freshly copied model hasn't run yet, so starting with no tick history is
+ * correct, not an omission. The user builds any new view (e.g. a multi-model
+ * dashboard) themselves afterward — see App.promptCopyModel, main.js.
+ *
+ * Part labels are copied UNCHANGED (unlike duplicateSection's own nextStreamName
+ * renaming) — the whole point of copying a model is to end up with a same-labeled
+ * counterpart in a different model, so a dashboard (or a person) can compare/relate
+ * "Model A: Revenue Total" against "Model B: Revenue Total" directly. `attributes`
+ * (DataEntityDetails) are deep-cloned but keep their own original `id`s, so a copied
+ * connector's `fromAttribute`/`toAttribute` (which reference an attribute id, not a
+ * part id) still resolve correctly against the copied part's own copied attributes
+ * with no remapping needed. `mirrorOf` (connector-to-connector, e.g. Level Down
+ * crossing links / stream companion pairs) DOES need remapping, since it references
+ * another CONNECTOR's id — built in a second pass, once every qualifying connector
+ * has already been copied and has its own old->new id mapping, exactly like the
+ * part-id map built in the first pass; a mirror whose OWN source connector wasn't
+ * itself copied (both endpoints not in this model) is left unmirrored. Returns
+ * `{ partCount, connectorCount }` for the caller's own confirmation toast. */
+function copyModel(store, sourceModelName, newModelName) {
+  store.addModel(newModelName);
+
+  const sourceParts = store.doc.parts.filter((p) => ciEq(p.model, sourceModelName));
+  const partIdMap = new Map(); // old part id -> new part id
+  for (const part of sourceParts) {
+    const newPart = store.createPart({
+      type: part.type, label: part.label, model: newModelName,
+      streams: [...(part.streams || [])], note: part.note || '', order: part.order || 0,
+      other: { ...(part.other || {}) }, xIds: part.xIds || '', description: part.description || '',
+      script: part.script || '', scriptEnabled: !!part.scriptEnabled, section: part.section || '',
+      attributes: (part.attributes || []).map((a) => ({ ...a })),
+    });
+    partIdMap.set(part.id, newPart.id);
+  }
+
+  const sourceConnectors = store.doc.connectors.filter((c) => ciEq(c.model, sourceModelName));
+  const connIdMap = new Map(); // old connector id -> new connector id
+  const newConnByOldId = new Map();
+  for (const conn of sourceConnectors) {
+    const newFrom = partIdMap.get(conn.from);
+    const newTo = partIdMap.get(conn.to);
+    if (!newFrom || !newTo) continue; // an endpoint outside this model -- nothing to remap onto
+    const newConn = store.createConnector({
+      from: newFrom, to: newTo, model: newModelName, connectorType: conn.connectorType,
+      relationship: conn.relationship || '', streams: [...(conn.streams || [])], note: conn.note || '',
+      fromAttribute: conn.fromAttribute || '', toAttribute: conn.toAttribute || '',
+      fromCardinality: conn.fromCardinality || '', toCardinality: conn.toCardinality || '',
+      isDerived: !!conn.isDerived,
+    });
+    connIdMap.set(conn.id, newConn.id);
+    newConnByOldId.set(conn.id, newConn);
+  }
+  for (const conn of sourceConnectors) {
+    if (!conn.mirrorOf) continue;
+    const newConn = newConnByOldId.get(conn.id);
+    const newMirrorId = connIdMap.get(conn.mirrorOf);
+    if (newConn && newMirrorId) newConn.mirrorOf = newMirrorId;
+  }
+
+  return { partCount: partIdMap.size, connectorCount: connIdMap.size };
+}
+
 // ===================== DATA MODELING: DDL IMPORT/EXPORT =====================
 /** Data Modeling > Import DDL...: parses DDL text (ddl.js's parseDDL — a deliberately
  * scoped CREATE TABLE subset, not a general SQL grammar) and creates one
@@ -5243,4 +5314,4 @@ function createDetectedConnectors(app, candidates) {
   return { created, placements, unplaced };
 }
 
-export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors };
+export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, copyModel, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors };

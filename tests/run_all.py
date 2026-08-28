@@ -13169,6 +13169,126 @@ def check_smart_check_model_dialog(page):
     return True, "Smart Check Model appears in the Advanced menu above Smart Check View, its dialog is reachable with no canvas tab open, unchecking a specific row before Fix Selected leaves exactly that issue alone while still applying the rest, and Cancel never touches the model"
 
 
+def check_copy_model(page):
+    """Regression guard/new-feature check for commands.js's new copyModel(store,
+    sourceModelName, newModelName), reported directly: "We'll also need a model copy
+    function, where everything identified for a specific model will be copied into a
+    new model; which will also help in testing this [a planned UI dashboard-element
+    feature]." "Everything for a model" is exactly the same part.model/connector.model
+    tag every other model-scoped mechanism (simulation, findParts) already keys off —
+    NOT views/viewMembers (a View has no model of its own anywhere in this app) and
+    NOT simulation runtime state (a freshly copied model hasn't run yet). Covers, via
+    the underlying function directly: every part tagged with the source model is
+    cloned with a NEW id but the SAME label (unlike duplicateSection's own renaming —
+    the point here is a same-labeled counterpart in a different model) and its
+    script/scriptEnabled/attributes preserved; every connector tagged with the source
+    model, BOTH of whose endpoints were copied, is cloned with endpoints remapped to
+    the new part ids; a 'd' connector's fromAttribute/toAttribute (which reference an
+    ATTRIBUTE id, not a part id) still resolve correctly since attributes are
+    deep-cloned with their original ids intact; a mirrorOf link between two copied
+    connectors is remapped to point at the new copy, not the old one; a part in an
+    unrelated model is never pulled in; the new model is registered in
+    store.doc.models; the original model's own parts/connectors are completely
+    untouched; and no viewMembers are created for any of the new parts. Also covers
+    the real Copy Model toolbar button/dialog (#model-copy-btn): opens with a
+    deduplicated "<source> copy" suggested name pre-filled, and switches Default Model
+    to the new copy on submit, same convention as Add Model."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const modelA = 'RegrCopyModelA_' + Date.now();
+      store.addModel(modelA);
+
+      const a = store.createPart({ type: 'BusinessFunction', label: 'Producer', model: modelA, script: 'return { value: 42 };', scriptEnabled: true });
+      const b = store.createPart({ type: 'BusinessFunction', label: 'Consumer', model: modelA });
+      const conn = store.createConnector({ from: a.id, to: b.id, model: modelA, connectorType: 'c' });
+      const mirrorConn = store.createConnector({ from: b.id, to: a.id, model: modelA, connectorType: 'c', mirrorOf: conn.id });
+
+      const table1 = store.createPart({ type: 'DataEntityDetails', label: 'Table1', model: modelA, attributes: [{ id: 'attr-pk-1', name: 'Id', dataType: 'numeric', nullable: false, isPrimaryKey: true }] });
+      const table2 = store.createPart({ type: 'DataEntityDetails', label: 'Table2', model: modelA, attributes: [{ id: 'attr-fk-1', name: 'Table1Id', dataType: 'numeric', nullable: true, isPrimaryKey: false }] });
+      const dConn = store.createConnector({ from: table1.id, to: table2.id, model: modelA, connectorType: 'd', fromAttribute: 'attr-pk-1', toAttribute: 'attr-fk-1' });
+
+      const modelC = 'RegrCopyModelC_' + Date.now();
+      store.addModel(modelC);
+      store.createPart({ type: 'BusinessFunction', label: 'Outsider', model: modelC });
+
+      const { partCount, connectorCount } = commands.copyModel(store, modelA, 'RegrCopyModelB');
+
+      const newParts = store.doc.parts.filter(p => p.model === 'RegrCopyModelB');
+      const newConns = store.doc.connectors.filter(c => c.model === 'RegrCopyModelB');
+      const newProducer = newParts.find(p => p.label === 'Producer');
+      const newConsumer = newParts.find(p => p.label === 'Consumer');
+      const newTable1 = newParts.find(p => p.label === 'Table1');
+      const newDConn = newConns.find(c => c.connectorType === 'd');
+      const newMirror = newConns.find(c => c.mirrorOf);
+      const newPlainConn = newConns.find(c => !c.mirrorOf && c.connectorType === 'c');
+
+      const out = {
+        partCount, connectorCount,
+        newPartsCount: newParts.length,
+        newConnsCount: newConns.length,
+        producerIdDifferent: newProducer && newProducer.id !== a.id,
+        producerScriptCopied: newProducer && newProducer.script === 'return { value: 42 };',
+        producerScriptEnabledCopied: newProducer && newProducer.scriptEnabled === true,
+        modelsRegistered: store.doc.models.some(m => m.modelName === 'RegrCopyModelB'),
+        connectorEndpointsRemapped: newPlainConn && newProducer && newConsumer && newPlainConn.from === newProducer.id && newPlainConn.to === newConsumer.id,
+        mirrorOfRemapped: newMirror && newPlainConn && newMirror.mirrorOf === newPlainConn.id,
+        dConnAttributesPreserved: newDConn && newDConn.fromAttribute === 'attr-pk-1' && newDConn.toAttribute === 'attr-fk-1',
+        newTable1AttrIdPreserved: newTable1 && newTable1.attributes[0].id === 'attr-pk-1',
+        outsiderNotCopied: !newParts.some(p => p.label === 'Outsider'),
+        originalUntouched: store.findPart(a.id).model === modelA,
+        noNewViewMembers: store.doc.viewMembers.filter(vm => newParts.some(p => p.id === vm.objectId)).length === 0,
+      };
+
+      // Real toolbar button + dialog
+      store.defaultModel = modelA;
+      app.render();
+      document.getElementById('model-copy-btn').click();
+      await new Promise(r => setTimeout(r, 30));
+      const nameInput = document.querySelector('.modal-box input[data-key=\"name\"]');
+      out.suggestedName = nameInput ? nameInput.value : null;
+      document.querySelector('.modal-box .submit').click();
+      await new Promise(r => setTimeout(r, 30));
+      out.switchedToNewModel = store.defaultModel === out.suggestedName;
+
+      return out;
+    }
+    """)
+    problems = []
+    if result["partCount"] != 4 or result["connectorCount"] != 3:
+        problems.append(f"expected copyModel to report 4 parts/3 connectors copied, got {result['partCount']}/{result['connectorCount']}")
+    if result["newPartsCount"] != 4 or result["newConnsCount"] != 3:
+        problems.append(f"expected the new model to actually contain 4 parts/3 connectors, got {result['newPartsCount']}/{result['newConnsCount']}")
+    if not result["producerIdDifferent"]:
+        problems.append("expected the copied part to have a NEW id, not the original's")
+    if not result["producerScriptCopied"] or not result["producerScriptEnabledCopied"]:
+        problems.append("expected script/scriptEnabled to be copied onto the new part")
+    if not result["modelsRegistered"]:
+        problems.append("expected the new model name to be registered in store.doc.models")
+    if not result["connectorEndpointsRemapped"]:
+        problems.append("expected the copied connector's from/to to point at the NEW copied parts, not the originals")
+    if not result["mirrorOfRemapped"]:
+        problems.append("expected a copied connector's mirrorOf to point at the OTHER copied connector, not the original")
+    if not result["dConnAttributesPreserved"]:
+        problems.append("expected a copied 'd' connector's fromAttribute/toAttribute to still resolve correctly")
+    if not result["newTable1AttrIdPreserved"]:
+        problems.append("expected a copied part's attributes to keep their own original ids")
+    if not result["outsiderNotCopied"]:
+        problems.append("expected a part in an unrelated model to NOT be copied")
+    if not result["originalUntouched"]:
+        problems.append("expected the original model's own part to be completely untouched")
+    if not result["noNewViewMembers"]:
+        problems.append("expected copyModel to create no viewMembers for the new parts")
+    if "copy" not in (result["suggestedName"] or "").lower():
+        problems.append(f"expected the Copy Model dialog to suggest a '<source> copy'-style name, got {result['suggestedName']!r}")
+    if not result["switchedToNewModel"]:
+        problems.append("expected submitting Copy Model to switch Default Model to the new copy")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, f"copyModel clones every part/connector tagged with the source model (script, scriptEnabled, attribute ids, and mirrorOf all correctly preserved/remapped) into a fresh model, leaves the original and unrelated models untouched, creates no viewMembers, and the real Copy Model button/dialog suggests a deduplicated name ({result['suggestedName']!r}) and switches Default Model to it"
+
+
 def check_load_sfcce(page):
     """Regression guard for File > Load SFCCE — the unified Section/Function/Capability/
     Application Capability/Entity import that replaced separate Load SFCE and Load Capability Map
@@ -13950,6 +14070,7 @@ CHECKS = [
     check_derived_connector_relationship_fallback,
     check_smart_check_model_detection_and_fix_precedence,
     check_smart_check_model_dialog,
+    check_copy_model,
 ]
 
 

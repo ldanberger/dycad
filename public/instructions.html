@@ -113,6 +113,16 @@ thing, not just this drawing of it. If you only want to change how it looks on <
 color), that's the ViewMember-level fields at the top of the property panel, described more in
 <a href="#properties">Property Panels</a> below.</p>
 
+<p>The <strong>Default Model</strong> selector (top toolbar) controls which model new parts/connectors are
+created into and which model's simulation controls currently target. The <strong>+</strong>/<strong>−</strong>
+buttons beside it add or remove a model entry (removing one keeps its parts/connectors — they just lose their
+model tag's registration); the 📋 <strong>Copy model</strong> button clones every part and connector tagged with
+the current Default Model — including each part's own script — into a brand-new model with a suggested
+"&lt;name&gt; copy" name, switching Default Model to the copy. Copied parts keep their original labels (so, say,
+"Revenue Total" exists under the same name in both models), but nothing about placement comes along — the copy
+starts with no views/nodes of its own, ready for you to build a new view (or reuse an existing one) around
+either or both models' parts.</p>
+
 <h3>Streams</h3>
 <p>A Stream is a tag you attach to parts and connectors to say "these belong to this named business flow."
 Streams are what the <strong>Generate Stream</strong> and <strong>Remap</strong> commands key off of — a
