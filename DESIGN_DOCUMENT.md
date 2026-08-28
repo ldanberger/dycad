@@ -475,11 +475,10 @@ Routing) render exactly as before, still gated on "nothing selected"; the 9 MOVE
 fields now render via a new `renderViewDisplayFilters(app)` — called from `app.render()`
 directly, into a new `#view-display-filters-wrap`/`#view-display-filters-body` pair
 appended after the Filters panel's 8 tab-scoped controls (a thin `border-top`
-separates the two groups visually) — any time the active tab is a canvas view,
-**independent of selection state**: a genuine behavior improvement, not just a
-relocation, since you no longer have to deselect everything first to reach them.
-Hidden entirely for every other tab type (including 3D — a 3D tab has no single
-backing `view` object, per §5.6's own earlier paragraph). Both `renderShowFieldsPanel`
+separates the two groups visually) — shown when the active tab is a canvas view AND
+nothing is selected (see the reversal below for why "independent of selection state"
+no longer holds). Hidden entirely for every other tab type (including 3D — a 3D tab
+has no single backing `view` object, per §5.6's own earlier paragraph). Both `renderShowFieldsPanel`
 calls pass an explicit `idNamespace` (`'view'` for Properties, `'view-filter'` for
 Filters) — passing a merged/filtered spec OBJECT instead of the plain `'view'` string
 this used to pass directly triggers `renderShowFieldsPanel`'s own `isMergedSpec`
@@ -504,6 +503,62 @@ too, since the label-to-control GAP has to match, not just the label's own width
 the control's left edge to land on the identical pixel. Base `.prop-row`'s
 `margin-bottom` dropped from `8px` to `4px` (denser rows in both panels); a dialog's
 own `.modal-box .prop-row` override (`12px`, higher specificity) is untouched.
+
+**Reversal: hidden while a node/connector is selected.** Direct follow-up, once the
+"independent of selection" behavior above had been live for a while: *"the panel for
+view filters should only be displayed in right side panel when the view is selected on
+canvas (ie not clicking on connector or node), current problem is the view filters are
+shown as well as the node properties when a node or connector is selected."* The two
+panels were visibly colliding — Properties showing a node's own fields while, right
+above it, the view-display Filters panel kept showing the VIEW's own display settings,
+implying two different objects' properties were open for editing at once.
+`renderViewDisplayFilters` (`render.js`) now hides `#view-display-filters-wrap` (clearing
+`#view-display-filters-body`) the moment `tab.selection.size > 0`, in addition to its
+existing "no view" check — the exact same condition `renderProperties` itself already
+uses to decide whether to render `renderViewProperties` vs. a node/connector's own
+panel, so the two functions now agree on when "the view itself" (rather than one of its
+members) is the thing being edited. Selecting a Section (`tab.selectedSectionId`) is
+deliberately NOT treated the same as a node/connector — the report's own wording ("not
+clicking on connector or node") doesn't cover it, and `renderSectionProperties` doesn't
+occupy the same visual slot the view-display Filters panel would otherwise fill. Note
+this is narrower than the outer `[data-panel-id="filters"]` panel's own 8 tab-scoped
+controls (Stream/Type/Section/Connector Type/View Scope/Layer Order/Highlight/Levels,
+earlier in this section) — those stay visible regardless of selection, since they filter
+what's currently DRAWN on the canvas and remain just as relevant while something is
+selected; only the 9 view-DOCUMENT display toggles below them got this treatment.
+`check_view_display_filters_moved_to_filters_panel` (the original relocation guard) had
+its own "stays visible with a node selected" assertion removed since that's no longer
+true; a new `check_view_display_filters_hidden_when_node_selected` (`tests/run_all.py`)
+covers the reversed behavior — shown with nothing selected, hidden for both a selected
+node and a selected connector, shown again after deselecting, and still shown while a
+Section is selected — proven via TEMP BREAK.
+
+**Select All/Exclude All consistency.** Reported directly: *"Any form with multiple
+select checkboxes should also have select all/deselect all checkboxes."* An audit
+against the app's existing pattern (a header/lead checkbox toggling every row, syncing
+back to reflect the individual boxes' state — Insert Smart Stream's two checklists,
+Auto-Detect Connectors' and Add Existing's own table header checkboxes, and the toolbar
+Stream/Type/Section/Connector Type filters all already followed it) found exactly two
+genuine multi-item checklists without one: Auto-Complete Streams' Part/View table
+columns (`promptAutoCompleteStreams`, §5.5's Auto-Complete Streams paragraphs) and Smart
+Check Node's "By Stream" checklist (§5.5, `promptSmartCheckNode`). New
+`#acs-part-select-all`/`#acs-view-select-all` table-header checkboxes for the former —
+`.checked` mirrors whether every row in that column is checked (disabled-and-forced-
+checked rows, where the part/view already exists, included), `.indeterminate` a genuine
+mixed state, and `.disabled` whether there's any TOGGLABLE row left to act on; clicking
+Part-select-all still drives the pre-existing per-row Part→View cascade (unchecking a
+part disables+unchecks its View box), just via a shared `applyPartCascade(i)` helper
+called both from the per-row listener and the bulk toggle so the two paths can't drift.
+New `#scn-streams-select-all` "Select All / Exclude All" row for the latter (only
+rendered once there's more than one stream to choose from, the same threshold Insert
+Smart Stream's own rows implicitly use — a single item is never ambiguous). Deliberately
+left alone: the Highlight (3D) type checklist, which already documents its own reasoned
+exception ("highlight everything" isn't a meaningful default), and every dialog whose
+checkboxes are independent, differently-meaning options (Import DDL, Smart Check
+View/Node's own feature toggles, Redraw) rather than "pick some subset of many similar
+items" — a Select All over unrelated options wouldn't mean anything. New
+`check_auto_complete_streams_select_all` and `check_smart_check_node_by_stream_select_all`
+(`tests/run_all.py`), both proven via TEMP BREAK.
 
 ### 5.7 Smart Check Model (`smartCheckModel`, `applySmartCheckModelFixes` — `commands.js`)
 

@@ -4574,6 +4574,94 @@ def check_auto_complete_streams_ui(page):
     return True, f"Auto-Complete Streams dialog: {result['rowCount']} rows found, Part/View checkbox dependency correct, creation respected the unchecked row (only it remains a gap), and no bridging connector was created across the gap"
 
 
+def check_auto_complete_streams_select_all(page):
+    """Regression guard/new-feature check, reported directly: "add a select all/
+    deselect all box for Part and View checkboxes [in the Auto-Complete Streams in
+    Model dialog]." New #acs-part-select-all/#acs-view-select-all header checkboxes
+    (promptAutoCompleteStreams, main.js) toggle every TOGGLABLE row in their column
+    (a row already checked-and-disabled because its part/view already exists is left
+    alone, since there's nothing to toggle) and reflect the true state of the WHOLE
+    column, disabled rows included -- .checked mirrors "is every row checked right
+    now" (always true when a disabled row is stuck checked), .indeterminate reflects a
+    genuine mixed state, and .disabled tracks whether there's anything left an
+    uncheck/recheck could actually change. Covers: unchecking Part-select-all
+    unchecks+disables every togglable View row too (the existing Part->View cascade
+    still fires per row); re-checking it restores every togglable Part row; unchecking
+    View-select-all only affects View, leaving Part alone; and manually unchecking one
+    row flips the header to indeterminate — proven via TEMP BREAK."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const streamName = 'RegrACSAll_' + Date.now();
+      store.createPart({ type: 'Unknown', label: 'seed', model: store.defaultModel, streams: [streamName] });
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      app.promptSmartCheckView();
+      await new Promise(r => setTimeout(r, 30));
+      document.getElementById('scv-missing-connectors').checked = false;
+      document.getElementById('scv-autocomplete').checked = true;
+      document.getElementById('scv-autocomplete').dispatchEvent(new Event('change', { bubbles: true }));
+      document.getElementById('scv-autocomplete-template').value = 'Enterprise';
+      await new Promise(r => setTimeout(r, 30));
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      const partSelectAll = document.getElementById('acs-part-select-all');
+      const viewSelectAll = document.getElementById('acs-view-select-all');
+      const partCbs = [...document.querySelectorAll('.acs-part')];
+      const viewCbs = [...document.querySelectorAll('.acs-view')];
+      const out = { present: !!partSelectAll && !!viewSelectAll };
+      out.initialChecked = partSelectAll.checked && viewSelectAll.checked;
+
+      partSelectAll.checked = false;
+      partSelectAll.dispatchEvent(new Event('change'));
+      out.partUncheckClearsAllTogglableParts = partCbs.every(cb => cb.disabled || !cb.checked);
+      out.partUncheckCascadesToViews = viewCbs.every(cb => !cb.checked);
+      out.viewSelectAllReflectsCascade = !viewSelectAll.checked;
+
+      partSelectAll.checked = true;
+      partSelectAll.dispatchEvent(new Event('change'));
+      out.partRecheckRestoresAllTogglableParts = partCbs.every(cb => cb.checked);
+
+      viewSelectAll.checked = false;
+      viewSelectAll.dispatchEvent(new Event('change'));
+      out.viewUncheckLeavesPartAlone = partCbs.every(cb => cb.checked);
+      out.viewUncheckClearsTogglableViews = viewCbs.filter(cb => !cb.disabled).every(cb => !cb.checked);
+
+      viewSelectAll.checked = true;
+      viewSelectAll.dispatchEvent(new Event('change'));
+      const firstTogglablePart = partCbs.find(cb => !cb.disabled);
+      firstTogglablePart.checked = false;
+      firstTogglablePart.dispatchEvent(new Event('change', { bubbles: true }));
+      out.indeterminateOnPartialUncheck = partSelectAll.indeterminate;
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["present"]:
+        problems.append("expected #acs-part-select-all and #acs-view-select-all header checkboxes to exist")
+    if not result["initialChecked"]:
+        problems.append("expected both select-all checkboxes checked by default (every row starts checked)")
+    if not result["partUncheckClearsAllTogglableParts"]:
+        problems.append("expected unchecking Part select-all to uncheck every togglable Part row")
+    if not result["partUncheckCascadesToViews"]:
+        problems.append("expected unchecking Part select-all to cascade-uncheck every View row (a node can't exist without its part)")
+    if not result["viewSelectAllReflectsCascade"]:
+        problems.append("expected View select-all to reflect the cascade (unchecked once every View row is unchecked)")
+    if not result["partRecheckRestoresAllTogglableParts"]:
+        problems.append("expected re-checking Part select-all to restore every togglable Part row")
+    if not result["viewUncheckLeavesPartAlone"]:
+        problems.append("expected unchecking View select-all to leave Part rows untouched")
+    if not result["viewUncheckClearsTogglableViews"]:
+        problems.append("expected unchecking View select-all to uncheck every togglable View row")
+    if not result["indeterminateOnPartialUncheck"]:
+        problems.append("expected manually unchecking one Part row to flip Part select-all to indeterminate")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Auto-Complete Streams' new Part/View select-all header checkboxes toggle every togglable row in their column, respect the Part->View dependency, and go indeterminate on a partial selection"
+
+
 def check_streams_field_editable(page):
     """Regression guard: showFields.part/connector 'streams' access was changed from
     read-only to writable — confirms the property panel's Streams field actually persists
@@ -7696,19 +7784,22 @@ def check_view_display_filters_moved_to_filters_panel(page):
     values (rename to show left badge), show script badge (rename to show right
     badge) that are currently below properties to the newly created filters group."
     Covers: (1) the 9 fields render inside #view-display-filters-body (the Filters
-    panel), not inside #properties-body, with the two renamed labels; (2) they render
-    there even while a NODE is selected (unlike before the move, when they only
-    showed once nothing was selected) -- a real behavior improvement, not just a
-    relocation; (3) they're genuinely gone from Properties' own view-settings display
-    (renderViewProperties keeps only Id/Name/View Type/Margin/Spacing/Spacing
-    Direction/Connector Routing/Stream Connector Routing); (4) toggling one there
-    still actually writes view.chkShowXxx (the move didn't silently break the wiring);
-    (5) the whole #view-display-filters-wrap hides for a non-canvas tab (3D)."""
+    panel), not inside #properties-body, with the two renamed labels; (2) they're
+    genuinely gone from Properties' own view-settings display (renderViewProperties
+    keeps only Id/Name/View Type/Margin/Spacing/Spacing Direction/Connector Routing/
+    Stream Connector Routing); (3) toggling one there still actually writes
+    view.chkShowXxx (the move didn't silently break the wiring); (4) the whole
+    #view-display-filters-wrap hides for a non-canvas tab (3D). Selection-dependence
+    (shown only with nothing selected, hidden once a node/connector is selected) is
+    covered separately by check_view_display_filters_hidden_when_node_selected, below
+    — that behavior was flipped back and forth by two direct, opposite follow-ups (see
+    that check's own docstring) and deserves its own guard."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
       const homeTab = store.tabs.find(t => t.type === 'canvas');
       app.switchToTab(homeTab.id);
+      homeTab.selection = new Set();
       app.render();
       await new Promise(r => setTimeout(r, 60));
       const view = store.findView(homeTab.viewId);
@@ -7724,20 +7815,7 @@ def check_view_display_filters_moved_to_filters_panel(page):
       out.propertiesHasRouting = propertiesHtml.includes('>Connector Routing<');
       out.wrapHiddenBefore = document.getElementById('view-display-filters-wrap').classList.contains('hidden');
 
-      // select a node -- the 9 fields should STILL show in Filters (independent of
-      // selection), while Properties switches away to the node's own fields
-      const part = store.createPart({ type: 'BusinessFunction', label: 'RegrViewFiltersMove', model: store.defaultModel, streams: [] });
-      const vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: 40, y: 40 });
-      homeTab.selection = new Set([vm.id]);
-      app.render();
-      await new Promise(r => setTimeout(r, 60));
-      out.filtersStillShownWithNodeSelected = document.getElementById('view-display-filters-body').innerHTML.includes('>Connectors<');
-      out.propertiesShowsNodeNotView = document.getElementById('properties-body').innerHTML.includes('RegrViewFiltersMove');
-      homeTab.selection = new Set();
-
-      // toggling actually still writes to the view
-      app.render();
-      await new Promise(r => setTimeout(r, 60));
+      // toggling actually still writes to the view (nothing selected, so the panel is showing)
       const streamsCb = [...document.querySelectorAll('#view-display-filters-body .prop-row.checkbox label')].find(l => l.textContent === 'Streams')?.previousElementSibling;
       const before = view.chkShowStreamType;
       streamsCb.checked = !before;
@@ -7762,17 +7840,98 @@ def check_view_display_filters_moved_to_filters_panel(page):
         problems.append(f"expected Properties to still show the fields that DIDN'T move (Id, Connector Routing, ...), got {result}")
     if result["wrapHiddenBefore"]:
         problems.append("expected #view-display-filters-wrap visible on a canvas tab with nothing selected")
-    if not result["filtersStillShownWithNodeSelected"]:
-        problems.append("expected the Filters panel's view-display fields to keep showing even while a node is selected (independent of selection state)")
-    if not result["propertiesShowsNodeNotView"]:
-        problems.append("expected Properties to switch to the selected node's own fields once one is selected")
     if not result["toggleWorked"]:
         problems.append("expected toggling 'Streams' in the Filters panel to actually flip view.chkShowStreamType")
     if not result["wrapHiddenOn3D"]:
         problems.append("expected #view-display-filters-wrap to hide on a non-canvas (3D) tab")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "The 9 view-display toggles (Connectors/Streams/Data/Types/Description/Attributes/Keys/Show Left Badge/Show Right Badge) now render in the Filters panel independent of node selection, are gone from Properties' own view settings (which keeps the rest), still write to the view when toggled, and hide on non-canvas tabs"
+    return True, "The 9 view-display toggles (Connectors/Streams/Data/Types/Description/Attributes/Keys/Show Left Badge/Show Right Badge) render in the Filters panel, are gone from Properties' own view settings (which keeps the rest), still write to the view when toggled, and hide on non-canvas tabs"
+
+
+def check_view_display_filters_hidden_when_node_selected(page):
+    """Regression guard, direct follow-up reversing check_view_display_filters_moved_
+    to_filters_panel's own earlier "independent of selection" behavior: "the panel for
+    view filters should only be displayed in right side panel when the view is
+    selected on canvas (ie not clicking on connector or node), current problem is the
+    view filters are shown as well as the node properties when a node or connector is
+    selected." renderViewDisplayFilters (render.js) now hides #view-display-filters-
+    wrap the moment tab.selection is non-empty (a node OR a connector selected),
+    mirroring exactly when renderProperties itself switches away from
+    renderViewProperties — the two panels no longer show two different things'
+    settings/fields at once. Covers: shown with nothing selected; hidden once a part
+    (node) is selected, with Properties showing the node's own fields; hidden once a
+    connector is selected; shown again after deselecting; and — the one carve-out the
+    report's own wording implies ("not clicking on connector or node") — STILL shown
+    while a Section is selected (tab.selectedSectionId), since a section isn't a node
+    or connector and Section Properties doesn't compete with this panel for space."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      homeTab.selection = new Set();
+      homeTab.selectedSectionId = null;
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      const wrapHidden = () => document.getElementById('view-display-filters-wrap').classList.contains('hidden');
+      const out = {};
+      out.shownWithNothingSelected = !wrapHidden();
+
+      const view = store.findView(homeTab.viewId);
+      const part = store.createPart({ type: 'BusinessFunction', label: 'RegrViewFiltersNodeSel', model: store.defaultModel, streams: [] });
+      const partVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: 40, y: 40 });
+      const part2 = store.createPart({ type: 'BusinessFunction', label: 'RegrViewFiltersNodeSel2', model: store.defaultModel, streams: [] });
+      const part2Vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: part2.id, x: 140, y: 40 });
+      const conn = store.createConnector({ from: part.id, to: part2.id, model: store.defaultModel, connectorType: 'c' });
+      const connVm = store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn.id, fromVmId: partVm.id, toVmId: part2Vm.id });
+
+      homeTab.selection = new Set([partVm.id]);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      out.hiddenWithNodeSelected = wrapHidden();
+      out.propertiesShowsNode = document.getElementById('properties-body').innerHTML.includes('RegrViewFiltersNodeSel');
+
+      homeTab.selection = new Set([connVm.id]);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      out.hiddenWithConnectorSelected = wrapHidden();
+
+      homeTab.selection = new Set();
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      out.shownAgainAfterDeselect = !wrapHidden();
+
+      const sections = store.doc.sections || [];
+      if (sections.length) {
+        homeTab.selectedSectionId = sections[0].id;
+        app.render();
+        await new Promise(r => setTimeout(r, 60));
+        out.shownWithSectionSelected = !wrapHidden();
+        homeTab.selectedSectionId = null;
+      } else {
+        out.shownWithSectionSelected = null; // no sections in this model -- skip, not a failure
+      }
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["shownWithNothingSelected"]:
+        problems.append("expected the view-display Filters panel visible with nothing selected")
+    if not result["hiddenWithNodeSelected"]:
+        problems.append("expected the view-display Filters panel to HIDE once a node (part) is selected")
+    if not result["propertiesShowsNode"]:
+        problems.append("expected Properties to show the selected node's own fields")
+    if not result["hiddenWithConnectorSelected"]:
+        problems.append("expected the view-display Filters panel to HIDE once a connector is selected")
+    if not result["shownAgainAfterDeselect"]:
+        problems.append("expected the view-display Filters panel to reappear after deselecting")
+    if result["shownWithSectionSelected"] is False:
+        problems.append("expected the view-display Filters panel to stay visible while a Section (not a node/connector) is selected")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The view-display Filters panel now hides whenever a node or connector is selected (matching Properties' own switch to that item's fields), reappears once deselected, and stays visible while a Section is selected instead"
 
 
 def check_filters_properties_alignment_and_row_spacing(page):
@@ -11201,6 +11360,67 @@ def check_smart_check_node_composition_redirect(page):
     return True, "Smart Check Node, run on a Level Down anchor, discovers a brand-new connection made at the parent level via the Composition link, without duplicating the parent"
 
 
+def check_smart_check_node_by_stream_select_all(page):
+    """Regression guard/new-feature check, reported directly: "Any form with multiple
+    select checkboxes should also have select all/deselect all checkboxes." Smart
+    Check Node's "By Stream" checklist (one .scn-stream-cb per stream on the selected
+    node) is the one other genuine multi-item checklist in the app (besides Auto-
+    Complete Streams' Part/View columns, see check_auto_complete_streams_select_all)
+    that had no Select All/Exclude All row — added as #scn-streams-select-all, only
+    rendered when the node has more than one stream (matching the reasoning
+    check_insert_smart_stream_dialog's own Select-All rows already follow), using the
+    same "Select All / Exclude All" prop-row pattern Insert Smart Stream's own
+    checklists use. Covers: present for a node with 3 streams; unchecking it clears
+    every stream checkbox; checking one stream back keeps the header unchecked (not a
+    false "all selected"); re-checking every stream individually flips the header back
+    to checked."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const part = store.createPart({ type: 'BusinessFunction', label: 'RegrSCNStreamSelAll', model, streams: ['S1', 'S2', 'S3'] });
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      const view = store.findView(homeTab.viewId);
+      const vm = store.createViewMember({ view: homeTab.viewId, objectType: 'part', objectId: part.id, x: 100, y: 100 });
+      homeTab.selection = new Set([vm.id]);
+      app.promptSmartCheckNode(homeTab);
+      await new Promise(r => setTimeout(r, 30));
+
+      const selectAll = document.getElementById('scn-streams-select-all');
+      const streamCbs = () => [...document.querySelectorAll('.scn-stream-cb')];
+      const out = { present: !!selectAll, initialAllChecked: streamCbs().every(cb => cb.checked) };
+
+      selectAll.checked = false;
+      selectAll.dispatchEvent(new Event('change'));
+      out.uncheckClearsAll = streamCbs().every(cb => !cb.checked);
+
+      streamCbs()[0].checked = true;
+      streamCbs()[0].dispatchEvent(new Event('change', { bubbles: true }));
+      out.partialCheckLeavesHeaderUnchecked = !selectAll.checked;
+
+      streamCbs().forEach(cb => { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); });
+      out.headerChecksOnceAllStreamsChecked = selectAll.checked;
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["present"]:
+        problems.append("expected #scn-streams-select-all to exist for a node with 3 streams")
+    if not result["initialAllChecked"]:
+        problems.append("expected every stream checkbox checked by default")
+    if not result["uncheckClearsAll"]:
+        problems.append("expected unchecking the header to clear every stream checkbox")
+    if not result["partialCheckLeavesHeaderUnchecked"]:
+        problems.append("expected the header to stay unchecked after checking only one of several streams back on")
+    if not result["headerChecksOnceAllStreamsChecked"]:
+        problems.append("expected the header to check itself once every stream checkbox is checked again")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Smart Check Node's By Stream checklist now has a Select All/Exclude All header checkbox that correctly toggles and reflects the individual stream checkboxes"
+
+
 def check_smart_check_sync_with_inventory_checkbox(page):
     """Regression guard for Smart Check View/Node's new "Sync existing connectors with
     inventory" checkbox (unchecked by default) — the REPLACEMENT for an earlier,
@@ -13265,6 +13485,7 @@ CHECKS = [
     check_filters_panel_moved_from_toolbar,
     check_view3d_empty_click_deselects_and_shows_filters,
     check_view_display_filters_moved_to_filters_panel,
+    check_view_display_filters_hidden_when_node_selected,
     check_filters_properties_alignment_and_row_spacing,
     check_script_console_runs_main_function,
     check_script_console_run_function_picker,
@@ -13312,6 +13533,7 @@ CHECKS = [
     check_boot_loader_wires_section_id_and_order,
     check_routing_style_per_connector_type,
     check_auto_complete_streams_ui,
+    check_auto_complete_streams_select_all,
     check_streams_field_editable,
     check_pinned_field_dblclick_not_stolen_by_pin_icon,
     check_local_secrets_settings_split,
@@ -13388,6 +13610,7 @@ CHECKS = [
     check_smart_check_composition_top_down,
     check_smart_check_composition_bottom_up,
     check_smart_check_node_composition_redirect,
+    check_smart_check_node_by_stream_select_all,
     check_smart_check_sync_with_inventory_checkbox,
     check_prompt_sync_inventory_connector,
     check_property_panel_relationship_edit_triggers_sync_prompt,

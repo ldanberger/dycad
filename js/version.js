@@ -4608,4 +4608,43 @@
 // "Edits are saved automatically" copy already described the intended behavior this
 // restores), so public/instructions.html untouched. Every pre-existing test needed no
 // changes. Full suite 166/166.
-export const APP_VERSION = '0.907';
+// v0.908: two direct reports. (1) "add a select all/deselect all box for Part and
+// View checkboxes [Auto-Complete Streams in Model dialog]. Any form with multiple
+// select checkboxes should also have select all/deselect all checkboxes." Audited the
+// app against its own existing Select-All/Exclude-All pattern (Insert Smart Stream,
+// Auto-Detect Connectors, Add Existing, the toolbar Stream/Type/Section/Connector
+// Type filters) and found two genuine multi-item checklists missing it: Auto-Complete
+// Streams' Part/View table columns (new #acs-part-select-all/#acs-view-select-all
+// header checkboxes, main.js -- .checked mirrors whether every row in that column is
+// checked, disabled-and-forced-checked rows included; .indeterminate a genuine mixed
+// state; .disabled whether any togglable row remains; a shared applyPartCascade(i)
+// helper keeps the pre-existing Part->View dependency identical whether triggered per
+// row or via the bulk toggle) and Smart Check Node's "By Stream" checklist (new
+// #scn-streams-select-all, only rendered for more than one stream). Deliberately left
+// alone: the Highlight (3D) checklist's own already-documented exception, and every
+// dialog whose checkboxes are independent, differently-meaning options rather than
+// "pick some subset of many similar items." New check_auto_complete_streams_select_all
+// and check_smart_check_node_by_stream_select_all, both proven via TEMP BREAK.
+// (2) Direct reversal of v0.887's own "independent of selection" behavior: "the panel
+// for view filters should only be displayed in right side panel when the view is
+// selected on canvas (ie not clicking on connector or node), current problem is the
+// view filters are shown as well as the node properties when a node or connector is
+// selected." renderViewDisplayFilters (render.js) now hides #view-display-filters-wrap
+// the moment tab.selection.size > 0, matching exactly when renderProperties itself
+// switches away from renderViewProperties -- the two panels no longer show two
+// different objects' settings/fields at once. A selected Section is deliberately NOT
+// treated the same as a node/connector (the report's own wording, and
+// renderSectionProperties doesn't occupy the same visual slot). The OUTER
+// [data-panel-id="filters"] panel's 8 tab-scoped controls (Stream/Type/Section/
+// Connector Type/View Scope/Layer Order/Highlight/Levels) are UNCHANGED -- they filter
+// what's drawn on the canvas and stay just as relevant with something selected; only
+// the 9 view-DOCUMENT display toggles below them got this treatment.
+// check_view_display_filters_moved_to_filters_panel's own now-false "stays visible
+// with a node selected" assertion removed; new
+// check_view_display_filters_hidden_when_node_selected covers the reversed behavior
+// (shown with nothing selected, hidden for a selected node AND a selected connector,
+// shown again after deselecting, still shown with a Section selected), proven via TEMP
+// BREAK. DESIGN_DOCUMENT.md SS5.6 and tests/README.md updated for both reports; no
+// public/instructions.html changes needed (it never described the old always-visible
+// behavior). Full suite 169/169.
+export const APP_VERSION = '0.908';

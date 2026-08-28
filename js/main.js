@@ -2196,7 +2196,10 @@ class App {
     box.innerHTML = `<h3>Smart Check Node</h3>
       <div style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">Checking "${escapeHtml(part.label)}" (${escapeHtml(part.type)})</div>
       <div class="prop-row checkbox"><input type="checkbox" id="scn-by-stream" ${hasStreams ? 'checked' : ''} ${hasStreams ? '' : 'disabled'} /><label for="scn-by-stream">By Stream — only follow connectors tagged with the selected stream(s) below${hasStreams ? '' : ' (this node has no streams)'}</label></div>
-      <div id="scn-streams-row" style="margin-left:22px;">${nodeStreams.map((s) => `<div class="prop-row checkbox"><input type="checkbox" class="scn-stream-cb" data-stream="${escapeHtml(s)}" checked /><label>${escapeHtml(s)}</label></div>`).join('')}</div>
+      <div id="scn-streams-row" style="margin-left:22px;">
+        ${nodeStreams.length > 1 ? '<div class="prop-row checkbox"><input type="checkbox" id="scn-streams-select-all" checked /><label for="scn-streams-select-all">Select All / Exclude All</label></div>' : ''}
+        ${nodeStreams.map((s) => `<div class="prop-row checkbox"><input type="checkbox" class="scn-stream-cb" data-stream="${escapeHtml(s)}" checked /><label>${escapeHtml(s)}</label></div>`).join('')}
+      </div>
       <div class="prop-row checkbox"><input type="checkbox" id="scn-upstream" checked /><label for="scn-upstream">Upstream — follow connectors into this node</label></div>
       <div class="prop-row checkbox"><input type="checkbox" id="scn-downstream" checked /><label for="scn-downstream">Downstream — follow connectors out of this node</label></div>
       <div class="prop-row checkbox"><input type="checkbox" id="scn-missing-connectors" checked /><label for="scn-missing-connectors">Missing connectors — add connectors between nodes already on this view</label></div>
@@ -2212,6 +2215,21 @@ class App {
     const updateStreamsVisibility = () => streamsRow.classList.toggle('hidden', !byStreamCheckbox.checked);
     byStreamCheckbox.addEventListener('change', updateStreamsVisibility);
     updateStreamsVisibility();
+
+    // Reported directly: "Any form with multiple select checkboxes should also have
+    // select all/deselect all checkboxes." Only rendered above when there's more than
+    // one stream to choose from — same reasoning check_insert_smart_stream_dialog's own
+    // Select-All rows follow, just with too few items here to ever be ambiguous.
+    const streamsSelectAll = box.querySelector('#scn-streams-select-all');
+    if (streamsSelectAll) {
+      const streamCbs = () => [...box.querySelectorAll('.scn-stream-cb')];
+      streamsSelectAll.addEventListener('change', (e) => {
+        streamCbs().forEach((cb) => { cb.checked = e.target.checked; });
+      });
+      streamCbs().forEach((cb) => cb.addEventListener('change', () => {
+        streamsSelectAll.checked = streamCbs().every((c) => c.checked);
+      }));
+    }
 
     const nodesCheckbox = box.querySelector('#scn-missing-connectors-nodes');
     const levelsRow = box.querySelector('#scn-levels-row');
@@ -2270,8 +2288,8 @@ class App {
             <th style="text-align:left; padding:5px 8px;">Stream</th>
             <th style="text-align:left; padding:5px 8px;">Type</th>
             <th style="text-align:left; padding:5px 8px;">Label</th>
-            <th style="text-align:center; padding:5px 8px;">Part</th>
-            <th style="text-align:center; padding:5px 8px;">View</th>
+            <th style="text-align:center; padding:5px 8px;"><input type="checkbox" id="acs-part-select-all" title="Select/deselect all Part checkboxes" /> Part</th>
+            <th style="text-align:center; padding:5px 8px;"><input type="checkbox" id="acs-view-select-all" title="Select/deselect all View checkboxes" /> View</th>
           </tr></thead>
           <tbody>
             ${rows.map((r, i) => `<tr style="border-top:1px solid var(--border);">
@@ -2290,14 +2308,53 @@ class App {
 
     const partBoxes = [...box.querySelectorAll('.acs-part')];
     const viewBoxes = [...box.querySelectorAll('.acs-view')];
+    const partSelectAll = box.querySelector('#acs-part-select-all');
+    const viewSelectAll = box.querySelector('#acs-view-select-all');
+
+    // Reported directly: "add a select all/deselect all box for Part and View
+    // checkboxes." Header checkboxes reflect/act on the WHOLE column, disabled-and-
+    // forced-checked rows (part/view already exists) included -- .checked mirrors "is
+    // every row in this column checked right now" (always true when a row is stuck
+    // checked-disabled), while .disabled tracks whether there's anything left an
+    // uncheck/recheck could actually change, so the header never invites a click that
+    // would do nothing.
+    const applyPartCascade = (i) => {
+      const cb = partBoxes[i], vcb = viewBoxes[i];
+      if (!cb.checked) { vcb.checked = false; vcb.disabled = true; }
+      else if (!rows[i].viewExists) { vcb.disabled = false; }
+    };
+    const syncSelectAlls = () => {
+      const partTogglable = partBoxes.filter((cb) => !cb.disabled);
+      partSelectAll.checked = partBoxes.every((cb) => cb.checked);
+      partSelectAll.indeterminate = !partSelectAll.checked && partBoxes.some((cb) => cb.checked);
+      partSelectAll.disabled = partTogglable.length === 0;
+
+      const viewTogglable = viewBoxes.filter((cb) => !cb.disabled);
+      viewSelectAll.checked = viewBoxes.every((cb) => cb.checked);
+      viewSelectAll.indeterminate = !viewSelectAll.checked && viewBoxes.some((cb) => cb.checked);
+      viewSelectAll.disabled = viewTogglable.length === 0;
+    };
     partBoxes.forEach((cb, i) => {
       if (cb.disabled) return; // part already exists — always available, unchecking makes no sense
-      cb.addEventListener('change', () => {
-        const vcb = viewBoxes[i];
-        if (!cb.checked) { vcb.checked = false; vcb.disabled = true; }
-        else if (!rows[i].viewExists) { vcb.disabled = false; }
-      });
+      cb.addEventListener('change', () => { applyPartCascade(i); syncSelectAlls(); });
     });
+    viewBoxes.forEach((cb) => {
+      if (cb.disabled) return;
+      cb.addEventListener('change', syncSelectAlls);
+    });
+    partSelectAll.addEventListener('change', () => {
+      partBoxes.forEach((cb, i) => {
+        if (cb.disabled) return;
+        cb.checked = partSelectAll.checked;
+        applyPartCascade(i);
+      });
+      syncSelectAlls();
+    });
+    viewSelectAll.addEventListener('change', () => {
+      viewBoxes.forEach((cb) => { if (!cb.disabled) cb.checked = viewSelectAll.checked; });
+      syncSelectAlls();
+    });
+    syncSelectAlls();
 
     box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
     box.querySelector('.submit').addEventListener('click', () => {

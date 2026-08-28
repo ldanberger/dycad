@@ -1210,9 +1210,11 @@ function renderSectionProperties(app, tab) {
 // left badge), show script badge (rename to show right badge) that are currently
 // below properties to the newly created filters group." These 9 fields used to render
 // inside renderViewProperties below (only while nothing was selected); they now
-// render in the Filters panel (renderViewDisplayFilters, below) any time the active
-// tab is a canvas view, independent of selection state — the same "always visible per
-// tab type, not per selection" convention the panel's other 8 controls already follow.
+// render in the Filters panel (renderViewDisplayFilters, below). Direct follow-up,
+// reported again once selection made the two panels visibly collide: "the view
+// filters are shown as well as the node properties when a node or connector is
+// selected" — so despite the name, this panel is NOT independent of selection: see
+// renderViewDisplayFilters's own comment for the current (reverted-back) rule.
 // (chkShowSimValues/chkShowScriptBadge were also renamed in their own showFields.view
 // label, custom.json, to match what they actually indicate — a left-side vs.
 // right-side badge on the node — now that "Show Simulation Values" sitting right next
@@ -1270,19 +1272,28 @@ function renderViewProperties(app, tab) {
 }
 
 /** Filters panel (index.html, right column, above Properties): the 9 view-level
- * display toggles moved here from renderViewProperties above. Shown any time the
- * active tab is a canvas view, regardless of whether a node is currently selected
- * (unlike before, where deselecting everything was the only way to reach them) —
+ * display toggles moved here from renderViewProperties above. Direct follow-up
+ * reported against the earlier "shown regardless of selection" behavior: "the panel
+ * for view filters should only be displayed in right side panel when the view is
+ * selected on canvas (ie not clicking on connector or node), current problem is the
+ * view filters are shown as well as the node properties when a node or connector is
+ * selected." So this panel is now shown exactly when renderProperties (above) would
+ * show renderViewProperties for the SAME tab — nothing selected (tab.selection empty)
+ * — and hidden the moment a node or connector is selected (tab.selection.size > 0),
+ * matching Properties' own switch away from view-level fields at that exact point;
  * hidden entirely for every other tab type, including 3D, since these are genuine
- * View DOCUMENT properties, not tab-scoped session filters, and a 3D tab isn't
- * backed by any single view. */
+ * View DOCUMENT properties, not tab-scoped session filters, and a 3D tab isn't backed
+ * by any single view. Selecting a SECTION (tab.selectedSectionId) is deliberately NOT
+ * treated the same as a node/connector here — a section isn't "a node or connector"
+ * per the report's own wording, and Section Properties doesn't compete for the same
+ * space this panel would otherwise fill. */
 function renderViewDisplayFilters(app) {
   const wrap = document.getElementById('view-display-filters-wrap');
   const container = document.getElementById('view-display-filters-body');
   if (!wrap || !container) return;
   const tab = app.store.activeTab();
   const view = tab && tab.type === 'canvas' ? app.store.findView(tab.viewId) : null;
-  if (!view) {
+  if (!view || tab.selection.size > 0) {
     wrap.classList.add('hidden');
     container.innerHTML = '';
     return;
