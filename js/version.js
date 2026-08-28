@@ -4736,4 +4736,31 @@
 // Align by section's own behavior separately from this in-dialog note, and that
 // behavior is unchanged). Every pre-existing test needed no changes. Full suite
 // 173/173.
-export const APP_VERSION = '0.911';
+// v0.912: reported directly, "Update the instructions page, insert 'Getting Started'
+// as number 1 under contents. In 'Getting Started' instruct reader to open Advanced
+// Script Console, read through the script, and run the main script to create sample
+// model and views. Smart Stream Example 2 is a view ready for them to work with, and
+// suggest they read Message Log for additional information. Add anything else you
+// think they may need to get started." New "Getting Started" section
+// (public/instructions.html), first in the Contents list and first h2 in the page --
+// every other h2 (and the TOC) renumbered accordingly (2 through 9, keeping "8a. Data
+// Modeling" alongside its own "8. ArchiMate Import", matching the existing precedent
+// of not renumbering a lettered sub-section). Walks a first-time reader through:
+// opening Advanced > Script Console; reading the shipped default script (not blank --
+// a real, working demonstration of main()'s BatchScript_* chain, dataAutoFill,
+// CommonScript_Example/CommonScript_Sim, and CustomRemap_Example); running main()
+// (Run button / Ctrl+Enter) to generate a sample industry, a laid-out "Business
+// Functions" org view (3D View included), and a fully-processed "Smart Stream
+// Example" view; then switching to "Smart Stream Example 2" -- deliberately left
+// un-processed by main() itself -- as a hands-on exercise for Smart Check View +
+// Remap; and checking the Message Log, which both narrates main()'s own progress and
+// ends with the exact settings to match. Also added, since a first-time reader would
+// otherwise have no way to know: File > Save/Load doesn't autosave (a real gap the
+// app's own beforeunload warning already guards against, main.js), Local Settings
+// (Script Console text included) persists per-browser separately from any document,
+// and the Filters/Properties panels are selection-driven. Documentation-only --
+// no code, no DESIGN_DOCUMENT.md change (nothing architectural changed), no new test
+// (no established precedent in this suite for testing instructions.html prose
+// content; verified instead via a live probe -- TOC/heading numbering correct, no
+// console errors fetching/parsing the file). Full suite unaffected, still 173/173.
+export const APP_VERSION = '0.912';

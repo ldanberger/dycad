@@ -9,6 +9,7 @@ This page is a working reference, not a tutorial — skim the headings, come bac
 <nav class="docs-toc">
   <strong>Contents</strong>
   <ol>
+    <li><a href="#getting-started">Getting Started</a></li>
     <li><a href="#data-model">The Data Model</a></li>
     <li><a href="#views">Views &amp; Layout</a></li>
     <li><a href="#commands">Commands</a></li>
@@ -21,7 +22,51 @@ This page is a working reference, not a tutorial — skim the headings, come bac
   </ol>
 </nav>
 
-<h2 id="data-model">1. The Data Model</h2>
+<h2 id="getting-started">1. Getting Started</h2>
+<p>The fastest way to get oriented is to generate a real, populated sample model and start exploring it —
+no blank-canvas guessing required.</p>
+<ol>
+  <li>Open <strong>Advanced &gt; Script Console</strong>. It opens pre-loaded with a working example script,
+  not a blank editor — every DyCAD session starts with the same one (it's Local Settings, tied to your
+  browser, not part of any document you save/load).</li>
+  <li>Read through the script text before running anything. It's not just filler — it's a real, working
+  demonstration of most of the concepts on this page: <code>main()</code> at the top calls a chain of
+  <code>BatchScript_*</code> functions in sequence (see "Simulation Scripting" below for the full script
+  contract this all runs under), and further down are <code>dataAutoFill()</code> (what Data Modeling &gt;
+  Autofill calls), <code>CommonScript_Example</code>/<code>CommonScript_Sim</code> (callable from any Part's
+  own script), and <code>CustomRemap_Example</code> (selectable from Remap's Pattern dropdown).</li>
+  <li>Click <strong>Run</strong> (or Ctrl+Enter) with <code>main()</code> selected in the Function dropdown —
+  it's the default. This runs the whole starter chain: generates a full sample industry dataset, builds a
+  "Business Functions" organization view (already laid out, zoomed, and opened in the 3D View too), then
+  traces and fully lays out a "Smart Stream Example" view end to end, then builds a second, deliberately
+  UN-processed <strong>"Smart Stream Example 2"</strong> view.</li>
+  <li>Switch to <strong>"Smart Stream Example 2"</strong> (Current View selector, top toolbar) — it's real
+  generated data, already placed, but left for you to work with rather than already finished: try
+  <strong>Advanced &gt; Smart Check View</strong> to pull in its missing connectors, then <strong>Remap</strong>
+  (Commands panel, left sidebar) to lay it out. The Message Log (next) tells you exactly which settings to
+  pick to match how "Smart Stream Example" already looks.</li>
+  <li>Check the <strong>Message Log</strong> (left sidebar) as you go — <code>main()</code> logs its own
+  progress at each step ("Done", "Insert Smart Stream example done", ...) and finishes with a reminder naming
+  the precise Smart Check View/Remap settings for "Smart Stream Example 2." Get in the habit of checking it
+  after any bulk operation — it's where every warning/rejection message the app shows you also ends up, not
+  just script output (see "Tips &amp; Things to Know" at the end of this page).</li>
+</ol>
+<p>A few things worth knowing before you go further:</p>
+<ul>
+  <li><strong>Nothing is saved automatically.</strong> <strong>File &gt; Save</strong> downloads the current
+  document (every part, connector, and view you just generated) as a JSON file; <strong>File &gt; Load</strong>
+  brings one back. The Script Console's own text and a handful of other preferences are separate — Local
+  Settings (<strong>File &gt; Save/Load Local Settings</strong>), tied to your browser rather than any one
+  document, which is why they're already there even in a brand-new session.</li>
+  <li>The right column's <strong>Filters</strong> and <strong>Properties</strong> panels both track your
+  canvas selection: click empty canvas space to see a view's own settings, click a node/connector/section to
+  see its own properties instead.</li>
+  <li>Once you've explored the generated views, "The Data Model" (next) covers the five record types
+  everything is built from, and "Commands" covers what the left-sidebar panel/right-click menu can do to
+  whatever you have selected.</li>
+</ul>
+
+<h2 id="data-model">2. The Data Model</h2>
 <p>Five kinds of record make up everything in DyCAD. Understanding how they relate is the single most useful
 thing to know before you start clicking around — most "why did that happen" moments trace back to this.</p>
 
@@ -76,7 +121,7 @@ and DyCAD builds or reorganizes a set of tagged nodes to match it. This is the p
 beyond standard ArchiMate drawing: instead of manually placing and connecting a dozen boxes for a business
 capability flow, you generate the whole pattern from a template and a few names.</p>
 
-<h2 id="views">2. Views &amp; Layout</h2>
+<h2 id="views">3. Views &amp; Layout</h2>
 
 <h3>View types</h3>
 <p>Every view is one of a small set of types, chosen when you create it:</p>
@@ -237,7 +282,7 @@ Script Entities — see <a href="#simulation">Simulation Scripting</a> below for
 localStorage caching work. It only affects views created <em>after</em> it's set; it doesn't resize anything
 already on screen.</p>
 
-<h2 id="commands">3. Commands</h2>
+<h2 id="commands">4. Commands</h2>
 <p>Available from the Commands panel (left sidebar) when a canvas view is active, and via right-click on the
 canvas. Availability depends on what's selected — greyed out means the current selection doesn't apply.</p>
 
@@ -573,7 +618,7 @@ Output ONLY the JSON array, valid and complete -- no commentary.</pre>
 <p>All of the above are ignored while typing in a text field (so, for example, deleting text in a Label field
 doesn't also delete the selected node) and require the current tab to be a canvas view where relevant.</p>
 
-<h2 id="filtering">4. Filtering, Streams &amp; Catalogs</h2>
+<h2 id="filtering">5. Filtering, Streams &amp; Catalogs</h2>
 <p>Every control below only appears in the toolbar while the current tab is one it actually applies to —
 e.g. View Scope/Connector Type/Layer Order/Highlight only show up on a 3D View tab, Levels only on a canvas
 tab, and none of them show up at all on a catalog table or other non-diagram tab — rather than sitting
@@ -669,7 +714,7 @@ many parts as you like, then <strong>Explore &gt; Reset Pinned 3D Positions</str
 at once and let auto-layout take back over (there's no per-part unpin — it's an all-or-nothing reset).
 Panning uses middle-click-drag here (right-click is reserved for the menu/drag instead).</p>
 
-<h2 id="properties">5. Property Panels</h2>
+<h2 id="properties">6. Property Panels</h2>
 <p>Selecting a node or connector on canvas shows two layers, deliberately kept separate:</p>
 <ul>
   <li><strong>Top level</strong> — fields that belong to <em>this view's placement</em> of the part/connector:
@@ -693,7 +738,7 @@ Size, and Border Color on a node, and Margin on a view. They're stored if you se
 current build reads them back to change how anything looks. Worth knowing so you don't spend time tuning a
 setting that isn't wired up yet.</p>
 
-<h2 id="simulation">6. Simulation Scripting</h2>
+<h2 id="simulation">7. Simulation Scripting</h2>
 <p>Any part can carry a script that runs once per simulation "tick," letting you model how values or state
 flow and change across a live architecture — not just a static diagram. Turn it on per-part with "Part Script
 Enabled" in Root Properties, then write the script body in the Script field.</p>
@@ -910,7 +955,7 @@ value, the error is logged, and every other part still runs normally that tick.<
 of which views currently show them — use the model selector next to the simulation Run/Pause/Step/Stop
 controls to choose which one you're running.</p>
 
-<h2 id="archimate">7. ArchiMate Import</h2>
+<h2 id="archimate">8. ArchiMate Import</h2>
 <p>Import a standard ArchiMate 3.0 Exchange Format file (File menu) to bring in its elements, relationships,
 and views as DyCAD parts/connectors/views. Notes on how it handles two ArchiMate conventions that don't map
 directly onto DyCAD's own model:</p>
@@ -926,7 +971,7 @@ directly onto DyCAD's own model:</p>
 <p>Re-importing the same file is safe — it matches existing records by the file's own stable ids and updates
 them in place rather than duplicating.</p>
 
-<h2 id="data-modeling">7a. Data Modeling</h2>
+<h2 id="data-modeling">8a. Data Modeling</h2>
 <p>The <strong>Data Modeling</strong> menu adds entity-relationship (ERD) detail — typed attributes, primary/
 foreign keys, and crow's-foot notation — on top of the Data Model's existing Data Entity element, without
 changing what a Data Entity already means elsewhere in your model (Streams, Capability Maps, etc. all keep
@@ -1014,7 +1059,7 @@ an existing Data connector is never proposed again. If both tables in a confirme
 the new connector is placed there automatically; if they don't share any view yet, the connector is still
 created (so it's ready once you do place them together) but won't be visible on any diagram until then.</p>
 
-<h2 id="tips">8. Tips &amp; Things to Know</h2>
+<h2 id="tips">9. Tips &amp; Things to Know</h2>
 <ul>
   <li><strong>Undo/Redo</strong> (Ctrl+Z / Ctrl+Shift+Z) covers the full model, not just the current view —
   it's safe even though views share underlying parts and connectors.</li>
