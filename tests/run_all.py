@@ -1991,6 +1991,65 @@ def check_script_console_run_function_picker(page):
     return True, "Script Console's Run button now offers a sorted, live-updating dropdown of the script's top-level functions (main selected by default) and Run calls whichever one is selected"
 
 
+def check_script_console_detach_to_window(page):
+    """Regression guard/new-feature check for the Script Console's Detach button.
+    Reported directly: "can script console window be non modal, and larger? detachable
+    window?" Detach opens a same-origin popup window (App.detachScriptConsole,
+    main.js) sharing the live app/store directly, and closes the in-app modal so only
+    one live editor is ever open against store.batchScriptCode at a time. Covers: the
+    in-app modal closes when Detach is clicked; the popup renders the same console UI
+    (output/input/Run); a script typed and run IN THE POPUP is immediately runnable
+    there with no separate save step (Run always executes whatever's currently in that
+    document's own textarea, matching the in-app modal's own behavior) and its result
+    updates store.batchScriptCode in the MAIN window live; the popup inherits the
+    main window's current theme; and closing the popup via its own window-close (not
+    the in-box Close button) still persists whatever was typed, via a beforeunload
+    handler, exactly like the in-app modal's Close button does."""
+    page.evaluate("document.body.dataset.theme = 'dark'")
+    with page.context.expect_page() as popup_info:
+        page.evaluate("window.dycadApp.promptScriptConsole()")
+        page.wait_for_timeout(150)
+        page.click(".modal-box.modal-box-console .detach")
+    popup = popup_info.value
+    popup.wait_for_load_state()
+    popup.wait_for_timeout(150)
+
+    problems = []
+    modal_gone = page.evaluate("!document.querySelector('.modal-box.modal-box-console')")
+    if not modal_gone:
+        problems.append("expected the in-app modal to close when Detach is clicked")
+
+    has_console_ui = popup.evaluate("!!document.querySelector('#console-input') && !!document.querySelector('.run')")
+    if not has_console_ui:
+        problems.append("expected the detached popup to render the same console UI (#console-input, .run)")
+
+    popup_theme = popup.evaluate("document.body.dataset.theme")
+    if popup_theme != "dark":
+        problems.append(f"expected the popup to inherit the main window's current theme ('dark'), got {popup_theme!r}")
+
+    popup.fill("#console-input", "function main() { return 40 + 2; }")
+    popup.click(".run")
+    popup.wait_for_timeout(200)
+    output_text = popup.inner_text("#console-output")
+    if "42" not in output_text:
+        problems.append(f"expected Run in the popup to execute the just-typed text immediately (no save step) and show 42, got: {output_text!r}")
+
+    code_in_main_store = page.evaluate("window.dycadApp.store.batchScriptCode")
+    if "40 + 2" not in code_in_main_store:
+        problems.append("expected running in the popup to persist to store.batchScriptCode, visible from the main window")
+
+    popup.fill("#console-input", "function main() { return 'closed-without-run'; }")
+    popup.close(run_before_unload=True)
+    page.wait_for_timeout(200)
+    code_after_close = page.evaluate("window.dycadApp.store.batchScriptCode")
+    if "closed-without-run" not in code_after_close:
+        problems.append("expected closing the popup window (without clicking Run or Close) to still persist the current text via beforeunload")
+
+    if problems:
+        return False, "; ".join(problems)
+    return True, "Detach opens the Script Console in its own popup window sharing the live app/store, closes the in-app modal, inherits the current theme, runs edits immediately with no separate save step, and persists on window-close via beforeunload"
+
+
 def check_batch_script_quickstart(page):
     """Regression guard/new-feature check for the built-in default batch script
     (store.batchScriptCode's out-of-the-box default, DEFAULT_BATCH_SCRIPT_CODE in
@@ -13144,6 +13203,7 @@ CHECKS = [
     check_filters_properties_alignment_and_row_spacing,
     check_script_console_runs_main_function,
     check_script_console_run_function_picker,
+    check_script_console_detach_to_window,
     check_batch_script_quickstart,
     check_script_console_remap_and_smart_check_bindings,
     check_script_console_reference_tab,

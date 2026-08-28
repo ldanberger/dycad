@@ -320,6 +320,98 @@ function findAllScriptFunctionNames(code) {
   return [...new Set(names)].sort((a, b) => a.localeCompare(b));
 }
 
+/** Builds the Script Console's inner markup (tabs, output/input panes, Reference tab,
+ * action row) — shared between the in-app modal (promptScriptConsole) and the detached
+ * popup window (App.detachScriptConsole) so the two stay identical apart from the
+ * action row: standalone drops the Detach button (a detached window can't detach
+ * further) since it's already its own real window. */
+function scriptConsoleInnerHTML(modelName, { standalone } = {}) {
+  return `<h3>Script Console${modelName ? ` — ${escapeHtml(modelName)}` : ''}</h3>
+      <div class="console-tabs" style="display:flex;gap:6px;margin-bottom:10px;">
+        <button type="button" class="tb-btn active" data-tab="console">Console</button>
+        <button type="button" class="tb-btn" data-tab="reference">Reference</button>
+      </div>
+      <div id="console-tab-console">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
+          Ctrl+Enter or Run calls the selected function below (<code>main()</code> by default)${modelName ? '' : ' — <span style="color:#c0392b;">no simulation model selected, model will be null</span>'}.
+          Bindings and <code>remap</code>/<code>smartCheckView</code>/<code>smartCheckNode</code>/<code>insertSmartStream</code> options: see the <strong>Reference</strong> tab above.
+          Edits are saved automatically (Local Settings).
+        </div>
+        <div class="console-pane-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+          <span style="font-size:11px;color:var(--text-muted);font-weight:600;">Output</span>
+          <button type="button" class="tb-btn copy-output" style="padding:2px 8px;font-size:11px;">Copy</button>
+        </div>
+        <div id="console-output" style="height:140px;overflow-y:auto;background:var(--bg);border:1px solid var(--border-strong);border-radius:5px;padding:8px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;margin-bottom:8px;"></div>
+        <div class="console-pane-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+          <span style="font-size:11px;color:var(--text-muted);font-weight:600;">Script</span>
+          <button type="button" class="tb-btn copy-script" style="padding:2px 8px;font-size:11px;">Copy</button>
+        </div>
+        <textarea id="console-input" spellcheck="false" style="width:100%;height:340px;font-family:var(--mono);font-size:12px;box-sizing:border-box;border:1px solid var(--border-strong);border-radius:5px;padding:8px;background:var(--bg);color:var(--text);resize:vertical;"></textarea>
+      </div>
+      <div id="console-tab-reference" style="display:none;font-size:12px;">
+        <div class="console-pane-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+          <span style="font-size:11px;color:var(--text-muted);font-weight:600;">Reference</span>
+          <button type="button" class="tb-btn copy-reference" style="padding:2px 8px;font-size:11px;">Copy</button>
+        </div>
+        <div id="console-reference-scroll" style="height:480px;overflow-y:auto;border:1px solid var(--border-strong);border-radius:5px;padding:10px;background:var(--bg);box-sizing:border-box;">
+        <p style="margin-top:0;">Run (or Ctrl+Enter, from the Console tab) defines everything currently in the box —
+        so a <code>function foo() {...}</code> you write becomes callable — then calls exactly one thing, your
+        top-level <code>main()</code>, which is free to call whatever else you've defined alongside it (they all
+        share the same bindings below, without needing them passed in).</p>
+        <table class="docs-table">
+          <thead><tr><th>Binding</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>app</code>, <code>store</code></td><td>Full application/document access — same as any command function uses internally.</td></tr>
+            <tr><td><code>model</code></td><td>The currently-selected simulation model, or <code>null</code> if none is selected.</td></tr>
+            <tr><td><code>findParts({type, model})</code></td><td>Look up parts by type and/or model.</td></tr>
+            <tr><td><code>log(...)</code></td><td>Prints to this console's own output area (above, Console tab).</td></tr>
+            <tr><td><code>messageLog(...)</code></td><td>Writes to the persistent Message Log instead.</td></tr>
+            <tr><td><code>generateIndustry(app, onProgress, placeInView)</code></td><td>Generates a full industry model.</td></tr>
+            <tr><td><code>populateFromTemplate(app, tab, templateName)</code></td><td>Populates a view from a stream template.</td></tr>
+            <tr><td><code>remap(app, tab, options)</code></td><td>options: <code>sortKeys, templateName</code>,
+              <code>pattern</code> (<code>'default'|'none'|'layered'|'force'|'clusters'</code>),
+              <code>limitColumnsToView, visiblePartVmIds, forcePreferRight, forceGroupRows</code>,
+              <code>edgeAssignment</code> (<code>{elementType: 'top1'..'top5'|'bottom1'..'bottom5'|'left1'..'left5'|'right1'..'right5'}</code>
+              — 1 = the slot closest to that edge, 5 = closest to the middle grid; a bare
+              <code>'top'|'bottom'|'left'|'right'</code> with no digit means index 1,
+              Default/None/Layered patterns only), <code>edgeBlanks</code>
+              (<code>{top|bottom|left|right: [1-5, ...]}</code> — forces specific slot
+              numbers to stay reserved-but-empty instead of being skipped/compacted away,
+              Default/None/Layered only), <code>minimizeCrossings, minimizeConnectorLength</code>
+              (both boolean, Default/None/Layered only), <code>alignBySection</code>
+              (boolean, default <code>true</code> — between two parts connected by a real edge
+              that share the same <code>part.section</code>, prioritizes the same column one
+              row apart for Default/None/Layered, or packs them shelf-adjacent for
+              Clusters; not used by Force/Custom) — all optional, same defaults as the Remap dialog.</td></tr>
+            <tr><td><code>smartCheckView(app, tab, options)</code></td><td>options: <code>missingConnectors,
+              missingConnectorsAndNodes, levels, syncWithInventory, deriveConnectors</code> (links two
+              on-view nodes directly when only connected via a chain of not-shown parts; creates both a
+              'c' and an 's' connector, each with <code>isDerived: true</code>; uses <code>levels</code> too),
+              <code>includeDerivedConnectors</code> (default <code>false</code> — whether the
+              <code>missingConnectors</code>/<code>missingConnectorsAndNodes</code> pull-in also brings in an
+              already-existing connector that's marked <code>isDerived</code>, e.g. one derived for a
+              different view).</td></tr>
+            <tr><td><code>smartCheckNode(app, tab, partId, options)</code></td><td>options: same as
+              smartCheckView, plus <code>upstream, downstream, byStream, streams</code>.</td></tr>
+            <tr><td><code>insertSmartStream(app, tab, options)</code></td><td>freeform views only; options:
+              <code>connectorType</code> (<code>'c'|'s'</code>), <code>startPartIds</code> (array of part
+              ids — use <code>findParts</code> to look them up), <code>direction</code>
+              (<code>'both'|'downstream'|'upstream'</code>), <code>endType</code> (element type or
+              <code>null</code>), <code>levels</code> (number or <code>null</code> for unlimited),
+              <code>showTypes</code> (array of element types to keep).</td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="cancel">${standalone ? 'Close window' : 'Close'}</button>
+        ${standalone ? '' : '<button type="button" class="tb-btn detach">Detach &#8599;</button>'}
+        <label for="console-run-fn" style="font-size:11px;color:var(--text-muted);margin-right:4px;">Function</label>
+        <select id="console-run-fn" style="margin-right:8px;"></select>
+        <button class="primary run">Run (Ctrl+Enter)</button>
+      </div>`;
+}
+
 class App {
   constructor(store) {
     this.store = store;
@@ -787,92 +879,65 @@ class App {
     // to use the modal's now-much-wider modal-box-console class (the reference text
     // no longer needs to fit narrow enough to read as flowing paragraphs).
     box.className = 'modal-box modal-box-console';
-    box.innerHTML = `<h3>Script Console${modelName ? ` — ${escapeHtml(modelName)}` : ''}</h3>
-      <div class="console-tabs" style="display:flex;gap:6px;margin-bottom:10px;">
-        <button type="button" class="tb-btn active" data-tab="console">Console</button>
-        <button type="button" class="tb-btn" data-tab="reference">Reference</button>
-      </div>
-      <div id="console-tab-console">
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
-          Ctrl+Enter or Run calls the selected function below (<code>main()</code> by default)${modelName ? '' : ' — <span style="color:#c0392b;">no simulation model selected, model will be null</span>'}.
-          Bindings and <code>remap</code>/<code>smartCheckView</code>/<code>smartCheckNode</code>/<code>insertSmartStream</code> options: see the <strong>Reference</strong> tab above.
-          Edits are saved automatically (Local Settings).
-        </div>
-        <div class="console-pane-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
-          <span style="font-size:11px;color:var(--text-muted);font-weight:600;">Output</span>
-          <button type="button" class="tb-btn copy-output" style="padding:2px 8px;font-size:11px;">Copy</button>
-        </div>
-        <div id="console-output" style="height:140px;overflow-y:auto;background:var(--bg);border:1px solid var(--border-strong);border-radius:5px;padding:8px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;margin-bottom:8px;"></div>
-        <div class="console-pane-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
-          <span style="font-size:11px;color:var(--text-muted);font-weight:600;">Script</span>
-          <button type="button" class="tb-btn copy-script" style="padding:2px 8px;font-size:11px;">Copy</button>
-        </div>
-        <textarea id="console-input" spellcheck="false" style="width:100%;height:340px;font-family:var(--mono);font-size:12px;box-sizing:border-box;border:1px solid var(--border-strong);border-radius:5px;padding:8px;background:var(--bg);color:var(--text);resize:vertical;"></textarea>
-      </div>
-      <div id="console-tab-reference" style="display:none;font-size:12px;">
-        <div class="console-pane-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
-          <span style="font-size:11px;color:var(--text-muted);font-weight:600;">Reference</span>
-          <button type="button" class="tb-btn copy-reference" style="padding:2px 8px;font-size:11px;">Copy</button>
-        </div>
-        <div id="console-reference-scroll" style="height:480px;overflow-y:auto;border:1px solid var(--border-strong);border-radius:5px;padding:10px;background:var(--bg);box-sizing:border-box;">
-        <p style="margin-top:0;">Run (or Ctrl+Enter, from the Console tab) defines everything currently in the box —
-        so a <code>function foo() {...}</code> you write becomes callable — then calls exactly one thing, your
-        top-level <code>main()</code>, which is free to call whatever else you've defined alongside it (they all
-        share the same bindings below, without needing them passed in).</p>
-        <table class="docs-table">
-          <thead><tr><th>Binding</th><th>Description</th></tr></thead>
-          <tbody>
-            <tr><td><code>app</code>, <code>store</code></td><td>Full application/document access — same as any command function uses internally.</td></tr>
-            <tr><td><code>model</code></td><td>The currently-selected simulation model, or <code>null</code> if none is selected.</td></tr>
-            <tr><td><code>findParts({type, model})</code></td><td>Look up parts by type and/or model.</td></tr>
-            <tr><td><code>log(...)</code></td><td>Prints to this console's own output area (above, Console tab).</td></tr>
-            <tr><td><code>messageLog(...)</code></td><td>Writes to the persistent Message Log instead.</td></tr>
-            <tr><td><code>generateIndustry(app, onProgress, placeInView)</code></td><td>Generates a full industry model.</td></tr>
-            <tr><td><code>populateFromTemplate(app, tab, templateName)</code></td><td>Populates a view from a stream template.</td></tr>
-            <tr><td><code>remap(app, tab, options)</code></td><td>options: <code>sortKeys, templateName</code>,
-              <code>pattern</code> (<code>'default'|'none'|'layered'|'force'|'clusters'</code>),
-              <code>limitColumnsToView, visiblePartVmIds, forcePreferRight, forceGroupRows</code>,
-              <code>edgeAssignment</code> (<code>{elementType: 'top1'..'top5'|'bottom1'..'bottom5'|'left1'..'left5'|'right1'..'right5'}</code>
-              — 1 = the slot closest to that edge, 5 = closest to the middle grid; a bare
-              <code>'top'|'bottom'|'left'|'right'</code> with no digit means index 1,
-              Default/None/Layered patterns only), <code>edgeBlanks</code>
-              (<code>{top|bottom|left|right: [1-5, ...]}</code> — forces specific slot
-              numbers to stay reserved-but-empty instead of being skipped/compacted away,
-              Default/None/Layered only), <code>minimizeCrossings, minimizeConnectorLength</code>
-              (both boolean, Default/None/Layered only), <code>alignBySection</code>
-              (boolean, default <code>true</code> — between two parts connected by a real edge
-              that share the same <code>part.section</code>, prioritizes the same column one
-              row apart for Default/None/Layered, or packs them shelf-adjacent for
-              Clusters; not used by Force/Custom) — all optional, same defaults as the Remap dialog.</td></tr>
-            <tr><td><code>smartCheckView(app, tab, options)</code></td><td>options: <code>missingConnectors,
-              missingConnectorsAndNodes, levels, syncWithInventory, deriveConnectors</code> (links two
-              on-view nodes directly when only connected via a chain of not-shown parts; creates both a
-              'c' and an 's' connector, each with <code>isDerived: true</code>; uses <code>levels</code> too),
-              <code>includeDerivedConnectors</code> (default <code>false</code> — whether the
-              <code>missingConnectors</code>/<code>missingConnectorsAndNodes</code> pull-in also brings in an
-              already-existing connector that's marked <code>isDerived</code>, e.g. one derived for a
-              different view).</td></tr>
-            <tr><td><code>smartCheckNode(app, tab, partId, options)</code></td><td>options: same as
-              smartCheckView, plus <code>upstream, downstream, byStream, streams</code>.</td></tr>
-            <tr><td><code>insertSmartStream(app, tab, options)</code></td><td>freeform views only; options:
-              <code>connectorType</code> (<code>'c'|'s'</code>), <code>startPartIds</code> (array of part
-              ids — use <code>findParts</code> to look them up), <code>direction</code>
-              (<code>'both'|'downstream'|'upstream'</code>), <code>endType</code> (element type or
-              <code>null</code>), <code>levels</code> (number or <code>null</code> for unlimited),
-              <code>showTypes</code> (array of element types to keep).</td></tr>
-          </tbody>
-        </table>
-        </div>
-      </div>
-      <div class="modal-actions">
-        <button class="cancel">Close</button>
-        <label for="console-run-fn" style="font-size:11px;color:var(--text-muted);margin-right:4px;">Function</label>
-        <select id="console-run-fn" style="margin-right:8px;"></select>
-        <button class="primary run">Run (Ctrl+Enter)</button>
-      </div>`;
+    box.innerHTML = scriptConsoleInnerHTML(modelName, { standalone: false });
     overlay.appendChild(box);
     root.appendChild(overlay);
+    this._wireScriptConsole(box, window, {
+      standalone: false,
+      onClose: () => overlay.remove(),
+      onDetach: () => { overlay.remove(); this.detachScriptConsole(); },
+    });
+  }
 
+  /** Advanced > Script Console > Detach: reopens the console in its own real,
+   * non-modal browser window instead of the in-app dialog. Reported directly: "can
+   * script console window be non modal, and larger? detachable window?" -- rather than
+   * reworking the app's shared .modal-overlay (every dialog blocks the whole app behind
+   * a backdrop, by design), this opens a same-origin popup, which gets all three asks
+   * at once for free: it's a real OS window (movable to another monitor, resizable,
+   * maximizable) that doesn't block the main canvas, and it's same-origin so it can
+   * share THIS window's live `this`/`this.store` directly -- no serialization, no
+   * postMessage round-trip, no separate save step. Editing in the popup's textarea is
+   * immediately runnable there: exactly like the in-app modal, Run/Ctrl+Enter always
+   * executes whatever text currently sits in that document's own #console-input, not a
+   * cached/saved copy. The in-app modal closes when detaching so there's only ever one
+   * live editor open against store.batchScriptCode at a time -- two simultaneously-open
+   * copies (modal + popup) could silently clobber each other's edits on Run/Close. */
+  detachScriptConsole() {
+    const modelName = this.store.simSelectedModel;
+    const popup = window.open('', 'dycad-script-console', 'width=1100,height=850,resizable=yes');
+    if (!popup) {
+      this.toast("Could not open the detached console — check your browser's popup blocker.", true);
+      return;
+    }
+    popup.document.title = `Script Console${modelName ? ` — ${modelName}` : ''} - DyCAD`;
+    popup.document.head.innerHTML = '<meta charset="UTF-8"><link rel="stylesheet" href="css/styles.css">';
+    popup.document.body.innerHTML = '';
+    popup.document.body.className = 'console-standalone-body';
+    popup.document.body.dataset.theme = document.body.dataset.theme;
+    const box = popup.document.createElement('div');
+    box.className = 'modal-box modal-box-console';
+    box.innerHTML = scriptConsoleInnerHTML(modelName, { standalone: true });
+    popup.document.body.appendChild(box);
+    this._wireScriptConsole(box, popup, { standalone: true, onClose: () => popup.close() });
+    // Persist on the OS window-close (titlebar X) too, not just the in-box Close
+    // button -- otherwise text typed but not yet Run, then closed via the titlebar,
+    // would silently be lost instead of surviving like the in-app modal's edits do.
+    popup.addEventListener('beforeunload', () => {
+      this.store.batchScriptCode = popup.document.querySelector('#console-input').value;
+      setCachedBatchScriptCode(this.store.batchScriptCode);
+    });
+    popup.focus();
+  }
+
+  /** Wires up a Script Console box's behavior (Run/Ctrl+Enter, tabs, copy buttons, the
+   * Run-function dropdown) — shared between the in-app modal (promptScriptConsole) and
+   * the detached popup (detachScriptConsole) so both behave identically apart from
+   * which window they close and whether a Detach button exists. `win` is the actual
+   * window the box's document belongs to (the main window, or the popup) — used for
+   * navigator.clipboard so a copy button's permission check runs against the document
+   * that's actually focused, not always the main window. */
+  _wireScriptConsole(box, win, { standalone, onClose, onDetach }) {
     const outputEl = box.querySelector('#console-output');
     const inputEl = box.querySelector('#console-input');
     const referenceScrollEl = box.querySelector('#console-reference-scroll');
@@ -904,7 +969,7 @@ class App {
     const copyPaneText = async (getText, label, btn) => {
       const original = btn.textContent;
       try {
-        await navigator.clipboard.writeText(getText());
+        await win.navigator.clipboard.writeText(getText());
         this.toast(`Copied ${label} to clipboard.`);
       } catch (err) {
         this.toast(`Could not copy ${label} — clipboard access blocked.`, true);
@@ -990,7 +1055,8 @@ class App {
     };
 
     box.querySelector('.run').addEventListener('click', run);
-    box.querySelector('.cancel').addEventListener('click', () => { persist(); overlay.remove(); });
+    box.querySelector('.cancel').addEventListener('click', () => { persist(); onClose(); });
+    if (!standalone) box.querySelector('.detach').addEventListener('click', () => { persist(); onDetach(); });
     inputEl.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
     });

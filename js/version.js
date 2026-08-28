@@ -4547,4 +4547,38 @@
 // itself (instructions.html's existing "Align by section" paragraph already described
 // the intended behavior this restores), so public/instructions.html untouched. Full
 // suite 164/164.
-export const APP_VERSION = '0.905';
+// v0.906: reported directly, "can script console window be non modal, and larger?
+// detachable window?" Added a Detach button (App.detachScriptConsole, main.js) that
+// opens the Script Console in a same-origin popup window instead of the in-app
+// .modal-overlay -- a real OS window gets all three asks at once: it doesn't block the
+// canvas (non-modal), it's freely resizable/movable to another monitor ("larger"), and
+// it IS the detached window. Same-origin means the popup shares this window's live
+// `this`/`this.store` directly -- editing there is exactly as live as the in-app
+// dialog, no separate save step: Run/Ctrl+Enter always executes whatever text
+// currently sits in THAT document's own #console-input. Refactored the console's
+// markup into scriptConsoleInnerHTML(modelName, {standalone}) and its wiring into
+// _wireScriptConsole(box, win, {standalone, onClose, onDetach}), shared by both the
+// modal and the popup -- `win` threaded through only for navigator.clipboard, so a
+// Copy button's permission check runs against whichever document is actually focused.
+// The in-app modal closes as soon as Detach is clicked, so only one live editor is
+// ever open against store.batchScriptCode at a time. New CSS
+// (body.console-standalone-body, css/styles.css): no backdrop/centering, and the
+// modal's fixed pixel pane heights become viewport-relative (22vh/52vh/72vh) so
+// resizing/maximizing the popup actually grows the panes. The popup inherits the main
+// window's current theme (copied once at open time, not live-synced afterward) and
+// links the same css/styles.css (relative to the opener's location -- an about:blank
+// popup's base URL is inherited from its opener). Closing the popup via its own
+// window-close (not the in-box Close button) still persists whatever's typed, via a
+// beforeunload handler -- otherwise text edited but never Run, then closed via the
+// titlebar, would silently be lost. New check_script_console_detach_to_window
+// (tests/run_all.py) -- the first check in the suite to deal with a real Playwright
+// popup (page.context.expect_page()); covers the in-app modal closing on Detach, the
+// popup rendering the same UI, a script run in the popup immediately reflecting in
+// store.batchScriptCode from the main window, theme inheritance, and beforeunload
+// persistence on window-close without Run/Close -- both the Detach wiring and the
+// beforeunload persistence proven via TEMP BREAK (the latter needs Playwright's
+// page.close(run_before_unload=True), since a plain close() skips beforeunload
+// handlers). DESIGN_DOCUMENT.md SS5.3, tests/README.md, and public/instructions.html's
+// Script Console section updated. Every pre-existing test needed no changes. Full
+// suite 165/165.
+export const APP_VERSION = '0.906';

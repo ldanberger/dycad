@@ -552,6 +552,17 @@ button, select, input { font-family: inherit; font-size: inherit; color: inherit
    left behind are the only two things in the Console tab, so they get to use the
    freed-up width fully instead of wrapping at the old dialog's narrower measure. */
 .modal-box-console { width: min(920px, 96vw); }
+/* Detached Script Console (App.detachScriptConsole, main.js): a real popup window/tab
+   of its own rather than an overlay on top of the app -- reported directly: "can
+   script console window be non modal, and larger? detachable window?" No backdrop, no
+   centering, and the modal's fixed pixel pane heights become viewport-relative so the
+   window actually gets bigger use out of being resized/maximized instead of staying
+   pinned to the original in-app dialog's size. */
+body.console-standalone-body { overflow: auto; padding: 16px; }
+body.console-standalone-body .modal-box-console { width: 100%; max-width: none; box-shadow: none; border: none; padding: 0; }
+body.console-standalone-body #console-output { height: 22vh; }
+body.console-standalone-body #console-input { height: 52vh; }
+body.console-standalone-body #console-reference-scroll { height: 72vh; }
 /* Load SFCCE's mapping step: one row per level (Section/Function/Capability/
    Application Capability/Entity), each with its Field/Description/Id selects laid
    out side by side instead of one .prop-row per select — 5 compact rows instead of

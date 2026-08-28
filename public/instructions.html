@@ -774,7 +774,10 @@ sandboxed <code>ctx</code>, since it's an explicit tool a person runs, not somet
 unattended). Its own dialog splits into a <strong>Console</strong> tab (output + editor, open by default) and a
 <strong>Reference</strong> tab (the bindings/options table below) — switch to Reference when you need to look
 something up; Console stays the wider, taller default view. A script builds its own <code>tab</code> when it
-needs one, e.g. via <code>app.createCanvasTab(view)</code> / <code>app.switchToTab(tab.id)</code>.</p>
+needs one, e.g. via <code>app.createCanvasTab(view)</code> / <code>app.switchToTab(tab.id)</code>. <strong>Detach</strong>
+reopens the console in its own real, non-modal browser window — resizable and movable to another monitor, and
+still backed by the same live document, so editing and running there works exactly like the in-app dialog, with
+no separate save step. The in-app dialog closes when you detach.</p>
 <table class="docs-table">
   <thead><tr><th>Binding</th><th>Description</th></tr></thead>
   <tbody>

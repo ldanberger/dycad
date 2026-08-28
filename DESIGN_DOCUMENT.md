@@ -220,6 +220,49 @@ surviving an edit that drops `main` but keeps that selection; and falling back t
 first name alphabetically once neither `main` nor the prior selection survives — the
 fallback-priority and non-`main` execution both proven via TEMP BREAK.
 
+**Detach to a real window**: reported directly, *"can script console window be non
+modal, and larger? detachable window?"* Rather than reworking the shared
+`.modal-overlay` every dialog uses (a deliberate app-wide "block everything behind it"
+pattern), a new **Detach** button (`App.detachScriptConsole`, `main.js`) opens the
+console in a same-origin `window.open(...)` popup instead — a real OS window gets all
+three asks for free: it doesn't block the canvas (non-modal), it's freely resizable and
+movable to another monitor ("larger"), and it IS the detached window. Same-origin means
+the popup can share `this`/`this.store` directly, no `postMessage`/serialization, so
+editing there is exactly as live as the in-app dialog: Run/Ctrl+Enter always executes
+whatever text currently sits in THAT document's own `#console-input`, never a
+cached/saved copy — there is no separate save step. The markup (tabs, output/input
+panes, Reference tab, action row) and its wiring (Run, tab switching, the three Copy
+buttons, the run-function dropdown) were factored out of `promptScriptConsole` into a
+shared `scriptConsoleInnerHTML(modelName, {standalone})` template and a
+`_wireScriptConsole(box, win, {standalone, onClose, onDetach})` method respectively, so
+the modal and the popup share one implementation — `win` (either `window` or the
+popup) is threaded through only for `navigator.clipboard`, so a Copy button's
+permission check runs against whichever document is actually focused. The in-app modal
+closes as soon as Detach is clicked, so there's only ever one live editor open against
+`store.batchScriptCode` at a time — two simultaneously-open copies could silently
+clobber each other's edits on Run/Close. The popup gets its own CSS (`css/styles.css`,
+`body.console-standalone-body`): no backdrop/centering, and the modal's fixed pixel
+pane heights become viewport-relative (`22vh`/`52vh`/`72vh`) so resizing/maximizing the
+window actually grows the panes instead of leaving them pinned to the original dialog
+size. It inherits the main window's current theme (`data-theme` copied onto the
+popup's own `<body>` at open time — a one-time copy, not live-synced if the main
+window's theme is toggled afterward) and links the same `css/styles.css` (relative to
+the opener's location, since an `about:blank` popup's base URL is inherited from its
+opener). Closing the popup via its own window-close (not the in-box Close button) still
+persists whatever's typed, via a `beforeunload` handler that writes
+`store.batchScriptCode` directly — otherwise text edited but never Run, then closed via
+the titlebar, would silently be lost instead of surviving like the in-app modal's Close
+button already guarantees. New `check_script_console_detach_to_window`
+(`tests/run_all.py`) — the only check in the suite that deals with a real Playwright
+popup (`page.context.expect_page()`), since every prior check drives the console via
+`app.promptScriptConsole()`/direct DOM inside one page. Covers: the in-app modal
+closing on Detach; the popup rendering the same console UI; a script run in the popup
+immediately reflecting in `store.batchScriptCode` as seen from the main window; theme
+inheritance; and `beforeunload` persistence on window-close without Run/Close — the
+Detach wiring and the `beforeunload` persistence both proven via TEMP BREAK (the
+`beforeunload` proof needs Playwright's `page.close(run_before_unload=True)`, since a
+plain `close()` skips `beforeunload` handlers entirely).
+
 ### 5.4 Feedback channels
 
 `app.toast(message, isError, alsoLog)` is the single entry point for user-facing
