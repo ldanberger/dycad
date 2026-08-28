@@ -263,6 +263,31 @@ Detach wiring and the `beforeunload` persistence both proven via TEMP BREAK (the
 `beforeunload` proof needs Playwright's `page.close(run_before_unload=True)`, since a
 plain `close()` skips `beforeunload` handlers entirely).
 
+**Live persist while editing (v0.907)**: direct follow-up bug report — *"a node script
+calls CommonScript_Example(ctx) but when I edit that function in detached console the
+updated code (changing 'called ' to 'called... ') does not take affect until I close
+the detached window."* `persist()` used to run only from Run's and Close's own click
+handlers — fine for the in-app modal, since its `.modal-overlay` makes it physically
+impossible to interact with the rest of the app (e.g. step a simulation from the
+Properties panel) while the console is open, so a Close (or a Run) was unavoidable
+before testing a change anywhere else. Detaching removes exactly that overlay — the
+whole point is to keep editing in one window while acting on the main one — so the same
+"only synced on Run/Close" story silently went stale the instant that became possible:
+`simulation.js`'s `runTick` compiles a part's script as
+`new Function('ctx', store.batchScriptCode + '\n' + part.script)`, read fresh every
+tick from the SAME `store` object `persist()` writes to, so any lag between "typed" and
+"persisted" is directly user-visible as "my edit didn't take". Fixed by also calling
+`persist()` from the input box's own `'input'` listener (`_wireScriptConsole`,
+main.js), alongside the pre-existing `populateRunFnSelect(true)` call already there —
+now genuinely living up to the dialog's own longstanding "Edits are saved automatically
+(Local Settings)" copy, for both the modal and the popup alike, not just Run/Close.
+New `check_script_console_edits_persist_live_while_open` (`tests/run_all.py`): creates
+a real Part with `scriptEnabled`/`script` calling `CommonScript_Example(ctx)`, detaches
+the console, edits `CommonScript_Example`'s own text in the popup, then — WITHOUT
+clicking Run or closing the popup — steps the simulation from the main window and
+confirms the Message Log shows the just-typed text, not the stale compiled copy;
+proven via TEMP BREAK.
+
 ### 5.4 Feedback channels
 
 `app.toast(message, isError, alsoLog)` is the single entry point for user-facing

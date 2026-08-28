@@ -959,7 +959,19 @@ class App {
       else if (names.length) runFnSelect.value = names[0];
     };
     populateRunFnSelect(false);
-    inputEl.addEventListener('input', () => populateRunFnSelect(true));
+    // Reported directly: a node script calling a CommonScript_<Name> helper defined in
+    // this text kept running the OLD version until the detached popup was closed.
+    // persist() used to run only on Run/Close -- fine for the in-app modal, since its
+    // .modal-overlay blocks all interaction with the rest of the app while open, so
+    // Close (or Run) was unavoidable before testing a change elsewhere anyway. The
+    // whole point of the detached popup is that it's NON-modal -- you can edit here and
+    // immediately switch to the main window to step the simulation or run a part's
+    // script, which reads store.batchScriptCode fresh every tick (simulation.js's
+    // runTick) -- so a plain-old close-to-persist story silently went stale the moment
+    // detaching made that workflow possible. persist is declared below but already
+    // assigned by the time this fires (a real keystroke, always after this synchronous
+    // wiring pass completes).
+    inputEl.addEventListener('input', () => { populateRunFnSelect(true); persist(); });
 
     /** Reported directly: "Add 'copy' buttons to the three windows: output, script,
      * reference to allow user to easily copy individually." One shared handler, one
@@ -1008,9 +1020,11 @@ class App {
     };
 
     /** Persists the editor's CURRENT text as store.batchScriptCode, both in memory and
-     * to the localStorage cache — called on every Run and on Close, so edits stick
-     * across reopening the console even before an explicit File > Save Local
-     * Settings. */
+     * to the localStorage cache — called on every keystroke (the 'input' listener
+     * above), plus redundantly on Run/Close, so edits are visible to a part script or
+     * the console's own Run at the moment they're typed, not just once the console
+     * closes, and also stick across reopening the console even before an explicit
+     * File > Save Local Settings. */
     const persist = () => {
       const code = inputEl.value;
       this.store.batchScriptCode = code;

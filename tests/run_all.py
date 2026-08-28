@@ -2050,6 +2050,71 @@ def check_script_console_detach_to_window(page):
     return True, "Detach opens the Script Console in its own popup window sharing the live app/store, closes the in-app modal, inherits the current theme, runs edits immediately with no separate save step, and persists on window-close via beforeunload"
 
 
+def check_script_console_edits_persist_live_while_open(page):
+    """Regression guard, reported directly: "a node script calls CommonScript_Example(ctx)
+    but when I edit that function in detached console the updated code (changing 'called '
+    to 'called... ') does not take affect until I close the detached window." Root cause:
+    persist() (writes the editor's text to store.batchScriptCode, which simulation.js's
+    runTick reads FRESH on every tick when compiling a part's script) used to run only on
+    Run/Close. That was invisible with the in-app modal, since its .modal-overlay blocks
+    all interaction with the rest of the app while open — Close (or Run) was unavoidable
+    before testing a change elsewhere anyway. The whole point of the detached popup
+    (App.detachScriptConsole) is that it's non-modal, so a person can edit there and
+    immediately switch to the main window to step the simulation — exposing the gap.
+    Fixed by also persisting on every 'input' event (main.js's _wireScriptConsole), not
+    just Run/Close. Covers, without ever clicking Run or closing the popup: an edit to
+    CommonScript_Example (the built-in example a part script can call by name — see
+    state.js/simulation.js) is immediately visible as store.batchScriptCode from the MAIN
+    window, and a real part with scriptEnabled/script calling CommonScript_Example(ctx),
+    run via a genuine sim.stepSimulation() tick from the main window, actually logs the
+    NEW text, not the stale one."""
+    part_id = js(page, """
+    () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+      const part = store.createPart({ type: 'BusinessFunction', label: 'LiveSyncTester', model, script: 'CommonScript_Example(ctx); return {};', scriptEnabled: true });
+      return part.id;
+    }
+    """)
+    page.evaluate("window.dycadApp.promptScriptConsole()")
+    page.wait_for_timeout(150)
+    with page.context.expect_page() as popup_info:
+        page.click(".modal-box.modal-box-console .detach")
+    popup = popup_info.value
+    popup.wait_for_load_state()
+    popup.wait_for_timeout(150)
+
+    original_code = popup.eval_on_selector("#console-input", "el => el.value")
+    edited_code = original_code.replace("called by ", "called... by ")
+    assert edited_code != original_code, "test setup: DEFAULT_BATCH_SCRIPT_CODE no longer contains CommonScript_Example's 'called by ' text"
+    popup.fill("#console-input", edited_code)
+    popup.wait_for_timeout(150)  # no Run click, no close -- just the edit itself
+
+    result = js(page, f"""
+    async () => {{
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+      const before = store.messageLog.length;
+      sim.stepSimulation(app, store.defaultModel);
+      const newLines = store.messageLog.slice(before);
+      return {{
+        storeHasEditedText: store.batchScriptCode.includes('called... by'),
+        loggedEditedText: newLines.some(m => m.message.includes('called... by')),
+      }};
+    }}
+    """)
+    popup.close()
+
+    problems = []
+    if not result["storeHasEditedText"]:
+        problems.append("expected store.batchScriptCode to reflect the popup's edit immediately, with no Run click and no close")
+    if not result["loggedEditedText"]:
+        problems.append("expected a real part script calling CommonScript_Example(ctx), run via a live simulation tick from the main window, to see the just-edited text — not a stale compiled copy")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "Editing the Script Console (in the detached popup, without clicking Run or closing) is immediately visible as store.batchScriptCode and immediately used by a real part script the next time it runs"
+
+
 def check_batch_script_quickstart(page):
     """Regression guard/new-feature check for the built-in default batch script
     (store.batchScriptCode's out-of-the-box default, DEFAULT_BATCH_SCRIPT_CODE in
@@ -13204,6 +13269,7 @@ CHECKS = [
     check_script_console_runs_main_function,
     check_script_console_run_function_picker,
     check_script_console_detach_to_window,
+    check_script_console_edits_persist_live_while_open,
     check_batch_script_quickstart,
     check_script_console_remap_and_smart_check_bindings,
     check_script_console_reference_tab,

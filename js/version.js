@@ -4581,4 +4581,31 @@
 // handlers). DESIGN_DOCUMENT.md SS5.3, tests/README.md, and public/instructions.html's
 // Script Console section updated. Every pre-existing test needed no changes. Full
 // suite 165/165.
-export const APP_VERSION = '0.906';
+// v0.907: direct follow-up bug report against v0.906's Detach button: "a node script
+// calls CommonScript_Example(ctx) but when I edit that function in detached console
+// the updated code (changing 'called ' to 'called... ') does not take affect until I
+// close the detached window." Root cause: persist() (writes the editor's text to
+// store.batchScriptCode, which simulation.js's runTick reads FRESH on every tick when
+// compiling a part's script -- new Function('ctx', store.batchScriptCode + '\n' +
+// part.script)) used to run only from Run's and Close's own click handlers. That was
+// invisible with the in-app modal, since its .modal-overlay makes it physically
+// impossible to interact with the rest of the app (e.g. step a simulation) while the
+// console is open -- Close/Run was unavoidable before testing a change anywhere else.
+// Detaching removes exactly that overlay -- the whole point is to keep editing in one
+// window while acting on the main one -- so the same "only synced on Run/Close" story
+// silently went stale the instant that became possible. Fixed by also calling
+// persist() from the input box's own 'input' listener (_wireScriptConsole, main.js),
+// alongside the pre-existing populateRunFnSelect(true) call already there -- now
+// genuinely living up to the dialog's own longstanding "Edits are saved automatically
+// (Local Settings)" copy, for both the modal and the popup alike, not just Run/Close.
+// New check_script_console_edits_persist_live_while_open (tests/run_all.py): creates a
+// real Part with scriptEnabled/script calling CommonScript_Example(ctx), detaches the
+// console, edits CommonScript_Example's own text in the popup, then -- WITHOUT
+// clicking Run or closing the popup -- steps the simulation from the main window and
+// confirms the Message Log shows the just-typed text, not a stale compiled copy;
+// proven via TEMP BREAK. DESIGN_DOCUMENT.md SS5.3 and tests/README.md updated; no
+// end-user-visible behavior CHANGED beyond fixing the bug itself (the dialog's own
+// "Edits are saved automatically" copy already described the intended behavior this
+// restores), so public/instructions.html untouched. Every pre-existing test needed no
+// changes. Full suite 166/166.
+export const APP_VERSION = '0.907';
