@@ -4935,4 +4935,37 @@
 // paragraph) and SS7a (stale "after Explore" menu-position reference fixed),
 // tests/README.md, and public/instructions.html (3 stale "Explore >"/"Load JSON"
 // references fixed) updated. Full suite 182/182.
-export const APP_VERSION = '0.916';
+// v0.917: two direct reports. (1) "change script console: Shorten text starting with
+// 'Ctrl+Enter' and move to same line as console and reference buttons, and reduce by
+// about 25% the length of the output text area." The old three-sentence paragraph
+// (Ctrl+Enter usage, a pointer to the Reference tab, and an "Edits are saved
+// automatically" reassurance) moved into .console-tabs itself as a short sentence,
+// a genuine sibling of the Console/Reference tab buttons -- the Reference-tab
+// pointer dropped entirely (redundant now that the button sits right next to it),
+// the auto-save reassurance surviving as a title tooltip (same "shown only on
+// request" pattern the Remap dialog's own "Align by section" note already uses).
+// #console-output dropped from 140px to 105px (~25% less). New
+// check_script_console_header_and_output_size; check_script_console_sizing_and_copy_
+// buttons' own stale 140px height assertion updated to 105px in the same pass -- both
+// proven via TEMP BREAK.
+// (2) "Add to remapPresets: { 'name': 'FocusedStreamDefault', ... },
+// { 'name': 'BUtoData', ... }." DEFAULT_REMAP_PRESETS (state.js) used to ship empty
+// (deliberately -- "nothing analogous to 'Production' was asked for here"); these are
+// the first two real examples, both full Edge Assignment layouts against the
+// "Enterprise" template with pattern:'layered'. 'FocusedStreamDefault' deliberately
+// OMITS alignBySection entirely -- not an oversight, the genuine reported shape,
+// relying on the same "absent field defaults to checked/true on Load" convention an
+// older preset already gets; 'BUtoData' carries alignBySection:true explicitly. Both
+// point customFunctionName at CustomRemap_Example even under pattern:'layered' --
+// harmless, just whatever the Custom Function dropdown held when each preset was
+// originally saved (Save As always captures it regardless of the current pattern).
+// New check_remap_presets_shipped_defaults: both names present/reachable from the
+// real dialog by default, the alignBySection presence/absence preserved exactly as
+// reported, loading 'BUtoData' populates Template/Pattern/Align by section correctly,
+// and -- proving the data is genuinely functional, not just well-formed JSON -- a
+// real remap() call using EACH preset's full option set, against real parts covering
+// every type in its own edgeAssignment, runs with no error -- the preset-name and
+// alignBySection assertions both proven via TEMP BREAK. DESIGN_DOCUMENT.md SS5.3 (two
+// new paragraphs) and tests/README.md updated; public/instructions.html's own Remap
+// section now names the two shipped presets. Full suite 184/184.
+export const APP_VERSION = '0.917';

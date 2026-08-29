@@ -327,21 +327,17 @@ function findAllScriptFunctionNames(code) {
  * further) since it's already its own real window. */
 function scriptConsoleInnerHTML(modelName, { standalone } = {}) {
   return `<h3>Script Console${modelName ? ` — ${escapeHtml(modelName)}` : ''}</h3>
-      <div class="console-tabs" style="display:flex;gap:6px;margin-bottom:10px;">
+      <div class="console-tabs" style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
         <button type="button" class="tb-btn active" data-tab="console">Console</button>
         <button type="button" class="tb-btn" data-tab="reference">Reference</button>
+        <span style="font-size:11px;color:var(--text-muted);margin-left:4px;" title="Bindings and remap/smartCheckView/smartCheckNode/insertSmartStream options: see the Reference tab. Edits are saved automatically (Local Settings).">Ctrl+Enter/Run runs the selected function${modelName ? '' : ' — <span style="color:#c0392b;">no model selected</span>'}.</span>
       </div>
       <div id="console-tab-console">
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
-          Ctrl+Enter or Run calls the selected function below (<code>main()</code> by default)${modelName ? '' : ' — <span style="color:#c0392b;">no simulation model selected, model will be null</span>'}.
-          Bindings and <code>remap</code>/<code>smartCheckView</code>/<code>smartCheckNode</code>/<code>insertSmartStream</code> options: see the <strong>Reference</strong> tab above.
-          Edits are saved automatically (Local Settings).
-        </div>
         <div class="console-pane-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
           <span style="font-size:11px;color:var(--text-muted);font-weight:600;">Output</span>
           <button type="button" class="tb-btn copy-output" style="padding:2px 8px;font-size:11px;">Copy</button>
         </div>
-        <div id="console-output" style="height:140px;overflow-y:auto;background:var(--bg);border:1px solid var(--border-strong);border-radius:5px;padding:8px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;margin-bottom:8px;"></div>
+        <div id="console-output" style="height:105px;overflow-y:auto;background:var(--bg);border:1px solid var(--border-strong);border-radius:5px;padding:8px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;margin-bottom:8px;"></div>
         <div class="console-pane-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
           <span style="font-size:11px;color:var(--text-muted);font-weight:600;">Script</span>
           <button type="button" class="tb-btn copy-script" style="padding:2px 8px;font-size:11px;">Copy</button>

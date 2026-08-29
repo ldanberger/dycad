@@ -192,6 +192,23 @@ supplying a different getter (`outputEl.textContent` / `inputEl.value` /
 `referenceScrollEl.textContent`) so a mixed-up wire-up is directly testable (marker
 text unique to each pane, checked against the real clipboard).
 
+**Further shrinking, once the Detach button existed**: reported directly, *"Shorten
+text starting with 'Ctrl+Enter' and move to same line as console and reference
+buttons, and reduce by about 25% the length of the output text area."* The old
+three-sentence paragraph (Ctrl+Enter usage, a pointer to the Reference tab, and an
+"Edits are saved automatically" reassurance) sat in its own row directly above the
+Output pane; it's now one short sentence living inside `.console-tabs` itself, as a
+genuine sibling of the Console/Reference tab buttons — the "see the Reference tab"
+pointer was dropped entirely (redundant now that the Reference button sits right next
+to it), and the auto-save reassurance survives as a `title` tooltip on that same
+sentence rather than being deleted outright — the same "shown only on request" pattern
+the Remap dialog's own "Align by section" note already established. `#console-output`
+dropped from `140px` to `105px` (~25% less, on top of the earlier `280px -> 140px`
+halving above). New `check_script_console_header_and_output_size`
+(`tests/run_all.py`) — `check_script_console_sizing_and_copy_buttons`'s own stale
+`140px` height assertion updated to `105px` in the same pass — both proven via TEMP
+BREAK.
+
 **Run function picker**: reported directly, *"change the run button so user can select
 (from a sorted list of functions in the script file) a function from the script file to
 run, with main as the default."* Run used to always compile-and-call a hardcoded
@@ -1364,6 +1381,30 @@ to a three-way `ownsPlacementItself`. `customFunctionName` round-trips through e
 existing per-view/cross-view memory path exactly like every other Remap field already
 does: `view.remapLastOptions`, the cross-view `getCachedRemapOptions` cache, and
 `remapPresets` entries (Save As.../Load).
+
+**Shipped preset defaults** (`DEFAULT_REMAP_PRESETS`, `state.js`): reported directly,
+with the exact field values to ship — two named presets, `"FocusedStreamDefault"` and
+`"BUtoData"`, both full Edge Assignment layouts against the `"Enterprise"` template
+with `pattern: 'layered'`. `remapPresets` used to ship empty (deliberately — "nothing
+analogous to 'Production' was asked for here," unlike `DEFAULT_SMART_STREAM_PRESETS`'s
+own seeded `"StreamSet1"`); these are the first real examples. `"FocusedStreamDefault"`
+deliberately OMITS `alignBySection` entirely rather than setting it explicitly — not an
+oversight, but the genuine reported shape, relying on the SAME "absent field defaults
+to checked/true on Load" convention `check_remap_align_by_section_dialog_wiring`
+already covers for a preset saved before that option existed; `"BUtoData"` carries
+`alignBySection: true` explicitly. Both point `customFunctionName` at
+`CustomRemap_Example` even though `pattern` is `'layered'`, not `'custom'` — harmless,
+reflecting nothing more than whatever the Custom Function dropdown happened to hold
+when the preset was originally saved (`#rm-preset-save`'s own handler always captures
+it, regardless of the currently-selected pattern). New
+`check_remap_presets_shipped_defaults` (`tests/run_all.py`): both preset names present
+by default and reachable from the real dialog's own `#rm-preset-select`; the
+`alignBySection` presence/absence preserved exactly as reported; loading `"BUtoData"`
+populates Template/Pattern/Align by section correctly; and — proving the data is
+genuinely functional Remap configuration, not just well-formed JSON — a real `remap()`
+call using EACH preset's full option set, against real parts covering every type in
+that preset's own `edgeAssignment`, runs with no error — the preset-name and
+`alignBySection` assertions both proven via TEMP BREAK.
 
 **`applyRemapLayout`'s `'custom'` branch** (`commands.js`) sits right after `'clusters'`,
 in the same early-return group (before Edge Assignment/passive-row splitting, which

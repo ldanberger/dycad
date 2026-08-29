@@ -454,16 +454,71 @@ const DEFAULT_SMART_STREAM_PRESETS = [
  * (main.js's promptRemap), saved/loaded via that dialog's own Preset row. Same Local
  * Settings persistence story as DEFAULT_SMART_STREAM_PRESETS above (cached to
  * localStorage, bundled into File > Save/Load Local Settings, both handled in main.js)
- * — deliberately never touches this.doc. Empty by default (no seeded example, unlike
- * smartStreamPresets — nothing analogous to "Production" was asked for here); every
- * preset the user saves lands in this same array via the dialog's Save As button.
- * Each entry: {name, templateName, pattern, sortKeys, limitColumnsToView, filteredOnly,
- * forcePreferRight, forceGroupRows, edgeAssignment: {[elementType]: 'top'|'bottom'|
- * 'left'|'right'}, minimizeCrossings, minimizeConnectorLength}. edgeAssignment/
- * minimizeCrossings/minimizeConnectorLength only affect the 'default'/'none' patterns
- * (see commands.js's applyRemapLayout) — force-directed and section-based views ignore
- * them entirely, same as sortKeys already does today. */
-const DEFAULT_REMAP_PRESETS = [];
+ * — deliberately never touches this.doc. Two presets shipped, reported directly (the
+ * exact fields the dialog's own Save As button writes, main.js's `#rm-preset-save`
+ * handler): {name, templateName, pattern, sortKeys, limitColumnsToView, filteredOnly,
+ * selectedOnly, forcePreferRight, forceGroupRows, edgeAssignment: {[elementType]:
+ * 'top'|'bottom'|'left'|'right'+1-5}, edgeBlanks: {[edge]: [1-5, ...]}, minimizeCrossings,
+ * minimizeConnectorLength, alignBySection, customFunctionName}. edgeAssignment/
+ * minimizeCrossings/minimizeConnectorLength/edgeBlanks only affect the 'default'/'none'
+ * patterns (see commands.js's applyRemapLayout) — force-directed and section-based
+ * views ignore them entirely, same as sortKeys already does today. "FocusedStreamDefault"
+ * deliberately omits `alignBySection` (not a mistake — an absent field on Load defaults
+ * to checked/true, the same "older preset, same default everywhere else" convention
+ * check_remap_align_by_section_dialog_wiring already covers); every OTHER preset a
+ * person saves lands in this same array via the dialog's Save As button. */
+const DEFAULT_REMAP_PRESETS = [
+  {
+    name: 'FocusedStreamDefault',
+    templateName: 'Enterprise',
+    pattern: 'layered',
+    sortKeys: ['streamName', 'connectionOrder', 'entityType', 'nodeLabel', 'streamOrder', 'elementGroup'],
+    limitColumnsToView: false,
+    filteredOnly: false,
+    selectedOnly: false,
+    forcePreferRight: false,
+    forceGroupRows: false,
+    edgeAssignment: {
+      ApplicationApplication: 'right1',
+      BusinessCapability: 'left3',
+      BusinessFunction: 'top1',
+      BusinessProcess: 'top2',
+      BusinessService: 'left2',
+      DataDataEntity: 'bottom1',
+      GeneralActor: 'left1',
+    },
+    edgeBlanks: { top: [3], right: [2] },
+    minimizeCrossings: false,
+    minimizeConnectorLength: false,
+    customFunctionName: 'CustomRemap_Example',
+  },
+  {
+    name: 'BUtoData',
+    templateName: 'Enterprise',
+    pattern: 'layered',
+    sortKeys: ['streamName', 'connectionOrder', 'entityType', 'nodeLabel', 'streamOrder', 'elementGroup'],
+    limitColumnsToView: false,
+    filteredOnly: false,
+    selectedOnly: false,
+    forcePreferRight: false,
+    forceGroupRows: false,
+    edgeAssignment: {
+      ApplicationApplication: 'right1',
+      BusinessCapability: 'left3',
+      BusinessFunction: 'top2',
+      BusinessOrganizationUnit: 'top1',
+      BusinessProcess: 'top3',
+      BusinessService: 'left2',
+      DataDataEntity: 'bottom1',
+      GeneralActor: 'left1',
+    },
+    edgeBlanks: { top: [4], bottom: [1], right: [2] },
+    minimizeCrossings: false,
+    minimizeConnectorLength: false,
+    alignBySection: true,
+    customFunctionName: 'CustomRemap_Example',
+  },
+];
 
 function newId() {
   return (crypto.randomUUID && crypto.randomUUID()) || `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;

@@ -2732,7 +2732,8 @@ def check_script_console_sizing_and_copy_buttons(page):
     fits at 80%. Make output window half the length and scrollable, and make reference
     part scrollable and have the length on open. Add 'copy' buttons to the three
     windows: output, script, reference to allow user to easily copy individually."
-    Confirms: (1) #console-output is half its old 280px height (140px) and still
+    Confirms: (1) #console-output is half its old 280px height (140px, later reduced
+    another ~25% to 105px — see check_script_console_header_and_output_size) and still
     scrollable (overflow-y auto); (2) #console-reference-scroll has a fixed height set
     the moment the dialog opens (not just after the tab is first clicked -- checked
     both before AND after clicking to Reference, same value both times) and is
@@ -2784,8 +2785,8 @@ def check_script_console_sizing_and_copy_buttons(page):
     }
     """)
     problems = []
-    if result["outputHeightPx"] != 140:
-        problems.append(f"expected #console-output height to be halved to 140px, got {result['outputHeightPx']}px")
+    if result["outputHeightPx"] != 105:
+        problems.append(f"expected #console-output height to be 105px, got {result['outputHeightPx']}px")
     if not result["outputScrollable"]:
         problems.append("expected #console-output to stay scrollable (overflow-y: auto)")
     if not result["refHeightOnOpen"] or result["refHeightOnOpen"] == '0px':
@@ -2802,7 +2803,77 @@ def check_script_console_sizing_and_copy_buttons(page):
         problems.append(f"Copy on the Reference pane should copy the bindings table's text, got clipboard={result['refClip']!r}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "Output pane is half-height (140px) and scrollable, the Reference pane has a real fixed height set on open (unchanged after switching to it) and is scrollable, and each of the three Copy buttons puts exactly that pane's own text on the clipboard"
+    return True, "Output pane is 105px tall and scrollable, the Reference pane has a real fixed height set on open (unchanged after switching to it) and is scrollable, and each of the three Copy buttons puts exactly that pane's own text on the clipboard"
+
+
+def check_script_console_header_and_output_size(page):
+    """Regression guard, direct follow-up: "Shorten text starting with 'Ctrl+Enter'
+    and move to same line as console and reference buttons, and reduce by about 25%
+    the length of the output text area." The old three-sentence paragraph (usage
+    instructions, a pointer to the Reference tab, and an auto-save reassurance) sat
+    in its own row above the Output pane; it's now a single short sentence living
+    directly in the `.console-tabs` row, alongside the Console/Reference tab buttons
+    themselves — the dropped "see the Reference tab" pointer is redundant now that the
+    Reference button sits right next to it, and the auto-save reassurance moved into
+    a `title` tooltip (same "shown only on request" pattern the Remap dialog's own
+    "Align by section" note already uses) rather than being deleted outright.
+    #console-output's height dropped from 140px to 105px (~25% less). Covers: the
+    info text element is a genuine sibling of the two tab buttons inside
+    `.console-tabs` (not left behind in the now-taller `#console-tab-console` block);
+    its text is short (well under the old paragraph's length) and no longer contains
+    the dropped "Bindings and" sentence; the "no model selected" warning still shows
+    when no simulation model is selected, and is genuinely absent when one is; the
+    auto-save reassurance survives as a title attribute rather than disappearing
+    outright; and #console-output is exactly 105px tall."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const hadModel = store.simSelectedModel;
+      store.simSelectedModel = null;
+      app.promptScriptConsole();
+      await new Promise(r => setTimeout(r, 60));
+      const box = document.querySelector('.modal-box.modal-box-console');
+      const tabsRow = box.querySelector('.console-tabs');
+      const infoEl = [...tabsRow.children].find(el => el.tagName === 'SPAN');
+      const out = {
+        infoIsSiblingOfTabButtons: !!infoEl,
+        infoTextLength: infoEl ? infoEl.textContent.length : -1,
+        infoHasBindingsSentence: infoEl ? infoEl.textContent.includes('Bindings and') : null,
+        infoHasTitleTooltip: infoEl ? infoEl.title.includes('Local Settings') : null,
+        noModelWarningShown: infoEl ? infoEl.textContent.includes('no model selected') : null,
+        outputHeightPx: parseInt(box.querySelector('#console-output').style.height, 10),
+      };
+      box.querySelector('.cancel').click();
+
+      store.simSelectedModel = hadModel;
+      app.promptScriptConsole();
+      await new Promise(r => setTimeout(r, 60));
+      const box2 = document.querySelector('.modal-box.modal-box-console');
+      const infoEl2 = [...box2.querySelector('.console-tabs').children].find(el => el.tagName === 'SPAN');
+      out.noModelWarningGoneWithModelSelected = infoEl2 ? !infoEl2.textContent.includes('no model selected') : null;
+      box2.querySelector('.cancel').click();
+
+      return out;
+    }
+    """)
+    problems = []
+    if not result["infoIsSiblingOfTabButtons"]:
+        problems.append("expected the info text to be a direct sibling of the Console/Reference tab buttons in .console-tabs")
+    if result["infoTextLength"] < 0 or result["infoTextLength"] > 90:
+        problems.append(f"expected the shortened info text to be well under the old paragraph's length (~90 chars max), got {result['infoTextLength']} chars")
+    if result["infoHasBindingsSentence"]:
+        problems.append("expected the 'Bindings and ... see the Reference tab' sentence to be dropped entirely")
+    if not result["infoHasTitleTooltip"]:
+        problems.append("expected the auto-save reassurance to survive as a title tooltip, not disappear outright")
+    if not result["noModelWarningShown"]:
+        problems.append("expected the 'no model selected' warning to still show when no simulation model is selected")
+    if result["outputHeightPx"] != 105:
+        problems.append(f"expected #console-output height to be 105px (~25% less than 140px), got {result['outputHeightPx']}px")
+    if result["noModelWarningGoneWithModelSelected"] is False:
+        problems.append("expected the 'no model selected' warning to be genuinely absent once a simulation model IS selected")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The Script Console's usage text is shortened and moved onto the same row as the Console/Reference tab buttons (with the auto-save note surviving as a tooltip), and the Output pane is reduced to 105px"
 
 
 def check_catalog_multi_column_sort(page):
@@ -6806,6 +6877,92 @@ def check_remap_preset_dialog_and_local_persistence(page):
         return False, f"remapPresets did not auto-apply from its localStorage cache after reload: {after}"
 
     return True, "Remap's Preset row saves the current dialog state (including Edge Assignment, Minimize Crossings, and Minimize Connector Length) as a named, persisted preset and loads it back field-for-field, hides all three new controls under the force pattern, keeps remapPresets out of the Save JSON document, and loads/caches/survives a reload via Local Settings same as smartStreamPresets"
+
+
+def check_remap_presets_shipped_defaults(page):
+    """Regression guard/new-feature check for the two named Remap presets shipped by
+    default (DEFAULT_REMAP_PRESETS, state.js), reported directly with the exact
+    fields to add: "Add to remapPresets: { 'name': 'FocusedStreamDefault', ... },
+    { 'name': 'BUtoData', ... }." Covers: both preset names appear in
+    store.remapPresets AND the real dialog's #rm-preset-select dropdown out of the
+    box; 'FocusedStreamDefault' genuinely OMITS alignBySection entirely (not a
+    mistake — an absent field defaults to checked/true on Load, the same "older
+    preset" convention check_remap_align_by_section_dialog_wiring already covers),
+    while 'BUtoData' explicitly carries alignBySection: true; loading 'BUtoData'
+    through the real dialog correctly populates Template/Pattern/Align by section;
+    and — proving the data is genuinely functional Remap configuration, not just
+    well-formed JSON — a real remap() call using EACH preset's full option set
+    (templateName/pattern/sortKeys/edgeAssignment/edgeBlanks/minimizeCrossings/
+    minimizeConnectorLength/alignBySection) against a small set of real parts
+    covering every type in that preset's own edgeAssignment runs with no error."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const out = {};
+
+      out.presetNames = (store.remapPresets || []).map(p => p.name);
+      const focused = store.remapPresets.find(p => p.name === 'FocusedStreamDefault');
+      const buToData = store.remapPresets.find(p => p.name === 'BUtoData');
+      out.focusedOmitsAlignBySection = focused ? !('alignBySection' in focused) : null;
+      out.buToDataAlignBySectionTrue = buToData ? buToData.alignBySection === true : null;
+
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      app.promptRemap(homeTab);
+      await new Promise(r => setTimeout(r, 60));
+      const box = document.querySelector('.modal-box.modal-box-wide');
+      out.selectHasBoth = ['FocusedStreamDefault', 'BUtoData'].every(n => [...box.querySelector('#rm-preset-select').options].some(o => o.value === n));
+      box.querySelector('#rm-preset-select').value = 'BUtoData';
+      box.querySelector('#rm-preset-load').click();
+      await new Promise(r => setTimeout(r, 60));
+      out.loadedTemplate = box.querySelector('#rm-template').value;
+      out.loadedPattern = box.querySelector('#rm-pattern').value;
+      out.loadedAlignBySection = box.querySelector('#rm-align-section').checked;
+      box.querySelector('.cancel').click();
+
+      // A real remap() run per preset, against parts covering that preset's own
+      // edgeAssignment types, proves the shipped data actually works end to end.
+      const errors = {};
+      for (const preset of [focused, buToData]) {
+        const view = store.findView(homeTab.viewId);
+        const mk = (type, label) => store.createPart({ type, label: label + '_' + preset.name, model: store.defaultModel, streams: [] });
+        const types = Object.keys(preset.edgeAssignment);
+        const parts = types.map(t => mk(t, t));
+        for (const p of parts) store.createViewMember({ view: view.id, objectType: 'part', objectId: p.id, x: 0, y: 0 });
+        try {
+          commands.remap(app, homeTab, {
+            templateName: preset.templateName, pattern: preset.pattern, sortKeys: preset.sortKeys,
+            limitColumnsToView: preset.limitColumnsToView, filteredOnly: preset.filteredOnly,
+            selectedOnly: preset.selectedOnly, forcePreferRight: preset.forcePreferRight,
+            forceGroupRows: preset.forceGroupRows, edgeAssignment: preset.edgeAssignment,
+            edgeBlanks: preset.edgeBlanks, minimizeCrossings: preset.minimizeCrossings,
+            minimizeConnectorLength: preset.minimizeConnectorLength, alignBySection: preset.alignBySection,
+          });
+          errors[preset.name] = null;
+        } catch (e) { errors[preset.name] = e.message; }
+      }
+      out.remapErrors = errors;
+
+      return out;
+    }
+    """)
+    problems = []
+    if 'FocusedStreamDefault' not in result["presetNames"] or 'BUtoData' not in result["presetNames"]:
+        problems.append(f"expected both 'FocusedStreamDefault' and 'BUtoData' in store.remapPresets by default, got {result['presetNames']}")
+    if not result["focusedOmitsAlignBySection"]:
+        problems.append("expected 'FocusedStreamDefault' to genuinely omit the alignBySection field")
+    if not result["buToDataAlignBySectionTrue"]:
+        problems.append("expected 'BUtoData' to have alignBySection: true")
+    if not result["selectHasBoth"]:
+        problems.append("expected both preset names in the real dialog's #rm-preset-select dropdown")
+    if result["loadedTemplate"] != "Enterprise" or result["loadedPattern"] != "layered" or not result["loadedAlignBySection"]:
+        problems.append(f"expected loading 'BUtoData' to set Template=Enterprise, Pattern=layered, Align by section=checked, got {result['loadedTemplate']}/{result['loadedPattern']}/{result['loadedAlignBySection']}")
+    if any(result["remapErrors"].values()):
+        problems.append(f"expected a real remap() call using each preset's full option set to run with no error, got {result['remapErrors']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "'FocusedStreamDefault' and 'BUtoData' ship as default Remap presets, correctly reachable from the real dialog, with the reported alignBySection presence/absence preserved, and each one's full option set runs a real remap() with no error"
 
 
 def check_remap_view_remembers_own_settings(page):
@@ -14491,6 +14648,7 @@ CHECKS = [
     check_script_console_remap_and_smart_check_bindings,
     check_script_console_reference_tab,
     check_script_console_sizing_and_copy_buttons,
+    check_script_console_header_and_output_size,
     check_catalog_multi_column_sort,
     check_sfce_table_multi_column_sort,
     check_spacing_scale_uniform,
@@ -14558,6 +14716,7 @@ CHECKS = [
     check_remap_edge_assignment_bottom_right_account_for_other_bands,
     check_remap_edge_assignment_dialog_numbered_ui,
     check_remap_preset_dialog_and_local_persistence,
+    check_remap_presets_shipped_defaults,
     check_remap_view_remembers_own_settings,
     check_remap_selected_only,
     check_spacing_command_selected_nodes_only,
