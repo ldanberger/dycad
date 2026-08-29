@@ -670,7 +670,7 @@ there disabled and confusing.</p>
   Pick a template from the sorted selector (defaults to "Enterprise") to see its Pattern/Capability Name
   Begin/Entity Name Begin fields, its full element-type chain in order, and its passive from/to pairs.</li>
 </ul>
-<p><strong>Explore &gt; 3D View</strong> — a rotatable/zoomable 3D scene over your Parts and Connectors
+<p><strong>Advanced &gt; 3D View</strong> — a rotatable/zoomable 3D scene over your Parts and Connectors
 directly, covering the whole document by default (not any one 2D view's placement of them) — unless you
 narrow it with the <strong>View Scope</strong> selector (top toolbar, 3D-only): pick a specific view there
 and the scene shows exactly what that view has placed (its own parts AND connectors), the same content
@@ -720,7 +720,7 @@ combining them; pick "All of the above" to filter to every stream the part carri
 <strong>Right-click and drag</strong> a part instead to move it anywhere in 3D space — dropping it "pins"
 it there (saved with the document), and it's excluded from the auto-layout grid entirely from then on, so
 it won't shift when other parts are added/removed. A dragged part doesn't also open the quick menu. Pin as
-many parts as you like, then <strong>Explore &gt; Reset Pinned 3D Positions</strong> to unpin all of them
+many parts as you like, then <strong>Advanced &gt; Reset Pinned 3D Positions</strong> to unpin all of them
 at once and let auto-layout take back over (there's no per-part unpin — it's an all-or-nothing reset).
 Panning uses middle-click-drag here (right-click is reserved for the menu/drag instead).</p>
 
@@ -777,7 +777,7 @@ Enabled" in Root Properties, then write the script body in the Script field.</p>
     <tr><td><code>ctx.setState(patch)</code></td><td>For asynchronous work (e.g. a fetch whose result arrives
     later) — merges into this part's state at the start of the <em>next</em> tick rather than immediately.</td></tr>
     <tr><td><code>ctx.loadedFileName</code></td><td>The filename of the last file that fully replaced the model
-    (Load JSON / File &gt; Load / File &gt; Load Example) — <code>null</code> if nothing's been loaded that way
+    (File &gt; Load / File &gt; Load Example) — <code>null</code> if nothing's been loaded that way
     yet this session. Not set by Import Data, which merges rather than replaces.</td></tr>
     <tr><td><code>ctx.currentView</code></td><td>The view id currently shown in the main view selector, as of
     the moment this tick started.</td></tr>

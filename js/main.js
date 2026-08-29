@@ -4937,6 +4937,9 @@ function wireGlobalEvents(app) {
     { label: 'Smart Check View', action: 'smartCheckView' },
     { label: 'Smart Check Node', action: 'smartCheckNode' },
     { separator: true },
+    { label: '3D View', action: 'view3d' },
+    { label: 'Reset Pinned 3D Positions', action: 'resetPinned3DPositions' },
+    { separator: true },
     { label: 'Script Console...', action: 'scriptConsole' },
     { label: 'Code Summary', action: 'codeSummary' },
   ];
@@ -4954,6 +4957,10 @@ function wireGlobalEvents(app) {
         app.promptSmartCheckView();
       } else if (item.dataset.action === 'smartCheckNode') {
         app.promptSmartCheckNode(app.store.activeTab());
+      } else if (item.dataset.action === 'view3d') {
+        app.openOrSwitch3DView();
+      } else if (item.dataset.action === 'resetPinned3DPositions') {
+        app.promptResetPinned3DPositions();
       } else if (item.dataset.action === 'scriptConsole') {
         app.promptScriptConsole();
       } else if (item.dataset.action === 'codeSummary') {
@@ -5012,23 +5019,6 @@ function wireGlobalEvents(app) {
     });
   });
 
-  // ===== Explore menu (alternate, whole-model visualizations — currently just the 3D
-  // View; distinct from Catalogs' per-entity tables and Advanced's one-shot commands) =====
-  const EXPLORE_LINKS = [
-    { label: '3D View', action: 'view3d' },
-    { separator: true },
-    { label: 'Reset Pinned 3D Positions', action: 'resetPinned3DPositions' },
-  ];
-  const exploreMenu = document.getElementById('explore-menu');
-  exploreMenu.innerHTML = EXPLORE_LINKS.map((l) => l.separator ? '<div class="dd-separator"></div>' : `<div class="dd-item" data-action="${l.action}">${l.label}</div>`).join('');
-  exploreMenu.querySelectorAll('.dd-item').forEach((item) => {
-    item.addEventListener('click', () => {
-      if (item.dataset.action === 'view3d') app.openOrSwitch3DView();
-      else if (item.dataset.action === 'resetPinned3DPositions') app.promptResetPinned3DPositions();
-      exploreMenu.classList.add('hidden');
-    });
-  });
-
   // ===== Data Modeling menu (crow's-foot ERD: entity attributes, PK/FK, DDL
   // import/export) — "Add/Edit Entity Details" is the menu-triggered equivalent of
   // double-clicking a DataDataEntity node (see promptAddEditEntityDetails); "Autofill"
@@ -5067,7 +5057,6 @@ function wireGlobalEvents(app) {
     ['catalogs-menu-btn', catalogsMenu],
     ['advanced-menu-btn', advancedMenu],
     ['simulation-menu-btn', simulationMenu],
-    ['explore-menu-btn', exploreMenu],
     ['data-modeling-menu-btn', dataModelingMenu],
   ];
   MENU_PAIRS.forEach(([btnId, menu]) => {
@@ -5490,7 +5479,6 @@ function wireGlobalEvents(app) {
   document.getElementById('redo-btn').addEventListener('click', () => { const tab = store.activeTab(); if (store.redo(tab)) app.render(); });
 
   document.getElementById('save-json-btn').addEventListener('click', () => app.saveJson());
-  document.getElementById('load-json-btn').addEventListener('click', () => document.getElementById('load-json-input').click());
   document.getElementById('load-json-input').addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (file) app.loadJson(file);

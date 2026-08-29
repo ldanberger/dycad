@@ -4906,4 +4906,33 @@
 // the correct, documented Total Cost. DESIGN_DOCUMENT.md SS8 and tests/README.md
 // updated; public/instructions.html's own "UI dashboard elements" subsection now
 // points at the example. Full suite 181/181.
-export const APP_VERSION = '0.915';
+// v0.916: two direct reports, one of which reverses an earlier decision. (1) "change
+// 'Save JSON' button to 'Save' and 'Load JSON' to 'Load'." Then, in the same
+// exchange, corrected: "remove 'Load' renamed from 'Load JSON' from the top menu, but
+// keep 'Load' in File menu." #save-json-btn's own text is genuinely renamed to plain
+// "Save"; #load-json-btn is REMOVED from the toolbar entirely, not renamed -- File's
+// own "Load" item (already plainly labeled) is the only top-menu-bar way to load a
+// file now, clicking the same hidden #load-json-input directly, so removing the
+// toolbar button's own click wiring doesn't touch that shared input or its change
+// handler at all.
+// (2) "Move '3D View' and 'Reset Pinned 3D Positions' and create a new separator
+// after 'Smart Check Node' in Advanced menu." Both had previously been moved INTO
+// their own standalone Explore menu (a direct follow-up at the time: "Move 'Reset
+// Pinned 3D Positions' to the Explore menu after a separator") -- this reverses that
+// specific decision. Since those two were the Explore menu's ONLY items, moving both
+// out leaves it permanently empty -- rather than leave a dangling, non-functional
+// top-menu-bar button, the whole Explore menu (button + dropdown div, index.html;
+// EXPLORE_LINKS/wiring/its MENU_PAIRS entry, main.js) is removed outright.
+// ADVANCED_LINKS gains a new separator right after 'Smart Check Node', then '3D
+// View'/'Reset Pinned 3D Positions', then the PRE-EXISTING separator that used to
+// lead straight into Script Console/Code Summary.
+// New check_3d_view_and_reset_pinned_moved_to_advanced (replacing the now-obsolete
+// check_reset_pinned_3d_positions_moved_to_explore) and
+// check_save_load_toolbar_buttons_renamed; check_view3d_boots updated to open 3D
+// View from its new Advanced-menu location -- all three proven/re-verified via TEMP
+// BREAK, the latter two also exercising a REAL download and a REAL file-chooser load
+// respectively, not just DOM/label assertions. DESIGN_DOCUMENT.md SS5.3 (new
+// paragraph) and SS7a (stale "after Explore" menu-position reference fixed),
+// tests/README.md, and public/instructions.html (3 stale "Explore >"/"Load JSON"
+// references fixed) updated. Full suite 182/182.
+export const APP_VERSION = '0.916';

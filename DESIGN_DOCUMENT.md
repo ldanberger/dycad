@@ -288,6 +288,35 @@ clicking Run or closing the popup — steps the simulation from the main window 
 confirms the Message Log shows the just-typed text, not the stale compiled copy;
 proven via TEMP BREAK.
 
+**Toolbar Save/Load, and 3D View's menu home — a reversal.** Reported directly:
+*"change 'Save JSON' button to 'Save' and 'Load JSON' to 'Load'."* Immediately
+corrected in the same exchange: *"remove 'Load' renamed from 'Load JSON' from the top
+menu, but keep 'Load' in File menu."* So `#save-json-btn`'s own text is genuinely
+renamed to plain `"Save"`, but `#load-json-btn` is REMOVED from the toolbar entirely,
+not renamed — File's own `"Load"` item (already plainly labeled, `promptFileMenuLoad`)
+is left as the only top-menu-bar way to load a file; it clicks the same hidden
+`#load-json-input` directly, so removing the toolbar button's own click wiring doesn't
+touch that shared input or its `change` handler at all.
+Same exchange: *"Move '3D View' and 'Reset Pinned 3D Positions' and create a new
+separator after 'Smart Check Node' in Advanced menu."* Both had previously been moved
+INTO their own standalone Explore menu (a direct follow-up at the time: *"Move 'Reset
+Pinned 3D Positions' to the Explore menu after a separator"*) — this reverses that
+specific decision (see [[feedback-check-for-reversed-prior-decisions]] — recognized as
+exactly that pattern going in). Since those two were the Explore menu's ONLY items,
+moving both out leaves it permanently empty — rather than leave a dangling,
+non-functional top-menu-bar button, the whole Explore menu (button + dropdown div,
+`index.html`; `EXPLORE_LINKS`/wiring/its `MENU_PAIRS` entry, `main.js`) is removed
+outright. `ADVANCED_LINKS` gains a new separator right after `'Smart Check Node'`,
+then `'3D View'`/`'Reset Pinned 3D Positions'`, then the PRE-EXISTING separator that
+used to lead straight into Script Console/Code Summary — so the 3D-View pair now sits
+in its own distinct group between two separators, not blended into either neighbor.
+New `check_3d_view_and_reset_pinned_moved_to_advanced` (replacing the now-obsolete
+`check_reset_pinned_3d_positions_moved_to_explore`, whose own assertions the reversal
+makes false) and `check_save_load_toolbar_buttons_renamed`; `check_view3d_boots`
+updated to open 3D View from its new Advanced-menu location — all three proven/
+re-verified via TEMP BREAK, the latter two also exercising a REAL download and a REAL
+file-chooser load respectively, not just DOM/label assertions.
+
 ### 5.4 Feedback channels
 
 `app.toast(message, isError, alsoLog)` is the single entry point for user-facing
@@ -1816,7 +1845,9 @@ type rather than replacing or extending it — a `DataDataEntity` used in a Stre
 Capability Map stays exactly as it was; ERD detail lives on a *separate* Level Down
 child, so the two concerns (business-level data entity vs. physical table schema)
 never collide. New top-level "Data Modeling" menu (`index.html`/`main.js`, positioned
-after Explore): **Add/Edit Entity Details**, **Autofill**, **Import DDL...**,
+after Simulation — originally after a since-removed Explore menu; see §5.3's own
+Advanced-menu paragraph for where 3D View/Reset Pinned 3D Positions ended up
+instead): **Add/Edit Entity Details**, **Autofill**, **Import DDL...**,
 **Export DDL**.
 
 **`DataEntityDetails`** (`public/custom.json`'s `settings.elements`, "Data" group) is

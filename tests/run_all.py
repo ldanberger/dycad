@@ -1880,45 +1880,117 @@ def check_script_console_and_code_summary_moved_to_advanced(page):
     return True, "Script Console and Code Summary now live in the Advanced menu, after a separator, and are gone from the Simulation menu"
 
 
-def check_reset_pinned_3d_positions_moved_to_explore(page):
-    """Regression guard: 'Reset Pinned 3D Positions' moved from the Advanced menu to
-    the Explore menu, after a separator — reported directly: "Move 'Reset Pinned 3D
-    Positions' to the Explore menu after a separator." Also checks it's genuinely GONE
-    from the Advanced menu, not just duplicated."""
+def check_3d_view_and_reset_pinned_moved_to_advanced(page):
+    """Regression guard, direct follow-up REVERSING an earlier move: an older report
+    ("Move 'Reset Pinned 3D Positions' to the Explore menu after a separator") had
+    put it, and '3D View', in their own standalone Explore menu. This report moved
+    both back: "Move '3D View' and 'Reset Pinned 3D Positions' and create a new
+    separator after 'Smart Check Node' in Advanced menu." Since those were the
+    Explore menu's ONLY two items, the whole menu (and its now-empty toolbar button)
+    is removed entirely rather than left dangling and non-functional. Covers: the
+    Advanced menu's own item sequence has, in order, ...Smart Check Node, a NEW
+    separator, 3D View, Reset Pinned 3D Positions, then the PRE-EXISTING separator,
+    Script Console..., Code Summary; clicking 3D View from its new Advanced-menu
+    location genuinely opens the 3D View tab; and #explore-menu-btn/#explore-menu
+    are both completely gone from the DOM, not just hidden."""
     result = js(page, """
     async () => {
-      const app = window.dycadApp;
-      document.getElementById('explore-menu-btn').click();
-      await new Promise(r => setTimeout(r, 60));
-      const exploreItems = [...document.querySelectorAll('#explore-menu .dd-item')];
-      const resetIdx = exploreItems.findIndex(e => e.dataset.action === 'resetPinned3DPositions');
-      const resetEl = exploreItems[resetIdx];
-      const precedingEl = resetEl ? resetEl.previousElementSibling : null;
-      const hasSeparatorBeforeReset = !!precedingEl && precedingEl.classList.contains('dd-separator');
-      document.getElementById('explore-menu-btn').click();
-
       document.getElementById('advanced-menu-btn').click();
       await new Promise(r => setTimeout(r, 60));
-      const advActions = [...document.querySelectorAll('#advanced-menu .dd-item')].map(e => e.dataset.action);
+      const items = [...document.querySelectorAll('#advanced-menu > *')];
+      const sequence = items.map(el => el.classList.contains('dd-separator') ? '---' : (el.dataset.action || el.textContent));
       document.getElementById('advanced-menu-btn').click();
-
       return {
-        resetInExplore: resetIdx !== -1,
-        hasSeparatorBeforeReset,
-        advActions,
+        sequence,
+        exploreMenuBtnGone: !document.getElementById('explore-menu-btn'),
+        exploreMenuGone: !document.getElementById('explore-menu'),
       };
     }
     """)
     problems = []
-    if not result["resetInExplore"]:
-        problems.append("expected 'Reset Pinned 3D Positions' in the Explore menu")
-    if not result["hasSeparatorBeforeReset"]:
-        problems.append("expected a separator immediately before 'Reset Pinned 3D Positions' in the Explore menu")
-    if 'resetPinned3DPositions' in result["advActions"]:
-        problems.append("expected 'Reset Pinned 3D Positions' to be GONE from the Advanced menu, not just duplicated")
+    seq = result["sequence"]
+    try:
+        smartNodeIdx = seq.index('smartCheckNode')
+        expectedTail = ['---', 'view3d', 'resetPinned3DPositions', '---', 'scriptConsole', 'codeSummary']
+        actualTail = seq[smartNodeIdx + 1: smartNodeIdx + 1 + len(expectedTail)]
+        if actualTail != expectedTail:
+            problems.append(f"expected exactly {expectedTail} right after 'Smart Check Node', got {actualTail}")
+    except ValueError:
+        problems.append(f"'Smart Check Node' not found in the Advanced menu at all: {seq}")
+    if not result["exploreMenuBtnGone"] or not result["exploreMenuGone"]:
+        problems.append("expected the Explore menu button AND its dropdown to be completely removed from the DOM")
+    if problems:
+        return False, "; ".join(problems) + f" (full sequence: {seq})"
+
+    page.click("#advanced-menu-btn")
+    page.wait_for_timeout(100)
+    page.click('#advanced-menu .dd-item[data-action="view3d"]')
+    page.wait_for_timeout(500)
+    canvas_found = page.evaluate("!!document.querySelector('.page-view.active canvas')")
+    if not canvas_found:
+        return False, "clicking '3D View' from its new Advanced-menu location did not open a real 3D canvas"
+    return True, "'3D View' and 'Reset Pinned 3D Positions' now live in the Advanced menu, after a new separator following 'Smart Check Node', and the now-empty Explore menu is completely removed"
+
+
+def check_save_load_toolbar_buttons_renamed(page):
+    """Regression guard, reported directly: "change 'Save JSON' button to 'Save' and
+    'Load JSON' to 'Load'." Then, in the same exchange, corrected: "remove 'Load'
+    renamed from 'Load JSON' from the top menu, but keep 'Load' in File menu" — so
+    the toolbar's own Save button (#save-json-btn) is genuinely renamed to plain
+    "Save," but the toolbar's Load button is REMOVED entirely (not renamed), leaving
+    File > Load (already labeled plain "Load") as the only way to load a file from
+    the top menu bar. Covers: #save-json-btn's own text is exactly "Save" (not "Save
+    JSON"); #load-json-btn no longer exists in the DOM at all; the File menu still
+    has both a "Save" and a "Load" item; the toolbar Save button still genuinely
+    saves (triggers a real download); and File > Load still genuinely opens the file
+    picker and loads a file — the hidden #load-json-input and its change handler
+    survive the button's removal, since File > Load's own promptFileMenuLoad clicks
+    that same input directly."""
+    result = js(page, """
+    () => {
+      const out = {};
+      out.saveBtnText = document.getElementById('save-json-btn')?.textContent;
+      out.loadBtnGone = !document.getElementById('load-json-btn');
+      out.loadInputExists = !!document.getElementById('load-json-input');
+      document.getElementById('file-menu-btn').click();
+      const fileMenuHtml = document.getElementById('file-menu').innerHTML;
+      document.getElementById('file-menu-btn').click();
+      out.fileMenuHasSave = fileMenuHtml.includes('>Save<');
+      out.fileMenuHasLoad = fileMenuHtml.includes('>Load<');
+      return out;
+    }
+    """)
+    problems = []
+    if result["saveBtnText"] != "Save":
+        problems.append(f"expected the toolbar Save button's text to be exactly 'Save', got {result['saveBtnText']!r}")
+    if not result["loadBtnGone"]:
+        problems.append("expected #load-json-btn to be completely removed from the toolbar")
+    if not result["loadInputExists"]:
+        problems.append("expected the hidden #load-json-input file input to still exist (File > Load still needs it)")
+    if not result["fileMenuHasSave"] or not result["fileMenuHasLoad"]:
+        problems.append("expected the File menu to still have both 'Save' and 'Load' items")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "Reset Pinned 3D Positions now lives in the Explore menu, after a separator, and is gone from the Advanced menu"
+
+    # The toolbar Save button still genuinely saves (triggers a real download).
+    with page.expect_download() as dl_info:
+        page.click("#save-json-btn")
+    download = dl_info.value
+    if not download.suggested_filename.endswith(".json"):
+        return False, f"expected the toolbar Save button to trigger a real .json download, got {download.suggested_filename!r}"
+
+    # File > Load still genuinely opens the file picker and loads a file.
+    with page.expect_file_chooser() as fc_info:
+        page.click("#file-menu-btn")
+        page.wait_for_timeout(100)
+        page.click("#file-menu >> text=Load")
+    chooser = fc_info.value
+    chooser.set_files("/home/larry/projects/dycad/public/examples/pipeline demo.json")
+    page.wait_for_timeout(300)
+    part_count = page.evaluate("window.dycadApp.store.doc.parts.length")
+    if not part_count:
+        return False, "expected File > Load to still genuinely load a file's parts"
+    return True, "The toolbar Save button is renamed to plain 'Save' and still triggers a real download; the toolbar Load button is removed entirely; and File > Load (still labeled 'Load') still genuinely opens the file picker and loads a file"
 
 
 def check_toolbar_filter_groups_hidden_when_inactive(page):
@@ -7528,10 +7600,12 @@ def check_smart_check_node(page):
 
 
 def check_view3d_boots(page):
-    """Regression guard for the 3D View tab (Stage 0 plumbing): Explore > 3D View opens
-    a singleton tab, lazy-loads the vendored Three.js/OrbitControls (js/vendor/) without
-    any console error, and renders a real <canvas> with nonzero size — not stuck behind
-    the "Loading 3D view..." placeholder (a real bug found while building this: the
+    """Regression guard for the 3D View tab (Stage 0 plumbing): Advanced > 3D View
+    (moved here from a since-removed standalone Explore menu — see
+    check_3d_view_and_reset_pinned_moved_to_advanced) opens a singleton tab,
+    lazy-loads the vendored Three.js/OrbitControls (js/vendor/) without any console
+    error, and renders a real <canvas> with nonzero size — not stuck behind the
+    "Loading 3D view..." placeholder (a real bug found while building this: the
     placeholder div was never removed before the canvas got appended as its sibling,
     so the unpositioned, 100%-height placeholder pushed the actual canvas out of view
     instead of being replaced by it). Also confirms closing and reopening the tab doesn't
@@ -7543,9 +7617,9 @@ def check_view3d_boots(page):
     page.goto(f"http://localhost:{PORT}/index.html")
     page.wait_for_timeout(800)
 
-    page.click("#explore-menu-btn")
-    menu_has_item = js(page, "async () => !!document.querySelector('#explore-menu .dd-item[data-action=\"view3d\"]')")
-    page.click('#explore-menu .dd-item[data-action="view3d"]')
+    page.click("#advanced-menu-btn")
+    menu_has_item = js(page, "async () => !!document.querySelector('#advanced-menu .dd-item[data-action=\"view3d\"]')")
+    page.click('#advanced-menu .dd-item[data-action="view3d"]')
     try:
         page.wait_for_function("!!document.querySelector('.page-view.active canvas')", timeout=5000)
     except Exception:
@@ -7590,7 +7664,7 @@ def check_view3d_boots(page):
     """)
 
     if not menu_has_item:
-        return False, "Explore menu is missing the '3D View' item"
+        return False, "Advanced menu is missing the '3D View' item"
     if logs:
         return False, f"console errors opening the 3D View tab: {logs}"
     if not first["canvasFound"]:
@@ -14400,7 +14474,8 @@ CHECKS = [
     check_multiselect_shows_entity_level_fields,
     check_code_summary,
     check_script_console_and_code_summary_moved_to_advanced,
-    check_reset_pinned_3d_positions_moved_to_explore,
+    check_3d_view_and_reset_pinned_moved_to_advanced,
+    check_save_load_toolbar_buttons_renamed,
     check_toolbar_filter_groups_hidden_when_inactive,
     check_filters_panel_moved_from_toolbar,
     check_view3d_empty_click_deselects_and_shows_filters,
