@@ -303,14 +303,33 @@ function renderLibraryFilters(app) {
  * and can vary). Lazily defaults to "everything on" the first time this runs, same
  * on/off-by-default convention as the sources chips above. Styled as light-blue
  * "group-chip"s (a distinct look from the source chips above them) via a second CSS
- * class rather than a source-vs-group difference in the underlying markup. */
-function renderGroupFilters(app) {
+ * class rather than a source-vs-group difference in the underlying markup.
+ *
+ * Reported directly: "the element group filters should only display if elements of
+ * that group are visible. For example filtered to source 'Other', ... Application ...
+ * should show, but ... Business ... should not be visible." A group's chip is only
+ * rendered when at least one of its elements survives the OTHER active toolkit
+ * filters — the current view's own allowedTypes restriction (`allowedTypes`, same rule
+ * renderToolbox's own tile loop already applies) and the active source/library chips
+ * (`app.store.activeLibraries`) — deliberately NOT gated by `activeElementGroups`
+ * itself: a group's own chip must never be the thing that makes its own chip
+ * disappear, or there'd be no way to turn it back on once switched off. */
+function renderGroupFilters(app, allowedTypes) {
   const wrap = document.getElementById('group-filters');
   if (!wrap) return;
   const groups = (app.store.settings.elementGroups || []).map((g) => g.group);
   if (!app.store.activeElementGroups) app.store.activeElementGroups = new Set(groups);
   wrap.innerHTML = '';
+  const codeMap = { t: 'TOGAF', a: 'ArchiMate', o: 'Other', b: 'BPMN' };
+  const els = app.store.settings.elements || [];
+  const groupHasVisibleElement = (group) => els.some((el) => {
+    if (el.group !== group) return false;
+    if (allowedTypes && !allowedTypes.has(String(el.type).toLowerCase())) return false;
+    const srcCodes = String(el.sources || '').split('');
+    return srcCodes.length === 0 || srcCodes.some((c) => app.store.activeLibraries.has(codeMap[c] || 'Other'));
+  });
   for (const group of groups) {
+    if (!groupHasVisibleElement(group)) continue;
     const chip = document.createElement('div');
     chip.className = 'lib-chip group-chip' + (app.store.activeElementGroups.has(group) ? ' active' : '');
     chip.textContent = group;
@@ -383,8 +402,12 @@ function wireToolboxTileDrag(app, tile, el) {
 }
 
 function renderToolbox(app) {
+  const tab = app.store.activeTab();
+  const activeView = tab && tab.type === 'canvas' ? app.store.findView(tab.viewId) : null;
+  const allowedTypes = activeView ? getAllowedTypesForView(activeView) : null;
+
   renderLibraryFilters(app);
-  renderGroupFilters(app);
+  renderGroupFilters(app, allowedTypes);
   const grid = document.getElementById('elements-grid');
   grid.innerHTML = '';
   const groupOrder = (app.store.settings.elementGroups || []).map((g) => g.group);
@@ -392,9 +415,6 @@ function renderToolbox(app) {
     const idx = groupOrder.findIndex((g) => ciEq(g, group));
     return idx === -1 ? groupOrder.length : idx;
   };
-  const tab = app.store.activeTab();
-  const activeView = tab && tab.type === 'canvas' ? app.store.findView(tab.viewId) : null;
-  const allowedTypes = activeView ? getAllowedTypesForView(activeView) : null;
 
   const els = [...(app.store.settings.elements || [])].sort((a, b) => {
     const gi = groupIndex(a.group) - groupIndex(b.group);

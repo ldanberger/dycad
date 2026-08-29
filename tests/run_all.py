@@ -3570,6 +3570,71 @@ def check_section_rowcount_realigns_nodes(page):
     return True, "nodes in a later section stayed correctly aligned after an earlier section's rowCount shrank"
 
 
+def check_toolbox_group_filter_chips_hide_when_no_visible_elements(page):
+    """Regression guard/new-feature check, reported directly: "in toolkit the element
+    group filters should only display if elements of that group are visible. For
+    example filtered to source 'Other', there are elements of group 'Application' so
+    it should show, but there are no elements of group 'Business' so it should not be
+    visible." renderGroupFilters (render.js) now only renders a group's chip when at
+    least one of its elements survives the OTHER active toolkit filters (the current
+    view's allowedTypes and the active source/library chips) -- covers: with every
+    source active, every group's chip shows; narrowing to 'Other' only leaves exactly
+    the groups that actually have an 'o'-sourced element (confirmed against the real
+    shipped custom.json data, not a synthetic fixture) and drops the rest, matching the
+    reported Application/Business example precisely; and switching a group's OWN chip
+    off does NOT make that chip disappear (it would otherwise be impossible to turn
+    back on) -- it stays present, just no longer marked 'active'. Proven via TEMP
+    BREAK."""
+    result = js(page, """
+    () => {
+      const app = window.dycadApp, store = app.store;
+      const codeMap = { t: 'TOGAF', a: 'ArchiMate', o: 'Other', b: 'BPMN' };
+      const chipTexts = () => [...document.querySelectorAll('#group-filters .group-chip')].map(c => c.textContent);
+
+      const allGroups = (store.settings.elementGroups || []).map(g => g.group);
+      const groupsWithOther = allGroups.filter(g => store.settings.elements.some(el =>
+        el.group === g && String(el.sources || '').split('').some(c => (codeMap[c] || 'Other') === 'Other')
+      ));
+
+      const withEverySourceActive = chipTexts();
+
+      store.activeLibraries = new Set(['Other']);
+      app.render();
+      const withOtherOnly = chipTexts();
+
+      const applicationChip = [...document.querySelectorAll('#group-filters .group-chip')].find(c => c.textContent === 'Application');
+      const applicationVisibleBeforeToggle = !!applicationChip;
+      if (applicationChip) applicationChip.click();
+      const afterTogglingApplicationOff = chipTexts();
+      const applicationStillPresent = afterTogglingApplicationOff.includes('Application');
+      const applicationNowInactive = ![...document.querySelectorAll('#group-filters .group-chip')].find(c => c.textContent === 'Application').classList.contains('active');
+
+      return {
+        allGroupsCount: allGroups.length, withEverySourceActive, groupsWithOther, withOtherOnly,
+        applicationVisibleBeforeToggle, applicationStillPresent, applicationNowInactive,
+      };
+    }
+    """)
+    problems = []
+    if len(result["withEverySourceActive"]) != result["allGroupsCount"]:
+        problems.append(f"expected every defined group to have a chip when all sources are active, got {result['withEverySourceActive']} (defined: {result['allGroupsCount']})")
+    if set(result["withOtherOnly"]) != set(result["groupsWithOther"]):
+        problems.append(f"expected exactly the groups with an 'Other'-sourced element ({result['groupsWithOther']}) to show once filtered to source 'Other', got {result['withOtherOnly']}")
+    if "Business" in result["withOtherOnly"]:
+        problems.append("expected 'Business' (no 'Other'-sourced elements in the shipped data) to be hidden once filtered to source 'Other'")
+    if "Application" not in result["withOtherOnly"]:
+        problems.append("expected 'Application' (has 'Other'-sourced elements) to still show once filtered to source 'Other'")
+    if not result["applicationVisibleBeforeToggle"]:
+        problems.append("test setup: expected the Application chip to be present before toggling it off")
+    if not result["applicationStillPresent"]:
+        problems.append("expected turning a group's OWN chip off to leave the chip present (just inactive), not make it disappear")
+    if not result["applicationNowInactive"]:
+        problems.append("expected the Application chip to lose its 'active' class after being clicked off")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "toolkit element-group filter chips only render for groups with at least one element surviving the active source/library filters (and the current view's allowed types), matching the reported Application/Business example, and a group's own chip toggle never makes itself disappear"
+
+
 def check_toolbox_drag_to_canvas(page):
     """Regression guard for dragging a toolkit tile onto the canvas. Reported directly:
     "drag from toolkit to freeform canvas does not allow drop, mouse cursor stuck on
@@ -14812,6 +14877,7 @@ CHECKS = [
     check_mutation_toasts_log_to_message_log,
     check_keyboard_focus_visible,
     check_section_rowcount_realigns_nodes,
+    check_toolbox_group_filter_chips_hide_when_no_visible_elements,
     check_toolbox_drag_to_canvas,
     check_new_content_sized_and_non_overlapping,
     check_smart_check_view_default_levels_unlimited,

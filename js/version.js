@@ -5005,4 +5005,23 @@
 // tests/README.md, and public/instructions.html (ctx.inputs/ctx.responses table rows,
 // "what a script must return," and the error-handling paragraph) all updated. Full
 // suite 185/185.
-export const APP_VERSION = '0.918';
+// v0.919: reported directly — "in toolkit the element group filters should only
+// display if elements of that group are visible. For example filtered to source
+// 'Other', there are elements of group 'Application' so it should show, but there are
+// no elements of group 'Business' so it should not be visible." renderGroupFilters
+// (render.js) now only renders a group's chip when at least one of its elements
+// survives the OTHER active toolkit filters -- the current view's own allowedTypes
+// restriction (renderToolbox now computes allowedTypes before calling either
+// filter-chip renderer, not after) and the active source/library chips
+// (store.activeLibraries) -- deliberately NOT gated by the group's own
+// active/inactive state (store.activeElementGroups), so switching a group off never
+// makes its own chip disappear, only its elements. New
+// check_toolbox_group_filter_chips_hide_when_no_visible_elements: every group's chip
+// shows with every source active; narrowing Source to "Other" leaves exactly the
+// groups with an 'o'-sourced element in the real shipped custom.json data (matching
+// the reported Application/Business example precisely) and drops the rest; and a
+// group's own chip stays present, just no longer '.active', after being toggled off
+// -- proven via TEMP BREAK. DESIGN_DOCUMENT.md SS5.8 (retitled, new paragraph),
+// tests/README.md, and public/instructions.html's own "Toolkit filters" bullet
+// updated. Full suite 186/186.
+export const APP_VERSION = '0.919';

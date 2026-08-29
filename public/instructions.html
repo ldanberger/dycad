@@ -658,7 +658,11 @@ there disabled and confusing.</p>
   anything else.</li>
   <li><strong>Toolkit filters</strong> (left sidebar) — Source chips (TOGAF/ArchiMate/Other) and Group chips
   (Application/Business/Data/etc., shown in light blue) narrow which element types appear in the drag-and-drop
-  toolkit itself.</li>
+  toolkit itself. A Group chip only appears at all when at least one element in that group survives the current
+  Source selection (and the current view's own allowed types, if any) — e.g. filtering Source down to just
+  "Other" hides any group whose elements are all TOGAF/ArchiMate-sourced, since there'd be nothing left in the
+  toolkit for it to filter. Switching a group's own chip off never makes the chip itself disappear, only its
+  elements.</li>
   <li><strong>Catalog tables</strong> — Parts, Connectors, Views, and ViewMembers each have a full sortable
   table, independent of any one diagram — useful for bulk review or finding something by name rather than
   hunting across views. Selecting a row shows the same property panel a canvas selection would. Click a column

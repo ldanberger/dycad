@@ -699,7 +699,26 @@ New `check_smart_check_model_detection_and_fix_precedence` (pure logic, the abov
 above Smart Check View, no-tab-required reachability, per-row uncheck-then-fix, and
 Cancel making zero changes) in `tests/run_all.py`.
 
-### 5.8 Toolkit drag-and-drop (`wireToolboxTileDrag`, `render.js`)
+### 5.8 Toolkit drag-and-drop and filters (`render.js`)
+
+**Group filter chips hide when nothing they'd show survives (`renderGroupFilters`)**:
+reported directly — *"in toolkit the element group filters should only display if
+elements of that group are visible. For example filtered to source 'Other', there are
+elements of group 'Application' so it should show, but there are no elements of group
+'Business' so it should not be visible."* `renderGroupFilters` now only renders a
+group's chip (`#group-filters .group-chip`) when at least one of its elements survives
+the OTHER active toolkit filters — the current view's own `allowedTypes` restriction
+(same rule `renderToolbox`'s own tile loop already applies, so `renderToolbox` now
+computes `allowedTypes` before calling either filter-chip renderer, not after) and the
+active source/library chips (`store.activeLibraries`) — deliberately NOT gated by
+`store.activeElementGroups` itself: a group's own on/off toggle must never be the thing
+that removes its own chip, or there'd be no way to turn it back on. New
+`check_toolbox_group_filter_chips_hide_when_no_visible_elements`: with every source
+active every group's chip shows; narrowing Source to "Other" leaves exactly the groups
+with an 'o'-sourced element in the real shipped `custom.json` data (matching the
+reported Application/Business example precisely) and drops the rest; and switching a
+group's own chip off leaves it present, just no longer `.active` — proven via TEMP
+BREAK.
 
 Dragging a toolkit tile (`#elements-grid .el-tile`) onto the active canvas creates a
 new part there (`App.dropNewPart`, `main.js`). Reported directly: *"drag from toolkit
