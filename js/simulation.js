@@ -38,16 +38,28 @@ import { isSectionViewType, createSectionPlacer } from './sections.js';
 //   ctx = { part, inputs, responses, state, tick, log, secrets, setState, loadedFileName, findParts, currentView, defaultModel, createPart, createConnector, createNode, createNodeConnector }
 //     - part: the Part record itself (id, type, label, ...)
 //     - inputs: one entry per incoming connector (within this part's model) this tick —
-//         { fromPartId, fromLabel, connector: { relationship, streams }, value }
-//       `value` is undefined for any edge whose source hasn't produced a value yet
-//       (always true on tick 0, since nothing has run).
+//         { fromPartId, fromLabel, connector: { relationship, streams }, value, lastGoodValue, changed }
+//       `value` is the SOURCE part's raw result from ITS most recent tick — undefined
+//       whenever that source produced nothing this round (no script ran, an unscripted
+//       idle node, a script that omitted `value`, or a thrown error — see "value never
+//       auto-holds" below, no way to tell these apart from here, and no need to: fixing
+//       the sender is the sender's job, not the receiver's). `lastGoodValue` is the
+//       source's own last-known-good reading — sticks at whatever it was through any
+//       gap, so a script that wants the old "just keep computing with the freshest real
+//       number" behavior reads THIS instead of `value`; a script that wants to notice and
+//       react to a gap reads `value` and checks it for undefined. `changed` is true when
+//       `lastGoodValue` just changed (deep-compared, so an object/array with the same
+//       content twice in a row does NOT read as changed) — never true on tick 0.
 //     - responses (Step 34): one entry per OUTGOING connector of this part whose target
 //       had a pending response last tick —
-//         { fromPartId, fromLabel, connector: { relationship, streams }, value }
+//         { fromPartId, fromLabel, connector: { relationship, streams }, value, changed }
 //       fromPartId/fromLabel identify the RESPONDER (the connector's target), mirroring
 //       how inputs[i].fromPartId/fromLabel identify the forward sender — a script never
-//       has to hardcode which neighbor it's talking to. See `response` below for how
-//       these get produced.
+//       has to hardcode which neighbor it's talking to. Unlike inputs, every entry here
+//       already IS a real delivery (see `response` below — gaps are filtered out before
+//       this array is built), so there's no separate lastGoodValue to expose; `changed`
+//       (deep-compared) is true when this delivery's payload differs from the RESPONDER's
+//       previous real delivery, skipping over any null gaps in between.
 //     - state: whatever this node's own script returned as `state` last tick ({} on
 //       tick 0, or after Reset) — merged with any pending ctx.setState(...) patch from a
 //       previous tick's async callback (see setState below) before the script runs.
@@ -192,20 +204,36 @@ import { isSectionViewType, createSectionPlacer } from './sections.js';
 // (the script already runs every tick regardless, so this is no extra burden), and a
 // script that omits `badge` this tick has no badge shown this tick.
 //
-// Nodes with no script (or scriptEnabled === false) pass their single input through
-// unchanged if they have exactly one incoming connector, otherwise sit idle (retain
-// whatever value they last held, emitting nothing new). They never produce a response.
+// value never auto-holds (Step 35): a node's raw `value` this tick is undefined unless
+// something actually produced one THIS tick — a script that returned `value` (or
+// returned nothing = script omitted it = undefined), or an unscripted node with exactly
+// one incoming connector passing that connector's own (possibly-also-undefined) value
+// straight through. Nodes with no script and not exactly one incoming connector sit
+// idle: undefined every tick, nothing to pass through. This applies uniformly to a
+// thrown script error too — errors are NOT hidden from downstream: the node's `value`
+// this tick is undefined, same as any other gap, its badge shows "ERR" (the visible
+// fault signal, at the source), and the error is recorded on that tick's runtime entry
+// and appended to the simulation log; every other part in the model still runs normally
+// that tick. `state` is unaffected either way — it only ever changes when a script
+// explicitly returns a new one.
 //
-// A thrown script error is caught per-node: the node keeps its LAST GOOD value/state
-// (never propagates undefined downstream from a broken node), the error is recorded on
-// that tick's runtime entry (surfaced as the node badge's error state) and appended to
-// the simulation log; every other part in the model still runs normally that tick.
+// This is deliberate: the engine no longer decides on a script's behalf whether a gap
+// should be papered over. Every runtime entry ALSO carries `lastGoodValue` — the last
+// value that was actually defined, held across any number of gap ticks — so a consuming
+// script can still get the old "keep computing with whatever's freshest" behavior by
+// reading `lastGoodValue` instead of `value`, entirely at its own discretion (see
+// ctx.inputs[i], above). The node's own badge (canvas.js) shows raw `value` — it blanks
+// the instant a tick returns nothing, same transparency as everywhere else; only the
+// "ERR" overlay (drawn from `lastError`) is a distinct visual, since a broken node is
+// worth flagging differently from one that's simply idle or between real readings.
 //
-// Each runtime entry also carries `changed` (Step 33): true when this tick's value
-// differs from last tick's (never true on tick 0, since there's no previous value yet).
-// Drives a distinct badge visual state in canvas.js, separate from the error state —
-// useful for spotting at a glance when a node (e.g. one polling an external API) just
-// received new data.
+// Each runtime entry also carries `changed` (Step 33, revised under Step 35): true when
+// `lastGoodValue` just changed from what it was — a DEEP comparison, so an object/array
+// with identical content on consecutive real deliveries does not read as changed — never
+// true on tick 0. Responses get the analogous `lastGoodResponse`/internal comparison,
+// which is what backs `ctx.responses[i].changed` above. Drives a distinct badge visual
+// state in canvas.js, separate from the error state — useful for spotting at a glance
+// when a node (e.g. one polling an external API) just received new data.
 
 const pendingStateUpdates = new Map(); // partId -> patch object, applied at the start of the next tick that part runs in
 
@@ -217,6 +245,25 @@ function ensureRuntime(store, modelName) {
 
 function safeStringify(v) {
   try { return JSON.stringify(v); } catch { return String(v); }
+}
+
+/** Deep, order-sensitive-for-arrays equality used for Step 35's changed-flag
+ * comparisons — a fast reference check first, then a recursive structural compare for
+ * objects/arrays so a script returning a fresh object/array with identical content each
+ * tick doesn't read as "changed" every time. Primitives fall through to the initial ===
+ * (so NaN !== NaN here, same as everywhere else in JS — not worth special-casing). */
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const k of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+    if (!deepEqual(a[k], b[k])) return false;
+  }
+  return true;
 }
 
 /** Appends a message to the global Message Log (left panel), capped at 500 entries.
@@ -424,6 +471,8 @@ function runTick(app, modelName) {
         fromLabel: fromPart ? fromPart.label : '',
         connector: { relationship: e.connector.relationship, streams: e.connector.streams || [] },
         value: prevEntry ? prevEntry.value : undefined,
+        lastGoodValue: prevEntry ? prevEntry.lastGoodValue : undefined,
+        changed: prevEntry ? !!prevEntry.changed : false,
       };
     });
 
@@ -440,6 +489,7 @@ function runTick(app, modelName) {
           fromLabel: toPart ? toPart.label : '',
           connector: { relationship: e.connector.relationship, streams: e.connector.streams || [] },
           value: prevEntry.response,
+          changed: !!prevEntry.responseChanged,
         };
       })
       .filter((r) => r !== null);
@@ -454,7 +504,7 @@ function runTick(app, modelName) {
       pendingStateUpdates.delete(part.id);
     }
 
-    let resultValue = prevSelf?.value;
+    let resultValue; // Step 35: no auto-carry — undefined unless something sets it below
     let resultState = prevState;
     let resultResponse = null; // Step 34: fresh every tick, never carried over — only set if the script returns one THIS tick
     let resultBadge = null; // script-controlled badge: same "fresh every tick" rule as response
@@ -516,13 +566,10 @@ function runTick(app, modelName) {
         // SUCCESS path — a thrown script error means NO write is queued at all for any
         // widget bound to `part` this tick, so it reads exactly like any other tick
         // where its label just wasn't addressed (the "—" not-set placeholder,
-        // canvas.js), rather than preserving a stale last-good number. Deliberately
-        // NOT the same "keep the last good value" rule the erroring PART's own value
-        // gets (top-of-file comment) — that rule exists to stop a broken part's
-        // failure from cascading through OTHER real parts' ctx.inputs; a UI Output
-        // widget has no such downstream (nothing reads it via a real connector), so
-        // there's nothing to protect by holding onto a value that's no longer true —
-        // and the erroring target's OWN badge already shows "ERR" as the visible
+        // canvas.js). Widget entries never get a lastGoodValue of their own (unlike a
+        // real Part's runtime entry, Step 35) — nothing reads a widget via ctx.inputs,
+        // so there's no downstream to protect by tracking a fallback nobody can reach;
+        // the erroring target part's OWN badge already shows "ERR" as the visible
         // signal something's wrong.
         queueUIOutputWrites(store, part.id, 'UITextOutput', uiTextOut, pendingUIWrites);
         queueUIOutputWrites(store, part.id, 'UINumericOutput', uiNumericOut, pendingUIWrites);
@@ -533,14 +580,27 @@ function runTick(app, modelName) {
     } else if (inputs.length === 1) {
       resultValue = inputs[0].value; // pass-through default for unscripted single-input nodes
     }
-    // else: idle — resultValue stays at prevSelf?.value (or undefined pre-tick-0)
+    // else: idle — resultValue stays undefined this tick (Step 35: no auto-carry)
 
-    // Step 33: track whether this part's value actually changed since last tick — only
-    // meaningful once there IS a previous tick (never flags "changed" on tick 0), used to
-    // drive a distinct badge visual state (canvas.js) separate from the error state.
-    const changed = prevSelf !== undefined && resultValue !== prevSelf.value;
+    // Step 35: lastGoodValue/lastGoodResponse persist across any number of gap ticks
+    // (undefined value, thrown error, idle) — a script that wants the old "keep
+    // computing with whatever's freshest" behavior reads THESE via ctx.inputs[i]/its own
+    // fallback logic, instead of the engine silently choosing for it. `changed` (Step 33)
+    // is now computed against this lastGood lineage (deep-compared), not the raw
+    // per-tick value, so it fires exactly when real content changes and never flickers
+    // on a gap tick.
+    const hasNewValue = resultValue !== undefined && resultValue !== null;
+    const lastGoodValue = hasNewValue ? resultValue : prevSelf?.lastGoodValue;
+    const changed = prevSelf !== undefined && !deepEqual(lastGoodValue, prevSelf.lastGoodValue);
 
-    nextValues.set(part.id, { value: resultValue, state: resultState, lastError, lastTick: runtime.tick, changed, response: resultResponse, badge: resultBadge });
+    const hasNewResponse = resultResponse !== undefined && resultResponse !== null;
+    const lastGoodResponse = hasNewResponse ? resultResponse : prevSelf?.lastGoodResponse;
+    const responseChanged = prevSelf !== undefined && !deepEqual(lastGoodResponse, prevSelf.lastGoodResponse);
+
+    nextValues.set(part.id, {
+      value: resultValue, lastGoodValue, state: resultState, lastError, lastTick: runtime.tick,
+      changed, response: resultResponse, lastGoodResponse, responseChanged, badge: resultBadge,
+    });
   }
 
   runtime.values = nextValues; // commit all outputs together, only once every part has run
@@ -654,10 +714,13 @@ function saveSimSnapshot(app, modelName) {
   }
   const values = {};
   for (const [partId, entry] of runtime.values) {
-    values[partId] = { value: entry.value, state: entry.state, lastError: entry.lastError || null };
+    values[partId] = {
+      value: entry.value, lastGoodValue: entry.lastGoodValue, state: entry.state,
+      lastError: entry.lastError || null, lastGoodResponse: entry.lastGoodResponse,
+    };
   }
   const snapshot = {
-    kind: 'dycad-sim-snapshot', version: 2,
+    kind: 'dycad-sim-snapshot', version: 3,
     tick: runtime.tick, timestamp: new Date().toISOString(),
     model: modelName,
     values, log: store.simLog.get(modelName) || [],
@@ -687,7 +750,10 @@ async function loadSimSnapshot(app, modelName, file) {
     let missing = 0;
     for (const [partId, entry] of Object.entries(snap.values || {})) {
       if (!store.findPart(partId)) { missing += 1; continue; } // part no longer exists — skip, don't crash
-      values.set(partId, { value: entry.value, state: entry.state || {}, lastError: entry.lastError || null, lastTick: snap.tick || 0 });
+      values.set(partId, {
+        value: entry.value, lastGoodValue: entry.lastGoodValue, state: entry.state || {},
+        lastError: entry.lastError || null, lastGoodResponse: entry.lastGoodResponse, lastTick: snap.tick || 0,
+      });
     }
     store.simRuntime.set(modelName, { tick: snap.tick || 0, values });
     store.simLog.set(modelName, Array.isArray(snap.log) ? snap.log : []);

@@ -5628,6 +5628,154 @@ def check_ui_dashboard_ctx_ui_engine(page):
     return True, "ctx.ui.UITextInput/UINumericInput (read, keyed by label) and ctx.ui.UITextOutput/UINumericOutput (write, keyed by label) work correctly across real simulation ticks: unbound/unaddressed/errored all correctly leave a widget unset, and a live input change flows through on the next tick"
 
 
+def check_sim_value_no_auto_hold_and_last_good_tracking(page):
+    """Regression guard/new-feature check for Step 35 (sim packet protocol expansion),
+    reported directly: "can we retain last known good value in addition to new value,
+    which may be null if no value provided? thrown errors will not be hidden
+    downstream, up to script logic to see and respond accordingly -- which may be to
+    use last known good." A part's raw `value` no longer auto-holds through a thrown
+    error, an idle tick, or a script that simply omits `value` -- it's undefined that
+    tick, same as any other gap, and this is now visible to a DOWNSTREAM part via
+    ctx.inputs[i].value the very next tick (confirmed: "blank the instant nothing's
+    returned, should reflect last tick"). A NEW `lastGoodValue` field (both on a part's
+    own runtime entry and as ctx.inputs[i].lastGoodValue) persists the last genuinely
+    defined value across any number of gap ticks, entirely opt-in for a script that
+    wants the old "keep computing with whatever's freshest" behavior. `changed` (and
+    the new ctx.responses[i].changed) is now computed from THIS lastGood lineage with a
+    deep/structural comparison, so a script returning a fresh object with identical
+    content every tick does not spuriously read as changed, and a gap tick never flips
+    changed on its own. Confirmed directly: "why doesn't matter to consumer, will be
+    responsibility of sender to address problem" -- so ctx.inputs carries no separate
+    error signal, only value/lastGoodValue/changed. Also covers: the snapshot
+    save/load round-trip (loadSimSnapshot) correctly restores lastGoodValue and
+    lastGoodResponse, not just value/state/lastError."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+      const model = store.defaultModel;
+
+      // --- value / lastGoodValue / changed, and their propagation via ctx.inputs ---
+      const src = store.createPart({
+        type: 'BusinessFunction', label: 'PP35Src', model, scriptEnabled: true,
+        // A step counter driven via ctx.setState (not the returned `state`, which -- by
+        // design, unrelated to this test -- holds automatically through a thrown error)
+        // so this sequence advances exactly once per tick regardless of the error ticks
+        // below, rather than depending on ctx.tick (shared across every part in the
+        // model, not reset for a part created partway through an existing run).
+        script: `
+          const step = ctx.state.step || 0;
+          ctx.setState({ step: step + 1 });
+          if (step === 0) return { value: { n: 1, tag: 'x' } };
+          if (step === 1) throw new Error('boom');
+          if (step === 2) return { value: { n: 1, tag: 'x' } };
+          if (step === 3) return { value: { n: 2, tag: 'x' } };
+          throw new Error('boom again');
+        `,
+      });
+      const consumer = store.createPart({
+        type: 'BusinessFunction', label: 'PP35Consumer', model, scriptEnabled: true,
+        script: "const r = ctx.inputs[0]; return { value: { v: (r && r.value !== undefined) ? r.value : null, lg: r ? r.lastGoodValue : null, ch: r ? r.changed : null } };",
+      });
+      const passThrough = store.createPart({ type: 'BusinessFunction', label: 'PP35PassThrough', model });
+      store.createConnector({ from: src.id, to: consumer.id, model });
+      store.createConnector({ from: src.id, to: passThrough.id, model });
+
+      const srcHist = [], consumerHist = [], passThroughHist = [];
+      for (let i = 0; i < 5; i++) {
+        sim.stepSimulation(app, model);
+        const rt = store.simRuntime.get(model);
+        const s = rt.values.get(src.id);
+        srcHist.push({ value: s.value, lastGoodValue: s.lastGoodValue, changed: s.changed, hasError: !!s.lastError });
+        consumerHist.push(rt.values.get(consumer.id).value);
+        passThroughHist.push(rt.values.get(passThrough.id).value);
+      }
+
+      // --- response / lastGoodResponse / responseChanged, and ctx.responses[i].changed ---
+      const responder = store.createPart({
+        type: 'BusinessFunction', label: 'PP35Responder', model, scriptEnabled: true,
+        script: `
+          const step = ctx.state.step || 0;
+          const out = { value: 1, state: { step: step + 1 } };
+          if (step === 0) out.response = { ok: true, n: 1 };
+          else if (step === 2) out.response = { ok: true, n: 1 };
+          else if (step === 3) out.response = { ok: true, n: 2 };
+          return out;
+        `,
+      });
+      const requester = store.createPart({
+        type: 'BusinessFunction', label: 'PP35Requester', model, scriptEnabled: true,
+        script: "const r = ctx.responses[0]; return { value: { has: !!r, val: r ? r.value : null, ch: r ? r.changed : null } };",
+      });
+      store.createConnector({ from: requester.id, to: responder.id, model });
+
+      const requesterHist = [];
+      for (let i = 0; i < 5; i++) {
+        sim.stepSimulation(app, model);
+        requesterHist.push(store.simRuntime.get(model).values.get(requester.id).value);
+      }
+
+      // --- snapshot round-trip persists lastGoodValue / lastGoodResponse ---
+      const snapFile = new File([JSON.stringify({
+        kind: 'dycad-sim-snapshot', version: 3, tick: 9, model,
+        values: { [src.id]: { value: undefined, lastGoodValue: { n: 99 }, state: {}, lastError: null, lastGoodResponse: { r: 1 } } },
+        log: [],
+      })], 'snap.json', { type: 'application/json' });
+      await sim.loadSimSnapshot(app, model, snapFile);
+      const restored = store.simRuntime.get(model).values.get(src.id);
+
+      return { srcHist, consumerHist, passThroughHist, requesterHist, restoredLastGoodValue: restored.lastGoodValue, restoredLastGoodResponse: restored.lastGoodResponse };
+    }
+    """)
+    problems = []
+    src = result["srcHist"]
+    if src[0]["value"] != {"n": 1, "tag": "x"} or src[0]["lastGoodValue"] != {"n": 1, "tag": "x"} or src[0]["changed"] or src[0]["hasError"]:
+        problems.append(f"tick 0: expected a fresh value/lastGoodValue with changed=false (no prior tick) and no error, got {src[0]}")
+    if src[1]["value"] is not None or src[1]["lastGoodValue"] != {"n": 1, "tag": "x"} or src[1]["changed"] or not src[1]["hasError"]:
+        problems.append(f"tick 1 (thrown error): expected value=undefined (not hidden/held), lastGoodValue still {{n:1}}, changed=false, and a real error, got {src[1]}")
+    if src[2]["value"] != {"n": 1, "tag": "x"} or src[2]["changed"] or src[2]["hasError"]:
+        problems.append(f"tick 2 (recovers with identical content, new object reference): expected value back to {{n:1}}, changed=false (deep-equal, not reference-equal), no error, got {src[2]}")
+    if src[3]["value"] != {"n": 2, "tag": "x"} or not src[3]["changed"]:
+        problems.append(f"tick 3 (real content change): expected value={{n:2}} and changed=true, got {src[3]}")
+    if src[4]["value"] is not None or src[4]["lastGoodValue"] != {"n": 2, "tag": "x"} or src[4]["changed"] or not src[4]["hasError"]:
+        problems.append(f"tick 4 (thrown error again): expected value=undefined, lastGoodValue still {{n:2}}, changed=false, got {src[4]}")
+
+    cons = result["consumerHist"]
+    expectedConsumer = [
+        {"v": None, "lg": None, "ch": False},
+        {"v": {"n": 1, "tag": "x"}, "lg": {"n": 1, "tag": "x"}, "ch": False},
+        {"v": None, "lg": {"n": 1, "tag": "x"}, "ch": False},
+        {"v": {"n": 1, "tag": "x"}, "lg": {"n": 1, "tag": "x"}, "ch": False},
+        {"v": {"n": 2, "tag": "x"}, "lg": {"n": 2, "tag": "x"}, "ch": True},
+    ]
+    if cons != expectedConsumer:
+        problems.append(f"expected the downstream consumer's ctx.inputs[0] history (one tick behind Src's own commits) to be {expectedConsumer}, got {cons}")
+
+    passThroughExpected = [None, {"n": 1, "tag": "x"}, None, {"n": 1, "tag": "x"}, {"n": 2, "tag": "x"}]
+    if result["passThroughHist"] != passThroughExpected:
+        problems.append(f"expected the unscripted pass-through part to mirror Src's raw value one tick behind (blanking exactly when Src had no value), got {result['passThroughHist']}")
+
+    req = result["requesterHist"]
+    expectedRequester = [
+        {"has": False, "val": None, "ch": None},
+        {"has": True, "val": {"ok": True, "n": 1}, "ch": False},
+        {"has": False, "val": None, "ch": None},
+        {"has": True, "val": {"ok": True, "n": 1}, "ch": False},
+        {"has": True, "val": {"ok": True, "n": 2}, "ch": True},
+    ]
+    if req != expectedRequester:
+        problems.append(f"expected the requester's ctx.responses[0] history to be {expectedRequester} (gaps stay absent, identical-content re-deliveries read changed=false, a real content change reads changed=true), got {req}")
+
+    if result["restoredLastGoodValue"] != {"n": 99}:
+        problems.append(f"expected loadSimSnapshot to restore lastGoodValue, got {result['restoredLastGoodValue']}")
+    if result["restoredLastGoodResponse"] != {"r": 1}:
+        problems.append(f"expected loadSimSnapshot to restore lastGoodResponse, got {result['restoredLastGoodResponse']}")
+
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "value never auto-holds (blanks the instant a tick returns nothing, including thrown errors -- not hidden from downstream), lastGoodValue persists the last real reading across any number of gap ticks and is exposed via ctx.inputs[i]/the part's own runtime entry, changed/ctx.responses[i].changed are deep-compared against this lastGood lineage (no spurious flips on identical-content re-deliveries or on gap ticks), and snapshot save/load round-trips both new fields"
+
+
 def check_ui_dashboard_output_badge_visibility(page):
     """Regression guard/new-feature check for UI Output widgets' canvas badge,
     reported directly: "_out will act like badges where they display a specific
@@ -14698,6 +14846,7 @@ CHECKS = [
     check_ui_dashboard_element_types_and_toolkit,
     check_ui_dashboard_property_panel,
     check_ui_dashboard_ctx_ui_engine,
+    check_sim_value_no_auto_hold_and_last_good_tracking,
     check_ui_dashboard_output_badge_visibility,
     check_copy_model_remaps_ui_bindings,
     check_ui_dashboard_cross_model_binding,

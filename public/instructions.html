@@ -761,10 +761,18 @@ Enabled" in Root Properties, then write the script body in the Script field.</p>
   <tbody>
     <tr><td><code>ctx.part</code></td><td>The part record itself (id, type, label, ...).</td></tr>
     <tr><td><code>ctx.inputs</code></td><td>One entry per incoming connector this tick:
-    <code>{ fromPartId, fromLabel, connector: { relationship, streams }, value }</code>. A neighbor that hasn't
-    produced a value yet shows <code>value: undefined</code>.</td></tr>
+    <code>{ fromPartId, fromLabel, connector: { relationship, streams }, value, lastGoodValue, changed }</code>.
+    <code>value</code> is <code>undefined</code> whenever that neighbor produced nothing THIS tick — no value
+    yet, an idle tick, or a script error, all read the same way; see "What a script must return" below.
+    <code>lastGoodValue</code> is that neighbor's last actually-defined value, held across any number of such
+    gaps — read this instead of <code>value</code> if you want to keep computing with whatever's freshest rather
+    than reacting to the gap. <code>changed</code> is true when <code>lastGoodValue</code> just changed (a deep
+    comparison, so an object/array with the same content twice in a row doesn't count).</td></tr>
     <tr><td><code>ctx.responses</code></td><td>One entry per outgoing connector whose target sent a
-    <em>response</em> back last tick (same shape as inputs) — see "Responses" below.</td></tr>
+    <em>response</em> back last tick: <code>{ fromPartId, fromLabel, connector, value, changed }</code> — see
+    "Responses" below. Every entry here is already a real delivery (gaps are simply absent, no
+    <code>lastGoodValue</code> needed); <code>changed</code> is true when this delivery's content differs from
+    that same neighbor's previous delivery.</td></tr>
     <tr><td><code>ctx.state</code></td><td>Whatever this part's own script returned as <code>state</code> last
     tick — empty on tick 0 or right after Reset. This is how a script remembers something between ticks.</td></tr>
     <tr><td><code>ctx.tick</code></td><td>The current tick number, starting at 0.</td></tr>
@@ -941,7 +949,10 @@ ENABLED or disabled and identifies its source part by label, type, and id, group
 <p>A script must return an object <code>{ value, state, response, badge }</code> — <code>response</code> and
 <code>badge</code> are both optional.</p>
 <ul>
-  <li><strong>value</strong> — what downstream connectors carry to their targets next tick.</li>
+  <li><strong>value</strong> — what downstream connectors carry to their targets next tick. Leaving it out (or
+  the tick simply not running) makes it <code>undefined</code> that tick — it does NOT keep showing whatever it
+  was last time; see <code>ctx.inputs[i].lastGoodValue</code> above if you want that behavior on the receiving
+  end instead.</li>
   <li><strong>state</strong> — carried forward to this same part's own <code>ctx.state</code> next tick.</li>
   <li><strong>response</strong> (optional) — a value sent <em>backward</em> to every node that feeds into this
   one, arriving as their <code>ctx.responses</code> one tick later. Useful for acknowledgement/feedback flows
@@ -960,8 +971,12 @@ for (const input of ctx.inputs) {
 return { value: sum, state: {} };</pre>
 
 <p>A part with no script (or script disabled) just passes a single input through unchanged if it has exactly
-one incoming connector, otherwise sits idle. A thrown error is caught per-part — that node keeps its last good
-value, the error is logged, and every other part still runs normally that tick.</p>
+one incoming connector, otherwise sits idle (its own <code>value</code> is <code>undefined</code> that tick,
+same as any other gap). A thrown error is caught per-part and is <strong>not</strong> hidden from downstream
+parts — that node's own <code>value</code> is <code>undefined</code> that tick too, its badge shows "ERR", the
+error is logged, and every other part still runs normally that tick. Its <code>lastGoodValue</code> still holds
+the last real reading, so anything reading THIS part via <code>ctx.inputs</code> can choose to fall back to that
+instead of reacting to the gap — the choice is the receiving script's, not the engine's.</p>
 
 <p>Simulation runs per <strong>Model</strong>, not per view, using every scripted part in that model regardless
 of which views currently show them — use the model selector next to the simulation Run/Pause/Step/Stop

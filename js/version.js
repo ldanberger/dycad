@@ -4968,4 +4968,41 @@
 // alignBySection assertions both proven via TEMP BREAK. DESIGN_DOCUMENT.md SS5.3 (two
 // new paragraphs) and tests/README.md updated; public/instructions.html's own Remap
 // section now names the two shipped presets. Full suite 184/184.
-export const APP_VERSION = '0.917';
+// v0.918: expanding the sim "packet protocol" (js/simulation.js), reported directly
+// across a multi-step design exchange: "lets expand on the sim packet protocol. Can
+// value and response be objects?" (confirmed already true) -> "can the changed flag ...
+// be baked into script handler instead of needing the script to track" -> a proposal to
+// make value behave like the already-transient response for consistency, which was
+// flagged as reversing the deliberate "never propagates undefined downstream from a
+// broken node" protection -> resolved with "can we retain last known good value in
+// addition to new value, which may be null if no value provided? thrown errors will
+// not be hidden downstream, up to script logic to see and respond accordingly -- which
+// may be to use last known good," then two confirmations: the node's own badge should
+// "blank the instant nothing's returned, should reflect last tick" (raw value, not
+// lastGoodValue), and "why [a value is missing] doesn't matter to consumer, will be
+// responsibility of sender to address problem" (no separate error signal exposed
+// downstream). A Part's raw `value` no longer auto-holds through a thrown error, an
+// idle tick, or a script that omits `value` -- it's undefined that tick, same as any
+// other gap, visible to a downstream part's ctx.inputs[i].value the very next tick. A
+// new `lastGoodValue` field (the Part's own runtime entry, and ctx.inputs[i].
+// lastGoodValue) persists the last actually-defined value across any number of gap
+// ticks, entirely opt-in for a script that wants the old "keep computing with
+// whatever's freshest" behavior. `response` gets the same treatment internally via a
+// new `lastGoodResponse` (ctx.responses[i] already only ever contains real deliveries,
+// so nothing new to expose there beyond a `changed` flag). `changed`/ctx.responses[i].
+// changed are now computed from this lastGood lineage with a recursive deep-equal
+// (new deepEqual helper), not reference equality, so an object/array with identical
+// content on two consecutive real deliveries doesn't spuriously read as changed, and a
+// gap tick never flips it on its own. Snapshot save/load (saveSimSnapshot/
+// loadSimSnapshot, version bumped to 3) round-trips both new fields. New
+// check_sim_value_no_auto_hold_and_last_good_tracking (tests/run_all.py): a 5-tick
+// sequence (fresh value, thrown error, identical-content recovery via a fresh object
+// reference, real content change, thrown error again) checked on the source part
+// directly and one tick downstream via ctx.inputs/ctx.responses, plus an unscripted
+// pass-through part mirroring the same raw blanking, plus the snapshot round-trip --
+// the entire auto-hold removal proven via TEMP BREAK (reintroducing the old
+// `resultValue = prevSelf?.value` carry). DESIGN_DOCUMENT.md SS8 (new paragraph),
+// tests/README.md, and public/instructions.html (ctx.inputs/ctx.responses table rows,
+// "what a script must return," and the error-handling paragraph) all updated. Full
+// suite 185/185.
+export const APP_VERSION = '0.918';

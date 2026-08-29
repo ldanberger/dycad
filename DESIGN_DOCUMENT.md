@@ -2326,15 +2326,53 @@ placed together on any view yet.
 ## 8. Simulation engine
 
 Per-model tick engine (`simulation.js`). `store.simRuntime: Map<modelName, {tick,
-values: Map<partId, {value, state, lastError}>}>`. Each tick, every scripted
-(`part.scriptEnabled`) Part in the selected model runs its script inside its own
-try/catch (one Part's error is logged and doesn't stop the others), receiving a `ctx`
-object (`part`, `inputs`, `responses`, `state`, `tick`, `log`, `secrets`, `setState`)
-and required to return `{value, state, response?, badge?}`. `response` values delivered
-this tick become the *sources'* `ctx.responses` next tick — the mechanism for
-acknowledgement/feedback flows running opposite the connector direction. A Part with no
-script and exactly one input passes it through unchanged. Full contract documented for
-end users in `public/instructions.html`.
+values: Map<partId, {value, lastGoodValue, state, lastError, response, lastGoodResponse,
+changed, responseChanged, badge}>}>`. Each tick, every scripted (`part.scriptEnabled`)
+Part in the selected model runs its script inside its own try/catch (one Part's error is
+logged and doesn't stop the others), receiving a `ctx` object (`part`, `inputs`,
+`responses`, `state`, `tick`, `log`, `secrets`, `setState`) and required to return
+`{value, state, response?, badge?}`. `response` values delivered this tick become the
+*sources'* `ctx.responses` next tick — the mechanism for acknowledgement/feedback flows
+running opposite the connector direction. A Part with no script and exactly one input
+passes it through unchanged. Full contract documented for end users in
+`public/instructions.html`.
+
+**Packet protocol: `value` never auto-holds, `lastGoodValue` does (Step 35)**: reported
+directly, expanding on `value`/`response` — *"can value and response be objects?"*, then
+*"can the changed flag ... be baked into script handler instead of needing the script to
+track"*, then — after a design pass on making `value` behave like the already-transient
+`response` for consistency, which was flagged as reversing a deliberate "never propagates
+undefined downstream from a broken node" protection — *"can we retain last known good
+value in addition to new value, which may be null if no value provided? thrown errors
+will not be hidden downstream, up to script logic to see and respond accordingly -- which
+may be to use last known good."* A Part's raw `value` this tick is `undefined` unless
+something actually produced one THIS tick (a script returning `value`, an unscripted
+single-input pass-through, or nothing at all for an idle node, an omitted `value`, or a
+thrown error — all read identically as "nothing this tick," confirmed directly: *"why
+doesn't matter to consumer, will be responsibility of sender to address problem,"* so no
+separate error signal is exposed downstream). `lastGoodValue` is a new, separately
+persisted field — the last value that was actually defined (`!== undefined && !== null`),
+held across any number of gap ticks — exposed both on the Part's own runtime entry and as
+`ctx.inputs[i].lastGoodValue`, so a script that wants the old "keep computing with
+whatever's freshest" behavior opts into it explicitly instead of the engine choosing on
+every script's behalf. `response` gets the same treatment via a new `lastGoodResponse`
+(internal — `ctx.responses[i]` already only ever contains real deliveries, so there's
+nothing new to expose in the payload itself). `changed`/`ctx.responses[i].changed` are
+now computed from this lastGood lineage with a recursive deep-equal (not `===`), so an
+object/array with identical content on two consecutive real deliveries doesn't
+spuriously read as changed, and a gap tick never flips it on its own. The node's own
+badge (`canvas.js`) reads raw `value`, unchanged — confirmed directly: *"blank the
+instant nothing's returned, should reflect last tick"* — only the separate "ERR" overlay
+(from `lastError`) still marks a broken node differently from an idle one. Snapshot
+save/load (`saveSimSnapshot`/`loadSimSnapshot`, version bumped to 3) now round-trips
+`lastGoodValue`/`lastGoodResponse` too. New
+`check_sim_value_no_auto_hold_and_last_good_tracking` (`tests/run_all.py`): a 5-tick
+sequence (fresh value, thrown error, identical-content recovery via a fresh object
+reference, real content change, thrown error again) checked on the source Part directly
+and one tick downstream via `ctx.inputs`/`ctx.responses`, plus an unscripted pass-through
+Part mirroring the same raw blanking, plus the snapshot round-trip — the entire auto-hold
+removal proven via TEMP BREAK (reintroducing the old `resultValue = prevSelf?.value`
+carry).
 
 **Common scripts callable from any part script**: reported directly — *"Create a common
 script in script console example that can be called from any part script. Within the
