@@ -84,6 +84,84 @@ def check_example_simulates(page):
     return True, "bundled example loaded and simulated 3 ticks with no errors"
 
 
+def check_ui_dashboard_elements_example(page):
+    """Regression guard/new-feature check for the new "ui dashboard elements demo.json"
+    example, reported directly: "create a new example file showing the new 4 UI
+    elements in a simulation." A "Pricing Calculator" BusinessFunction reads a bound
+    UINumericInput ("Base Price") and UITextInput ("Discount Code") via ctx.ui, and
+    writes a bound UINumericOutput ("Total Cost") and UITextOutput ("Status") — none
+    connected to it with a real connector (`connectors: []` in the file itself),
+    binding entirely via each element's own uiTargetPartId. Covers: the file is
+    listed in examples/index.json (so it's actually reachable from File > Load
+    Example, not just sitting in the directory unused); loads with no simulation
+    errors; all 4 dashboard elements are genuinely bound to the Calculator; the
+    shipped starting values (Base Price 100, code "SAVE10") produce the documented
+    10%-off result (90) on the very first tick, with the matching Status text;
+    and — proving the "try editing the Value field and Step again" instruction in
+    the file's own readme actually works — changing the Input's value and
+    stepping again recomputes the Output correctly (Base Price 50 -> 45)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+
+      const manifestRes = await fetch('public/examples/index.json', { cache: 'no-store' });
+      const manifest = await manifestRes.json();
+      const listedInManifest = manifest.includes('ui dashboard elements demo.json');
+
+      const res = await fetch('public/examples/ui dashboard elements demo.json', { cache: 'no-store' });
+      const obj = await res.json();
+      store.loadFromJSON(obj);
+      store.tabs = [];
+      const homeView = store.findView(store.currentView) || store.doc.views[0];
+      const tab = app.createCanvasTab(homeView);
+      app.switchToTab(tab.id);
+
+      const calc = store.doc.parts.find(p => p.label === 'Pricing Calculator');
+      const inPrice = store.doc.parts.find(p => p.label === 'Base Price');
+      const inCode = store.doc.parts.find(p => p.label === 'Discount Code');
+      const outTotal = store.doc.parts.find(p => p.label === 'Total Cost');
+      const outStatus = store.doc.parts.find(p => p.label === 'Status');
+      const allBound = [inPrice, inCode, outTotal, outStatus].every(w => w && w.uiTargetPartId === calc.id);
+      const noRealConnectors = store.doc.connectors.length === 0;
+
+      sim.stepSimulation(app, store.defaultModel);
+      const rt1 = store.simRuntime.get(store.defaultModel);
+      const totalTick1 = rt1.values.get(outTotal.id)?.value;
+      const statusTick1 = rt1.values.get(outStatus.id)?.value;
+      const errorsTick1 = [...rt1.values.values()].filter(v => v.lastError).map(v => v.lastError);
+
+      inPrice.uiInputValue = 50;
+      sim.stepSimulation(app, store.defaultModel);
+      const rt2 = store.simRuntime.get(store.defaultModel);
+      const totalAfterEdit = rt2.values.get(outTotal.id)?.value;
+
+      return {
+        listedInManifest, allBound, noRealConnectors,
+        totalTick1, statusTick1, errorsTick1, totalAfterEdit,
+      };
+    }
+    """)
+    problems = []
+    if not result["listedInManifest"]:
+        problems.append("expected 'ui dashboard elements demo.json' to be listed in examples/index.json")
+    if not result["allBound"]:
+        problems.append("expected all 4 dashboard elements to have uiTargetPartId pointing at the Pricing Calculator")
+    if not result["noRealConnectors"]:
+        problems.append("expected zero real connectors in the file -- binding is via uiTargetPartId, not connectors")
+    if result["errorsTick1"]:
+        problems.append(f"expected no simulation errors, got {result['errorsTick1']}")
+    if result["totalTick1"] != 90:
+        problems.append(f"expected the shipped starting values (Base Price 100, code SAVE10) to produce Total Cost 90 on tick 1, got {result['totalTick1']}")
+    if result["statusTick1"] != "Discount applied (SAVE10)":
+        problems.append(f"expected Status to read 'Discount applied (SAVE10)' on tick 1, got {result['statusTick1']!r}")
+    if result["totalAfterEdit"] != 45:
+        problems.append(f"expected editing Base Price to 50 and stepping again to produce Total Cost 45, got {result['totalAfterEdit']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The 'ui dashboard elements demo' example is reachable from File > Load Example, all 4 dashboard elements bind via uiTargetPartId with no real connectors, and the Pricing Calculator computes the documented discount correctly both on first load and after editing an Input"
+
+
 def check_sim_snapshot_rejects_pre_rebrand_tag(page):
     """Regression guard for a deliberate behavior change, reported directly: "update
     documentation, remove all reference to flowrun" (confirmed explicitly, not
@@ -14298,6 +14376,7 @@ def check_load_sfcce_dialog_ux_and_generate_unique_id(page):
 CHECKS = [
     check_boots_clean,
     check_example_simulates,
+    check_ui_dashboard_elements_example,
     check_sim_snapshot_rejects_pre_rebrand_tag,
     check_remap_patterns,
     check_remap_layered_pattern,

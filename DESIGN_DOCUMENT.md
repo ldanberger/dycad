@@ -2533,6 +2533,22 @@ model_binding` (the exact confirmed scenario above) — the cross-model routing,
 `ctx.ui` wiring itself, the badge override, `copyModel`'s binding remap, and the
 property panel field injection all proven via TEMP BREAK.
 
+**Example file**: `public/examples/ui dashboard elements demo.json` (listed in
+`examples/index.json`, File > Load Example), reported directly — *"create a new
+example file showing the new 4 UI elements in a simulation."* A "Pricing Calculator"
+`BusinessFunction` reads a bound `UINumericInput` ("Base Price") and `UITextInput`
+("Discount Code") and writes a bound `UINumericOutput` ("Total Cost") and
+`UITextOutput` ("Status") — `connectors: []` in the file itself, since binding is
+entirely `uiTargetPartId`, matching the design above. Ships with Base Price 100 and
+code "SAVE10" (a 10%-off total of 90 on the very first tick) so the effect is visible
+immediately without editing anything first; the readme also walks through editing an
+Input's Value field and Model Copy-ing the whole thing into a second, independently
+steppable model. New `check_ui_dashboard_elements_example` (`tests/run_all.py`):
+confirms the file is actually reachable from the manifest (proven via TEMP BREAK —
+removing it from `index.json`), loads with no simulation errors, all 4 elements are
+genuinely bound with zero real connectors, and the shipped values (plus an edited
+Input, re-stepped) both produce the documented, correct Total Cost.
+
 ## 9. The 3D View subsystem (`view3d.js`)
 
 A rotatable/zoomable WebGL scene over `store.doc.parts`/`connectors` directly —

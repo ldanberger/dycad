@@ -4889,4 +4889,21 @@
 // DOCUMENT.md SS8 (continuing v0.913's own forward reference) and tests/README.md
 // updated; public/instructions.html gets a new "UI dashboard elements" subsection
 // (Simulation Scripting). Full suite 180/180.
-export const APP_VERSION = '0.914';
+// v0.915: reported directly, "create a new example file showing the new 4 UI
+// elements in a simulation." New public/examples/ui dashboard elements demo.json
+// (listed in examples/index.json, File > Load Example): a "Pricing Calculator"
+// BusinessFunction reads a bound UINumericInput ("Base Price") and UITextInput
+// ("Discount Code") and writes a bound UINumericOutput ("Total Cost") and
+// UITextOutput ("Status") via ctx.ui -- connectors: [] in the file itself, since
+// binding is entirely uiTargetPartId, no real edges at all. Ships with Base Price
+// 100 and code "SAVE10" (a 10%-off total of 90 on the very first tick, no editing
+// needed to see the effect); the readme walks through editing an Input's Value field
+// and re-stepping, plus Model Copy-ing the whole thing into a second, independently
+// steppable model. New check_ui_dashboard_elements_example (tests/run_all.py):
+// confirms the file is reachable from the manifest (proven via TEMP BREAK), loads
+// with no simulation errors, all 4 elements are genuinely bound with zero real
+// connectors, and both the shipped values and an edited Input (re-stepped) produce
+// the correct, documented Total Cost. DESIGN_DOCUMENT.md SS8 and tests/README.md
+// updated; public/instructions.html's own "UI dashboard elements" subsection now
+// points at the example. Full suite 181/181.
+export const APP_VERSION = '0.915';

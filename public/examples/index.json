@@ -8,5 +8,6 @@
   "createPart demo.json",
   "createNode demo.json",
   "pipeline demo.json",
-  "smart factory 3d demo.json"
+  "smart factory 3d demo.json",
+  "ui dashboard elements demo.json"
 ]
