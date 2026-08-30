@@ -5181,4 +5181,14 @@
 // hidden->B connectors pulled in by missingConnectors instead -- once `hidden` is
 // also present and the chain is fully shown -- proven via TEMP BREAK.
 // DESIGN_DOCUMENT.md SS5.5 (new paragraph) and tests/README.md updated.
-export const APP_VERSION = '0.923';
+// v0.924: reported directly — "update the main script, change the messageLog line to
+// now be: messageLog('################################# example 2 created, now run
+// smart check view (missing connectors; derive connectors) and ##############
+// remap (enterprise; layered; minimum crossings; minimum connector length;
+// connectorOrder, streamOrder, streamName, entityType, nodeLevel, elementGroup)
+// #################################');" -- BatchScript_QuickStart's own reminder
+// (state.js, logged by main() after InsertSmartStreamExample2) now wraps the same
+// exact settings text in '#' banners, for more visual prominence in the Message Log.
+// check_batch_script_quickstart's own messageLogHasReminder assertion (tests/run_all.py)
+// updated to the exact new text.
+export const APP_VERSION = '0.924';

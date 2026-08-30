@@ -2484,7 +2484,7 @@ def check_batch_script_quickstart(page):
         streamExample2PartCount: streamVms2.length,
         streamExample2SingleTab: streamTabsForView2.length === 1,
         streamExample2TabIsActive: streamTabsForView2.length ? store.activeTabId === streamTabsForView2[0].id : false,
-        messageLogHasReminder: store.messageLog.some(e => JSON.stringify(e).includes('example 2 created, now run smart check view (missing connectors; derive connectors) and remap (enterprise; layered; minimum crossings; minimum connector length; connectorOrder, streamOrder, streamName, entityType, nodeLevel, elementGroup)')),
+        messageLogHasReminder: store.messageLog.some(e => JSON.stringify(e).includes('################################# example 2 created, now run smart check view (missing connectors; derive connectors) and ############## remap (enterprise; layered; minimum crossings; minimum connector length; connectorOrder, streamOrder, streamName, entityType, nodeLevel, elementGroup) #################################')),
       };
     }
     """)

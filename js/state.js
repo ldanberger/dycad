@@ -60,7 +60,7 @@ async function main() {
   await BatchScript_SmartCheckViewExample();
   await BatchScript_RemapExample();
   await BatchScript_InsertSmartStreamExample2();
-  messageLog('example 2 created, now run smart check view (missing connectors; derive connectors) and remap (enterprise; layered; minimum crossings; minimum connector length; connectorOrder, streamOrder, streamName, entityType, nodeLevel, elementGroup)');
+  messageLog('################################# example 2 created, now run smart check view (missing connectors; derive connectors) and ############## remap (enterprise; layered; minimum crossings; minimum connector length; connectorOrder, streamOrder, streamName, entityType, nodeLevel, elementGroup) #################################');
   return;
 }
 
