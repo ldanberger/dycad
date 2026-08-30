@@ -343,14 +343,38 @@ function createStream(app, {
   // Actor/Role would ordinarily relate to a Business Function it performs. Runs after
   // BOTH the main chain loop and the passive loop above, since the function node can
   // come from either one depending on the template's own shape.
+  //
+  // Streams tracking (fixed post-Step-40 bug report): "connectors type 'c' are created
+  // from business organization unit to business function, but not of type 's' and
+  // business organization unit does not contain streams." The OrgUnit part and its
+  // connector to the function used to be the ONE part/edge this function creates that
+  // never tagged streamName onto anything — every other part/edge above does, via the
+  // same create-with-streams / reuse-then-push convention. A genuine 's' companion
+  // connector (mirroring the pattern every OTHER edge in this function uses) was tried
+  // and reverted: insertSmartStream's own traversal (connsByPart, above) walks ANY
+  // connector of the chosen connectorType regardless of the OTHER endpoint's type — so
+  // a real 's' edge here turns every OrgUnit into a graph bridge between EVERY function
+  // it's assigned to, even when those functions are otherwise unrelated. Confirmed as a
+  // real, large regression, not a theoretical one: check_remap_layered_avoids_node_
+  // occlusion's own real generateIndustry -> insertSmartStream('Production') ->
+  // smartCheckView -> remap('layered') pipeline pulled in 91 parts / 126 connector
+  // viewMembers with the 's' edge present, vs 13 parts / 18 without it — a Smart Stream
+  // trace starting at ONE function transitively swept in every other function sharing
+  // its Section. So this stays connectorType 'c' only, deliberately NOT routed through
+  // findOrCreateStreamConnector/createCompanionConnector either (that pair's companion
+  // relationship is inferred from the generic type-pair default, a DIFFERENT relation
+  // key than Assignment here) — just the existing 'c' connector, now also tagged with
+  // streamName the same way every other edge in this function is.
   if (functionSection && functionPart) {
     const orgUnitKey = `${functionSection}|BusinessOrganizationUnit|${modelName}`.toLowerCase();
     let orgUnitPart = lookupCache
       ? lookupCache.partsByKey.get(orgUnitKey)
       : store.doc.parts.find((p) => ciEq(p.label, functionSection) && ciEq(p.type, 'BusinessOrganizationUnit') && ciEq(p.model, modelName));
     if (!orgUnitPart) {
-      orgUnitPart = store.createPart({ type: 'BusinessOrganizationUnit', label: functionSection, model: modelName, streams: [], note: 'org unit', order: 0, other: {}, section: functionSection, description: sectionDescription, xIds: sectionId });
+      orgUnitPart = store.createPart({ type: 'BusinessOrganizationUnit', label: functionSection, model: modelName, streams: [streamName], note: 'org unit', order: 0, other: {}, section: functionSection, description: sectionDescription, xIds: sectionId });
       if (lookupCache) cacheRegisterPart(lookupCache, orgUnitPart);
+    } else if (!(orgUnitPart.streams || []).includes(streamName)) {
+      orgUnitPart.streams = [...(orgUnitPart.streams || []), streamName];
     }
 
     let orgUnitVm = null;
@@ -371,14 +395,18 @@ function createStream(app, {
       }
     }
 
+    const assignRel = (store.settings.relations || []).find((r) => r.key === 'i'); // Assignment
+    const assignRelName = assignRel?.name || 'Assignment';
+
     const orgUnitConnKey = `${orgUnitPart.id}|${functionPart.id}|${modelName}`.toLowerCase();
     let orgUnitConn = lookupCache
       ? lookupCache.plainConnsByFromTo.get(orgUnitConnKey)
       : store.findExistingConnector(orgUnitPart.id, functionPart.id, modelName, 'c');
     if (!orgUnitConn) {
-      const assignRel = (store.settings.relations || []).find((r) => r.key === 'i'); // Assignment
-      orgUnitConn = store.createConnector({ from: orgUnitPart.id, to: functionPart.id, model: modelName, connectorType: 'c', relationship: assignRel?.name || 'Assignment' });
+      orgUnitConn = store.createConnector({ from: orgUnitPart.id, to: functionPart.id, model: modelName, connectorType: 'c', relationship: assignRelName, streams: [streamName] });
       if (lookupCache) cacheRegisterPlainConn(lookupCache, orgUnitConn);
+    } else if (!(orgUnitConn.streams || []).includes(streamName)) {
+      orgUnitConn.streams = [...(orgUnitConn.streams || []), streamName];
     }
 
     if (placeInView) {

@@ -5024,4 +5024,36 @@
 // -- proven via TEMP BREAK. DESIGN_DOCUMENT.md SS5.8 (retitled, new paragraph),
 // tests/README.md, and public/instructions.html's own "Toolkit filters" bullet
 // updated. Full suite 186/186.
-export const APP_VERSION = '0.919';
+// v0.920: reported directly, on a new file after Generate Industry — "a connectors
+// type 'c' are created from business organization unit to business function, but not
+// of type 's' and business organization unit does not contain streams. For example
+// business operation unit 'Mainstream Operation Functions' to business function
+// 'Production'." Traced to createStream's Business Organization Unit reification
+// block (commands.js, ~SS7.3 DESIGN_DOCUMENT.md): every OTHER part/connector this
+// function creates or reuses tags streamName onto itself (streams: [streamName] on
+// create, part.streams = [...streams, streamName] on reuse), but the OrgUnit block was
+// a hand-rolled one-off that never carried this over -- the OrgUnit part was created
+// with streams: [] and never updated on reuse, and its Assignment connector had no
+// streams field at all. Fixed: the OrgUnit part now tags streamName on create and
+// reuse, and its existing 'c' Assignment connector now does too.
+// A genuine connectorType 's' companion (matching the pattern every OTHER edge in this
+// function uses) was tried first, per the user's explicit choice, then REVERTED after
+// a real regression: insertSmartStream's own traversal (connsByPart, commands.js)
+// walks ANY connector of the chosen connectorType regardless of the other endpoint's
+// type -- so a real 's' edge here turned every OrgUnit into a graph bridge across
+// every function it's assigned to, even unrelated ones. Confirmed as large and real,
+// not theoretical: check_remap_layered_avoids_node_occlusion's own real
+// generateIndustry -> insertSmartStream('Production') -> smartCheckView ->
+// remap('layered') pipeline pulled in 91 parts / 126 connector viewMembers with the
+// 's' edge present, vs 13/18 without it. So this stays connectorType 'c' only, still
+// deliberately NOT routed through findOrCreateStreamConnector/createCompanionConnector
+// either (that pair's companion relationship is inferred from the generic type-pair
+// default, a DIFFERENT relation key than Assignment here, which would have silently
+// replaced this connector's deliberate ArchiMate semantics).
+// check_business_organization_unit_element_and_generation (tests/run_all.py) extended:
+// the OrgUnit part's own streams is the union across every function sharing it, each
+// 'c' connector carries only its own function's stream name, idempotent re-runs don't
+// duplicate it, and a guard confirms NO 's' connector gets created here -- all proven
+// via TEMP BREAK. DESIGN_DOCUMENT.md SS7.3 (new paragraph), tests/README.md, and
+// public/instructions.html's own Load SFCCE table row updated. Full suite 186/186.
+export const APP_VERSION = '0.920';

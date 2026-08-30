@@ -10316,7 +10316,22 @@ def check_business_organization_unit_element_and_generation(page):
     to the function it's responsible for, and placed on the view; re-running
     generateIndustry is idempotent (no duplicate OrgUnits or connectors); and this
     only ever triggers via generateIndustry (Load SFCCE / built-in industries), never
-    the plain manual Generate Stream dialog, which has no section concept at all."""
+    the plain manual Generate Stream dialog, which has no section concept at all. (4)
+    Step 40 follow-up, reported directly: "connectors type 'c' are created from
+    business organization unit to business function, but not of type 's' and business
+    organization unit does not contain streams" -- the OrgUnit part now carries every
+    stream flowing through any function it's assigned to, and the existing 'c'
+    Assignment connector now carries the specific stream name(s) for its own function
+    too -- covers this across two functions sharing one OrgUnit (union of both stream
+    names on the part, each connector only its own). Does NOT also add a connectorType
+    's' companion (tried, then reverted): insertSmartStream's own traversal walks ANY
+    connector of the chosen connectorType regardless of the other endpoint's type, so a
+    real 's' edge here turns every OrgUnit into a graph bridge across every function
+    sharing it -- confirmed as a large real regression (91 parts / 126 connector
+    viewMembers pulled into check_remap_layered_avoids_node_occlusion's own real
+    generateIndustry -> insertSmartStream('Production') pipeline, vs 13/18 without it)
+    rather than a theoretical concern, so this also guards that NO 's' connector is
+    created here."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -10359,6 +10374,21 @@ def check_business_organization_unit_element_and_generation(page):
       // would never see.
       const allOrgUnitsAfterFirst = store.doc.parts.filter(p => p.type === 'BusinessOrganizationUnit');
       const assignConnsAfterFirst = store.doc.connectors.filter(c => c.connectorType === 'c' && c.relationship === 'Assignment' && orgUnitsAfterFirst.some(o => o.id === c.from));
+      // Step 40: both the OrgUnit part and its Assignment connector must carry the
+      // stream name(s) actually flowing through it -- reported directly: "connectors
+      // type 'c' are created from business organization unit to business function, but
+      // not of type 's' and business organization unit does not contain streams."
+      // Deliberately does NOT also add a connectorType 's' companion (tried and
+      // reverted -- see createStream's own comment, commands.js: insertSmartStream's
+      // traversal walks ANY 's' connector regardless of the other endpoint's type, so a
+      // real 's' edge here turns every OrgUnit into a graph bridge between every
+      // function it's assigned to, confirmed as a large real regression against
+      // check_remap_layered_avoids_node_occlusion's own pipeline) -- so this also
+      // guards that NO 's' connector gets created here, not just that streams get
+      // tagged onto the 'c' one.
+      const streamConnsAfterFirst = store.doc.connectors.filter(c => c.connectorType === 's' && orgUnitsAfterFirst.some(o => o.id === c.from));
+      const orgUnitStreamsAfterFirst = orgUnitsAfterFirst[0] ? [...(orgUnitsAfterFirst[0].streams || [])].sort() : [];
+      const cConnStreamsAfterFirst = assignConnsAfterFirst.map(c => [...(c.streams || [])]).sort();
       const orgUnitVms = store.viewMembersForView(view.id).filter(v => v.objectType === 'part' && orgUnitsAfterFirst.some(o => o.id === v.objectId));
 
       // Re-run: must reuse the same OrgUnit and not duplicate the Assignment connectors.
@@ -10372,6 +10402,8 @@ def check_business_organization_unit_element_and_generation(page):
         orgUnitCountAfterFirst: orgUnitsAfterFirst.length,
         allOrgUnitCountAfterFirst: allOrgUnitsAfterFirst.length,
         assignConnCountAfterFirst: assignConnsAfterFirst.length,
+        streamConnCountAfterFirst: streamConnsAfterFirst.length,
+        orgUnitStreamsAfterFirst, cConnStreamsAfterFirst,
         orgUnitVmCount: orgUnitVms.length,
         orgUnitCountAfterSecond: orgUnitsAfterSecond.length,
         assignConnCountAfterSecond: assignConnsAfterSecond.length,
@@ -10409,9 +10441,15 @@ def check_business_organization_unit_element_and_generation(page):
         problems.append(f"expected OrgUnit count unchanged on re-run, got {result['orgUnitCountAfterFirst']} -> {result['orgUnitCountAfterSecond']}")
     if result["assignConnCountAfterSecond"] != result["assignConnCountAfterFirst"]:
         problems.append(f"expected Assignment connector count unchanged on re-run (no duplicates), got {result['assignConnCountAfterFirst']} -> {result['assignConnCountAfterSecond']}")
+    if result["streamConnCountAfterFirst"] != 0:
+        problems.append(f"expected NO connectorType 's' connector from the OrgUnit (would turn it into a graph bridge across every function sharing it, breaking insertSmartStream traversal) — only 'c', got {result['streamConnCountAfterFirst']}")
+    if result["orgUnitStreamsAfterFirst"] != ["RegrOUEntA", "RegrOUEntB"]:
+        problems.append(f"expected the OrgUnit part's own streams to include both functions' stream names, got {result['orgUnitStreamsAfterFirst']}")
+    if result["cConnStreamsAfterFirst"] != [["RegrOUEntA"], ["RegrOUEntB"]]:
+        problems.append(f"expected each 'c' Assignment connector to carry its own function's stream name, got {result['cConnStreamsAfterFirst']}")
     if problems:
         return False, "; ".join(problems)
-    return True, "BusinessOrganizationUnit is a real Business-group element with a distinct oval icon and mirrored Business Actor relations, and generateIndustry now reifies each function's section as a shared, Assignment-connected OrgUnit part instead of only a string tag, idempotently across re-runs"
+    return True, "BusinessOrganizationUnit is a real Business-group element with a distinct oval icon and mirrored Business Actor relations, and generateIndustry now reifies each function's section as a shared, Assignment-connected OrgUnit part instead of only a string tag, now correctly stream-tagged (both the OrgUnit part and its 'c' connector) without adding a connectorType 's' companion that would wrongly bridge unrelated functions via insertSmartStream traversal, idempotently across re-runs"
 
 
 def check_level_down_single_creates_new_part(page):

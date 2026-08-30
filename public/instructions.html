@@ -447,7 +447,10 @@ canvas. Availability depends on what's selected — greyed out means the current
     same Section, so the Section filter shows the whole related chain, not just the Function itself. Each
     distinct Section also gets its own <strong>Business Organization Unit</strong> node generated (reused, not
     duplicated, across every Function that shares it), Assignment-connected to the Function(s) it's
-    responsible for — a real, visible node representing the section itself, not just a filterable tag.
+    responsible for — a real, visible node representing the section itself, not just a filterable tag. Both
+    the node and its Assignment connector pick up every stream that flows through the Function(s) it's
+    assigned to, so it stays visible when a view is filtered down to one of those streams instead of
+    disappearing.
     Every level (Section, Function, Capability, Application Capability, Entity) can also optionally map a
     Description field and an Id field — an unmapped Id falls back to an auto-generated one, while a mapped
     Id gives that node a real, stable identity (so re-generating later reuses it instead of creating a

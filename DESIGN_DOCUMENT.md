@@ -1797,6 +1797,43 @@ built-in default dataset (§7.5), which now also carries real section values; th
 manual Generate Stream dialog never passes a `functionSection` at all, so it's
 completely unaffected.
 
+**A third, real gap caught after shipping (Step 40)**: reported directly — *"a
+connectors type 'c' are created from business organization unit to business function,
+but not of type 's' and business organization unit does not contain streams."* Every
+OTHER part/connector `createStream` touches (the main chain, every `passive[]` node,
+every edge between them via `findOrCreateStreamConnector`) follows the SAME
+`streams: [streamName]`-on-create / `part.streams = [...streams, streamName]`-on-reuse
+convention — but the OrgUnit block above was written as a genuine one-off (hand-rolled
+find-or-create for both the part and its `'c'` connector, not routed through that
+shared helper) and simply never carried it over: the OrgUnit part was created with
+`streams: []` and never updated on reuse, and its Assignment connector was created with
+no `streams` at all. Fixed by tagging `streamName` onto both (create AND reuse, same as
+everywhere else).
+
+A genuine `connectorType: 's'` companion alongside the existing `'c'` one (matching the
+pattern every OTHER edge in this function uses) was tried and reverted after a real
+regression surfaced: `insertSmartStream`'s own traversal (`connsByPart`, `commands.js`)
+walks ANY connector of the chosen `connectorType` regardless of what the OTHER endpoint
+is, with no `showTypes` filtering during the walk itself (only when deciding what to
+actually place) — so a real `'s'` edge here turns every OrgUnit into a graph bridge
+between EVERY function it's assigned to, even when those functions are otherwise
+unrelated. Confirmed against `check_remap_layered_avoids_node_occlusion`'s own real
+`generateIndustry → insertSmartStream('Production') → smartCheckView → remap('layered')`
+pipeline: with the `'s'` edge present, a trace starting at ONE function pulled in 91
+parts / 126 connector viewMembers (every other function sharing "Mainstream Operational
+Functions"' section, and everything reachable from each of them) versus 13/18 without
+it — not a theoretical concern. So this stays `connectorType: 'c'` only, still
+deliberately NOT routed through `findOrCreateStreamConnector`/`createCompanionConnector`
+either (that pair's companion relationship is inferred from `findRelationshipPair`'s
+generic type-pair default, a DIFFERENT relation key than `'i'`/Assignment here, which
+would have silently replaced this connector's deliberate ArchiMate semantics) — just the
+one existing `'c'` connector, now also stream-tagged. `check_business_organization_
+unit_element_and_generation` (`tests/run_all.py`) extended: the OrgUnit part's own
+`streams` is the union across every function sharing it, each `'c'` connector carries
+only its own function's stream name, idempotent re-runs don't duplicate either, and a
+guard confirms NO `connectorType: 's'` connector gets created here — all proven via
+TEMP BREAK.
+
 ### 7.4 SFCE Catalog page
 
 `flattenIndustryTree(tree)` turns any tree (Load SFCE's or the built-in default's)
