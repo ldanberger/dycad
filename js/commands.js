@@ -349,22 +349,25 @@ function createStream(app, {
   // business organization unit does not contain streams." The OrgUnit part and its
   // connector to the function used to be the ONE part/edge this function creates that
   // never tagged streamName onto anything — every other part/edge above does, via the
-  // same create-with-streams / reuse-then-push convention. A genuine 's' companion
-  // connector (mirroring the pattern every OTHER edge in this function uses) was tried
-  // and reverted: insertSmartStream's own traversal (connsByPart, above) walks ANY
-  // connector of the chosen connectorType regardless of the OTHER endpoint's type — so
-  // a real 's' edge here turns every OrgUnit into a graph bridge between EVERY function
-  // it's assigned to, even when those functions are otherwise unrelated. Confirmed as a
-  // real, large regression, not a theoretical one: check_remap_layered_avoids_node_
-  // occlusion's own real generateIndustry -> insertSmartStream('Production') ->
-  // smartCheckView -> remap('layered') pipeline pulled in 91 parts / 126 connector
-  // viewMembers with the 's' edge present, vs 13 parts / 18 without it — a Smart Stream
-  // trace starting at ONE function transitively swept in every other function sharing
-  // its Section. So this stays connectorType 'c' only, deliberately NOT routed through
-  // findOrCreateStreamConnector/createCompanionConnector either (that pair's companion
-  // relationship is inferred from the generic type-pair default, a DIFFERENT relation
-  // key than Assignment here) — just the existing 'c' connector, now also tagged with
-  // streamName the same way every other edge in this function is.
+  // same create-with-streams / reuse-then-push convention. Fixed with a genuine 's'
+  // companion connector (mirroring the pattern every OTHER edge in this function uses),
+  // both connector types tagged with streamName. This DOES turn each OrgUnit into a
+  // real graph bridge between every function it's assigned to for any 's'-connectorType
+  // traversal (insertSmartStream, connector-levels expansion) — confirmed directly
+  // against check_remap_layered_avoids_node_occlusion's own real generateIndustry ->
+  // insertSmartStream('Production') -> smartCheckView -> remap('layered') pipeline,
+  // which pulls in 91 parts / 126 connector viewMembers with this edge present vs 13/18
+  // without it — confirmed as the INTENDED behavior (an org unit really does connect
+  // everything it's responsible for), not a bug to route around. Deliberately NOT
+  // routed through findOrCreateStreamConnector/createCompanionConnector (the pattern
+  // every other edge in this function uses): that pair's companion 'c' relationship is
+  // inferred from the generic type-pair default, a DIFFERENT relation key than
+  // Assignment here — using it would silently replace this connector's deliberate
+  // ArchiMate semantics, and its 's'-side lookup wouldn't recognize an already-existing
+  // pre-fix 'c' Assignment connector in an OLDER document (different connectorType),
+  // risking a duplicate parallel edge there. Instead both connector types are
+  // found-or-created independently, right here, each keeping the SAME "Assignment"
+  // relationship.
   if (functionSection && functionPart) {
     const orgUnitKey = `${functionSection}|BusinessOrganizationUnit|${modelName}`.toLowerCase();
     let orgUnitPart = lookupCache
@@ -409,13 +412,25 @@ function createStream(app, {
       orgUnitConn.streams = [...(orgUnitConn.streams || []), streamName];
     }
 
+    let orgUnitStreamConn = lookupCache
+      ? lookupCache.connsByFromToModel.get(orgUnitConnKey)
+      : store.findExistingConnector(orgUnitPart.id, functionPart.id, modelName, 's');
+    if (!orgUnitStreamConn) {
+      orgUnitStreamConn = store.createConnector({ from: orgUnitPart.id, to: functionPart.id, model: modelName, connectorType: 's', relationship: assignRelName, streams: [streamName] });
+      if (lookupCache) cacheRegisterStreamConn(lookupCache, orgUnitStreamConn);
+    } else if (!(orgUnitStreamConn.streams || []).includes(streamName)) {
+      orgUnitStreamConn.streams = [...(orgUnitStreamConn.streams || []), streamName];
+    }
+
     if (placeInView) {
-      const orgUnitConnVm = lookupCache
-        ? lookupCache.connVmsByConnView.get(`${orgUnitConn.id}|${view.id}`)
-        : store.doc.viewMembers.find((v) => v.objectType === 'connector' && ciEq(v.objectId, orgUnitConn.id) && ciEq(v.view, view.id));
-      if (!orgUnitConnVm) {
-        const connVm = store.createViewMember({ view: view.id, objectType: 'connector', objectId: orgUnitConn.id, fromVmId: orgUnitVm.id, toVmId: functionVm.id });
-        if (lookupCache) cacheRegisterConnVm(lookupCache, connVm);
+      for (const conn of [orgUnitConn, orgUnitStreamConn]) {
+        const connVm = lookupCache
+          ? lookupCache.connVmsByConnView.get(`${conn.id}|${view.id}`)
+          : store.doc.viewMembers.find((v) => v.objectType === 'connector' && ciEq(v.objectId, conn.id) && ciEq(v.view, view.id));
+        if (!connVm) {
+          const newConnVm = store.createViewMember({ view: view.id, objectType: 'connector', objectId: conn.id, fromVmId: orgUnitVm.id, toVmId: functionVm.id });
+          if (lookupCache) cacheRegisterConnVm(lookupCache, newConnVm);
+        }
       }
     }
   }
@@ -3076,6 +3091,38 @@ function insertSmartStream(app, tab, options) {
     connsByPart.get(c.to).push(c);
   }
 
+  // Stream-continuity gate (fixed post-Step-40 bug report, second pass): reported
+  // directly, on top of a real regression the first attempt at this fix caused — "what
+  // about using both directions but in addition to being either 'to' or 'from', the
+  // candidate node is checked for stream membership." A first attempt made "upstream"/
+  // "downstream" strictly direction-consistent per BFS pass (never switching direction
+  // mid-walk), which correctly stopped fan-out through a Business Organization Unit
+  // hub (nothing points TO an OrgUnit, so upstream traversal naturally terminates
+  // there) — but ALSO broke a genuinely legitimate zigzag the Enterprise template's own
+  // chain relies on: Production (BusinessFunction) --downstream--> its own Process
+  // (passive pair) <--upstream-- Capability <--upstream-- Service <--upstream--
+  // GeneralActor is how BatchScript_InsertSmartStreamExample's shipped trace was
+  // always reaching GeneralActor, and strict per-pass direction broke it. Direction
+  // handling here is therefore back to a plain PER-EDGE check (exactly as before
+  // Step 40 — any edge touching the current frontier node counts, in whichever
+  // direction(s) were requested), and a SEPARATE, independent requirement is added
+  // instead: a newly-discovered candidate part must share at least one stream with the
+  // seed part(s) to be included. This is what actually distinguishes "still part of
+  // THIS function's own generated chain" (every part createStream tagged with the SAME
+  // streamName, regardless of which direction connects them) from "an unrelated
+  // sibling function reached only by transiting a shared Organization Unit" (a
+  // disjoint streams set) — the OrgUnit itself still passes (its own streams are the
+  // union of every function it's assigned to, which includes the seed's), but walking
+  // onward from it into a SIBLING function's own chain does not, since that function's
+  // streams don't overlap the seed's. Skipped entirely when the seed(s) carry no
+  // streams at all (a manually-built graph with no stream tagging) — falls back to
+  // plain direction-based traversal, unchanged, so this is purely an ADDITIONAL
+  // narrowing for stream-tagged data, never a new restriction for untagged graphs. A
+  // part already collected (via any other path) is never re-gated — the gate only ever
+  // decides whether to admit a part for the FIRST time.
+  const seedStreams = new Set(seeds.flatMap((p) => p.streams || []));
+  const streamGateActive = seedStreams.size > 0;
+
   const collectedPartIds = new Set(seeds.map((p) => p.id));
   const collectedConnIds = new Set();
   let frontier = new Set(seeds.map((p) => p.id));
@@ -3087,8 +3134,13 @@ function insertSmartStream(app, tab, options) {
         const otherId = c.from === presentId ? c.to : c.from;
         const edgeIsDownstream = c.from === presentId;
         if (!(edgeIsDownstream ? downstream : upstream)) continue;
+        const alreadyCollected = collectedPartIds.has(otherId);
+        if (!alreadyCollected && streamGateActive) {
+          const otherStreams = store.findPart(otherId)?.streams || [];
+          if (!otherStreams.some((s) => seedStreams.has(s))) continue;
+        }
         collectedConnIds.add(c.id);
-        if (!collectedPartIds.has(otherId)) {
+        if (!alreadyCollected) {
           collectedPartIds.add(otherId);
           nextFrontier.add(otherId);
         }

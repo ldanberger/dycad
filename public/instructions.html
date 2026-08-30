@@ -358,7 +358,12 @@ canvas. Availability depends on what's selected — greyed out means the current
     types actually present in the current default model, and defaulting to all of them checked). Starting from
     the checked instance(s), it follows connectors of the chosen Connector Type in the
     chosen direction(s) up to the level limit — a part matching the Ending Element type is still included but
-    doesn't itself propagate any further, so other branches keep expanding independently. The result is then
+    doesn't itself propagate any further, so other branches keep expanding independently. If the starting
+    part(s) carry any Streams (Root Properties), a newly-found part must share at least one of those same
+    Streams to be included — this keeps a trace scoped to the starting part's own story even when a shared
+    "hub" part (like a Business Organization Unit assigned to several Functions) is on the path, rather than
+    wandering into an unrelated Function's own chain just because it's reachable. Starting from a part with no
+    Streams at all traces normally with no such restriction. The result is then
     narrowed to only the checked element types (a connector is only placed if both its endpoints survived that
     narrowing), and only genuinely new parts/connectors get added — anything already on the view is left alone.
     Since only real, existing connectors are ever placed, they keep whatever line/arrowhead styling their own
@@ -448,9 +453,12 @@ canvas. Availability depends on what's selected — greyed out means the current
     distinct Section also gets its own <strong>Business Organization Unit</strong> node generated (reused, not
     duplicated, across every Function that shares it), Assignment-connected to the Function(s) it's
     responsible for — a real, visible node representing the section itself, not just a filterable tag. Both
-    the node and its Assignment connector pick up every stream that flows through the Function(s) it's
-    assigned to, so it stays visible when a view is filtered down to one of those streams instead of
-    disappearing.
+    the node and its Assignment connector (one plain, one Stream-type, same relationship) pick up every stream
+    that flows through the Function(s) it's assigned to, so it stays visible when a view is filtered down to
+    one of those streams instead of disappearing. Because the Stream-type connector is real, an OrgUnit shared
+    by several Functions genuinely connects them in the underlying graph, not just visually — Insert Smart
+    Stream's own stream-continuity check (below) is what keeps a trace starting at one Function from wandering
+    into a sibling Function's own chain just because they share an Organization Unit.
     Every level (Section, Function, Capability, Application Capability, Entity) can also optionally map a
     Description field and an Id field — an unmapped Id falls back to an auto-generated one, while a mapped
     Id gives that node a real, stable identity (so re-generating later reuses it instead of creating a

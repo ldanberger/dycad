@@ -468,6 +468,46 @@ checkbox are unaffected by this option too — they're placed through their own 
 code path (`createDerivedConnectorPairs`'s returned list, above), never through the
 `missingConnectors` pull-in loops this option gates.
 
+**`insertSmartStream`'s own collection BFS — stream-continuity gate (Step 40)**: a real
+bug surfaced once §7.3's Business Organization Unit part gained a genuine `connectorType:
+'s'` Assignment edge to every Function it's assigned to — an OrgUnit is legitimately a
+graph hub, and `direction: 'both'` traversal (`BatchScript_InsertSmartStreamExample`'s
+own default) started walking straight through it into every unrelated sibling Function,
+not just the seed's own chain (91 parts pulled into one trace instead of 13). A first fix
+made `'upstream'`/`'downstream'` strictly direction-consistent per BFS pass (once a pass
+starts walking `'to'`-edges, it only ever continues via `'to'`-edges, never switching to
+`'from'` mid-walk, and vice versa) — this correctly stopped the OrgUnit fan-out (nothing
+points TO an OrgUnit, so upstream traversal naturally dead-ends there) but ALSO broke a
+genuinely legitimate zigzag the Enterprise template's own chain relies on: reaching
+`GeneralActor` from a Function requires going downstream to its passive `BusinessProcess`
+pair, then upstream through `BusinessCapability` and `BusinessService` — two independent
+chains (the Function's own passive link, and the template's actor→...→process main
+chain) that converge at the same Process node. Direction-consistency broke that
+convergence, confirmed directly against `check_batch_script_quickstart`'s own shipped
+"Smart Stream Example" losing every `GeneralActor`.
+
+Resolved with a different, orthogonal gate instead of touching direction at all: direction
+reverted to the original PER-EDGE check (any edge touching the frontier node counts, in
+whichever direction(s) were requested — full zigzag restored), and a NEWLY-discovered
+candidate part must now ALSO share at least one `streams` entry with the seed part(s) to
+be admitted. This is the actual distinguishing signal between "still this Function's own
+generated chain" (every part `createStream` touches for one job shares that job's exact
+`streamName`, regardless of which direction the connector runs) and "an unrelated sibling
+reached only by transiting a shared hub" (a disjoint `streams` set) — the OrgUnit ITSELF
+still passes the gate (its own `streams` is the union of every Function assigned to it,
+which includes the seed's), but walking onward from it into a sibling's own chain does
+not, since that sibling's `streams` don't overlap the seed's. The gate is computed once,
+from the seed(s)' own `streams` union, and is skipped ENTIRELY when that union is empty —
+a manually-built graph with no stream tagging at all traces exactly as it always did,
+this is purely an additional narrowing that only ever activates for stream-tagged data.
+An already-collected part is never re-gated (the check only ever decides admission the
+FIRST time a part is discovered). New `check_insert_smart_stream_stream_continuity_gate`
+(`tests/run_all.py`): a small synthetic hub graph (seed --downstream--> B <--upstream--
+C, all sharing one stream; a hub D --upstream of seed--, sharing that stream too since
+it's a union; D --downstream--> sibling E, a DISJOINT stream) proves the zigzag is
+admitted and the sibling is blocked, plus a fully untagged pair proving the gate stays
+inactive without any seed streams — proven via TEMP BREAK.
+
 ### 5.6 The Filters panel (right column)
 
 Reported directly: *"In the right column above properties add a new collapsable group
@@ -952,6 +992,24 @@ accepting to eliminate one. New `check_remap_layered_avoids_node_occlusion`
 EVERY connector's straight-line path against EVERY other node's bounding box for
 genuine geometric intersection — proven via TEMP BREAK to reproduce all 4 real
 overlaps before this criterion existed, then reverted.
+
+**Latent limitation, surfaced then no longer triggered (Step 40)**: `transposeAll`'s
+local, adjacent-columns-only swap heuristic doesn't reliably reach zero occlusions once
+several same-row Function/Process pairs land on one row at once (as opposed to the 1–2
+pairs the fix above was built and tested against) — briefly confirmed via
+`check_remap_layered_avoids_node_occlusion`'s own real pipeline once §7.3's Business
+Organization Unit `'s'` connector legitimately pulled ~7 such pairs onto one row: 200+
+occlusions, not the isolated handful the original fix targeted. That specific trigger
+was a SEPARATE bug (`insertSmartStream` fanning out through the OrgUnit into unrelated
+sibling Functions — see its own stream-continuity gate, §5.5), now fixed, so the real
+pipeline is back to its original small scope and this heuristic gap isn't currently
+exercised by anything shipped. The underlying weakness is still real and unaddressed,
+though — architectural, not a tuning issue: a same-row pair can only ever be GUARANTEED
+occlusion-free by staying column-adjacent, but a one-step-at-a-time local swap search
+can get stuck short of that arrangement once multiple pairs compete for the same row.
+Not yet fixed — the leading candidate is treating each same-row pair as one merged unit
+during ordering (guaranteeing adjacency by construction) and expanding it into its real
+two columns afterward, rather than further heuristic tuning.
 
 **Align by section** (`alignBySection`, default `true`, `commands.js`): reported
 directly — *"add option default enabled to align columns or rows by section, or to
@@ -1811,28 +1869,26 @@ no `streams` at all. Fixed by tagging `streamName` onto both (create AND reuse, 
 everywhere else).
 
 A genuine `connectorType: 's'` companion alongside the existing `'c'` one (matching the
-pattern every OTHER edge in this function uses) was tried and reverted after a real
-regression surfaced: `insertSmartStream`'s own traversal (`connsByPart`, `commands.js`)
-walks ANY connector of the chosen `connectorType` regardless of what the OTHER endpoint
-is, with no `showTypes` filtering during the walk itself (only when deciding what to
-actually place) — so a real `'s'` edge here turns every OrgUnit into a graph bridge
-between EVERY function it's assigned to, even when those functions are otherwise
-unrelated. Confirmed against `check_remap_layered_avoids_node_occlusion`'s own real
-`generateIndustry → insertSmartStream('Production') → smartCheckView → remap('layered')`
-pipeline: with the `'s'` edge present, a trace starting at ONE function pulled in 91
-parts / 126 connector viewMembers (every other function sharing "Mainstream Operational
-Functions"' section, and everything reachable from each of them) versus 13/18 without
-it — not a theoretical concern. So this stays `connectorType: 'c'` only, still
-deliberately NOT routed through `findOrCreateStreamConnector`/`createCompanionConnector`
-either (that pair's companion relationship is inferred from `findRelationshipPair`'s
-generic type-pair default, a DIFFERENT relation key than `'i'`/Assignment here, which
-would have silently replaced this connector's deliberate ArchiMate semantics) — just the
-one existing `'c'` connector, now also stream-tagged. `check_business_organization_
-unit_element_and_generation` (`tests/run_all.py`) extended: the OrgUnit part's own
-`streams` is the union across every function sharing it, each `'c'` connector carries
-only its own function's stream name, idempotent re-runs don't duplicate either, and a
-guard confirms NO `connectorType: 's'` connector gets created here — all proven via
-TEMP BREAK.
+pattern every OTHER edge in this function uses) is now also created, both stream-tagged
+— but NOT routed through `findOrCreateStreamConnector`/`createCompanionConnector` (that
+pair's companion relationship is inferred from `findRelationshipPair`'s generic
+type-pair default, a DIFFERENT relation key than `'i'`/Assignment here, which would
+silently replace this connector's deliberate ArchiMate semantics, and its `'s'`-side
+lookup wouldn't recognize an already-existing pre-fix `'c'` connector in an older
+document) — both types found-or-created independently, right here, each keeping the
+SAME "Assignment" relationship.
+
+This IS a real, confirmed behavior change, not a side effect to route around: an
+OrgUnit genuinely connects every Function it's assigned to now — confirmed directly as
+the INTENDED behavior, not a bug: *"Bridge behaviour identified is normal, what is
+expected."* `insertSmartStream` traversing THROUGH that bridge into unrelated sibling
+Functions, though, was a genuine bug in `insertSmartStream` itself, fixed separately —
+see its own stream-continuity gate, §5.5. `check_business_organization_unit_element_
+and_generation` (`tests/run_all.py`) extended: both connector types present with the
+right relationship and per-function `streams`, the OrgUnit part's own `streams` is the
+union across every function sharing it, the new `'s'` connector gets its own
+ViewMember too, and idempotent re-runs don't duplicate it either — proven via TEMP
+BREAK.
 
 ### 7.4 SFCE Catalog page
 

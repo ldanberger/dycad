@@ -5056,4 +5056,59 @@
 // duplicate it, and a guard confirms NO 's' connector gets created here -- all proven
 // via TEMP BREAK. DESIGN_DOCUMENT.md SS7.3 (new paragraph), tests/README.md, and
 // public/instructions.html's own Load SFCCE table row updated. Full suite 186/186.
-export const APP_VERSION = '0.920';
+// v0.921: direct follow-up REVERSING v0.920's own decision to skip a connectorType
+// 's' companion for the Business Organization Unit -> Function Assignment edge. v0.920
+// showed the exact regression (a real 's' edge turns each OrgUnit into a graph bridge
+// across every function sharing it, ballooning a single-function insertSmartStream
+// trace from 13 to 91 parts) and asked how to proceed; confirmed directly that this
+// bridging is the intended behavior, not a bug -- "please add the 's' connector.
+// Bridge behaviour identified is normal, what is expected." The 's' connector is back:
+// found-or-created independently alongside the existing 'c' one (same "Assignment"
+// relationship, both stream-tagged), still not routed through
+// findOrCreateStreamConnector/createCompanionConnector for the same reason as before
+// (that pair's companion relationship would drift off "Assignment").
+//
+// Restoring the bridge reproduced two real, separate regressions, both now fixed
+// (not left open): (1) 'layered' Remap's occlusion-avoidance heuristic
+// (minimizeRowCrossings, commands.js) showed 200+ connector-through-node overlaps
+// once several same-row Function/Process pairs landed on one row at once, in the real
+// generateIndustry -> insertSmartStream('Production') -> smartCheckView ->
+// remap('layered') pipeline -- demonstrated with a real screenshot at the user's
+// request, deliberately NOT fixed directly ("dont change remap yet"). (2) reported
+// directly: "now lets fix smartstream. when traversing upstream, logic should only be
+// looking for connectors where focused part is the 'to' ... when checking downstream,
+// we check node for any 'from' connector membership" -- insertSmartStream's own
+// direction:'both' traversal was the ACTUAL root cause of (1): it walked ANY edge
+// touching a frontier node regardless of which direction discovered that node, so the
+// instant an OrgUnit hub entered the traced set, its OWN downstream edges into every
+// sibling Function got swept in too. A first fix made upstream/downstream strictly
+// direction-consistent per BFS pass (matching the report above word for word) -- this
+// correctly stopped the OrgUnit fan-out (nothing points TO an OrgUnit, so upstream
+// traversal dead-ends there) AND, as a side effect, fixed (1) for free (the trace
+// shrank back to its original scope). But it ALSO broke a legitimate zigzag the
+// Enterprise template's own chain relies on -- reaching GeneralActor from a Function
+// requires going downstream to its passive BusinessProcess, then upstream through
+// BusinessCapability and BusinessService, two chains converging at the same Process
+// node -- confirmed against check_batch_script_quickstart's shipped "Smart Stream
+// Example" losing every GeneralActor (23 parts -> 15).
+//
+// Resolved per direct follow-up: "what about using both directions but in addition to
+// being either 'to' or 'from', the candidate node is checked for stream membership."
+// Direction reverted to the original per-edge check (any edge touching the frontier
+// node counts, in whichever direction(s) were requested -- zigzag restored), and a
+// NEW, independent gate added: a newly-discovered candidate must share at least one
+// `streams` entry with the seed part(s) to be admitted -- distinguishing "still this
+// Function's own generated chain" (shares the seed's streamName regardless of which
+// direction connects it) from "an unrelated sibling reached only via a shared hub" (a
+// disjoint streams set); skipped entirely when the seed(s) carry no streams at all, so
+// untagged/hand-built graphs trace exactly as before. Both check_remap_layered_
+// avoids_node_occlusion and check_batch_script_quickstart pass again, unmodified, on
+// the real pipeline. New check_insert_smart_stream_stream_continuity_gate
+// (tests/run_all.py): a synthetic hub graph proves the zigzag is admitted and a
+// disjoint-stream sibling is blocked, plus a fully untagged pair proves the gate stays
+// inactive without seed streams -- proven via TEMP BREAK.
+// check_business_organization_unit_element_and_generation restored to assert the 's'
+// connector's presence/streams/idempotency. DESIGN_DOCUMENT.md SS5.5, SS6.1a, and
+// SS7.3, tests/README.md, and public/instructions.html all updated. Full suite
+// 187/187.
+export const APP_VERSION = '0.921';

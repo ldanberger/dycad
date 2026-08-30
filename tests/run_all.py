@@ -10320,18 +10320,18 @@ def check_business_organization_unit_element_and_generation(page):
     Step 40 follow-up, reported directly: "connectors type 'c' are created from
     business organization unit to business function, but not of type 's' and business
     organization unit does not contain streams" -- the OrgUnit part now carries every
-    stream flowing through any function it's assigned to, and the existing 'c'
-    Assignment connector now carries the specific stream name(s) for its own function
-    too -- covers this across two functions sharing one OrgUnit (union of both stream
-    names on the part, each connector only its own). Does NOT also add a connectorType
-    's' companion (tried, then reverted): insertSmartStream's own traversal walks ANY
-    connector of the chosen connectorType regardless of the other endpoint's type, so a
-    real 's' edge here turns every OrgUnit into a graph bridge across every function
-    sharing it -- confirmed as a large real regression (91 parts / 126 connector
-    viewMembers pulled into check_remap_layered_avoids_node_occlusion's own real
-    generateIndustry -> insertSmartStream('Production') pipeline, vs 13/18 without it)
-    rather than a theoretical concern, so this also guards that NO 's' connector is
-    created here."""
+    stream flowing through any function it's assigned to, and BOTH the existing 'c'
+    Assignment connector and a new, equally-Assignment-relationship 's' one carry the
+    specific stream name(s) for their own function -- covers this across two functions
+    sharing one OrgUnit (union of both stream names on the part, each connector only
+    its own), each connector type placed on the view, and idempotent re-runs for the
+    's' side too. Confirmed directly that the resulting graph-bridging behavior (an
+    OrgUnit's new 's' edges connect every function it's assigned to, reachable from one
+    another via insertSmartStream traversal) is the INTENDED behavior, not a bug --
+    "Bridge behaviour identified is normal, what is expected" -- even though it also
+    exposes a separate, pre-existing scaling limitation in the 'layered' Remap's
+    occlusion-avoidance heuristic (check_remap_layered_avoids_node_occlusion), which is
+    tracked and addressed separately, not by avoiding this fix."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -10374,27 +10374,25 @@ def check_business_organization_unit_element_and_generation(page):
       // would never see.
       const allOrgUnitsAfterFirst = store.doc.parts.filter(p => p.type === 'BusinessOrganizationUnit');
       const assignConnsAfterFirst = store.doc.connectors.filter(c => c.connectorType === 'c' && c.relationship === 'Assignment' && orgUnitsAfterFirst.some(o => o.id === c.from));
-      // Step 40: both the OrgUnit part and its Assignment connector must carry the
-      // stream name(s) actually flowing through it -- reported directly: "connectors
-      // type 'c' are created from business organization unit to business function, but
-      // not of type 's' and business organization unit does not contain streams."
-      // Deliberately does NOT also add a connectorType 's' companion (tried and
-      // reverted -- see createStream's own comment, commands.js: insertSmartStream's
-      // traversal walks ANY 's' connector regardless of the other endpoint's type, so a
-      // real 's' edge here turns every OrgUnit into a graph bridge between every
-      // function it's assigned to, confirmed as a large real regression against
-      // check_remap_layered_avoids_node_occlusion's own pipeline) -- so this also
-      // guards that NO 's' connector gets created here, not just that streams get
-      // tagged onto the 'c' one.
-      const streamConnsAfterFirst = store.doc.connectors.filter(c => c.connectorType === 's' && orgUnitsAfterFirst.some(o => o.id === c.from));
+      // Step 40: the SAME edges must also exist as connectorType 's' (same 'Assignment'
+      // relationship), and both the OrgUnit part and each connector (both types) must
+      // carry the stream name(s) actually flowing through it -- reported directly:
+      // "connectors type 'c' are created from business organization unit to business
+      // function, but not of type 's' and business organization unit does not contain
+      // streams."
+      const streamConnsAfterFirst = store.doc.connectors.filter(c => c.connectorType === 's' && c.relationship === 'Assignment' && orgUnitsAfterFirst.some(o => o.id === c.from));
       const orgUnitStreamsAfterFirst = orgUnitsAfterFirst[0] ? [...(orgUnitsAfterFirst[0].streams || [])].sort() : [];
       const cConnStreamsAfterFirst = assignConnsAfterFirst.map(c => [...(c.streams || [])]).sort();
+      const sConnStreamsAfterFirst = streamConnsAfterFirst.map(c => [...(c.streams || [])]).sort();
       const orgUnitVms = store.viewMembersForView(view.id).filter(v => v.objectType === 'part' && orgUnitsAfterFirst.some(o => o.id === v.objectId));
+      const streamConnVmCountAfterFirst = store.viewMembersForView(view.id).filter(v => v.objectType === 'connector' && streamConnsAfterFirst.some(c => c.id === v.objectId)).length;
 
-      // Re-run: must reuse the same OrgUnit and not duplicate the Assignment connectors.
+      // Re-run: must reuse the same OrgUnit and not duplicate the Assignment connectors
+      // (either type).
       await generateIndustry(app, null, true);
       const orgUnitsAfterSecond = store.doc.parts.filter(p => p.type === 'BusinessOrganizationUnit' && p.label === 'RegrEnvironment');
       const assignConnsAfterSecond = store.doc.connectors.filter(c => c.connectorType === 'c' && c.relationship === 'Assignment' && orgUnitsAfterSecond.some(o => o.id === c.from));
+      const streamConnsAfterSecond = store.doc.connectors.filter(c => c.connectorType === 's' && c.relationship === 'Assignment' && orgUnitsAfterSecond.some(o => o.id === c.from));
 
       return {
         el, requirementPath: requirementEl?.path, businessActorFill,
@@ -10403,10 +10401,12 @@ def check_business_organization_unit_element_and_generation(page):
         allOrgUnitCountAfterFirst: allOrgUnitsAfterFirst.length,
         assignConnCountAfterFirst: assignConnsAfterFirst.length,
         streamConnCountAfterFirst: streamConnsAfterFirst.length,
-        orgUnitStreamsAfterFirst, cConnStreamsAfterFirst,
+        orgUnitStreamsAfterFirst, cConnStreamsAfterFirst, sConnStreamsAfterFirst,
+        streamConnVmCountAfterFirst,
         orgUnitVmCount: orgUnitVms.length,
         orgUnitCountAfterSecond: orgUnitsAfterSecond.length,
         assignConnCountAfterSecond: assignConnsAfterSecond.length,
+        streamConnCountAfterSecond: streamConnsAfterSecond.length,
       };
     }
     """)
@@ -10441,15 +10441,21 @@ def check_business_organization_unit_element_and_generation(page):
         problems.append(f"expected OrgUnit count unchanged on re-run, got {result['orgUnitCountAfterFirst']} -> {result['orgUnitCountAfterSecond']}")
     if result["assignConnCountAfterSecond"] != result["assignConnCountAfterFirst"]:
         problems.append(f"expected Assignment connector count unchanged on re-run (no duplicates), got {result['assignConnCountAfterFirst']} -> {result['assignConnCountAfterSecond']}")
-    if result["streamConnCountAfterFirst"] != 0:
-        problems.append(f"expected NO connectorType 's' connector from the OrgUnit (would turn it into a graph bridge across every function sharing it, breaking insertSmartStream traversal) — only 'c', got {result['streamConnCountAfterFirst']}")
+    if result["streamConnCountAfterFirst"] != 2:
+        problems.append(f"expected 2 'Assignment' connectors of connectorType 's' (one per function sharing the OrgUnit), matching the 'c' ones, got {result['streamConnCountAfterFirst']}")
+    if result["streamConnVmCountAfterFirst"] != 2:
+        problems.append(f"expected both new 's' Assignment connectors to be placed on the view too, got {result['streamConnVmCountAfterFirst']} viewMembers")
     if result["orgUnitStreamsAfterFirst"] != ["RegrOUEntA", "RegrOUEntB"]:
         problems.append(f"expected the OrgUnit part's own streams to include both functions' stream names, got {result['orgUnitStreamsAfterFirst']}")
     if result["cConnStreamsAfterFirst"] != [["RegrOUEntA"], ["RegrOUEntB"]]:
         problems.append(f"expected each 'c' Assignment connector to carry its own function's stream name, got {result['cConnStreamsAfterFirst']}")
+    if result["sConnStreamsAfterFirst"] != [["RegrOUEntA"], ["RegrOUEntB"]]:
+        problems.append(f"expected each 's' Assignment connector to carry its own function's stream name, got {result['sConnStreamsAfterFirst']}")
+    if result["streamConnCountAfterSecond"] != result["streamConnCountAfterFirst"]:
+        problems.append(f"expected 's' Assignment connector count unchanged on re-run (no duplicates), got {result['streamConnCountAfterFirst']} -> {result['streamConnCountAfterSecond']}")
     if problems:
         return False, "; ".join(problems)
-    return True, "BusinessOrganizationUnit is a real Business-group element with a distinct oval icon and mirrored Business Actor relations, and generateIndustry now reifies each function's section as a shared, Assignment-connected OrgUnit part instead of only a string tag, now correctly stream-tagged (both the OrgUnit part and its 'c' connector) without adding a connectorType 's' companion that would wrongly bridge unrelated functions via insertSmartStream traversal, idempotently across re-runs"
+    return True, "BusinessOrganizationUnit is a real Business-group element with a distinct oval icon and mirrored Business Actor relations, and generateIndustry now reifies each function's section as a shared, Assignment-connected OrgUnit part instead of only a string tag (both connectorType 'c' and 's', both stream-tagged, the OrgUnit part itself stream-tagged too), idempotently across re-runs — this deliberately bridges every function sharing an OrgUnit for insertSmartStream traversal, confirmed as intended"
 
 
 def check_level_down_single_creates_new_part(page):
@@ -13314,6 +13320,91 @@ def check_insert_smart_stream_traversal(page):
     return True, "insertSmartStream traces by connectorType/direction/levels/endType, prunes by showTypes (parts and their connectors), is idempotent, and refuses non-freeform views"
 
 
+def check_insert_smart_stream_stream_continuity_gate(page):
+    """Regression guard/new-feature check for insertSmartStream's stream-continuity
+    gate (commands.js), Step 40's second follow-up to the Business Organization Unit
+    streams fix. Once the OrgUnit->Function Assignment edge became a genuine
+    connectorType 's' connector (reported directly: "please add the 's' connector.
+    Bridge behaviour identified is normal, what is expected"), insertSmartStream's
+    'both'-direction traversal started fanning out through a shared OrgUnit into every
+    OTHER function it's assigned to, not just the seed's own chain -- confirmed as a
+    real, large regression against check_remap_layered_avoids_node_occlusion's own
+    pipeline. A first fix attempt made "upstream"/"downstream" strictly
+    direction-consistent per BFS pass (never switching direction mid-walk); that
+    correctly stopped the OrgUnit fan-out but ALSO broke a genuinely legitimate zigzag
+    the Enterprise template's own chain relies on (reaching GeneralActor from a
+    Function requires going downstream to its passive Process, then upstream through
+    Capability and Service) -- confirmed against check_batch_script_quickstart's own
+    shipped "Smart Stream Example" losing every GeneralActor. Resolved per direct
+    follow-up: "what about using both directions but in addition to being either 'to'
+    or 'from', the candidate node is checked for stream membership." Direction is back
+    to a plain per-edge check (any edge touching the frontier node counts, in whichever
+    direction(s) were requested -- restoring the zigzag), and a newly-discovered
+    candidate must now ALSO share at least one stream with the seed part(s) to be
+    admitted -- distinguishing "still this function's own generated chain" (shares the
+    seed's streamName regardless of which direction connects it) from "an unrelated
+    sibling reached only by transiting a shared hub" (a disjoint streams set), skipped
+    entirely when the seed(s) carry no streams at all (so untagged/hand-built graphs
+    trace exactly as before). Builds a small synthetic hub graph mirroring the real
+    shape (seed A --downstream--> B <--upstream-- C, all sharing stream 'S1'; a hub D
+    --upstream of A--, streams ['S1','S2'] since it's shared with a sibling; D
+    --downstream--> sibling E, streams ['S2'] only) plus a completely untagged pair (F,
+    G, no streams at all) to prove the gate stays inactive for non-stream-tagged data —
+    proven via TEMP BREAK."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const mkPart = (type, label, streams) => store.createPart({ type, label, model, streams });
+      const mkConn = (from, to) => store.createConnector({ from: from.id, to: to.id, connectorType: 's', model, relationship: 'Association' });
+
+      const a = mkPart('BusinessFunction', 'RegrGateA', ['S1']);
+      const b = mkPart('BusinessProcess', 'RegrGateB', ['S1']);
+      const c = mkPart('BusinessCapability', 'RegrGateC', ['S1']);
+      const d = mkPart('BusinessOrganizationUnit', 'RegrGateD', ['S1', 'S2']);
+      const e = mkPart('BusinessFunction', 'RegrGateE', ['S2']);
+      mkConn(a, b);      // A -downstream-> B
+      mkConn(c, b);      // C -downstream-> B, i.e. reaching C from B needs upstream
+      mkConn(d, a);      // D -downstream-> A, i.e. reaching D from A needs upstream
+      mkConn(d, e);      // D -downstream-> E (the sibling fan-out this gate must block)
+
+      const f = mkPart('BusinessFunction', 'RegrGateF', []);
+      const g = mkPart('BusinessProcess', 'RegrGateG', []);
+      mkConn(f, g);      // both untagged -- gate must stay inactive here
+
+      const allTypes = ['BusinessFunction', 'BusinessProcess', 'BusinessCapability', 'BusinessOrganizationUnit'];
+      const freshView = (name) => {
+        const view = store.addView(name, 'ff');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        return { view, tab };
+      };
+      const labelsOf = (view) => store.viewMembersForView(view.id).filter(v => v.objectType === 'part').map(v => store.findPart(v.objectId).label).sort();
+
+      const { view: v1, tab: t1 } = freshView('RegrGate_tagged');
+      commands.insertSmartStream(app, t1, { connectorType: 's', startPartIds: [a.id], direction: 'both', endType: null, levels: null, showTypes: allTypes });
+      const taggedLabels = labelsOf(v1);
+
+      const { view: v2, tab: t2 } = freshView('RegrGate_untagged');
+      commands.insertSmartStream(app, t2, { connectorType: 's', startPartIds: [f.id], direction: 'both', endType: null, levels: null, showTypes: allTypes });
+      const untaggedLabels = labelsOf(v2);
+
+      return { taggedLabels, untaggedLabels };
+    }
+    """)
+    problems = []
+    expectedTagged = sorted(["RegrGateA", "RegrGateB", "RegrGateC", "RegrGateD"])
+    if result["taggedLabels"] != expectedTagged:
+        problems.append(f"expected the stream-tagged trace to reach A/B/C (zigzag, shared stream S1) and D (the hub, shares S1 too) but NOT E (sibling, only S2) — expected {expectedTagged}, got {result['taggedLabels']}")
+    expectedUntagged = sorted(["RegrGateF", "RegrGateG"])
+    if result["untaggedLabels"] != expectedUntagged:
+        problems.append(f"expected the untagged pair to trace normally (gate inactive with no seed streams) — expected {expectedUntagged}, got {result['untaggedLabels']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "insertSmartStream's stream-continuity gate admits a candidate reached via either direction as long as it shares a stream with the seed (restoring legitimate zigzag traversal through a template's own chain), blocks a sibling reached only by transiting a shared hub whose own streams don't overlap the seed's, and stays inactive entirely for untagged/hand-built graphs"
+
+
 def check_insert_smart_stream_dialog(page):
     """Regression guard for the Insert Smart Stream dialog itself (main.js's
     promptInsertSmartStream) — a bespoke modal (promptModal has no multi-checkbox
@@ -15033,6 +15124,7 @@ CHECKS = [
     check_delete_offers_inventory_cleanup,
     check_add_existing_prefiltered_by_section,
     check_insert_smart_stream_traversal,
+    check_insert_smart_stream_stream_continuity_gate,
     check_insert_smart_stream_dialog,
     check_insert_smart_stream_derived_connections,
     check_smart_check_view_derive_connectors,
