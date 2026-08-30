@@ -2491,10 +2491,53 @@ function smartCheckView(app, tab, options = {}) {
       // exists to require, so sweep for exactly this case here: an isDerived connector
       // of this connectorType with both endpoints already present but no viewMember on
       // this view yet.
+      //
+      // Direct follow-up, a real regression this exact sweep introduced: "smart check
+      // view should only create derived connectors if only connected through
+      // not-shown parts, but instead is currently creating in addition to existing
+      // shown parts" — reproduced on "Smart Stream Example 2": its own real,
+      // ApplicationCapability -> ApplicationProcess -> ApplicationLogicalComponent ->
+      // ApplicationPhysicalComponent -> DataDataEntity chain is FULLY shown there (all
+      // 4 types are in its own showTypes), but the sweep above still placed an old
+      // ApplicationCapability -> DataDataEntity derived connector — one insertSmartStream
+      // had legitimately created earlier while building the FIRST, narrower "Smart
+      // Stream Example" view, where that chain genuinely WAS hidden. A derived
+      // connector's own validity is relative to what's showing on THIS view, not a
+      // fixed property of the connector object — so the sweep must re-check, not just
+      // trust the flag: only place it if the two endpoints are NOT already connected
+      // via a real (non-derived) chain of exclusively PRESENT parts. `hasRealPresentPath`
+      // is a small BFS over ordinary (non-isDerived) connectors of this same
+      // connectorType, staying entirely within presentPartIdSet — if it finds a path,
+      // the derived shortcut is stale for this view and gets skipped, same as it would
+      // never have been created here in the first place.
+      const ordinaryConnsByFrom = new Map();
+      for (const c of store.doc.connectors) {
+        if (c.isDerived || !ciEq(c.connectorType, connectorType)) continue;
+        if (!ordinaryConnsByFrom.has(c.from)) ordinaryConnsByFrom.set(c.from, []);
+        ordinaryConnsByFrom.get(c.from).push(c);
+      }
+      const hasRealPresentPath = (fromId, toId) => {
+        const visited = new Set([fromId]);
+        let frontier = [fromId];
+        while (frontier.length > 0) {
+          const next = [];
+          for (const cur of frontier) {
+            for (const c of ordinaryConnsByFrom.get(cur) || []) {
+              if (!presentPartIdSet.has(c.to) || visited.has(c.to)) continue;
+              if (c.to === toId) return true;
+              visited.add(c.to);
+              next.push(c.to);
+            }
+          }
+          frontier = next;
+        }
+        return false;
+      };
       for (const conn of store.doc.connectors) {
         if (!conn.isDerived || !ciEq(conn.connectorType, connectorType)) continue;
         if (!presentPartIdSet.has(conn.from) || !presentPartIdSet.has(conn.to)) continue;
         if (placedConnectorIds.has(conn.id)) continue;
+        if (hasRealPresentPath(conn.from, conn.to)) continue;
         store.createViewMember({
           view: viewId, objectType: 'connector', objectId: conn.id,
           fromVmId: partIdToVmId.get(conn.from), toVmId: partIdToVmId.get(conn.to),

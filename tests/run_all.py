@@ -13923,6 +13923,91 @@ def check_smart_check_view_derive_places_already_existing_sibling(page):
     return True, "Smart Check View's 'Derive hidden connections' now places an already-existing derived connector (created by an earlier, different-connectorType trace over the SAME pair) that simply never got a viewMember on this view yet, instead of falling through both missingConnectors' isDerived exclusion and findDerivedPairsForType's own gap-only discovery, and stays idempotent on re-run"
 
 
+def check_smart_check_view_derive_skips_stale_sibling_when_real_path_shown(page):
+    """Regression guard for a real bug the previous fix (check_smart_check_view_
+    derive_places_already_existing_sibling, above) introduced, reported directly:
+    "smart check view should only create derived connectors if only connected through
+    not-shown parts, but instead is currently creating in addition to existing shown
+    parts. To reproduce: Smart Stream Example 2 from main script, when smart check
+    view is run with only 'missing connectors' and 'derive hidden' selected, it create
+    derived connector from application capability to data entity, but should not have
+    since in view path exists: application capability -> application process ->
+    application logical component -> application physical component -> data entity."
+    Reproduced exactly against the real shipped pipeline (running main() end to end via
+    the real Script Console UI, then Smart Check View on the real "Smart Stream Example
+    2" view): insertSmartStream had legitimately derived and created an
+    ApplicationCapability -> DataDataEntity connector (both 'c' and 's') while building
+    the FIRST, narrower "Smart Stream Example" view, where the intermediate chain
+    genuinely WAS hidden — but that derived connector's endpoints ALSO both happen to
+    be present on "Smart Stream Example 2" (a separate, later, broader-showTypes view
+    where the full chain IS shown), and the previous fix's sweep blindly placed it
+    there too, purely because both endpoints were present, without checking whether the
+    underlying gap it represents is still real on THIS view. Fixed: the sweep now calls
+    a small BFS (`hasRealPresentPath`) over ordinary (non-derived) connectors of the
+    same connectorType, staying entirely within present parts — if `from` can already
+    reach `to` this way, the derived shortcut is stale for this view and gets skipped.
+    Builds a synthetic version of the exact shape (A -> hidden -> B, a stale derived
+    A->B pair) and proves: with `hidden` NOT placed, the derived connector still gets
+    placed (matching the legitimate case the other test covers); with `hidden` ALSO
+    placed (the real chain now fully shown), the SAME derived connector is correctly
+    skipped, and the real A->hidden/hidden->B connectors get pulled in by
+    missingConnectors instead — proven via TEMP BREAK."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const mkPart = (type, label) => store.createPart({ type, label, model, streams: [] });
+      const mkConn = (from, to, connectorType, isDerived) => store.createConnector({ from: from.id, to: to.id, connectorType, model, relationship: 'Association', isDerived: !!isDerived });
+      const freshView = (name) => {
+        const view = store.addView(name + '_' + Date.now(), 'ff');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        return { view, tab };
+      };
+      const connIsPlaced = (view, connId) => store.viewMembersForView(view.id).some(vm => vm.objectType === 'connector' && vm.objectId === connId);
+
+      const a = mkPart('BusinessFunction', 'RegrStaleA');
+      const hidden = mkPart('BusinessProcess', 'RegrStaleHidden');
+      const b = mkPart('ApplicationCapability', 'RegrStaleB');
+      mkConn(a, hidden, 'c'); mkConn(hidden, b, 'c');
+      // A stale derived connector, as if insertSmartStream created it on some EARLIER
+      // view where `hidden` genuinely wasn't shown.
+      const staleDerived = mkConn(a, b, 'c', true);
+
+      // Case 1: `hidden` NOT present on this view -- the derived shortcut is still the
+      // ONLY way to represent the relationship, so it SHOULD get placed (legitimate case).
+      const { view: vGap, tab: tGap } = freshView('RegrStaleGap');
+      store.createViewMember({ view: vGap.id, objectType: 'part', objectId: a.id, x: 0, y: 0 });
+      store.createViewMember({ view: vGap.id, objectType: 'part', objectId: b.id, x: 100, y: 0 });
+      const rGap = commands.smartCheckView(app, tGap, { missingConnectors: true, deriveConnectors: true });
+      const staleplacedWhenGap = connIsPlaced(vGap, staleDerived.id);
+
+      // Case 2: `hidden` IS ALSO present (the real chain is fully shown) -- the same
+      // stale derived connector must NOT get placed; the real chain should instead.
+      const { view: vShown, tab: tShown } = freshView('RegrStaleShown');
+      store.createViewMember({ view: vShown.id, objectType: 'part', objectId: a.id, x: 0, y: 0 });
+      store.createViewMember({ view: vShown.id, objectType: 'part', objectId: hidden.id, x: 100, y: 0 });
+      store.createViewMember({ view: vShown.id, objectType: 'part', objectId: b.id, x: 200, y: 0 });
+      const rShown = commands.smartCheckView(app, tShown, { missingConnectors: true, deriveConnectors: true });
+      const staleplacedWhenShown = connIsPlaced(vShown, staleDerived.id);
+      const realConnVmCount = store.viewMembersForView(vShown.id).filter(vm => vm.objectType === 'connector').length;
+
+      return { rGap, staleplacedWhenGap, rShown, staleplacedWhenShown, realConnVmCount };
+    }
+    """)
+    problems = []
+    if not result["staleplacedWhenGap"]:
+        problems.append(f"expected the stale derived connector to still be placed when the intermediate part is genuinely NOT shown (legitimate gap), got {result['rGap']}")
+    if result["staleplacedWhenShown"]:
+        problems.append(f"expected the stale derived connector to NOT be placed once the real chain is fully shown on this view — a redundant shortcut alongside an already-visible real path, got {result['rShown']}")
+    if result["realConnVmCount"] != 2:
+        problems.append(f"expected exactly 2 real connectors (A->hidden, hidden->B) pulled in by missingConnectors instead, got {result['realConnVmCount']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Smart Check View's derived-connector sweep re-validates each already-existing derived connector against the CURRENT view before placing it — skipping one whose underlying gap is no longer real because the full intermediate chain is genuinely shown here, while still placing it correctly when that chain remains genuinely hidden"
+
+
 def check_smart_check_view_dialog_include_derived_checkbox_wiring(page):
     """Regression guard for the real Smart Check View DIALOG's new "Include existing
     derived connectors" checkbox (#scv-include-derived, main.js) -- confirms it's wired
@@ -15212,6 +15297,7 @@ CHECKS = [
     check_smart_check_view_derive_connectors,
     check_derived_connector_isDerived_flag_and_include_option,
     check_smart_check_view_derive_places_already_existing_sibling,
+    check_smart_check_view_derive_skips_stale_sibling_when_real_path_shown,
     check_smart_check_view_dialog_include_derived_checkbox_wiring,
     check_derived_connector_relationship_fallback,
     check_smart_check_model_detection_and_fix_precedence,

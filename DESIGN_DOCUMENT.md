@@ -462,6 +462,36 @@ A->B pair with only the `'s'` one placed — mirroring `insertSmartStream`'s own
 behavior exactly) confirms `deriveConnectors` places the missing `'c'` sibling, counts
 it, and stays idempotent on re-run — proven via TEMP BREAK.
 
+**That sweep introduced a real regression of its own (Step 40 follow-up)**: reported
+directly — *"smart check view should only create derived connectors if only connected
+through not-shown parts, but instead is currently creating in addition to existing
+shown parts. To reproduce: Smart Stream Example 2 from main script, when smart check
+view is run with only 'missing connectors' and 'derive hidden' selected, it create
+derived connector from application capability to data entity, but should not have
+since in view path exists: application capability -> application process ->
+application logical component -> application physical component -> data entity."*
+Reproduced exactly against the real shipped pipeline: `insertSmartStream` legitimately
+derived and created an `ApplicationCapability` → `DataDataEntity` connector while
+building the FIRST, narrower "Smart Stream Example" (whose `showTypes` genuinely hides
+the intermediate chain) — but that connector's endpoints ALSO both happen to be
+present on "Smart Stream Example 2" (a separate, later, broader-`showTypes` view where
+the full 4-hop chain IS shown), and the sweep above blindly placed it there too,
+purely because both endpoints were present, without checking whether the gap it
+represents is still real on THIS view. A derived connector's validity is relative to
+what's showing on the CURRENT view, not a fixed property of the connector object —
+`isDerived: true` records that it WAS legitimately derived somewhere, not that it
+still SHOULD be shown here. Fixed by re-validating before placing: `hasRealPresentPath`
+is a small BFS over ordinary (non-derived) connectors of the same connectorType,
+staying entirely within `presentPartIdSet` — if `from` can already reach `to` this
+way, the shortcut is stale for this view and gets skipped, exactly as it would never
+have been derived here in the first place. New `check_smart_check_view_derive_skips_
+stale_sibling_when_real_path_shown` (`tests/run_all.py`): the same synthetic A→hidden→B
+shape, with a stale derived A→B connector, proves it still gets placed when `hidden`
+is genuinely absent (the legitimate case the previous test covers) but is correctly
+skipped — with the real A→hidden/hidden→B connectors pulled in by `missingConnectors`
+instead — once `hidden` is also present and the chain is fully shown — proven via TEMP
+BREAK.
+
 **`insertSmartStream`**'s own discovery predates the shared helper and keeps its
 original, narrower scope on purpose: it only derives across parts already inside
 `collectedPartIds` (this trace's own already-BFS'd-and-`levels`-bounded neighborhood

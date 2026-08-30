@@ -5148,4 +5148,37 @@
 // deriveConnectors places the missing 'c' sibling, counts it, and stays idempotent on
 // re-run -- proven via TEMP BREAK. DESIGN_DOCUMENT.md SS5.5 (two new paragraphs) and
 // tests/README.md updated.
-export const APP_VERSION = '0.922';
+// v0.923: direct follow-up fixing a real regression v0.922's own sweep introduced.
+// Reported directly: "smart check view should only create derived connectors if only
+// connected through not-shown parts, but instead is currently creating in addition to
+// existing shown parts. To reproduce: Smart Stream Example 2 from main script, when
+// smart check view is run with only 'missing connectors' and 'derive hidden'
+// selected, it create derived connector from application capability to data entity,
+// but should not have since in view path exists: application capability ->
+// application process -> application logical component -> application physical
+// component -> data entity." Reproduced exactly against the real shipped pipeline
+// (running main() end to end via the real Script Console, then Smart Check View on
+// the real "Smart Stream Example 2" view): insertSmartStream had legitimately derived
+// and created an ApplicationCapability -> DataDataEntity connector while building the
+// FIRST, narrower "Smart Stream Example" view, where that intermediate chain
+// genuinely WAS hidden -- but v0.922's own sweep placed it AGAIN on "Smart Stream
+// Example 2" (a separate, later, broader-showTypes view where the full 4-hop chain IS
+// shown), purely because both endpoints happen to also be present there, without
+// checking whether the gap it represents is still real on THIS view. A derived
+// connector's validity is relative to what's showing on the CURRENT view, not a fixed
+// property of the connector object -- isDerived:true records that it WAS legitimately
+// derived somewhere, not that it still SHOULD be shown here.
+//
+// Fixed by re-validating before placing: hasRealPresentPath (commands.js) is a small
+// BFS over ordinary (non-derived) connectors of the same connectorType, staying
+// entirely within presentPartIdSet -- if `from` can already reach `to` this way, the
+// derived shortcut is stale for this view and gets skipped, exactly as it would never
+// have been derived here in the first place. New check_smart_check_view_derive_
+// skips_stale_sibling_when_real_path_shown (tests/run_all.py): the same synthetic
+// A->hidden->B shape from v0.922's own test, with a stale derived A->B connector,
+// proves it still gets placed when `hidden` is genuinely absent (the legitimate case
+// the previous test covers) but is correctly skipped -- with the real A->hidden/
+// hidden->B connectors pulled in by missingConnectors instead -- once `hidden` is
+// also present and the chain is fully shown -- proven via TEMP BREAK.
+// DESIGN_DOCUMENT.md SS5.5 (new paragraph) and tests/README.md updated.
+export const APP_VERSION = '0.923';
