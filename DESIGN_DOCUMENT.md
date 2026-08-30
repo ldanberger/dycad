@@ -423,6 +423,45 @@ Two shared helpers do the work, both used by both commands below:
   traced relationship (typically from a `'c'`-typed hidden chain) always wins over the
   pair's own default, not just over the generic `'Association'` fallback.
 
+  Returns `{ created, all }` (Step 40 follow-up) — `created` is only the connectors
+  genuinely minted this call; `all` is every matching connector for the given pairs
+  regardless of whether it was just created or already existed. This matters when a
+  pair is still a genuine gap this call but one of its two types was already created by
+  an *earlier* call over the same pair (e.g. `smartCheckView`'s own `'c'` and `'s'`
+  iterations, below, re-discovering one another's pair from each side) — without `all`,
+  a caller that only reacts to `created` places a viewMember for the type it just made
+  but silently never for the sibling that already existed.
+
+**A real, reported gap `all` does NOT cover on its own (Step 40)**: reported directly —
+*"in script main example, when running smart check view on 'smart stream example' the
+derived 'c' connectors are not created for datadatadentity or generalactor nodes."*
+Traced to the exact shipped pipeline: `BatchScript_InsertSmartStreamExample` (a
+`connectorType: 's'` trace) reaches `GeneralActor`/`DataDataEntity` only through a
+hidden multi-hop chain, so `insertSmartStream`'s own derivation (below) creates BOTH a
+`'c'` and an `'s'` connector for that pair — but places only the `'s'` one, matching
+its own trace's scope (see below). The `'c'` one now sits in the model, `isDerived:
+true`, with NO viewMember anywhere. `BatchScript_SmartCheckViewExample` then runs
+`deriveConnectors: true` on that SAME view — and finds nothing new to derive for that
+exact pair: `findDerivedPairsForType`'s own `existingDirectPairs` correctly excludes a
+pair that's ALREADY directly connected between two present parts (there's no gap left
+to bridge), so it's never even handed to `createDerivedConnectorPairs` in the first
+place — `all` never gets a chance to help. Meanwhile `missingConnectors`' own
+`isDerived` exclusion (guarding against an UNRELATED other view's derived connector
+silently leaking in when not asked for — §5.5's own "Include existing derived
+connectors" note, below) blocks it too. The connector falls through BOTH pull-in paths
+and never gets a viewMember at all. Fixed with a THIRD, independent sweep in
+`smartCheckView`'s `deriveConnectors` block: for the connectorType currently being
+processed, any `isDerived` connector with both endpoints already present but no
+viewMember on THIS view yet gets placed (and counted in `derivedConnectorsAdded`)
+regardless of whether this specific call is what created it — requesting
+`deriveConnectors` at all is exactly the explicit opt-in the `missingConnectors`
+exclusion was designed to require. New `check_smart_check_view_derive_places_already_
+existing_sibling` (`tests/run_all.py`): a synthetic version of the exact shape (A
+--hidden--> B, both a `'c'` and `'s'` chain, plus a pre-existing `'c'`+`'s'` derived
+A->B pair with only the `'s'` one placed — mirroring `insertSmartStream`'s own real
+behavior exactly) confirms `deriveConnectors` places the missing `'c'` sibling, counts
+it, and stays idempotent on re-run — proven via TEMP BREAK.
+
 **`insertSmartStream`**'s own discovery predates the shared helper and keeps its
 original, narrower scope on purpose: it only derives across parts already inside
 `collectedPartIds` (this trace's own already-BFS'd-and-`levels`-bounded neighborhood

@@ -5111,4 +5111,41 @@
 // connector's presence/streams/idempotency. DESIGN_DOCUMENT.md SS5.5, SS6.1a, and
 // SS7.3, tests/README.md, and public/instructions.html all updated. Full suite
 // 187/187.
-export const APP_VERSION = '0.921';
+// v0.922: reported directly — "in script main example, when running smart check view
+// on 'smart stream example' the derived 'c' connectors are not created for
+// datadatadentity or generalactor nodes." Traced to the exact shipped pipeline:
+// BatchScript_InsertSmartStreamExample (connectorType 's') reaches GeneralActor/
+// DataDataEntity only through a hidden multi-hop chain, so insertSmartStream's own
+// derivation (createDerivedConnectorPairs) creates BOTH a 'c' and an 's' connector for
+// that pair, but places only the 's' one, matching its own trace's scope. The 'c' one
+// now sits in the model, isDerived:true, with no viewMember anywhere.
+// BatchScript_SmartCheckViewExample then runs deriveConnectors:true on that SAME view
+// and finds nothing new to derive for that exact pair -- findDerivedPairsForType
+// correctly refuses to re-derive a pair that's already directly connected (no gap
+// left to bridge), so it's never even handed to createDerivedConnectorPairs; and
+// missingConnectors' own isDerived exclusion (guarding against an UNRELATED other
+// view's derived connector leaking in unasked) blocks it too. Falls through both
+// pull-in paths, never gets a viewMember.
+//
+// Two fixes, both real: (1) createDerivedConnectorPairs now returns { created, all }
+// -- `all` includes a matching connector that already existed (not just ones
+// genuinely minted this call), fixing the case where a pair is STILL a genuine gap
+// this call but one of its two types was already created by an earlier call over the
+// same pair (e.g. smartCheckView's own 'c' and 's' iterations re-discovering one
+// another's pair). Both callers (smartCheckView, insertSmartStream) updated to use
+// `all` for placement. (2) This alone does NOT cover the actually-reported bug (the
+// pair is no longer a gap at all) -- fixed with a THIRD, independent sweep in
+// smartCheckView's deriveConnectors block: for the connectorType being processed, any
+// isDerived connector with both endpoints already present but no viewMember on this
+// view yet gets placed (and counted in derivedConnectorsAdded) regardless of whether
+// this call created it -- requesting deriveConnectors at all is the explicit opt-in
+// missingConnectors' own exclusion was designed to require.
+//
+// New check_smart_check_view_derive_places_already_existing_sibling
+// (tests/run_all.py): a synthetic version of the exact shape (A --hidden--> B, both a
+// 'c' and 's' chain, plus a pre-existing 'c'+'s' derived A->B pair with only the 's'
+// one placed -- mirroring insertSmartStream's own real behavior exactly) confirms
+// deriveConnectors places the missing 'c' sibling, counts it, and stays idempotent on
+// re-run -- proven via TEMP BREAK. DESIGN_DOCUMENT.md SS5.5 (two new paragraphs) and
+// tests/README.md updated.
+export const APP_VERSION = '0.922';

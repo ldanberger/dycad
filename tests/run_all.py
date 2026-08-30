@@ -13841,6 +13841,88 @@ def check_derived_connector_isDerived_flag_and_include_option(page):
     return True, "createDerivedConnectorPairs now flags every connector it creates with isDerived:true (leaving ordinary connectors untouched), and Smart Check View's new includeDerivedConnectors option (default false) keeps an existing derived connector from silently spreading onto other views via either missing-connector pull-in pass, while never affecting ordinary connectors"
 
 
+def check_smart_check_view_derive_places_already_existing_sibling(page):
+    """Regression guard for a real bug, reported directly: "in script main example,
+    when running smart check view on 'smart stream example' the derived 'c'
+    connectors are not created for datadatadentity or generalactor nodes." Traced to
+    the exact shipped pipeline (BatchScript_InsertSmartStreamExample, connectorType
+    's', then BatchScript_SmartCheckViewExample's deriveConnectors:true): insertSmartStream's
+    OWN derivation (createDerivedConnectorPairs) always creates BOTH a 'c' and an 's'
+    connector for a discovered pair, but places only the ONE matching its own trace's
+    connectorType — so a GeneralActor/DataDataEntity pair reached only through a hidden
+    BusinessService/ApplicationProcess chain ends up with a real 'c' connector already
+    sitting in the model, isDerived:true, with NO viewMember on this view. Smart Check
+    View's own "Derive hidden connections" then runs and finds NOTHING new to derive
+    for that exact pair (findDerivedPairsForType correctly excludes it — a real direct
+    connector between both already-present parts is not a gap to bridge), and
+    missingConnectors' own isDerived exclusion (guarding against an UNRELATED other
+    view's derived connector leaking in unasked) blocks it too — so it falls through
+    BOTH pull-in paths and never gets a viewMember at all. Fixed with a new sweep
+    inside the deriveConnectors block: an isDerived connector of the connectorType
+    being processed, both endpoints already present, with no viewMember on THIS view
+    yet, gets placed (and counted in derivedConnectorsAdded) regardless of whether
+    THIS call is what created it. Builds a synthetic version of the exact shape (A
+    --hidden--> B, both a 'c' and 's' chain, plus a pre-existing 'c'+'s' derived A->B
+    pair with only the 's' one placed — mirroring insertSmartStream's own real
+    behavior exactly) and confirms deriveConnectors places the missing 'c' sibling,
+    counts it, and is idempotent on re-run — proven via TEMP BREAK."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+      const mkPart = (type, label) => store.createPart({ type, label, model, streams: [] });
+      const mkConn = (from, to, connectorType, isDerived) => store.createConnector({ from: from.id, to: to.id, connectorType, model, relationship: connectorType === 's' ? 'Stream' : 'Association', isDerived: !!isDerived });
+      const freshView = (name) => {
+        const view = store.addView(name + '_' + Date.now(), 'ff');
+        const tab = app.createCanvasTab(view);
+        app.switchToTab(tab.id);
+        return { view, tab };
+      };
+
+      const a = mkPart('BusinessFunction', 'RegrDrvSibA');
+      const hidden = mkPart('BusinessProcess', 'RegrDrvSibHidden');
+      const b = mkPart('ApplicationCapability', 'RegrDrvSibB');
+      mkConn(a, hidden, 'c'); mkConn(hidden, b, 'c');
+      mkConn(a, hidden, 's'); mkConn(hidden, b, 's');
+      // Mirrors insertSmartStream's own exact behavior: a prior 's'-typed trace already
+      // derived BOTH the 'c' and 's' A->B connectors, but only placed the 's' one.
+      const preDerivedS = mkConn(a, b, 's', true);
+      const preDerivedC = mkConn(a, b, 'c', true);
+
+      const { view, tab } = freshView('RegrDrvSib');
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: a.id, x: 0, y: 0 });
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: b.id, x: 100, y: 0 });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: preDerivedS.id, fromVmId: store.viewMembersForView(view.id)[0].id, toVmId: store.viewMembersForView(view.id)[1].id });
+
+      const result1 = commands.smartCheckView(app, tab, { missingConnectors: true, deriveConnectors: true });
+      const cPlacedAfterFirst = store.viewMembersForView(view.id).some(vm => vm.objectType === 'connector' && vm.objectId === preDerivedC.id);
+      const connVmCountAfterFirst = store.viewMembersForView(view.id).filter(vm => vm.objectType === 'connector').length;
+
+      // Idempotent re-run: nothing left to place, no duplicate viewMember.
+      const result2 = commands.smartCheckView(app, tab, { missingConnectors: true, deriveConnectors: true });
+      const connVmCountAfterSecond = store.viewMembersForView(view.id).filter(vm => vm.objectType === 'connector').length;
+
+      return {
+        derivedConnectorsAdded1: result1.derivedConnectorsAdded, cPlacedAfterFirst, connVmCountAfterFirst,
+        derivedConnectorsAdded2: result2.derivedConnectorsAdded, connVmCountAfterSecond,
+      };
+    }
+    """)
+    problems = []
+    if not result["cPlacedAfterFirst"]:
+        problems.append("expected the already-existing derived 'c' connector (created earlier by a different trace, never placed on this view) to get a viewMember from deriveConnectors")
+    if result["derivedConnectorsAdded1"] < 1:
+        problems.append(f"expected derivedConnectorsAdded to count the placed sibling, got {result['derivedConnectorsAdded1']}")
+    if result["connVmCountAfterFirst"] != 2:
+        problems.append(f"expected exactly 2 connector viewMembers after the first run (the pre-placed 's' one plus the newly-placed 'c' sibling), got {result['connVmCountAfterFirst']}")
+    if result["derivedConnectorsAdded2"] != 0 or result["connVmCountAfterSecond"] != result["connVmCountAfterFirst"]:
+        problems.append(f"expected a re-run to add nothing further (idempotent), got derivedConnectorsAdded2={result['derivedConnectorsAdded2']} connVmCountAfterSecond={result['connVmCountAfterSecond']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Smart Check View's 'Derive hidden connections' now places an already-existing derived connector (created by an earlier, different-connectorType trace over the SAME pair) that simply never got a viewMember on this view yet, instead of falling through both missingConnectors' isDerived exclusion and findDerivedPairsForType's own gap-only discovery, and stays idempotent on re-run"
+
+
 def check_smart_check_view_dialog_include_derived_checkbox_wiring(page):
     """Regression guard for the real Smart Check View DIALOG's new "Include existing
     derived connectors" checkbox (#scv-include-derived, main.js) -- confirms it's wired
@@ -15129,6 +15211,7 @@ CHECKS = [
     check_insert_smart_stream_derived_connections,
     check_smart_check_view_derive_connectors,
     check_derived_connector_isDerived_flag_and_include_option,
+    check_smart_check_view_derive_places_already_existing_sibling,
     check_smart_check_view_dialog_include_derived_checkbox_wiring,
     check_derived_connector_relationship_fallback,
     check_smart_check_model_detection_and_fix_precedence,

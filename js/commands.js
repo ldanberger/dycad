@@ -2061,9 +2061,25 @@ function findDerivedPairsForType(store, connectorType, presentPartIdSet, levels)
  * existing note addition." This is what lets Smart Check View's own "Include existing
  * derived connectors" checkbox (below) distinguish an already-in-the-model derived
  * connector from an ordinary one when deciding what to silently pull into a view.
+ *
+ * Returns `{ created, all }` (Step 40 follow-up) — `created` is only the connectors
+ * genuinely minted THIS call (what the `log` line above fires for); `all` is every
+ * 'c'+'s' connector for every given pair regardless of whether it was just created or
+ * already existed. Matters when a pair is STILL a genuine gap this call (present in
+ * `derivedPairs`) but one of its two types was already created by an EARLIER call over
+ * the same pair (e.g. the 'c' and 's' iterations within one smartCheckView run
+ * re-discovering the same pair from each other's graph) — `exists` is true for that
+ * type, so it's silently skipped and never lands in `created`, meaning a caller that
+ * only reacts to `created` would place a viewMember for the type it just made but
+ * never for the sibling that already existed. `all` fixes that specific case; it does
+ * NOT, on its own, cover a pair that's no longer a gap at all (already directly
+ * connected — findDerivedPairsForType's own `existingDirectPairs` excludes it from
+ * `derivedPairs` before this function is ever called) — see smartCheckView's own
+ * separate isDerived sweep, right after its call to this function, for that one.
  */
 function createDerivedConnectorPairs(store, derivedPairs, log, describePart) {
   const created = [];
+  const all = [];
   for (const { from, to, relationship, viaTypes } of derivedPairs.values()) {
     const fromPart = store.findPart(from);
     const modelName = fromPart?.model;
@@ -2072,23 +2088,25 @@ function createDerivedConnectorPairs(store, derivedPairs, log, describePart) {
     const viaText = [...new Set(viaTypes)].join(', ');
     const note = `Derived — implied via ${viaText} (not shown)`;
     for (const connectorType of ['c', 's']) {
-      const exists = store.doc.connectors.some((c) => c.from === from && c.to === to && ciEq(c.connectorType, connectorType) && ciEq(c.model, modelName));
-      if (exists) continue;
-      let connRelationship = relationship;
-      if (connectorType === 'c') {
-        const relationKey = relationCodeFor(relationship, store.settings);
-        if (!isRelationValid(store, fromPart?.type, toPart?.type, relationKey)) {
-          const pair = findRelationshipPair(store, fromPart?.type, toPart?.type);
-          const defaultRel = pair?.default ? (store.settings.relations || []).find((r) => r.key === pair.default) : null;
-          connRelationship = defaultRel?.name || 'Association';
+      let conn = store.doc.connectors.find((c) => c.from === from && c.to === to && ciEq(c.connectorType, connectorType) && ciEq(c.model, modelName));
+      if (!conn) {
+        let connRelationship = relationship;
+        if (connectorType === 'c') {
+          const relationKey = relationCodeFor(relationship, store.settings);
+          if (!isRelationValid(store, fromPart?.type, toPart?.type, relationKey)) {
+            const pair = findRelationshipPair(store, fromPart?.type, toPart?.type);
+            const defaultRel = pair?.default ? (store.settings.relations || []).find((r) => r.key === pair.default) : null;
+            connRelationship = defaultRel?.name || 'Association';
+          }
         }
+        conn = store.createConnector({ from, to, model: modelName, connectorType, relationship: connRelationship, note, isDerived: true });
+        created.push(conn);
+        if (log) log(`Derived connector: ${describePart(from)} -> ${describePart(to)} (${connectorType === 'c' ? 'Connector' : 'Stream'}), implied via ${viaText}.`);
       }
-      const conn = store.createConnector({ from, to, model: modelName, connectorType, relationship: connRelationship, note, isDerived: true });
-      created.push(conn);
-      if (log) log(`Derived connector: ${describePart(from)} -> ${describePart(to)} (${connectorType === 'c' ? 'Connector' : 'Stream'}), implied via ${viaText}.`);
+      all.push(conn);
     }
   }
-  return created;
+  return { created, all };
 }
 
 // ===================== SMART CHECK MODEL =====================
@@ -2441,8 +2459,42 @@ function smartCheckView(app, tab, options = {}) {
     const presentPartIdSet = new Set(partIdToVmId.keys());
     for (const connectorType of ['c', 's']) {
       const pairs = findDerivedPairsForType(store, connectorType, presentPartIdSet, levels);
-      const createdConns = createDerivedConnectorPairs(store, pairs, log, describePart);
-      for (const conn of createdConns) {
+      // Step 40: place a viewMember for EVERY matching derived connector this pair
+      // implies (both types — `all`, not just `created`) — covers a pair that's still
+      // a genuine gap this call, where one of its two types was already created by an
+      // earlier call over the same pair (e.g. the 'c' and 's' iterations of THIS SAME
+      // loop re-discovering one another's pair) — see createDerivedConnectorPairs' own
+      // doc comment. The sweep right below this loop covers the OTHER real bug this
+      // was originally reported against, where the pair is no longer a gap at all.
+      const { all: derivedConns } = createDerivedConnectorPairs(store, pairs, log, describePart);
+      for (const conn of derivedConns) {
+        if (placedConnectorIds.has(conn.id)) continue;
+        store.createViewMember({
+          view: viewId, objectType: 'connector', objectId: conn.id,
+          fromVmId: partIdToVmId.get(conn.from), toVmId: partIdToVmId.get(conn.to),
+        });
+        placedConnectorIds.add(conn.id);
+        derivedConnectorsAdded += 1;
+      }
+      // Step 40, reported directly: "when running smart check view on 'smart stream
+      // example' the derived 'c' connectors are not created for datadatadentity or
+      // generalactor nodes." Root cause: findDerivedPairsForType deliberately
+      // excludes a pair that's ALREADY directly connected between two present parts
+      // (existingDirectPairs, above it) — correct, there's no gap left to bridge. But
+      // when that direct connector is ITSELF isDerived:true (e.g. insertSmartStream's
+      // own earlier derivation pass already created it while building THIS SAME view,
+      // placing only the ONE connectorType matching its own trace), it never gets a
+      // viewMember here either way: findDerivedPairsForType won't re-derive it (no gap
+      // left), and missingConnectors' own isDerived exclusion (guarding against an
+      // UNRELATED other view's derived connector silently leaking in when not asked
+      // for) blocks it too. Requesting deriveConnectors IS the explicit ask this guard
+      // exists to require, so sweep for exactly this case here: an isDerived connector
+      // of this connectorType with both endpoints already present but no viewMember on
+      // this view yet.
+      for (const conn of store.doc.connectors) {
+        if (!conn.isDerived || !ciEq(conn.connectorType, connectorType)) continue;
+        if (!presentPartIdSet.has(conn.from) || !presentPartIdSet.has(conn.to)) continue;
+        if (placedConnectorIds.has(conn.id)) continue;
         store.createViewMember({
           view: viewId, objectType: 'connector', objectId: conn.id,
           fromVmId: partIdToVmId.get(conn.from), toVmId: partIdToVmId.get(conn.to),
@@ -3223,8 +3275,11 @@ function insertSmartStream(app, tab, options) {
   // always creates both; only the ONE matching this trace's own connectorType gets
   // placed as a viewMember on the view actually being built here (the other type still
   // exists in the model, just not shown on this particular connectorType-scoped view).
-  const createdDerived = createDerivedConnectorPairs(store, derivedPairs);
-  for (const conn of createdDerived) {
+  // Uses `all` (both freshly-created AND already-existing matches), not just `created`
+  // — a re-run, or a pair some OTHER derivation already touched, must still place this
+  // trace's own type here even when it didn't need to mint a new Connector for it.
+  const { all: allDerived } = createDerivedConnectorPairs(store, derivedPairs);
+  for (const conn of allDerived) {
     if (!ciEq(conn.connectorType, connectorType)) continue;
     finalConnIds.push(conn.id);
     // Register in connsByPart too so the placement hop-distance BFS just below can
