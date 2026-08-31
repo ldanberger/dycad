@@ -5191,4 +5191,22 @@
 // exact settings text in '#' banners, for more visual prominence in the Message Log.
 // check_batch_script_quickstart's own messageLogHasReminder assertion (tests/run_all.py)
 // updated to the exact new text.
-export const APP_VERSION = '0.924';
+// v0.925: direct follow-up, reported directly — "connectors of type 's' should only
+// have relationship of stream or passive, however there are some of type assignment
+// from business organization unit. Check how these are being created and why." Traced
+// to createStream's Business Organization Unit reification block (commands.js): the
+// v0.921 fix (adding a genuine 's' companion connector alongside the existing 'c' one)
+// deliberately kept BOTH connectors on the real 'Assignment' relationship, to preserve
+// genuine ArchiMate semantics. Confirmed directly this was wrong for the 's' side:
+// "normalize it to 'Stream'/'Passive', the 's' connectors are not intended to be
+// Archimate." The 's' connector's relationship is now 'Passive' -- matching how every
+// shipped template's own passive[] array already categorizes this exact
+// {from:'BusinessOrganizationUnit', to:'BusinessFunction'} pair, and consistent with
+// every OTHER 's' connector in the app (always 'Stream' or 'Passive', a role label for
+// a chain position, never a real ArchiMate relationship name). The 'c' connector is
+// unaffected -- it's the one meant to carry real ArchiMate semantics, so it keeps
+// 'Assignment'. check_business_organization_unit_element_and_generation
+// (tests/run_all.py) updated to assert 'Passive' on the 's' side instead of
+// 'Assignment' -- proven via TEMP BREAK. DESIGN_DOCUMENT.md SS7.3 and tests/README.md
+// updated. Full suite 189/189.
+export const APP_VERSION = '0.925';

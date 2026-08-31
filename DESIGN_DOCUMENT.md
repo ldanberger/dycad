@@ -1944,8 +1944,14 @@ pair's companion relationship is inferred from `findRelationshipPair`'s generic
 type-pair default, a DIFFERENT relation key than `'i'`/Assignment here, which would
 silently replace this connector's deliberate ArchiMate semantics, and its `'s'`-side
 lookup wouldn't recognize an already-existing pre-fix `'c'` connector in an older
-document) — both types found-or-created independently, right here, each keeping the
-SAME "Assignment" relationship.
+document) — both types found-or-created independently, right here. Direct follow-up:
+*"normalize it to 'Stream'/'Passive', the 's' connectors are not intended to be
+Archimate."* Only the `'c'` connector keeps the real `'i'`/Assignment relationship; the
+`'s'` one uses `'Passive'` instead — matching how every shipped template's own
+`passive[]` array already categorizes this exact `{from:'BusinessOrganizationUnit',
+to:'BusinessFunction'}` pair, and consistent with every OTHER `'s'` connector in the
+app, which never carries a real ArchiMate relationship name (always `'Stream'` or
+`'Passive'`, a role label for a chain position, from `findOrCreateStreamConnector`).
 
 This IS a real, confirmed behavior change, not a side effect to route around: an
 OrgUnit genuinely connects every Function it's assigned to now — confirmed directly as

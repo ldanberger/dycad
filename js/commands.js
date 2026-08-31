@@ -366,8 +366,10 @@ function createStream(app, {
   // ArchiMate semantics, and its 's'-side lookup wouldn't recognize an already-existing
   // pre-fix 'c' Assignment connector in an OLDER document (different connectorType),
   // risking a duplicate parallel edge there. Instead both connector types are
-  // found-or-created independently, right here, each keeping the SAME "Assignment"
-  // relationship.
+  // found-or-created independently, right here — the 'c' one keeping the real
+  // Assignment relationship, the 's' one using 'Passive' instead (direct follow-up:
+  // "'s' connectors are not intended to be Archimate" — see the 's' block's own
+  // comment, below, for why 'Passive' specifically).
   if (functionSection && functionPart) {
     const orgUnitKey = `${functionSection}|BusinessOrganizationUnit|${modelName}`.toLowerCase();
     let orgUnitPart = lookupCache
@@ -412,11 +414,20 @@ function createStream(app, {
       orgUnitConn.streams = [...(orgUnitConn.streams || []), streamName];
     }
 
+    // The 's' side deliberately does NOT reuse assignRelName (Assignment): 's'
+    // connectors aren't meant to carry real ArchiMate relationship semantics at all
+    // (every other one in the app gets 'Stream' or 'Passive' — a role label for its
+    // position in a generated chain, from findOrCreateStreamConnector) — 'Passive' is
+    // the correct one here, matching how every shipped template's own passive[] array
+    // already categorizes this exact {from:'BusinessOrganizationUnit',
+    // to:'BusinessFunction'} pair. Only the 'c' connector, above, keeps the real
+    // Assignment relationship — that's the one meant to represent genuine ArchiMate
+    // semantics.
     let orgUnitStreamConn = lookupCache
       ? lookupCache.connsByFromToModel.get(orgUnitConnKey)
       : store.findExistingConnector(orgUnitPart.id, functionPart.id, modelName, 's');
     if (!orgUnitStreamConn) {
-      orgUnitStreamConn = store.createConnector({ from: orgUnitPart.id, to: functionPart.id, model: modelName, connectorType: 's', relationship: assignRelName, streams: [streamName] });
+      orgUnitStreamConn = store.createConnector({ from: orgUnitPart.id, to: functionPart.id, model: modelName, connectorType: 's', relationship: 'Passive', streams: [streamName] });
       if (lookupCache) cacheRegisterStreamConn(lookupCache, orgUnitStreamConn);
     } else if (!(orgUnitStreamConn.streams || []).includes(streamName)) {
       orgUnitStreamConn.streams = [...(orgUnitStreamConn.streams || []), streamName];

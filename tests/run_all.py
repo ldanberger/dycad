@@ -10321,17 +10321,21 @@ def check_business_organization_unit_element_and_generation(page):
     business organization unit to business function, but not of type 's' and business
     organization unit does not contain streams" -- the OrgUnit part now carries every
     stream flowing through any function it's assigned to, and BOTH the existing 'c'
-    Assignment connector and a new, equally-Assignment-relationship 's' one carry the
-    specific stream name(s) for their own function -- covers this across two functions
-    sharing one OrgUnit (union of both stream names on the part, each connector only
-    its own), each connector type placed on the view, and idempotent re-runs for the
-    's' side too. Confirmed directly that the resulting graph-bridging behavior (an
-    OrgUnit's new 's' edges connect every function it's assigned to, reachable from one
-    another via insertSmartStream traversal) is the INTENDED behavior, not a bug --
-    "Bridge behaviour identified is normal, what is expected" -- even though it also
-    exposes a separate, pre-existing scaling limitation in the 'layered' Remap's
-    occlusion-avoidance heuristic (check_remap_layered_avoids_node_occlusion), which is
-    tracked and addressed separately, not by avoiding this fix."""
+    Assignment connector and a new 's' one carry the specific stream name(s) for their
+    own function -- covers this across two functions sharing one OrgUnit (union of
+    both stream names on the part, each connector only its own), each connector type
+    placed on the view, and idempotent re-runs for the 's' side too. Confirmed
+    directly that the resulting graph-bridging behavior (an OrgUnit's new 's' edges
+    connect every function it's assigned to, reachable from one another via
+    insertSmartStream traversal) is the INTENDED behavior, not a bug -- "Bridge
+    behaviour identified is normal, what is expected." A further follow-up, "normalize
+    it to 'Stream'/'Passive', the 's' connectors are not intended to be Archimate" --
+    the 's' connector's relationship is now 'Passive' (matching every shipped
+    template's own passive[] categorization of this exact
+    {from:'BusinessOrganizationUnit', to:'BusinessFunction'} pair), NOT the real
+    'Assignment' relationship the 'c' connector keeps -- 's' connectors elsewhere in
+    the app never carry real ArchiMate relationship names at all (always 'Stream' or
+    'Passive', role labels for a chain position), so this one should not either."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -10374,13 +10378,16 @@ def check_business_organization_unit_element_and_generation(page):
       // would never see.
       const allOrgUnitsAfterFirst = store.doc.parts.filter(p => p.type === 'BusinessOrganizationUnit');
       const assignConnsAfterFirst = store.doc.connectors.filter(c => c.connectorType === 'c' && c.relationship === 'Assignment' && orgUnitsAfterFirst.some(o => o.id === c.from));
-      // Step 40: the SAME edges must also exist as connectorType 's' (same 'Assignment'
-      // relationship), and both the OrgUnit part and each connector (both types) must
-      // carry the stream name(s) actually flowing through it -- reported directly:
-      // "connectors type 'c' are created from business organization unit to business
-      // function, but not of type 's' and business organization unit does not contain
-      // streams."
-      const streamConnsAfterFirst = store.doc.connectors.filter(c => c.connectorType === 's' && c.relationship === 'Assignment' && orgUnitsAfterFirst.some(o => o.id === c.from));
+      // Step 40: the SAME edges must also exist as connectorType 's', and both the
+      // OrgUnit part and each connector (both types) must carry the stream name(s)
+      // actually flowing through it -- reported directly: "connectors type 'c' are
+      // created from business organization unit to business function, but not of
+      // type 's' and business organization unit does not contain streams." Step 40
+      // follow-up, reported directly: "normalize it to 'Stream'/'Passive', the 's'
+      // connectors are not intended to be Archimate" -- the 's' side uses 'Passive'
+      // (matching every shipped template's own passive[] categorization of this exact
+      // pair), NOT the real 'Assignment' relationship the 'c' side keeps.
+      const streamConnsAfterFirst = store.doc.connectors.filter(c => c.connectorType === 's' && c.relationship === 'Passive' && orgUnitsAfterFirst.some(o => o.id === c.from));
       const orgUnitStreamsAfterFirst = orgUnitsAfterFirst[0] ? [...(orgUnitsAfterFirst[0].streams || [])].sort() : [];
       const cConnStreamsAfterFirst = assignConnsAfterFirst.map(c => [...(c.streams || [])]).sort();
       const sConnStreamsAfterFirst = streamConnsAfterFirst.map(c => [...(c.streams || [])]).sort();
@@ -10392,7 +10399,7 @@ def check_business_organization_unit_element_and_generation(page):
       await generateIndustry(app, null, true);
       const orgUnitsAfterSecond = store.doc.parts.filter(p => p.type === 'BusinessOrganizationUnit' && p.label === 'RegrEnvironment');
       const assignConnsAfterSecond = store.doc.connectors.filter(c => c.connectorType === 'c' && c.relationship === 'Assignment' && orgUnitsAfterSecond.some(o => o.id === c.from));
-      const streamConnsAfterSecond = store.doc.connectors.filter(c => c.connectorType === 's' && c.relationship === 'Assignment' && orgUnitsAfterSecond.some(o => o.id === c.from));
+      const streamConnsAfterSecond = store.doc.connectors.filter(c => c.connectorType === 's' && c.relationship === 'Passive' && orgUnitsAfterSecond.some(o => o.id === c.from));
 
       return {
         el, requirementPath: requirementEl?.path, businessActorFill,
@@ -10455,7 +10462,7 @@ def check_business_organization_unit_element_and_generation(page):
         problems.append(f"expected 's' Assignment connector count unchanged on re-run (no duplicates), got {result['streamConnCountAfterFirst']} -> {result['streamConnCountAfterSecond']}")
     if problems:
         return False, "; ".join(problems)
-    return True, "BusinessOrganizationUnit is a real Business-group element with a distinct oval icon and mirrored Business Actor relations, and generateIndustry now reifies each function's section as a shared, Assignment-connected OrgUnit part instead of only a string tag (both connectorType 'c' and 's', both stream-tagged, the OrgUnit part itself stream-tagged too), idempotently across re-runs — this deliberately bridges every function sharing an OrgUnit for insertSmartStream traversal, confirmed as intended"
+    return True, "BusinessOrganizationUnit is a real Business-group element with a distinct oval icon and mirrored Business Actor relations, and generateIndustry now reifies each function's section as a shared OrgUnit part instead of only a string tag, connected via both a real 'c' Assignment connector and an 's' Passive one (both stream-tagged, the OrgUnit part itself stream-tagged too), idempotently across re-runs — this deliberately bridges every function sharing an OrgUnit for insertSmartStream traversal, confirmed as intended, while keeping 's' connectors free of real ArchiMate relationship names"
 
 
 def check_level_down_single_creates_new_part(page):
