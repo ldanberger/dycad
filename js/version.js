@@ -5209,4 +5209,38 @@
 // (tests/run_all.py) updated to assert 'Passive' on the 's' side instead of
 // 'Assignment' -- proven via TEMP BREAK. DESIGN_DOCUMENT.md SS7.3 and tests/README.md
 // updated. Full suite 189/189.
-export const APP_VERSION = '0.925';
+// v0.926: reported directly — "add a isDerived (or something similar) flag to
+// connectors, set it anytime a derived connector is created. Valid for any connector
+// type. Add it to connector property view in all views and catalogs where connector
+// properties are shown. Not user updatable. Add a view filter (any place connector
+// types can be filtered) to allow only showing derived connectors. Note updated with
+// derived does not replace this, keep existing note for ease of use, but as an
+// editable note the user may replace it." isDerived itself already existed
+// (createDerivedConnectorPairs, commands.js, set true on every connector it creates,
+// either connectorType) -- this is the new part: (1) a new isDerived entry in
+// custom.json's showFields.connector (show:'y', access:'r' -- readonly), with a
+// matching accessor added to BOTH connector property panels that were missing it
+// entirely -- the Catalogs > Connectors row panel (renderConnectorOnlyProperties) and
+// the canvas-selected-connector panel (renderConnectorProperties), render.js. (2) a
+// new view.chkShowOnlyDerived checkbox (2D canvas, default false) wired into
+// redrawEdges (canvas.js) and Export SVG's own buildViewSvgString path (main.js) --
+// the same two places chkShowConnectorType/chkShowStreamType/chkShowDataType already
+// gate connector visibility -- and schema-driven into the View Display Filters panel
+// via VIEW_DISPLAY_FILTER_FIELDS. (3) a new tab.showOnlyDerivedConnectors boolean (3D
+// View, default false), an extra checkbox inside the existing Connector Type filter
+// dropdown, orthogonal to activeConnectorTypes since a derived connector can be
+// either connectorType -- real bug caught while verifying this: view3d.js's
+// computeSignature (the scene-rebuild-skip optimization) had to gain this field too,
+// or toggling the checkbox would silently do nothing (correct filtering logic, but
+// the cached scene never got asked to re-run it). (4) confirmed the note text set at
+// derivation time needs no change at all -- already a separate, freely user-editable
+// field, untouched by any of the above.
+// New check_derived_connector_flag_display_and_only_derived_filters
+// (tests/run_all.py): both property panels show isDerived correctly (readonly
+// 'true'/'false'), chkShowOnlyDerived reduces both the on-canvas edge count and the
+// exported SVG's path count to just the derived connector, the 3D dropdown checkbox
+// is present and correctly filters the scene, and the note text is confirmed both
+// unchanged and still freely editable -- each of the four wiring points proven
+// independently via TEMP BREAK. DESIGN_DOCUMENT.md SS5.5 (new paragraph),
+// tests/README.md, and public/instructions.html updated.
+export const APP_VERSION = '0.926';

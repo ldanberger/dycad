@@ -14015,6 +14015,145 @@ def check_smart_check_view_derive_skips_stale_sibling_when_real_path_shown(page)
     return True, "Smart Check View's derived-connector sweep re-validates each already-existing derived connector against the CURRENT view before placing it — skipping one whose underlying gap is no longer real because the full intermediate chain is genuinely shown here, while still placing it correctly when that chain remains genuinely hidden"
 
 
+def check_derived_connector_flag_display_and_only_derived_filters(page):
+    """Regression guard/new-feature check, reported directly: "add a isDerived (or
+    something similar) flag to connectors, set it anytime a derived connector is
+    created. Valid for any connector type. Add it to connector property view in all
+    views and catalogs where connector properties are shown. Not user updatable. Add a
+    view filter (any place connector types can be filtered) to allow only showing
+    derived connectors. Note updated with derived does not replace this, keep existing
+    note for ease of use, but as an editable note the user may replace it." The
+    `isDerived` flag itself already existed (createDerivedConnectorPairs, commands.js,
+    set true on every connector it creates, either connectorType) -- this covers the
+    NEW parts: (1) a new `isDerived` field in custom.json's showFields.connector
+    (show:'y', access:'r' -- readonly, matching the "not user updatable" requirement),
+    with a matching accessor added to BOTH connector property panels (the Catalogs >
+    Connectors row panel, renderConnectorOnlyProperties, and the canvas-selected-
+    connector panel, renderConnectorProperties) -- both were previously missing it
+    entirely; (2) a new `view.chkShowOnlyDerived` checkbox (2D canvas, wired into
+    redrawEdges' existing chkShowConnectorType/chkShowStreamType/chkShowDataType gate
+    AND buildViewSvgString's Export-as-Image path, the same "every place connectors
+    already get type-filtered" convention those three already follow) and a new
+    `tab.showOnlyDerivedConnectors` boolean (3D View, an extra checkbox inside the
+    existing Connector Type filter dropdown, orthogonal to activeConnectorTypes since a
+    derived connector can be either connectorType) -- both default false (no behavior
+    change for anyone not using it); (3) confirms the note text set at derivation time
+    is completely unaffected by any of this and stays a normal, user-editable field."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view3d = await import('./js/view3d.js');
+      const model = store.defaultModel;
+      const a = store.createPart({ type: 'BusinessFunction', label: 'RegrDerivFlagA', model, streams: [] });
+      const b = store.createPart({ type: 'ApplicationCapability', label: 'RegrDerivFlagB', model, streams: [] });
+      const derived = store.createConnector({ from: a.id, to: b.id, connectorType: 'c', model, relationship: 'Association', note: 'Derived — implied via Business Process (not shown)', isDerived: true });
+      const ordinary = store.createConnector({ from: b.id, to: a.id, connectorType: 's', model, relationship: 'Stream', streams: ['S1'] });
+
+      const view = store.addView('RegrDerivFlag_' + Date.now(), 'ff');
+      view.chkShowStreamType = true; // 'ff' defaults this false -- need both types visible to start
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const vmA = store.createViewMember({ view: view.id, objectType: 'part', objectId: a.id, x: 40, y: 40 });
+      const vmB = store.createViewMember({ view: view.id, objectType: 'part', objectId: b.id, x: 300, y: 40 });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: derived.id, fromVmId: vmA.id, toVmId: vmB.id });
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: ordinary.id, fromVmId: vmB.id, toVmId: vmA.id });
+      app.render();
+
+      const out = {};
+
+      // 1) Catalogs > Connectors row panel.
+      app.openOrSwitchCatalog('connectors', 'Connectors Catalog');
+      await new Promise(r => setTimeout(r, 60));
+      document.querySelector(`tr.catalog-row[data-id="${derived.id}"]`).click();
+      await new Promise(r => setTimeout(r, 60));
+      const catalogInput = document.getElementById('sf-connector-isDerived');
+      out.catalogPanelValue = catalogInput ? catalogInput.value : null;
+      out.catalogPanelReadonly = catalogInput ? catalogInput.readOnly : null;
+
+      // 2) Canvas-selected connector panel.
+      app.switchToTab(tab.id);
+      const connVmDerived = store.viewMembersForView(view.id).find(v => v.objectType === 'connector' && v.objectId === derived.id);
+      tab.selection = new Set([connVmDerived.id]);
+      app.render();
+      const canvasInput = document.getElementById('sf-connector-isDerived');
+      out.canvasPanelValue = canvasInput ? canvasInput.value : null;
+      const connVmOrdinary = store.viewMembersForView(view.id).find(v => v.objectType === 'connector' && v.objectId === ordinary.id);
+      tab.selection = new Set([connVmOrdinary.id]);
+      app.render();
+      out.canvasPanelValueOrdinary = document.getElementById('sf-connector-isDerived')?.value;
+      tab.selection = new Set();
+      app.render();
+
+      // 3) 2D canvas chkShowOnlyDerived filter (redrawEdges).
+      const edgeCount = () => document.querySelector('.page-view.active .edge-layer').children.length;
+      out.edgeCountBoth = edgeCount();
+      view.chkShowOnlyDerived = true;
+      app.render();
+      out.edgeCountDerivedOnly = edgeCount();
+      view.chkShowOnlyDerived = false;
+      app.render();
+
+      // 4) Export SVG respects chkShowOnlyDerived too.
+      const countSvgPaths = () => {
+        const svg = app.buildViewSvgString(view).svgString;
+        const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+        return doc.documentElement.querySelectorAll(':scope > path').length;
+      };
+      out.svgPathsBoth = countSvgPaths();
+      view.chkShowOnlyDerived = true;
+      out.svgPathsDerivedOnly = countSvgPaths();
+      view.chkShowOnlyDerived = false;
+
+      // 5) 3D View's own showOnlyDerivedConnectors toggle, including the dropdown checkbox.
+      app.openOrSwitch3DView();
+      const tab3d = store.tabs.find(t => t.type === '3d');
+      await new Promise(r => setTimeout(r, 250));
+      out.scene3dBoth = view3d.getDebugSceneInfo(tab3d.id).connectorCount;
+      document.getElementById('connector-type-filter-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      out.dropdownCheckboxPresent = !!document.getElementById('connector-type-derived-only');
+      document.getElementById('connector-type-derived-only').checked = true;
+      document.getElementById('connector-type-derived-only').dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 100));
+      out.scene3dDerivedOnly = view3d.getDebugSceneInfo(tab3d.id).connectorCount;
+      out.tab3dFlag = tab3d.showOnlyDerivedConnectors;
+
+      // 6) Note is completely unaffected -- still the original text, still editable.
+      out.noteUnchanged = derived.note === 'Derived — implied via Business Process (not shown)';
+      derived.note = 'a person typed this instead';
+      out.noteEditable = derived.note === 'a person typed this instead';
+
+      return out;
+    }
+    """)
+    problems = []
+    if result["catalogPanelValue"] != "true" or not result["catalogPanelReadonly"]:
+        problems.append(f"expected the Catalogs > Connectors row panel to show isDerived as a readonly 'true', got value={result['catalogPanelValue']!r} readonly={result['catalogPanelReadonly']}")
+    if result["canvasPanelValue"] != "true":
+        problems.append(f"expected the canvas-selected derived connector's panel to show isDerived as 'true', got {result['canvasPanelValue']!r}")
+    if result["canvasPanelValueOrdinary"] != "false":
+        problems.append(f"expected the canvas-selected ORDINARY connector's panel to show isDerived as 'false', got {result['canvasPanelValueOrdinary']!r}")
+    if result["edgeCountBoth"] <= result["edgeCountDerivedOnly"] or result["edgeCountDerivedOnly"] == 0:
+        problems.append(f"expected chkShowOnlyDerived to reduce the visible edge count (both types shown -> only the derived one), got both={result['edgeCountBoth']} derivedOnly={result['edgeCountDerivedOnly']}")
+    if result["svgPathsBoth"] != 2:
+        problems.append(f"expected 2 connector paths in the exported SVG with chkShowOnlyDerived off, got {result['svgPathsBoth']}")
+    if result["svgPathsDerivedOnly"] != 1:
+        problems.append(f"expected chkShowOnlyDerived to drop Export SVG to just the 1 derived connector path, got {result['svgPathsDerivedOnly']}")
+    if result["scene3dBoth"] != 2:
+        problems.append(f"expected both connectors visible in the 3D scene with no derived-only filter, got {result['scene3dBoth']}")
+    if not result["dropdownCheckboxPresent"]:
+        problems.append("expected a 'Derived only' checkbox inside the 3D Connector Type filter dropdown")
+    if result["scene3dDerivedOnly"] != 1 or not result["tab3dFlag"]:
+        problems.append(f"expected checking 'Derived only' in the 3D dropdown to set tab.showOnlyDerivedConnectors and drop the scene to just the 1 derived connector, got scene3dDerivedOnly={result['scene3dDerivedOnly']} tab3dFlag={result['tab3dFlag']}")
+    if not result["noteUnchanged"]:
+        problems.append("expected the derived connector's note text to be completely unaffected by the isDerived flag/filter additions")
+    if not result["noteEditable"]:
+        problems.append("expected the note field to remain freely editable by the user despite isDerived being readonly")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "isDerived is now a readonly field in BOTH connector property panels (Catalogs row and canvas-selected), a new chkShowOnlyDerived view checkbox filters both the 2D canvas and Export SVG, a new 3D 'Derived only' dropdown checkbox filters the 3D scene, and the note field stays completely independent and freely user-editable"
+
+
 def check_smart_check_view_dialog_include_derived_checkbox_wiring(page):
     """Regression guard for the real Smart Check View DIALOG's new "Include existing
     derived connectors" checkbox (#scv-include-derived, main.js) -- confirms it's wired
@@ -15305,6 +15444,7 @@ CHECKS = [
     check_derived_connector_isDerived_flag_and_include_option,
     check_smart_check_view_derive_places_already_existing_sibling,
     check_smart_check_view_derive_skips_stale_sibling_when_real_path_shown,
+    check_derived_connector_flag_display_and_only_derived_filters,
     check_smart_check_view_dialog_include_derived_checkbox_wiring,
     check_derived_connector_relationship_fallback,
     check_smart_check_model_detection_and_fix_precedence,

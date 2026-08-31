@@ -537,6 +537,54 @@ checkbox are unaffected by this option too — they're placed through their own 
 code path (`createDerivedConnectorPairs`'s returned list, above), never through the
 `missingConnectors` pull-in loops this option gates.
 
+**`isDerived` display and a "derived only" filter (Step 40)**: `isDerived` itself
+already existed (set by `createDerivedConnectorPairs`, above, on every connector it
+creates, either `connectorType`) — reported directly as a follow-up: *"add a isDerived
+(or something similar) flag to connectors, set it anytime a derived connector is
+created. Valid for any connector type. Add it to connector property view in all views
+and catalogs where connector properties are shown. Not user updatable."* The flag was
+never actually SHOWN anywhere — a new `isDerived` entry in `custom.json`'s
+`showFields.connector` (`show: 'y'`, `access: 'r'` — readonly, since `renderShowFieldsPanel`
+checks `access === 'r'` before it ever looks at `show`, so this always renders as a
+plain readonly text input regardless of the `'y'` type) now appears in BOTH places a
+connector's properties are shown: the Catalogs > Connectors row panel
+(`renderConnectorOnlyProperties`) and the canvas-selected-connector panel
+(`renderConnectorProperties`) — both needed their own accessor added (`{ get: () =>
+!!conn.isDerived, set: () => {} }`), same "no shared helper, duplicated per panel"
+pattern the `from`/`to` label-resolution accessors already follow in both functions.
+
+*"Add a view filter (any place connector types can be filtered) to allow only showing
+derived connectors."* Two independent additions, matching the two existing connector-
+type-filter mechanisms exactly: a new `view.chkShowOnlyDerived` boolean (2D canvas,
+default `false`) sits alongside `chkShowConnectorType`/`chkShowStreamType`/
+`chkShowDataType` everywhere those three already gate connector visibility —
+`redrawEdges` (`canvas.js`) and `buildViewSvgString`'s Export-as-Image path (`main.js`,
+which has its own separate connector-drawing loop specifically so exports match what's
+on screen — see that function's own comment) — and is schema-driven into the View
+Display Filters panel for free via `VIEW_DISPLAY_FILTER_FIELDS`. A new
+`tab.showOnlyDerivedConnectors` boolean (3D View, default `false`) is a SEPARATE,
+orthogonal toggle from `tab.activeConnectorTypes` — a derived connector can be EITHER
+connectorType, so "derived" isn't a value to add to that checklist, it's its own gate —
+added as an extra checkbox inside the existing Connector Type filter dropdown
+(`main.js`) and checked in `view3d.js`'s own connector-line-building loop. Real bug
+caught while verifying this: `view3d.js`'s `computeSignature` (the scene-rebuild-skip
+optimization) enumerates every tab/store field that affects the 3D scene and skips a
+full rebuild when none of them changed — `tab.showOnlyDerivedConnectors` had to be
+added to that list too, or toggling the new checkbox would silently do nothing (the
+filtering logic itself was correct; the cached scene just never got asked to re-run
+it).
+
+*"Note updated with derived does not replace this, keep existing note for ease of use,
+but as an editable note the user may replace it."* No change needed — `createDerivedConnectorPairs`'s
+own `note` text and the `note` field's own free-text accessor were never touched by any
+of the above; `isDerived` is a separate, independent field. New `check_derived_
+connector_flag_display_and_only_derived_filters` (`tests/run_all.py`): both property
+panels show `isDerived` correctly (readonly `'true'`/`'false'`), `chkShowOnlyDerived`
+reduces both the on-canvas edge count and the exported SVG's path count to just the
+derived connector, the 3D dropdown checkbox is present and correctly filters the scene,
+and the note text is confirmed both unchanged and still freely editable — proven via
+TEMP BREAK (each of the four wiring points independently).
+
 **`insertSmartStream`'s own collection BFS — stream-continuity gate (Step 40)**: a real
 bug surfaced once §7.3's Business Organization Unit part gained a genuine `connectorType:
 's'` Assignment edge to every Function it's assigned to — an OrgUnit is legitimately a

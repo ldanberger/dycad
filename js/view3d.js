@@ -1078,6 +1078,7 @@ function computeSignature(app, tab) {
     tab.activeElementTypes,
     tab.activeSections,
     tab.activeConnectorTypes,
+    tab.showOnlyDerivedConnectors,
     tab.highlightedTypes,
     tab.view3DScopeViewId,
     scopedViewMembersSig,
@@ -1308,6 +1309,7 @@ function syncSceneData(app, tab, inst) {
   const activeConnectorTypes = tab.activeConnectorTypes;
   for (const c of store.doc.connectors) {
     if (activeConnectorTypes != null && !activeConnectorTypes.includes(c.connectorType)) continue;
+    if (tab.showOnlyDerivedConnectors && !c.isDerived) continue;
     if (scopedConnectorIds && !scopedConnectorIds.has(c.id)) continue;
     const fromPos = partPositions.get(c.from);
     const toPos = partPositions.get(c.to);

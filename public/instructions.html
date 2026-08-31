@@ -418,8 +418,10 @@ canvas. Availability depends on what's selected — greyed out means the current
     concept Insert Smart Stream uses (see above), creating both a Connector ('c') and a Stream ('s') version and
     noting which off-view type(s) it stands in for. Since it runs after the other options' own additions, a node
     that Missing connectors and nodes just pulled in this same run no longer counts as "hidden" and won't get
-    bridged. Every connector it creates is flagged internally as derived — see Include existing derived
-    connectors, above.</td></tr>
+    bridged. Every connector it creates is flagged <strong>Derived</strong> — a read-only field on its own
+    property panel (Root Properties, and the Connectors catalog row panel), alongside its editable Note (which
+    keeps its own "implied via..." text by default, but is a normal text field you can retype). See Include
+    existing derived connectors, above, and <strong>Derived Only</strong> below.</td></tr>
     <tr><td><strong>Smart Check Node</strong></td><td>(Advanced menu, or right-click a single node) The
     single-node version of Smart Check View — same "missing connectors" / "missing connectors and nodes, N
     levels" idea (including the same Composition-awareness described above), but starting from just the node
@@ -662,7 +664,13 @@ there disabled and confusing.</p>
   filtered node's immediate context instead of it floating in isolation.</li>
   <li><strong>Connector Type filter</strong> (3D View only) — which connectorType(s) draw at all: 'c'
   Connectors and/or 's' Streams. Same select-all/exclude-all pattern as Stream/Type/Section. Disabled on a
-  canvas tab, where this is instead a per-view setting (Show Connector Type / Show Stream Type).</li>
+  canvas tab, where this is instead a per-view setting (Show Connector Type / Show Stream Type). Its dropdown
+  also has a separate <strong>Derived only</strong> checkbox — independent of the Connectors/Streams selection
+  above it, since a derived connector can be either type — that narrows the scene down to just connectors
+  flagged Derived (see Smart Check View's own Derive hidden connections, above). The canvas tab's own
+  equivalent is the <strong>Derived Only</strong> checkbox alongside Show Connector Type/Show Stream Type/Show
+  Data Type in the view's own display filters (Root Properties, or the Filters panel while nothing is
+  selected).</li>
   <li><strong>Highlight</strong> (3D View only) — NOT a filter: draws a wireframe box around every part of
   whichever checked element type(s), while everything else keeps rendering normally. Useful for making one
   or two types of interest visually pop out of a large scene (e.g. every Business Function) without hiding

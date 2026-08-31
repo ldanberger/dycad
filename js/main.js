@@ -3643,6 +3643,7 @@ class App {
       if (conn.connectorType === 'c' && view?.chkShowConnectorType === false) continue;
       if (conn.connectorType === 's' && view?.chkShowStreamType === false) continue;
       if (conn.connectorType === 'd' && view?.chkShowDataType === false) continue;
+      if (view?.chkShowOnlyDerived && !conn.isDerived) continue;
 
       // Reported directly: "view options 'Connector Routing' and 'Stream Connector
       // Routing' are ignored when exporting view to image." Routing/obstacle-avoidance
@@ -5382,6 +5383,12 @@ function wireGlobalEvents(app) {
       </div>
       <div class="dd-item-list">
         ${CONNECTOR_TYPE_ITEMS.map((i) => `<div class="dd-item"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" value="${escapeHtml(i.value)}" ${checkedTypes.has(i.value) ? 'checked' : ''} />${escapeHtml(i.label)}</label></div>`).join('')}
+      </div>
+      <div class="dd-separator"></div>
+      <div class="dd-item">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+          <input type="checkbox" id="connector-type-derived-only" ${tab.showOnlyDerivedConnectors ? 'checked' : ''} />Derived only
+        </label>
       </div>`;
 
     const itemCheckboxes = () => [...menu.querySelectorAll('.dd-item-list input[type="checkbox"]')];
@@ -5397,6 +5404,10 @@ function wireGlobalEvents(app) {
         selectAllCb.checked = itemCheckboxes().every((c) => c.checked);
         app.render();
       });
+    });
+    document.getElementById('connector-type-derived-only').addEventListener('change', (ev) => {
+      tab.showOnlyDerivedConnectors = ev.target.checked;
+      app.render();
     });
     menu.classList.toggle('hidden');
   });

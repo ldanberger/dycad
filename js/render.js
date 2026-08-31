@@ -196,6 +196,7 @@ function renderToolbar(app) {
   } else {
     connTypeBtn.textContent = 'All (c + s)';
   }
+  if (is3D && tab.showOnlyDerivedConnectors) connTypeBtn.textContent += ' · Derived only';
   connTypeBtn.disabled = !is3D;
   document.getElementById('connector-type-filter-group').classList.toggle('hidden', !is3D);
 
@@ -1280,7 +1281,7 @@ function renderSectionProperties(app, tab) {
 // right-side badge on the node — now that "Show Simulation Values" sitting right next
 // to "Show Script Badge" in the same panel made the asymmetric old naming obviously
 // inconsistent.)
-const VIEW_DISPLAY_FILTER_FIELDS = ['chkShowConnectorType', 'chkShowStreamType', 'chkShowDataType', 'chkShowElementTypes', 'chkShowDescription', 'chkShowAttributes', 'chkShowKeys', 'chkShowSimValues', 'chkShowScriptBadge'];
+const VIEW_DISPLAY_FILTER_FIELDS = ['chkShowConnectorType', 'chkShowStreamType', 'chkShowDataType', 'chkShowOnlyDerived', 'chkShowElementTypes', 'chkShowDescription', 'chkShowAttributes', 'chkShowKeys', 'chkShowSimValues', 'chkShowScriptBadge'];
 
 function viewFieldAccessors(app, tab, view) {
   return {
@@ -1293,6 +1294,7 @@ function viewFieldAccessors(app, tab, view) {
     chkShowConnectorType: { get: () => view.chkShowConnectorType, set: (v) => { view.chkShowConnectorType = v; } },
     chkShowStreamType: { get: () => view.chkShowStreamType, set: (v) => { view.chkShowStreamType = v; } },
     chkShowDataType: { get: () => view.chkShowDataType, set: (v) => { view.chkShowDataType = v; } },
+    chkShowOnlyDerived: { get: () => view.chkShowOnlyDerived, set: (v) => { view.chkShowOnlyDerived = v; } },
     chkShowAttributes: { get: () => view.chkShowAttributes, set: (v) => { view.chkShowAttributes = v; } },
     chkShowElementTypes: { get: () => view.chkShowElementTypes, set: (v) => { view.chkShowElementTypes = v; redrawAndResolveLayout(app, tab); } },
     chkShowKeys: { get: () => view.chkShowKeys, set: (v) => { view.chkShowKeys = v; redrawAndResolveLayout(app, tab); } },
@@ -1540,6 +1542,7 @@ function renderConnectorOnlyProperties(app, conn) {
     toCardinality: { get: () => conn.toCardinality || '', set: (v) => { conn.toCardinality = v; app.store.touchConnector(conn); } },
     model: { get: () => conn.model, set: () => {} },
     note: { get: () => conn.note, set: (v) => { conn.note = v; app.store.touchConnector(conn); } },
+    isDerived: { get: () => !!conn.isDerived, set: () => {} },
     streams: { get: () => conn.streams || [], set: (v) => { conn.streams = v.split(',').map((s) => s.trim()).filter(Boolean); app.store.touchConnector(conn); app.promptSyncInventoryConnector(conn); } },
     connectorType: { get: () => conn.connectorType, set: (v) => { conn.connectorType = v; app.store.touchConnector(conn); } },
     fromLineEndSettings: { get: () => conn.fromLineEndSettings, set: () => {} },
@@ -1573,6 +1576,7 @@ function renderViewOnlyProperties(app, view) {
     chkShowConnectorType: { get: () => view.chkShowConnectorType, set: (v) => { view.chkShowConnectorType = v; } },
     chkShowStreamType: { get: () => view.chkShowStreamType, set: (v) => { view.chkShowStreamType = v; } },
     chkShowDataType: { get: () => view.chkShowDataType, set: (v) => { view.chkShowDataType = v; } },
+    chkShowOnlyDerived: { get: () => view.chkShowOnlyDerived, set: (v) => { view.chkShowOnlyDerived = v; } },
     chkShowAttributes: { get: () => view.chkShowAttributes, set: (v) => { view.chkShowAttributes = v; } },
     chkShowElementTypes: { get: () => view.chkShowElementTypes, set: (v) => { view.chkShowElementTypes = v; } },
     chkShowKeys: { get: () => view.chkShowKeys, set: (v) => { view.chkShowKeys = v; } },
@@ -1770,6 +1774,7 @@ function renderConnectorProperties(app, vm) {
     model: { get: () => conn.model, set: () => {} },
     streams: { get: () => conn.streams || [], set: (v) => { conn.streams = v.split(',').map((s) => s.trim()).filter(Boolean); app.store.touchConnector(conn); app.promptSyncInventoryConnector(conn); } },
     note: { get: () => conn.note, set: (v) => { conn.note = v; app.store.touchConnector(conn); } },
+    isDerived: { get: () => !!conn.isDerived, set: () => {} },
     connectorType: { get: () => conn.connectorType, set: (v) => { conn.connectorType = v; app.store.touchConnector(conn); } },
     relationship: { get: () => conn.relationship, set: (relationKey) => { app.applyRelationToConnector(conn, relationKey); app.store.touchConnector(conn); app.promptSyncInventoryConnector(conn); } },
     fromAttribute: { get: () => conn.fromAttribute || '', set: (v) => { conn.fromAttribute = v; app.store.touchConnector(conn); } },

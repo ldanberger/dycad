@@ -374,6 +374,7 @@ function redrawEdges(app, tab, edgeLayer, partVms, connVms) {
     if (conn.connectorType === 'c' && view?.chkShowConnectorType === false) continue;
     if (conn.connectorType === 's' && view?.chkShowStreamType === false) continue;
     if (conn.connectorType === 'd' && view?.chkShowDataType === false) continue;
+    if (view?.chkShowOnlyDerived && !conn.isDerived) continue;
     const fromVm = partVmById.get(cvm.fromVmId);
     const toVm = partVmById.get(cvm.toVmId);
     if (!fromVm || !toVm) continue;

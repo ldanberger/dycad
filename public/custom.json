@@ -216,6 +216,11 @@
           "access": "w",
           "label": "Note"
         },
+        "isDerived": {
+          "show": "y",
+          "access": "r",
+          "label": "Derived"
+        },
         "connectorType": {
           "show": "s",
           "access": "w",
@@ -398,6 +403,11 @@
           "show": "y",
           "access": "w",
           "label": "Data"
+        },
+        "chkShowOnlyDerived": {
+          "show": "y",
+          "access": "w",
+          "label": "Derived Only"
         },
         "chkShowElementTypes": {
           "show": "y",

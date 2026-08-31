@@ -590,7 +590,7 @@ class Store {
       industryTemplateName: 'SFCCE',
       models: [{ modelName: 'Reference' }, { modelName: 'As-is' }, { modelName: 'To-be' }, { modelName: 'Gap' }],
       views: [
-        { id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, chkShowAllText: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1, spacingAxis: 'both' },
+        { id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowOnlyDerived: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, chkShowAllText: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1, spacingAxis: 'both' },
       ],
       parts: [],
       connectors: [],
@@ -703,7 +703,7 @@ class Store {
   addView(viewName, viewType = 'ff') {
     const id = viewName;
     if (this.findView(id)) return this.findView(id);
-    const view = { id, viewName, viewType, chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, chkShowAllText: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(this.nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1, spacingAxis: 'both' };
+    const view = { id, viewName, viewType, chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowOnlyDerived: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, chkShowAllText: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(this.nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1, spacingAxis: 'both' };
     this.doc.views.push(view);
     this.ensureViewSections(view);
     return view;
@@ -1048,6 +1048,13 @@ class Store {
       // view.chkShowConnectorType/chkShowStreamType the way the 2D canvas's own
       // equivalent does; this is the 3D-only, tab-scoped counterpart instead.
       activeConnectorTypes: null,
+      // 3D-tab-only: a separate, orthogonal on/off toggle from activeConnectorTypes
+      // above — a derived connector can be EITHER connectorType, so this isn't a value
+      // to add to that list, it's its own boolean gate. Default false (show
+      // everything, no behavior change for anyone not using it). Set via the same
+      // Connector Type filter dropdown (main.js), as an extra checkbox alongside the
+      // 'c'/'s'/'d' list. The 2D canvas's own counterpart is view.chkShowOnlyDerived.
+      showOnlyDerivedConnectors: false,
       // 3D-tab-only: which element type(s) get a highlight overlay (a bright wireframe
       // box around every matching instance) — a plain array, default [] (nothing
       // highlighted), NOT the null-vs-[] convention the filters above use, since there's
@@ -1170,7 +1177,7 @@ function migrateDoc(obj, nodeSizeMultiplier = 1.2) {
     industryTree: obj.industryTree ?? [],
     industryTemplateName: obj.industryTemplateName || 'SFCCE',
     models: obj.models && obj.models.length ? obj.models : [{ modelName: 'Reference' }],
-    views: obj.views && obj.views.length ? obj.views.map((v) => ({ ...v, viewType: v.viewType || 'ff', sections: v.sections ?? [], nodeWidth: v.nodeWidth ?? defaultNodeSize(nodeSizeMultiplier).nodeWidth, nodeHeight: v.nodeHeight ?? defaultNodeSize(nodeSizeMultiplier).nodeHeight, remapSortKeys: v.remapSortKeys ?? null, remapLastOptions: v.remapLastOptions ?? null, chkShowConnectorType: v.chkShowConnectorType ?? (v.chkShowConnectors ?? true), chkShowStreamType: v.chkShowStreamType ?? (v.chkShowConnectors ?? true), chkShowDataType: v.chkShowDataType ?? true, chkShowDescription: v.chkShowDescription ?? true, chkShowAttributes: v.chkShowAttributes ?? true, chkShowSimValues: v.chkShowSimValues ?? false, chkShowScriptBadge: v.chkShowScriptBadge ?? false, chkShowAllText: v.chkShowAllText ?? false, routingStyle: v.routingStyle ?? 'default', routingStyleStream: v.routingStyleStream ?? 'default', spacingScale: v.spacingScale ?? 1, spacingAxis: v.spacingAxis ?? 'both' })) : [{ id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, chkShowAllText: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1, spacingAxis: 'both' }],
+    views: obj.views && obj.views.length ? obj.views.map((v) => ({ ...v, viewType: v.viewType || 'ff', sections: v.sections ?? [], nodeWidth: v.nodeWidth ?? defaultNodeSize(nodeSizeMultiplier).nodeWidth, nodeHeight: v.nodeHeight ?? defaultNodeSize(nodeSizeMultiplier).nodeHeight, remapSortKeys: v.remapSortKeys ?? null, remapLastOptions: v.remapLastOptions ?? null, chkShowConnectorType: v.chkShowConnectorType ?? (v.chkShowConnectors ?? true), chkShowStreamType: v.chkShowStreamType ?? (v.chkShowConnectors ?? true), chkShowDataType: v.chkShowDataType ?? true, chkShowOnlyDerived: v.chkShowOnlyDerived ?? false, chkShowDescription: v.chkShowDescription ?? true, chkShowAttributes: v.chkShowAttributes ?? true, chkShowSimValues: v.chkShowSimValues ?? false, chkShowScriptBadge: v.chkShowScriptBadge ?? false, chkShowAllText: v.chkShowAllText ?? false, routingStyle: v.routingStyle ?? 'default', routingStyleStream: v.routingStyleStream ?? 'default', spacingScale: v.spacingScale ?? 1, spacingAxis: v.spacingAxis ?? 'both' })) : [{ id: 'home', viewName: 'home', viewType: 'ff', chkShowConnectorType: true, chkShowStreamType: false, chkShowDataType: true, chkShowOnlyDerived: false, chkShowKeys: false, chkShowElementTypes: true, chkShowDescription: true, chkShowAttributes: true, chkShowOnPageCatalogs: false, chkShowSimValues: false, chkShowScriptBadge: false, chkShowAllText: false, routingStyle: 'default', routingStyleStream: 'default', margin: 50, sections: [], ...defaultNodeSize(nodeSizeMultiplier), remapSortKeys: null, remapLastOptions: null, spacingScale: 1, spacingAxis: 'both' }],
     parts: (obj.parts || []).map((p) => ({
       id: p.id, type: p.type, label: p.label ?? p.id, rawLabel: p.rawLabel ?? p.label ?? p.id,
       model: p.model ?? (obj.defaultModel || 'Reference'),
