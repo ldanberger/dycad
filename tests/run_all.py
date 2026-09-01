@@ -14154,6 +14154,55 @@ def check_derived_connector_flag_display_and_only_derived_filters(page):
     return True, "isDerived is now a readonly field in BOTH connector property panels (Catalogs row and canvas-selected), a new chkShowOnlyDerived view checkbox filters both the 2D canvas and Export SVG, a new 3D 'Derived only' dropdown checkbox filters the 3D scene, and the note field stays completely independent and freely user-editable"
 
 
+def check_viewmember_font_border_fields_hidden(page):
+    """Regression guard, reported directly: "in view property panel the Font Color,
+    Border Color, and Font Size have no affect. Change to hidden if that is still
+    available in custom.json showFields, otherwise just remove from property panel
+    display, may be implemented later." These three viewMember fields were fully
+    wired (schema entry, accessor, persisted correctly) but never read during
+    rendering — a known, documented non-issue (DESIGN_DOCUMENT.md SS10), but still
+    misleading to leave visible and editable with no effect. `show: 'h'` (custom.json's
+    showFields.viewMember) is an existing, already-supported field type —
+    renderShowFieldsPanel (render.js) skips any field with `def.show === 'h'` before
+    it ever looks at `access`, in both the main panel body loop and the pin-button-
+    wiring loop, and the "📌 Pinned" section routes through the exact same function
+    with a merged spec, so this hides the fields everywhere with no other code
+    change. Selects a real node on a real view and confirms all three field inputs
+    (#sf-viewMember-fontColor/-fontSize/-borderColor) are absent from the DOM, while
+    a genuinely-working sibling field (#sf-viewMember-fillColor) stays present —
+    proven via TEMP BREAK."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.addView('RegrHiddenFields_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const part = store.createPart({ type: 'BusinessFunction', label: 'RegrHiddenFieldsPart', model: store.defaultModel, streams: [] });
+      const vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: 40, y: 40 });
+      tab.selection = new Set([vm.id]);
+      app.render();
+      return {
+        fontColorPresent: !!document.getElementById('sf-viewMember-fontColor'),
+        fontSizePresent: !!document.getElementById('sf-viewMember-fontSize'),
+        borderColorPresent: !!document.getElementById('sf-viewMember-borderColor'),
+        fillColorPresent: !!document.getElementById('sf-viewMember-fillColor'),
+      };
+    }
+    """)
+    problems = []
+    if result["fontColorPresent"]:
+        problems.append("expected Font Color to be hidden from the node property panel")
+    if result["fontSizePresent"]:
+        problems.append("expected Font Size to be hidden from the node property panel")
+    if result["borderColorPresent"]:
+        problems.append("expected Border Color to be hidden from the node property panel")
+    if not result["fillColorPresent"]:
+        problems.append("test setup: expected the genuinely-working Fill Color field to still be present (control case)")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "viewMember's Font Color/Font Size/Border Color fields (fully wired but never read during rendering) are hidden from the property panel via show:'h', while a genuinely-working sibling field (Fill Color) stays visible"
+
+
 def check_smart_check_view_dialog_include_derived_checkbox_wiring(page):
     """Regression guard for the real Smart Check View DIALOG's new "Include existing
     derived connectors" checkbox (#scv-include-derived, main.js) -- confirms it's wired
@@ -15445,6 +15494,7 @@ CHECKS = [
     check_smart_check_view_derive_places_already_existing_sibling,
     check_smart_check_view_derive_skips_stale_sibling_when_real_path_shown,
     check_derived_connector_flag_display_and_only_derived_filters,
+    check_viewmember_font_border_fields_hidden,
     check_smart_check_view_dialog_include_derived_checkbox_wiring,
     check_derived_connector_relationship_fallback,
     check_smart_check_model_detection_and_fix_precedence,

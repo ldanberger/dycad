@@ -5243,4 +5243,24 @@
 // unchanged and still freely editable -- each of the four wiring points proven
 // independently via TEMP BREAK. DESIGN_DOCUMENT.md SS5.5 (new paragraph),
 // tests/README.md, and public/instructions.html updated.
-export const APP_VERSION = '0.926';
+// v0.927: reported directly — "in view property panel the Font Color, Border Color,
+// and Font Size have no affect. Change to hidden if that is still available in
+// custom.json showFields, otherwise just remove from property panel display, may be
+// implemented later." These viewMember fields (fontColor/fontSize/borderColor) were
+// fully wired (schema entry, accessor, persist correctly) but never read during
+// rendering -- a known, permanent non-issue per CLAUDE.md/DESIGN_DOCUMENT.md SS10, but
+// still misleading to leave editable with no visible effect. custom.json's
+// showFields.viewMember already supports show:'h' (hidden) as a field type --
+// renderShowFieldsPanel (render.js) skips any field with def.show === 'h' before it
+// ever looks at access, in both the main panel body loop and the pin-button-wiring
+// loop, and the "Pinned" section routes through the exact same function with a merged
+// spec -- so setting all three to show:'h' hides them everywhere with no other code
+// change needed. view.margin (the fourth field in the same known-gap list) is left
+// alone -- not reported, and less obviously dead as a per-view setting than a
+// per-node field someone directly edits with no effect. New
+// check_viewmember_font_border_fields_hidden (tests/run_all.py): a real selected node
+// confirms all three field inputs are absent from the DOM, while a genuinely-working
+// sibling field (Fill Color) stays present -- proven via TEMP BREAK.
+// DESIGN_DOCUMENT.md SS10, CLAUDE.md, and public/instructions.html's own "no visible
+// effect" paragraph updated.
+export const APP_VERSION = '0.927';

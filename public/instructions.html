@@ -768,10 +768,10 @@ part-to-part "inventory" connector elsewhere in the model (see Level Down and Sm
 Composition-awareness, above). If it does, you're asked whether to update that inventory connector to match
 too. Say yes to keep both in sync; say no to let them intentionally diverge. Most connectors have no such
 counterpart and are edited with no extra prompt at all.</p>
-<p><strong>A few fields exist in the panel but currently have no visible effect</strong> — Font Color, Font
-Size, and Border Color on a node, and Margin on a view. They're stored if you set them, but nothing in the
-current build reads them back to change how anything looks. Worth knowing so you don't spend time tuning a
-setting that isn't wired up yet.</p>
+<p><strong>Margin</strong> (on a view) is stored if you set it, but nothing in the current build reads it back
+to change how anything looks — worth knowing so you don't spend time tuning a setting that isn't wired up yet.
+A node's own Font Color, Font Size, and Border Color had the same problem and were removed from the panel
+entirely rather than left visible with no effect; they may return once actually implemented.</p>
 
 <h2 id="simulation">7. Simulation Scripting</h2>
 <p>Any part can carry a script that runs once per simulation "tick," letting you model how values or state

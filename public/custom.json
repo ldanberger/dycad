@@ -133,17 +133,17 @@
           "label": "Fill Color"
         },
         "fontColor": {
-          "show": "c",
+          "show": "h",
           "access": "w",
           "label": "Font Color"
         },
         "fontSize": {
-          "show": "n",
+          "show": "h",
           "access": "w",
           "label": "Font Size"
         },
         "borderColor": {
-          "show": "c",
+          "show": "h",
           "access": "w",
           "label": "Border Color"
         },

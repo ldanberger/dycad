@@ -3368,10 +3368,23 @@ rediscovered and re-investigated as if new:
   model and marker CSS but has no UI control setting it away from the default —
   present but currently unreachable.
 - `viewMember.fontColor`, `.fontSize`, `.borderColor`, and `view.margin` are fully
-  wired as editable property-panel fields (schema entry, accessor, persist correctly)
-  but are never read during rendering — editing them currently has no visible effect.
-  Found via a deliberate field-by-field audit (see `RECREATION_PROMPT.md` §12); worth
-  repeating after future property-panel work.
+  wired in the data model (create/persist correctly) but are never read during
+  rendering — editing them would have no visible effect. Found via a deliberate
+  field-by-field audit (see `RECREATION_PROMPT.md` §12); worth repeating after future
+  property-panel work. Reported directly: *"in view property panel the Font Color,
+  Border Color, and Font Size have no affect. Change to hidden if that is still
+  available in custom.json showFields, otherwise just remove from property panel
+  display, may be implemented later."* The three `viewMember` fields are now
+  `show: 'h'` in `custom.json`'s `showFields.viewMember` — `renderShowFieldsPanel`
+  (`render.js`) already skips any field with `def.show === 'h'`, in both the main
+  panel body and the "📌 Pinned" section (same function, called with a merged spec),
+  so this hides them everywhere with no other code change. `view.margin` is left
+  alone — not reported, and less obviously dead (a view-level setting, not a
+  per-node one someone would notice has no effect while directly editing a node).
+  New `check_viewmember_font_border_fields_hidden` (`tests/run_all.py`): a real
+  selected node's property panel confirms all three field inputs are absent, while a
+  genuinely-working sibling field (`fillColor`) stays present — proven via TEMP
+  BREAK.
 - `part.note` and `connector.note` show in the catalog table and the row Copy text, but
   not on the canvas node/edge itself (no tooltip).
 - `templates[].parts[].x`/`.y` hints are not honored by Populate From Template's

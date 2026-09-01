@@ -129,8 +129,11 @@ dependency direction. Quick orientation:
 - Obstacle-avoiding routing only looks at obstacles near each connector's own path, not
   the whole diagram — intentional, for performance on large views.
 - `viewMember.fontColor`/`.fontSize`/`.borderColor` and `view.margin` are fully wired
-  as editable fields but never read during rendering — known gap, documented in
+  in the data model but never read during rendering — known gap, documented in
   `DESIGN_DOCUMENT.md` §10 and the in-app Instructions tab, not a regression to chase.
+  The three `viewMember` fields are hidden from the property panel (`show: 'h'` in
+  `custom.json`) since they had no visible effect while editable; `view.margin` stays
+  visible (less obviously dead as a per-view setting).
 
 ## Rebrand note
 
