@@ -5263,4 +5263,37 @@
 // sibling field (Fill Color) stays present -- proven via TEMP BREAK.
 // DESIGN_DOCUMENT.md SS10, CLAUDE.md, and public/instructions.html's own "no visible
 // effect" paragraph updated.
-export const APP_VERSION = '0.927';
+// v0.928: reported directly — "change simulator script so value can return an object,
+// same behaviour as state, and create new 5th return value for left badge now called
+// something like leftBadge and right badge now called rightBadge. Change script so
+// return value and return response are now objects, same as state and badge (now to
+// be called rightBadge), with new leftBadge.text being shown in left badge instead of
+// whatever is in value." The script contract's badge field is renamed rightBadge
+// (unchanged shape/behavior -- {text, color}, bottom-right, gated by
+// chkShowScriptBadge/"Show Right Badge"). A new 5th return field, leftBadge (same
+// {text, color} shape), occupies the SAME bottom-left slot as the pre-existing
+// auto-computed value badge (chkShowSimValues/"Show Left Badge") -- when a script
+// returns leftBadge this tick, its text (and color, via inline style) replaces the
+// formatSimValue(value) display entirely; omitted, it falls back unchanged to the old
+// auto-value display, so no existing script breaks. The ERR overlay (lastError)
+// always wins over leftBadge, since a thrown script never reaches its own return
+// statement. Updated: simulation.js (runTick's resultLeftBadge/resultRightBadge,
+// pendingUIWrites entries, top-of-file doc comment), canvas.js (buildNodeEl's value-
+// badge block), main.js (buildViewSvgString's Export SVG mirror of the same override
+// logic, content-for-content with the on-screen canvas per this codebase's established
+// separate-renderer precedent). The flagship CommonScript_Sim example (state.js) now
+// also demonstrates value/response as objects -- {type, label, receivedFrom} /
+// {ack, from, tick} -- matching state's own always-object convention, a recommended
+// shape the engine has never required and still does not require. Every example file
+// with a real badge: return-key usage ("right badge chain demo.json", "smart factory
+// 3d demo.json") updated to rightBadge: -- per project convention (no prior real
+// users), the old field name was renamed outright rather than kept as a compat shim.
+// check_common_script_sim_covers_enterprise_types's assertions rewritten for the
+// object-shaped value/response and leftBadge/rightBadge; check_export_svg_respects_
+// content_checkboxes's fabricated store.simRuntime data renamed badge -> rightBadge
+// and gained a leftBadge-override case; new check_left_badge_overrides_value_display
+// proves the override, the no-leftBadge fallback, and ERR-always-wins, all via real
+// DOM-rendered nodes and real simulation ticks -- every changed/new assertion proven
+// via TEMP BREAK. DESIGN_DOCUMENT.md SS8, public/instructions.html's "What a script
+// must return" section, and tests/README.md updated.
+export const APP_VERSION = '0.928';

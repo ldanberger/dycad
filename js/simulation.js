@@ -181,8 +181,8 @@ import { isSectionViewType, createSectionPlacer } from './sections.js';
 //       in the graph at all. A binding with no matching widget just does nothing
 //       (silent, both directions); a widget bound to a part whose script never runs
 //       (unscripted, disabled, or simply never addresses that label) reads/shows null.
-//   Must return { value, state, response, badge } — response and badge are both
-//   optional (see below), or the
+//   Must return { value, state, response, leftBadge, rightBadge } — response,
+//   leftBadge, and rightBadge are all optional (see below), or the
 //   whole call may throw — caught per-node, see below.
 //
 // response (Step 34): a SINGLE value (not a queue/history — only ever one pending
@@ -194,15 +194,25 @@ import { isSectionViewType, createSectionPlacer } from './sections.js';
 // tick, same as value/state, so it naturally disappears from the runtime the tick after
 // it's set unless the script explicitly returns a new one.
 //
-// badge (script-controlled, freeform): a script may return `badge: { text, color }` to
-// drive a SECOND, independent badge on the node (bottom-right, right-aligned — separate
-// from the auto-computed value badge at bottom-left) — full script control over both
-// text and color (any CSS color value), gated by its own view toggle
-// (chkShowScriptBadge), distinct from chkShowSimValues. Computed fresh from the script's
-// return every tick, same as value/state/response — NOT carried over automatically; a
-// script that wants its badge to keep showing simply returns the same `badge` again
-// (the script already runs every tick regardless, so this is no extra burden), and a
-// script that omits `badge` this tick has no badge shown this tick.
+// leftBadge / rightBadge (script-controlled, freeform — renamed/added, Step 41): a
+// script may return `rightBadge: { text, color }` to drive a SECOND, independent badge
+// on the node (bottom-right, right-aligned) — full script control over both text and
+// any CSS color, gated by its own view toggle (chkShowScriptBadge), distinct from
+// chkShowSimValues. `rightBadge` is the exact same field previously called `badge`
+// (renamed for symmetry with the new `leftBadge`); nothing else about it changed.
+// `leftBadge: { text, color }` is its new sibling for the bottom-left badge — the SAME
+// slot the auto-computed value badge already occupies (chkShowSimValues), not a third
+// badge position. When a script returns `leftBadge` this tick, its `text` (and
+// `color`, if given) is shown there INSTEAD of the auto-formatted `value` — useful once
+// `value` itself is a rich object that doesn't make a good short badge string on its
+// own. Omitting `leftBadge` falls straight back to the existing auto-computed display
+// (`formatSimValue(value)`), so this is purely additive — no existing script needs to
+// change. Both badges are computed fresh from the script's return every tick, same as
+// value/state/response — NOT carried over automatically; a script that wants either to
+// keep showing simply returns the same object again (the script already runs every
+// tick regardless, so this is no extra burden), and a script that omits one this tick
+// has nothing script-driven shown for it this tick (rightBadge shows nothing at all;
+// leftBadge falls back to the value display, as above).
 //
 // value never auto-holds (Step 35): a node's raw `value` this tick is undefined unless
 // something actually produced one THIS tick — a script that returned `value` (or
@@ -223,9 +233,12 @@ import { isSectionViewType, createSectionPlacer } from './sections.js';
 // script can still get the old "keep computing with whatever's freshest" behavior by
 // reading `lastGoodValue` instead of `value`, entirely at its own discretion (see
 // ctx.inputs[i], above). The node's own badge (canvas.js) shows raw `value` — it blanks
-// the instant a tick returns nothing, same transparency as everywhere else; only the
-// "ERR" overlay (drawn from `lastError`) is a distinct visual, since a broken node is
-// worth flagging differently from one that's simply idle or between real readings.
+// the instant a tick returns nothing, same transparency as everywhere else — UNLESS the
+// script also returned `leftBadge` this tick, which takes over the display entirely
+// (see leftBadge/rightBadge, above). Only the "ERR" overlay (drawn from `lastError`)
+// always wins regardless of either — a broken node is worth flagging differently from
+// one that's simply idle or between real readings, and `leftBadge` is never set on an
+// error tick anyway (the script threw before its return value was ever read).
 //
 // Each runtime entry also carries `changed` (Step 33, revised under Step 35): true when
 // `lastGoodValue` just changed from what it was — a DEEP comparison, so an object/array
@@ -507,7 +520,8 @@ function runTick(app, modelName) {
     let resultValue; // Step 35: no auto-carry — undefined unless something sets it below
     let resultState = prevState;
     let resultResponse = null; // Step 34: fresh every tick, never carried over — only set if the script returns one THIS tick
-    let resultBadge = null; // script-controlled badge: same "fresh every tick" rule as response
+    let resultLeftBadge = null; // script-controlled: same "fresh every tick" rule as response
+    let resultRightBadge = null; // (Step 41) formerly `badge` — renamed for symmetry with leftBadge
     let lastError = null;
 
     if (part.scriptEnabled && part.script) {
@@ -557,8 +571,11 @@ function runTick(app, modelName) {
         resultValue = out.value;
         resultState = out.state || {};
         if ('response' in out) resultResponse = out.response;
-        if (out.badge && typeof out.badge === 'object') {
-          resultBadge = { text: String(out.badge.text ?? ''), color: String(out.badge.color || '#666666') };
+        if (out.leftBadge && typeof out.leftBadge === 'object') {
+          resultLeftBadge = { text: String(out.leftBadge.text ?? ''), color: String(out.leftBadge.color || '#666666') };
+        }
+        if (out.rightBadge && typeof out.rightBadge === 'object') {
+          resultRightBadge = { text: String(out.rightBadge.text ?? ''), color: String(out.rightBadge.color || '#666666') };
         }
         log.push({ tick: runtime.tick, partId: part.id, label: part.label, type: 'value', message: safeStringify(resultValue), ts: Date.now() });
         // Queued, not written directly — see queueUIOutputWrites' own comment for why
@@ -599,7 +616,8 @@ function runTick(app, modelName) {
 
     nextValues.set(part.id, {
       value: resultValue, lastGoodValue, state: resultState, lastError, lastTick: runtime.tick,
-      changed, response: resultResponse, lastGoodResponse, responseChanged, badge: resultBadge,
+      changed, response: resultResponse, lastGoodResponse, responseChanged,
+      leftBadge: resultLeftBadge, rightBadge: resultRightBadge,
     });
   }
 
@@ -620,7 +638,7 @@ function runTick(app, modelName) {
     widgetRuntime.values.set(w.widgetId, {
       value: w.value, state: {}, lastError: null, lastTick: runtime.tick - 1,
       changed: prevWidgetEntry !== undefined && w.value !== prevWidgetEntry.value,
-      response: null, badge: null,
+      response: null, leftBadge: null, rightBadge: null,
     });
   }
 }

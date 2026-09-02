@@ -3776,23 +3776,28 @@ class App {
         const entry = runtime ? runtime.values.get(part.id) : null;
         if (entry) {
           const hasError = !!entry.lastError;
-          const display = hasError ? 'ERR' : formatSimValue(entry.value);
-          const bg = hasError ? '#c0392b' : (entry.changed ? '#2f6fed' : '#2f8f4e');
+          // leftBadge (Step 41): mirrors buildNodeEl's own on-canvas override exactly
+          // (canvas.js) -- when the script returned one this tick, its text/color
+          // replaces the auto-formatted value display, keeping Export SVG content-for-
+          // content with what's actually on screen.
+          const useLeftBadge = !hasError && !!entry.leftBadge;
+          const display = hasError ? 'ERR' : (useLeftBadge ? entry.leftBadge.text : formatSimValue(entry.value));
+          const bg = hasError ? '#c0392b' : (useLeftBadge && entry.leftBadge.color ? entry.leftBadge.color : (entry.changed ? '#2f6fed' : '#2f8f4e'));
           const bw = Math.max(24, display.length * 6 + 12);
           const by = y + nodeH - 8;
-          parts.push(`<rect x="${x - 8}" y="${by}" width="${bw}" height="16" rx="8" fill="${bg}"/>`);
+          parts.push(`<rect x="${x - 8}" y="${by}" width="${bw}" height="16" rx="8" fill="${escapeHtml(bg)}"/>`);
           parts.push(`<text x="${x - 8 + bw / 2}" y="${by + 11}" font-size="9" font-family="monospace" fill="#fff" text-anchor="middle">${escapeHtml(display)}</text>`);
         }
       }
       if (showScriptBadge) {
         const runtime = this.store.simRuntime.get(part.model);
         const entry = runtime ? runtime.values.get(part.id) : null;
-        if (entry && entry.badge) {
-          const text = entry.badge.text || '';
+        if (entry && entry.rightBadge) {
+          const text = entry.rightBadge.text || '';
           const bw = Math.max(24, text.length * 6 + 12);
           const by = y + nodeH - 8;
           const bx = x + nodeW - 2 - bw;
-          parts.push(`<rect x="${bx}" y="${by}" width="${bw}" height="16" rx="8" fill="${escapeHtml(entry.badge.color || '#333')}"/>`);
+          parts.push(`<rect x="${bx}" y="${by}" width="${bw}" height="16" rx="8" fill="${escapeHtml(entry.rightBadge.color || '#333')}"/>`);
           parts.push(`<text x="${bx + bw / 2}" y="${by + 11}" font-size="9" font-family="monospace" fill="#fff" text-anchor="middle">${escapeHtml(text)}</text>`);
         }
       }

@@ -5394,7 +5394,11 @@ def check_common_script_sim_covers_enterprise_types(page):
     directly with a starter shape ("switch (ctx.part.type.toLowerCase()) { case
     'generalactor': ctx.log(...); break; default: ctx.log(...) }") to extend to "all
     known element types identified in streamTemplates where name = 'Enterprise'," plus
-    "a generic return statement with value, state, response, and badge settings."
+    "a generic return statement with value, state, response, and badge settings" --
+    later updated (Step 41, "change simulator script so value can return an object,
+    same behaviour as state, and create new 5th return value for left badge... and
+    right badge...") so value/response are objects (matching state's own
+    always-object convention) and badge is split into leftBadge/rightBadge.
     "Enterprise" (public/custom.json, settings.streamTemplates) uses 9 element types in
     its own value[] chain (GeneralActor, BusinessService, BusinessCapability,
     BusinessProcess, ApplicationCapability, ApplicationProcess,
@@ -5405,9 +5409,10 @@ def check_common_script_sim_covers_enterprise_types(page):
     message via a real part whose script calls CommonScript_Sim(ctx); an unrecognized
     type falls through to the default "received unknown .. <Type>" case; and the
     example's own return statement actually works end to end with no simulation
-    error -- value defaults to the part's own label when there's no input, state
-    increments a ticksSeen counter tick over tick, response is only set once
-    ctx.inputs.length > 0, and badge is a real { text, color } object."""
+    error -- value is an object whose type/label match the part's own, state
+    increments a ticksSeen counter tick over tick, response is an object only set once
+    ctx.inputs.length > 0, and leftBadge/rightBadge are each real { text, color }
+    objects."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -5435,16 +5440,21 @@ def check_common_script_sim_covers_enterprise_types(page):
       const loggedUnknown = newLines.some((m) => m.includes('received unknown .. TotallyUnknownElementType'));
 
       const entry1 = rt1.values.get(parts[0].id);
-      const valueDefaultsToLabel = entry1?.value === 'SimCover_GeneralActor';
+      const valueIsObjectMatchingPart = entry1?.value && typeof entry1.value === 'object'
+        && entry1.value.type === 'GeneralActor' && entry1.value.label === 'SimCover_GeneralActor'
+        && entry1.value.receivedFrom === null;
       const stateAfterTick1 = entry1?.state?.ticksSeen;
-      const badgeOk = entry1?.badge && entry1.badge.text === 'GeneralActor' && typeof entry1.badge.color === 'string';
+      const leftBadgeOk = entry1?.leftBadge && entry1.leftBadge.text === '1' && typeof entry1.leftBadge.color === 'string';
+      const rightBadgeOk = entry1?.rightBadge && entry1.rightBadge.text === 'GeneralActor' && typeof entry1.rightBadge.color === 'string';
       const noResponseWithNoInput = entry1?.response === undefined;
 
       sim.stepSimulation(app, model);
       const rt2 = store.simRuntime.get(model);
-      const stateAfterTick2 = rt2.values.get(parts[0].id)?.state?.ticksSeen;
+      const entry2 = rt2.values.get(parts[0].id);
+      const stateAfterTick2 = entry2?.state?.ticksSeen;
+      const leftBadgeAfterTick2 = entry2?.leftBadge?.text;
 
-      return { errors, loggedForEachType, loggedUnknown, valueDefaultsToLabel, stateAfterTick1, stateAfterTick2, badgeOk, noResponseWithNoInput };
+      return { errors, loggedForEachType, loggedUnknown, valueIsObjectMatchingPart, stateAfterTick1, stateAfterTick2, leftBadgeOk, rightBadgeOk, noResponseWithNoInput, leftBadgeAfterTick2 };
     }
     """)
     problems = []
@@ -5454,17 +5464,100 @@ def check_common_script_sim_covers_enterprise_types(page):
         problems.append("expected every one of the 12 Enterprise element types to log its own 'received .. <Type>' message")
     if not result["loggedUnknown"]:
         problems.append("expected an unrecognized element type to fall through to the default 'received unknown .. <Type>' case")
-    if not result["valueDefaultsToLabel"]:
-        problems.append(f"expected the example return's value to default to the part's own label with no input, got {result['valueDefaultsToLabel']}")
+    if not result["valueIsObjectMatchingPart"]:
+        problems.append(f"expected the example return's value to be an object with type/label matching the part and receivedFrom null with no input, got {result['valueIsObjectMatchingPart']}")
     if result["stateAfterTick1"] != 1 or result["stateAfterTick2"] != 2:
         problems.append(f"expected the example return's state.ticksSeen to increment each tick (1, then 2), got {result['stateAfterTick1']}, {result['stateAfterTick2']}")
-    if not result["badgeOk"]:
-        problems.append("expected the example return's badge to be a real {text, color} object matching the part's own type")
+    if not result["leftBadgeOk"]:
+        problems.append("expected the example return's leftBadge to be a real {text, color} object matching ticksSeen")
+    if not result["rightBadgeOk"]:
+        problems.append("expected the example return's rightBadge to be a real {text, color} object matching the part's own type")
+    if result["leftBadgeAfterTick2"] != '2':
+        problems.append(f"expected leftBadge.text to track ticksSeen across ticks (should be '2' on tick 2), got {result['leftBadgeAfterTick2']}")
     if not result["noResponseWithNoInput"]:
         problems.append("expected the example return's response to be omitted when ctx.inputs is empty")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "CommonScript_Sim(ctx) logs a distinct message for all 12 element types the Enterprise stream template uses (plus a default for anything else), and its example return statement's value/state/response/badge all work correctly across real simulation ticks"
+    return True, "CommonScript_Sim(ctx) logs a distinct message for all 12 element types the Enterprise stream template uses (plus a default for anything else), and its example return statement's object-shaped value/state/response and leftBadge/rightBadge all work correctly across real simulation ticks"
+
+
+def check_left_badge_overrides_value_display(page):
+    """Regression guard/new-feature check for the Step 41 leftBadge field, reported
+    directly: "change simulator script so value can return an object, same behaviour
+    as state, and create new 5th return value for left badge now called something
+    like leftBadge and right badge now called rightBadge... with new leftBadge.text
+    being shown in left badge instead of whatever is in value." leftBadge occupies
+    the SAME slot as the pre-existing auto-computed value badge
+    (.fnode-sim-badge, gated by chkShowSimValues/"Show Left Badge") rather than being
+    a new element. Covers, via real DOM-rendered nodes and real simulation ticks: a
+    script that returns leftBadge shows leftBadge.text (with leftBadge.color as its
+    background, via inline style) INSTEAD of the auto-formatted value; a script that
+    never returns leftBadge (an ordinary value-only script) falls back unchanged to
+    the pre-existing formatSimValue(value) display; and — proving ERR always wins —
+    a script that throws shows "ERR" even on a tick where a PRIOR successful tick had
+    set a leftBadge (a thrown script never reaches its own return statement, so
+    leftBadge can never coexist with an error)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+      const model = store.defaultModel;
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      const view = store.findView(homeTab.viewId);
+      view.chkShowSimValues = true;
+
+      const withBadge = store.createPart({
+        type: 'BusinessFunction', label: 'RegrLeftBadgeOn', model, scriptEnabled: true,
+        script: "return { value: 'hidden-value', state: {}, leftBadge: { text: 'CUSTOM', color: '#ff00ff' } };",
+      });
+      const noBadge = store.createPart({
+        type: 'BusinessFunction', label: 'RegrLeftBadgeOff', model, scriptEnabled: true,
+        script: "return { value: 42, state: {} };",
+      });
+      const erroring = store.createPart({
+        type: 'BusinessFunction', label: 'RegrLeftBadgeErr', model, scriptEnabled: true,
+        script: "if (ctx.tick === 0) return { value: 1, state: {}, leftBadge: { text: 'BEFORE-ERR', color: '#0000ff' } }; throw new Error('boom');",
+      });
+
+      const vmWith = store.createViewMember({ view: view.id, objectType: 'part', objectId: withBadge.id, x: 40, y: 40 });
+      const vmNo = store.createViewMember({ view: view.id, objectType: 'part', objectId: noBadge.id, x: 140, y: 40 });
+      const vmErr = store.createViewMember({ view: view.id, objectType: 'part', objectId: erroring.id, x: 240, y: 40 });
+
+      sim.stepSimulation(app, model);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+
+      const badgeEl = (vmId) => document.querySelector(`.fnode[data-vm-id="${vmId}"] .fnode-sim-badge`);
+      const out1 = {
+        withBadgeText: badgeEl(vmWith.id)?.textContent ?? null,
+        withBadgeBg: badgeEl(vmWith.id)?.getAttribute('style') ?? null,
+        noBadgeText: badgeEl(vmNo.id)?.textContent ?? null,
+        errFirstTickText: badgeEl(vmErr.id)?.textContent ?? null,
+      };
+
+      sim.stepSimulation(app, model);
+      app.render();
+      await new Promise(r => setTimeout(r, 60));
+      out1.errSecondTickText = badgeEl(vmErr.id)?.textContent ?? null;
+
+      return out1;
+    }
+    """)
+    problems = []
+    if result["withBadgeText"] != "CUSTOM":
+        problems.append(f"expected a script returning leftBadge to show leftBadge.text ('CUSTOM') instead of the auto-formatted value, got {result['withBadgeText']}")
+    if not result["withBadgeBg"] or "#ff00ff" not in result["withBadgeBg"]:
+        problems.append(f"expected leftBadge.color to set the badge's background via inline style, got {result['withBadgeBg']}")
+    if result["noBadgeText"] != "42":
+        problems.append(f"expected a script with no leftBadge to fall back to the auto-formatted value display ('42'), got {result['noBadgeText']}")
+    if result["errFirstTickText"] != "BEFORE-ERR":
+        problems.append(f"test setup: expected the first, non-throwing tick to show its own leftBadge, got {result['errFirstTickText']}")
+    if result["errSecondTickText"] != "ERR":
+        problems.append(f"expected a thrown script to always show 'ERR', even after a prior tick set a leftBadge, got {result['errSecondTickText']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "leftBadge (Step 41) correctly overrides the auto-computed value badge on the real on-screen canvas when a script returns one, falls back to formatSimValue(value) when omitted, and never coexists with the ERR overlay on a thrown script"
 
 
 def check_ui_dashboard_element_types_and_toolkit(page):
@@ -10040,7 +10133,10 @@ def check_export_svg_respects_content_checkboxes(page):
     renderer -- see printViews' own doc comment). Covers each of the four newly-added
     ones turning its own content on/off in the exported SVG, using a DataEntityDetails
     part (for Attributes) and fabricated store.simRuntime data (for Sim Values/Script
-    Badge, which read live simulation state)."""
+    Badge, which read live simulation state). Also covers the Step 41 leftBadge/
+    rightBadge rename/addition: a part with a fabricated leftBadge entry shows its
+    leftBadge text INSTEAD of its formatSimValue'd value in the export, mirroring the
+    on-screen canvas override exactly."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -10053,7 +10149,12 @@ def check_export_svg_respects_content_checkboxes(page):
       const vmA = store.createViewMember({ view: view.id, objectType: 'part', objectId: a.id, x: 40, y: 40 });
       const ded = store.createPart({ type: 'DataEntityDetails', label: 'RegrSvgContentTable', model, streams: [], attributes: [{ id: 'regrAttr1', name: 'RegrAttrName', dataType: 'numeric', isPrimaryKey: true }] });
       const vmDed = store.createViewMember({ view: view.id, objectType: 'part', objectId: ded.id, x: 300, y: 40 });
-      store.simRuntime.set(model, { values: new Map([[a.id, { value: 'RegrSimVal', lastTick: 1, changed: false, badge: { text: 'RegrBadgeText', color: '#123456' } }]]) });
+      const b = store.createPart({ type: 'BusinessFunction', label: 'RegrSvgContentB', model, streams: [] });
+      const vmB = store.createViewMember({ view: view.id, objectType: 'part', objectId: b.id, x: 40, y: 200 });
+      store.simRuntime.set(model, { values: new Map([
+        [a.id, { value: 'RegrSimVal', lastTick: 1, changed: false, rightBadge: { text: 'RegrBadgeText', color: '#123456' } }],
+        [b.id, { value: 'RegrHiddenByLeftBadge', lastTick: 1, changed: false, leftBadge: { text: 'RegrLeftBadgeText', color: '#654321' } }],
+      ]) });
 
       const getSvg = () => app.buildViewSvgString(view).svgString;
       const out = {};
@@ -10082,6 +10183,9 @@ def check_export_svg_respects_content_checkboxes(page):
       out.badgeOff = getSvg().includes('RegrBadgeText');
       view.chkShowScriptBadge = true;
 
+      out.leftBadgeShown = getSvg().includes('RegrLeftBadgeText');
+      out.valueHiddenByLeftBadge = getSvg().includes('RegrHiddenByLeftBadge');
+
       return out;
     }
     """)
@@ -10091,9 +10195,13 @@ def check_export_svg_respects_content_checkboxes(page):
             problems.append(f"expected {label}=true to include its content in the exported SVG, got {result}")
         if result[f"{name}Off"]:
             problems.append(f"expected {label}=false to EXCLUDE its content from the exported SVG, got {result}")
+    if not result["leftBadgeShown"]:
+        problems.append(f"expected a part with a fabricated leftBadge entry to show its leftBadge text in the export, got {result}")
+    if result["valueHiddenByLeftBadge"]:
+        problems.append(f"expected leftBadge to REPLACE the formatSimValue'd value in the export (not show both), got {result}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "Export View as Image's SVG builder now also respects chkShowAttributes/chkShowKeys/chkShowSimValues/chkShowScriptBadge, matching the real on-screen canvas content-for-content"
+    return True, "Export View as Image's SVG builder now also respects chkShowAttributes/chkShowKeys/chkShowSimValues/chkShowScriptBadge, matching the real on-screen canvas content-for-content, and its leftBadge override of the auto-value display (Step 41) matches the on-screen canvas too"
 
 
 def check_export_view3d_as_image(page):
@@ -15400,6 +15508,7 @@ CHECKS = [
     check_batch_script_code_persists_with_local_settings,
     check_common_script_callable_from_part_script,
     check_common_script_sim_covers_enterprise_types,
+    check_left_badge_overrides_value_display,
     check_ui_dashboard_element_types_and_toolkit,
     check_ui_dashboard_property_panel,
     check_ui_dashboard_ctx_ui_engine,

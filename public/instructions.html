@@ -952,7 +952,9 @@ directly, the same restriction any part script already has. A second shipped exa
 directly: it switches on <code>ctx.part.type</code>, logging a distinct message for every element type the
 "Enterprise" stream template uses (see Catalogs &gt; Stream Templates above to browse that same data), and its
 own return statement is a working example of every field a part script's return can set —
-<code>value</code>, <code>state</code>, <code>response</code>, and <code>badge</code>.</p>
+<code>value</code>, <code>state</code>, <code>response</code>, <code>leftBadge</code>, and <code>rightBadge</code> —
+and demonstrates <code>value</code>/<code>response</code> as objects (matching <code>state</code>'s own
+always-object convention), a recommended shape rather than one the engine requires.</p>
 <p>A fourth kind of function belongs here too: a user-designed <strong>Remap layout</strong> (see "Remap" above),
 picked interactively from that dialog's Pattern dropdown ("Custom" reveals a second dropdown listing every
 matching function found here) rather than called from <code>main()</code>, a menu item, or a part script. The
@@ -969,8 +971,11 @@ checkbox is currently on, since a disabled script could always be re-enabled lat
 ENABLED or disabled and identifies its source part by label, type, and id, grouped by model.</p>
 
 <h3>What a script must return</h3>
-<p>A script must return an object <code>{ value, state, response, badge }</code> — <code>response</code> and
-<code>badge</code> are both optional.</p>
+<p>A script must return an object <code>{ value, state, response, leftBadge, rightBadge }</code> —
+<code>response</code>, <code>leftBadge</code>, and <code>rightBadge</code> are all optional. <code>value</code>
+and <code>response</code> can be any JS value; making them objects (as the shipped
+<code>CommonScript_Sim</code> example does) matches <code>state</code>'s own always-object convention and is
+recommended but not required.</p>
 <ul>
   <li><strong>value</strong> — what downstream connectors carry to their targets next tick. Leaving it out (or
   the tick simply not running) makes it <code>undefined</code> that tick — it does NOT keep showing whatever it
@@ -980,8 +985,11 @@ ENABLED or disabled and identifies its source part by label, type, and id, group
   <li><strong>response</strong> (optional) — a value sent <em>backward</em> to every node that feeds into this
   one, arriving as their <code>ctx.responses</code> one tick later. Useful for acknowledgement/feedback flows
   where a downstream node needs to signal something back upstream.</li>
-  <li><strong>badge</strong> (optional) — <code>{ text, color }</code> to show a freeform label on the node
-  (bottom-right), independent of the automatic value badge. Only shows while the view's "Show Right Badge"
+  <li><strong>leftBadge</strong> (optional) — <code>{ text, color }</code> to replace the automatic value badge
+  (bottom-left) with your own text/color for this tick. Only shows while the view's "Show Left Badge" toggle
+  (Filters panel) is on; omit it and the node falls back to showing its own <code>value</code> as usual.</li>
+  <li><strong>rightBadge</strong> (optional) — <code>{ text, color }</code> to show a freeform label on the node
+  (bottom-right), independent of the left badge. Only shows while the view's "Show Right Badge"
   toggle (Filters panel) is on, and only for the tick a script actually returns one.</li>
 </ul>
 

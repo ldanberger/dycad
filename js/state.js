@@ -38,7 +38,7 @@
  * is a second example of this same kind — meant to be copied into (or called from) a
  * part's own script field directly, demonstrating a type-switch covering every element
  * type the "Enterprise" stream template uses, plus the full `{ value, state, response,
- * badge }` return shape (see Catalogs > Stream Templates, `App.promptStreamTemplates`
+ * leftBadge, rightBadge }` return shape (see Catalogs > Stream Templates, `App.promptStreamTemplates`
  * in main.js, for a live read-only browser of the template data this switches over).
  *
  * `CustomRemap_Example()` (below, after CommonScript_Example) is a FOURTH kind of
@@ -362,9 +362,10 @@ function CustomRemap_Example(ctx) {
 // ApplicationApplication, BusinessOrganizationUnit) -- see Catalogs > Stream Templates
 // for a live, read-only browser of this same template data instead of hand-cross-
 // referencing custom.json. The return statement afterward demonstrates the full
-// { value, state, response, badge } shape a part script's return can use -- see
-// simulation.js's own script-contract comment for exactly what each field does; response
-// and badge are both optional, this just shows a real, working example of each.
+// { value, state, response, leftBadge, rightBadge } shape a part script's return can
+// use -- see simulation.js's own script-contract comment for exactly what each field
+// does; response, leftBadge, and rightBadge are all optional, this just shows a real,
+// working example of each.
 function CommonScript_Sim(ctx) {
   switch (ctx.part.type.toLowerCase()) {
     case 'generalactor':
@@ -408,18 +409,25 @@ function CommonScript_Sim(ctx) {
   }
 
   // Example return -- value passes through to every downstream connector's target as
-  // its ctx.inputs[i].value next tick; state persists across ticks (merged forward
+  // its ctx.inputs[i].value next tick, here an object (like state already always is)
+  // rather than a bare scalar, since that's usually the more useful shape once a part
+  // has more than one thing to say; state persists across ticks (merged forward
   // automatically), here just counting how many times this part's script has run;
   // response broadcasts back, one tick later, to whichever node(s) sent an input THIS
-  // tick (only meaningful once ctx.inputs.length > 0); badge drives the node's second,
-  // independent bottom-right badge (any text + any CSS color), shown only while the
-  // view's "Show Right Badge" toggle is on, and only for the tick a script actually
-  // returns one.
+  // tick (only meaningful once ctx.inputs.length > 0), also an object here; leftBadge
+  // and rightBadge each drive one of the node's two independent corner badges (any
+  // text + any CSS color) -- rightBadge (bottom-right) shown only while the view's
+  // "Show Right Badge" toggle is on; leftBadge (bottom-left) shown whenever "Show Left
+  // Badge" is on, REPLACING the auto-formatted value display for that tick -- exactly
+  // why it's worth having now that value itself is an object too rich to make a good
+  // short badge string on its own. Either badge (or response) simply isn't shown at
+  // all for a tick the script doesn't return it.
   return {
-    value: ctx.inputs[0]?.value ?? ctx.part.label,
+    value: { type: ctx.part.type, label: ctx.part.label, receivedFrom: ctx.inputs[0]?.value ?? null },
     state: { ticksSeen: (ctx.state.ticksSeen || 0) + 1 },
-    response: ctx.inputs.length > 0 ? 'ack:' + ctx.part.label : undefined,
-    badge: { text: ctx.part.type, color: '#3b5bfd' },
+    response: ctx.inputs.length > 0 ? { ack: true, from: ctx.part.label, tick: ctx.tick } : undefined,
+    leftBadge: { text: String((ctx.state.ticksSeen || 0) + 1), color: '#2f8f4e' },
+    rightBadge: { text: ctx.part.type, color: '#3b5bfd' },
   };
 }
 `;

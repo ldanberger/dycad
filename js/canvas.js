@@ -723,12 +723,18 @@ function buildNodeEl(app, tab, vm, part) {
     const entry = runtime ? runtime.values.get(part.id) : null;
     if (entry) {
       const hasError = !!entry.lastError;
-      const display = hasError ? 'ERR' : formatSimValue(entry.value);
-      const title = hasError ? entry.lastError : `tick ${entry.lastTick}: ${formatSimValue(entry.value)}`;
+      // leftBadge (Step 41): when a script returns one this tick, its `text` (and
+      // `color`, via the inline style below) replaces the auto-formatted `value`
+      // display entirely — never on an error tick, since a thrown script never reaches
+      // its own return statement, so `entry.leftBadge` is naturally null there anyway.
+      const useLeftBadge = !hasError && !!entry.leftBadge;
+      const display = hasError ? 'ERR' : (useLeftBadge ? entry.leftBadge.text : formatSimValue(entry.value));
+      const title = hasError ? entry.lastError : `tick ${entry.lastTick}: ${display}`;
       // "changed" (Step 33) is a lower-priority visual than error — only applied when
       // there's no error, so a node can't show both states confusingly at once.
       const stateClass = hasError ? ' error' : (entry.changed ? ' changed' : '');
-      simBadgeHtml = `<div class="fnode-sim-badge${stateClass}" title="${escapeHtml(title)}">${escapeHtml(display)}</div>`;
+      const colorStyle = useLeftBadge && entry.leftBadge.color ? ` style="background:${escapeHtml(entry.leftBadge.color)};"` : '';
+      simBadgeHtml = `<div class="fnode-sim-badge${stateClass}"${colorStyle} title="${escapeHtml(title)}">${escapeHtml(display)}</div>`;
     } else if (isUIOutput) {
       // Reported directly: "If UI element is connected to a part but the part script
       // does not set a value, it stays as null or similar" -- a visible placeholder
@@ -739,15 +745,15 @@ function buildNodeEl(app, tab, vm, part) {
   }
 
   // Script-controlled badge: separate from the auto-computed value badge above — full
-  // freeform text/color, driven entirely by whatever the script returned as `badge` this
-  // tick (nothing shown if it didn't return one), gated by its own view toggle so it can
-  // be shown/hidden independently of chkShowSimValues.
+  // freeform text/color, driven entirely by whatever the script returned as `rightBadge`
+  // this tick (nothing shown if it didn't return one), gated by its own view toggle so
+  // it can be shown/hidden independently of chkShowSimValues.
   let scriptBadgeHtml = '';
   if (view?.chkShowScriptBadge) {
     const runtime = app.store.simRuntime.get(part.model);
     const entry = runtime ? runtime.values.get(part.id) : null;
-    if (entry && entry.badge) {
-      scriptBadgeHtml = `<div class="fnode-sim-badge-right" style="background:${escapeHtml(entry.badge.color)};" title="${escapeHtml(entry.badge.text)}">${escapeHtml(entry.badge.text)}</div>`;
+    if (entry && entry.rightBadge) {
+      scriptBadgeHtml = `<div class="fnode-sim-badge-right" style="background:${escapeHtml(entry.rightBadge.color)};" title="${escapeHtml(entry.rightBadge.text)}">${escapeHtml(entry.rightBadge.text)}</div>`;
     }
   }
 
