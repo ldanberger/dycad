@@ -3776,17 +3776,21 @@ class App {
         const entry = runtime ? runtime.values.get(part.id) : null;
         if (entry) {
           const hasError = !!entry.lastError;
-          // leftBadge (Step 41): mirrors buildNodeEl's own on-canvas override exactly
-          // (canvas.js) -- when the script returned one this tick, its text/color
-          // replaces the auto-formatted value display, keeping Export SVG content-for-
-          // content with what's actually on screen.
+          // leftBadge (Step 41, tightened): mirrors buildNodeEl's own on-canvas
+          // override exactly (canvas.js) -- purely opt-in, same as rightBadge. A
+          // script must explicitly return leftBadge this tick for anything to show;
+          // no fallback to the auto-formatted value display anymore (reported
+          // directly against `return { value }` scripts with no leftBadge still
+          // showing a badge).
           const useLeftBadge = !hasError && !!entry.leftBadge;
-          const display = hasError ? 'ERR' : (useLeftBadge ? entry.leftBadge.text : formatSimValue(entry.value));
-          const bg = hasError ? '#c0392b' : (useLeftBadge && entry.leftBadge.color ? entry.leftBadge.color : (entry.changed ? '#2f6fed' : '#2f8f4e'));
-          const bw = Math.max(24, display.length * 6 + 12);
-          const by = y + nodeH - 8;
-          parts.push(`<rect x="${x - 8}" y="${by}" width="${bw}" height="16" rx="8" fill="${escapeHtml(bg)}"/>`);
-          parts.push(`<text x="${x - 8 + bw / 2}" y="${by + 11}" font-size="9" font-family="monospace" fill="#fff" text-anchor="middle">${escapeHtml(display)}</text>`);
+          if (hasError || useLeftBadge) {
+            const display = hasError ? 'ERR' : entry.leftBadge.text;
+            const bg = hasError ? '#c0392b' : (entry.leftBadge.color || (entry.changed ? '#2f6fed' : '#2f8f4e'));
+            const bw = Math.max(24, display.length * 6 + 12);
+            const by = y + nodeH - 8;
+            parts.push(`<rect x="${x - 8}" y="${by}" width="${bw}" height="16" rx="8" fill="${escapeHtml(bg)}"/>`);
+            parts.push(`<text x="${x - 8 + bw / 2}" y="${by + 11}" font-size="9" font-family="monospace" fill="#fff" text-anchor="middle">${escapeHtml(display)}</text>`);
+          }
         }
       }
       if (showScriptBadge) {

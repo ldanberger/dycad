@@ -5486,17 +5486,24 @@ def check_left_badge_overrides_value_display(page):
     directly: "change simulator script so value can return an object, same behaviour
     as state, and create new 5th return value for left badge now called something
     like leftBadge and right badge now called rightBadge... with new leftBadge.text
-    being shown in left badge instead of whatever is in value." leftBadge occupies
-    the SAME slot as the pre-existing auto-computed value badge
-    (.fnode-sim-badge, gated by chkShowSimValues/"Show Left Badge") rather than being
-    a new element. Covers, via real DOM-rendered nodes and real simulation ticks: a
-    script that returns leftBadge shows leftBadge.text (with leftBadge.color as its
-    background, via inline style) INSTEAD of the auto-formatted value; a script that
-    never returns leftBadge (an ordinary value-only script) falls back unchanged to
-    the pre-existing formatSimValue(value) display; and — proving ERR always wins —
-    a script that throws shows "ERR" even on a tick where a PRIOR successful tick had
-    set a leftBadge (a thrown script never reaches its own return statement, so
-    leftBadge can never coexist with an error)."""
+    being shown in left badge instead of whatever is in value" — then tightened by a
+    direct follow-up: "if leftBadge is empty then no value should be displayed in
+    left badge. Smart factory example shows (for example) return { value }; which
+    should not result in left badge display. only 'return {value, leftBadge: {...}}'
+    pattern should trigger left badge to be displayed, same behavior as rightBadge."
+    leftBadge is now purely opt-in, occupying the SAME slot as the badge that used to
+    auto-display formatSimValue(value) (.fnode-sim-badge, gated by
+    chkShowSimValues/"Show Left Badge") but with NO fallback anymore. Covers, via real
+    DOM-rendered nodes and real simulation ticks: a script that returns leftBadge
+    shows leftBadge.text (with leftBadge.color as its background, via inline style); a
+    script that never returns leftBadge (an ordinary value-only script, matching the
+    reported "smart factory 3d demo" sensor scripts) shows NO badge at all — not the
+    old auto-formatted value; a UI Output widget (a separate, pre-existing mechanism
+    unrelated to this opt-in rule — see check_ui_dashboard_output_badge_visibility)
+    keeps showing its own written value regardless, since it can never set its own
+    leftBadge; and — proving ERR always wins — a script that throws shows "ERR" even
+    on a tick where a PRIOR successful tick had set a leftBadge (a thrown script never
+    reaches its own return statement, so leftBadge can never coexist with an error)."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -5519,10 +5526,16 @@ def check_left_badge_overrides_value_display(page):
         type: 'BusinessFunction', label: 'RegrLeftBadgeErr', model, scriptEnabled: true,
         script: "if (ctx.tick === 0) return { value: 1, state: {}, leftBadge: { text: 'BEFORE-ERR', color: '#0000ff' } }; throw new Error('boom');",
       });
+      const uiTarget = store.createPart({
+        type: 'BusinessFunction', label: 'RegrLeftBadgeUITarget', model, scriptEnabled: true,
+        script: "ctx.ui.UINumericOutput['RegrLeftBadgeUIOut'] = 99; return { value: 1, state: {} };",
+      });
+      const uiOutput = store.createPart({ type: 'UINumericOutput', label: 'RegrLeftBadgeUIOut', model, uiTargetPartId: uiTarget.id });
 
       const vmWith = store.createViewMember({ view: view.id, objectType: 'part', objectId: withBadge.id, x: 40, y: 40 });
       const vmNo = store.createViewMember({ view: view.id, objectType: 'part', objectId: noBadge.id, x: 140, y: 40 });
       const vmErr = store.createViewMember({ view: view.id, objectType: 'part', objectId: erroring.id, x: 240, y: 40 });
+      const vmUiOut = store.createViewMember({ view: view.id, objectType: 'part', objectId: uiOutput.id, x: 340, y: 40 });
 
       sim.stepSimulation(app, model);
       app.render();
@@ -5532,7 +5545,8 @@ def check_left_badge_overrides_value_display(page):
       const out1 = {
         withBadgeText: badgeEl(vmWith.id)?.textContent ?? null,
         withBadgeBg: badgeEl(vmWith.id)?.getAttribute('style') ?? null,
-        noBadgeText: badgeEl(vmNo.id)?.textContent ?? null,
+        noBadgeAbsent: badgeEl(vmNo.id) === null,
+        uiOutputText: badgeEl(vmUiOut.id)?.textContent ?? null,
         errFirstTickText: badgeEl(vmErr.id)?.textContent ?? null,
       };
 
@@ -5546,18 +5560,20 @@ def check_left_badge_overrides_value_display(page):
     """)
     problems = []
     if result["withBadgeText"] != "CUSTOM":
-        problems.append(f"expected a script returning leftBadge to show leftBadge.text ('CUSTOM') instead of the auto-formatted value, got {result['withBadgeText']}")
+        problems.append(f"expected a script returning leftBadge to show leftBadge.text ('CUSTOM'), got {result['withBadgeText']}")
     if not result["withBadgeBg"] or "#ff00ff" not in result["withBadgeBg"]:
         problems.append(f"expected leftBadge.color to set the badge's background via inline style, got {result['withBadgeBg']}")
-    if result["noBadgeText"] != "42":
-        problems.append(f"expected a script with no leftBadge to fall back to the auto-formatted value display ('42'), got {result['noBadgeText']}")
+    if not result["noBadgeAbsent"]:
+        problems.append("expected a script with no leftBadge to show NO badge at all (no fallback to the auto-formatted value)")
+    if result["uiOutputText"] != "99":
+        problems.append(f"expected a UI Output widget (which can never set its own leftBadge) to keep showing its own written value ('99'), got {result['uiOutputText']}")
     if result["errFirstTickText"] != "BEFORE-ERR":
         problems.append(f"test setup: expected the first, non-throwing tick to show its own leftBadge, got {result['errFirstTickText']}")
     if result["errSecondTickText"] != "ERR":
         problems.append(f"expected a thrown script to always show 'ERR', even after a prior tick set a leftBadge, got {result['errSecondTickText']}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "leftBadge (Step 41) correctly overrides the auto-computed value badge on the real on-screen canvas when a script returns one, falls back to formatSimValue(value) when omitted, and never coexists with the ERR overlay on a thrown script"
+    return True, "leftBadge (Step 41, tightened) is purely opt-in on the real on-screen canvas -- shown only when a script explicitly returns it, absent entirely (no auto-value fallback) otherwise -- except the pre-existing UI Output widget mechanism, which is unaffected, and ERR always wins regardless"
 
 
 def check_ui_dashboard_element_types_and_toolkit(page):
@@ -10134,9 +10150,11 @@ def check_export_svg_respects_content_checkboxes(page):
     ones turning its own content on/off in the exported SVG, using a DataEntityDetails
     part (for Attributes) and fabricated store.simRuntime data (for Sim Values/Script
     Badge, which read live simulation state). Also covers the Step 41 leftBadge/
-    rightBadge rename/addition: a part with a fabricated leftBadge entry shows its
-    leftBadge text INSTEAD of its formatSimValue'd value in the export, mirroring the
-    on-screen canvas override exactly."""
+    rightBadge field (tightened to be purely opt-in, same as rightBadge -- a part
+    with a fabricated leftBadge entry shows its leftBadge text, gated by
+    chkShowSimValues same as before; a part with NO leftBadge (only a bare `value`)
+    shows nothing at all regardless of chkShowSimValues, mirroring the on-screen
+    canvas exactly."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -10152,7 +10170,7 @@ def check_export_svg_respects_content_checkboxes(page):
       const b = store.createPart({ type: 'BusinessFunction', label: 'RegrSvgContentB', model, streams: [] });
       const vmB = store.createViewMember({ view: view.id, objectType: 'part', objectId: b.id, x: 40, y: 200 });
       store.simRuntime.set(model, { values: new Map([
-        [a.id, { value: 'RegrSimVal', lastTick: 1, changed: false, rightBadge: { text: 'RegrBadgeText', color: '#123456' } }],
+        [a.id, { value: 'RegrSimValNoBadge', lastTick: 1, changed: false, rightBadge: { text: 'RegrBadgeText', color: '#123456' } }],
         [b.id, { value: 'RegrHiddenByLeftBadge', lastTick: 1, changed: false, leftBadge: { text: 'RegrLeftBadgeText', color: '#654321' } }],
       ]) });
 
@@ -10172,9 +10190,9 @@ def check_export_svg_respects_content_checkboxes(page):
       view.chkShowKeys = true;
 
       view.chkShowSimValues = true;
-      out.simOn = getSvg().includes('RegrSimVal');
+      out.simOn = getSvg().includes('RegrLeftBadgeText');
       view.chkShowSimValues = false;
-      out.simOff = getSvg().includes('RegrSimVal');
+      out.simOff = getSvg().includes('RegrLeftBadgeText');
       view.chkShowSimValues = true;
 
       view.chkShowScriptBadge = true;
@@ -10183,8 +10201,8 @@ def check_export_svg_respects_content_checkboxes(page):
       out.badgeOff = getSvg().includes('RegrBadgeText');
       view.chkShowScriptBadge = true;
 
-      out.leftBadgeShown = getSvg().includes('RegrLeftBadgeText');
       out.valueHiddenByLeftBadge = getSvg().includes('RegrHiddenByLeftBadge');
+      out.noLeftBadgeShowsNothing = !getSvg().includes('RegrSimValNoBadge');
 
       return out;
     }
@@ -10195,8 +10213,8 @@ def check_export_svg_respects_content_checkboxes(page):
             problems.append(f"expected {label}=true to include its content in the exported SVG, got {result}")
         if result[f"{name}Off"]:
             problems.append(f"expected {label}=false to EXCLUDE its content from the exported SVG, got {result}")
-    if not result["leftBadgeShown"]:
-        problems.append(f"expected a part with a fabricated leftBadge entry to show its leftBadge text in the export, got {result}")
+    if not result["noLeftBadgeShowsNothing"]:
+        problems.append(f"expected a part with NO leftBadge (a bare formatSimValue-only value) to show nothing at all in the export, got {result}")
     if result["valueHiddenByLeftBadge"]:
         problems.append(f"expected leftBadge to REPLACE the formatSimValue'd value in the export (not show both), got {result}")
     if problems:

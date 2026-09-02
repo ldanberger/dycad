@@ -5296,4 +5296,35 @@
 // DOM-rendered nodes and real simulation ticks -- every changed/new assertion proven
 // via TEMP BREAK. DESIGN_DOCUMENT.md SS8, public/instructions.html's "What a script
 // must return" section, and tests/README.md updated.
-export const APP_VERSION = '0.928';
+// v0.929: direct follow-up tightening v0.928's leftBadge — "if leftBadge is empty then
+// no value should be displayed in left badge. Smart factory example shows (for
+// example) return { value }; which should not result in left badge display. only
+// 'return {value, leftBadge: {...}}' pattern should trigger left badge to be
+// displayed, same behavior as rightBadge." Removed the auto-fallback-to-
+// formatSimValue(value) behavior entirely -- leftBadge is now purely opt-in, exactly
+// like rightBadge: a script that never returns leftBadge shows no left badge at all,
+// where v0.928 still auto-displayed the raw value. The one exception, left unchanged:
+// a UI Output widget's own pre-existing display mechanism (canvas.js's isUIOutput
+// path) -- its written value IS its entire reason for existing and it can never set
+// its own leftBadge, so it keeps showing its value regardless of this opt-in rule.
+// The ERR overlay still always wins, unaffected. Updated canvas.js's buildNodeEl and
+// main.js's buildViewSvgString (Export SVG, mirroring exactly) to gate the badge's
+// entire display, not just its content, on hasError||useLeftBadge (||isUIOutput on
+// canvas.js only -- Export SVG has no isUIOutput handling, a pre-existing, unrelated
+// gap). "right badge chain demo.json" updated: since its readme specifically
+// showcased "the normal left badge (last value sent)," each of its 3 parts' scripts
+// now explicitly returns leftBadge (matching the value they're already sending/
+// forwarding/receiving) so the demo's documented behavior stays true under the new
+// opt-in rule; readme text updated to describe leftBadge as opt-in. "smart factory 3d
+// demo.json" needed no script changes -- its sensors' plain `return { value }` scripts
+// are the exact reported case, and now correctly show no left badge, matching intent.
+// check_left_badge_overrides_value_display rewritten: the "no leftBadge" case now
+// asserts the badge element is ABSENT (not a fallback value), plus a new UI Output
+// case proving that exception still works; check_export_svg_respects_content_
+// checkboxes' sim-values toggle case switched to use a part WITH leftBadge (the only
+// thing that renders now) and gained an explicit no-leftBadge-shows-nothing
+// assertion -- both changed assertions proven via TEMP BREAK forcing the badge to
+// always render regardless of leftBadge/error. DESIGN_DOCUMENT.md SS8 and
+// public/instructions.html's "What a script must return" leftBadge bullet updated;
+// tests/README.md updated.
+export const APP_VERSION = '0.929';

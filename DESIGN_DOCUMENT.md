@@ -2574,17 +2574,26 @@ mechanism for acknowledgement/feedback flows running opposite the connector dire
 Part with no script and exactly one input passes it through unchanged. Full contract
 documented for end users in `public/instructions.html`.
 
-**`leftBadge`/`rightBadge` (Step 41)**: `rightBadge` is the original script-controlled
-badge (bottom-right corner, `.fnode-sim-badge-right`, gated by the "Show Right Badge"
-view checkbox), simply renamed from its earlier name `badge` for symmetry — fully
-freeform `{text, color}`, fresh every tick, shows nothing if omitted. `leftBadge` is new
-and occupies the SAME slot as the pre-existing auto-computed value badge (bottom-left
-corner, `.fnode-sim-badge`, gated by "Show Left Badge" — the same checkbox, renamed from
-"Show Simulation Values"): when a script returns `leftBadge: {text, color}` this tick,
-that text/color is shown INSTEAD of the auto-computed `formatSimValue(value)` display;
-when omitted, the left badge falls back unchanged to the existing auto-value display, so
-no pre-existing script breaks. The "ERR" overlay (from `lastError`) always wins over
-`leftBadge`, since a thrown script never reaches its own return statement.
+**`leftBadge`/`rightBadge` (Step 41, tightened)**: `rightBadge` is the original
+script-controlled badge (bottom-right corner, `.fnode-sim-badge-right`, gated by the
+"Show Right Badge" view checkbox), simply renamed from its earlier name `badge` for
+symmetry — fully freeform `{text, color}`, fresh every tick, shows nothing if omitted.
+`leftBadge` is new and occupies the SAME slot as the badge that used to auto-display a
+part's `value` (bottom-left corner, `.fnode-sim-badge`, gated by "Show Left Badge" — the
+same checkbox, renamed from "Show Simulation Values"): when a script returns `leftBadge:
+{text, color}` this tick, that text/color is shown. Purely opt-in, exactly like
+`rightBadge` — a direct follow-up ("if leftBadge is empty then no value should be
+displayed in left badge... only 'return {value, leftBadge: {...}}' pattern should
+trigger left badge to be displayed, same behavior as rightBadge") removed an initial
+version's fallback to auto-formatted `value` when `leftBadge` was omitted; a script that
+never returns `leftBadge` now shows no left badge at all — reported directly against the
+"smart factory 3d demo" example's plain `return { value }` sensor scripts, which were
+still showing a badge under the old fallback behavior. The one exception: a UI Output
+widget's own pre-existing display mechanism (its written value IS its entire reason for
+existing — see the UI dashboard elements section below) is a separate code path unaffected
+by this opt-in rule, since a widget can never set its own `leftBadge`. The "ERR" overlay
+(from `lastError`) always wins over `leftBadge`, since a thrown script never reaches its
+own return statement.
 
 **Packet protocol: `value` never auto-holds, `lastGoodValue` does (Step 35)**: reported
 directly, expanding on `value`/`response` — *"can value and response be objects?"*, then
@@ -2688,12 +2697,14 @@ receivedFrom}` / `{ack: true, from, tick}`) rather than a bare string, matching 
 own always-object convention — documentation of a *recommended* shape, since the engine
 itself has never required and still does not require `value`/`response` to be objects.
 `badge` is renamed `rightBadge` (same `{text, color}` shape, unchanged behavior); the new
-`leftBadge` field (`{text: String(ticksSeen + 1), color: '#2f8f4e'}`) demonstrates the
-override of the auto-computed value badge described above. Both
-`check_common_script_sim_covers_enterprise_types`'s assertions and the fabricated
-`store.simRuntime` data in `check_export_svg_respects_content_checkboxes` were updated
-for the field rename; a new dedicated check proves the leftBadge-overrides-value-display
-behavior and its no-`leftBadge`-supplied fallback.
+`leftBadge` field (`{text: String(ticksSeen + 1), color: '#2f8f4e'}`) demonstrates
+setting it explicitly, since (per a direct follow-up) it's purely opt-in like
+`rightBadge` — see the `leftBadge`/`rightBadge` paragraph above for the tightened
+no-fallback behavior. Both `check_common_script_sim_covers_enterprise_types`'s
+assertions and the fabricated `store.simRuntime` data in
+`check_export_svg_respects_content_checkboxes` were updated for the field rename; a new
+dedicated check proves the leftBadge-is-opt-in behavior, the UI Output widget exception,
+and ERR always winning.
 
 **Catalogs > Stream Templates** (`App.promptStreamTemplates`, `main.js`): reported
 directly, immediately after the above — *"In Catalogs menu after SFCCE create a new

@@ -723,18 +723,26 @@ function buildNodeEl(app, tab, vm, part) {
     const entry = runtime ? runtime.values.get(part.id) : null;
     if (entry) {
       const hasError = !!entry.lastError;
-      // leftBadge (Step 41): when a script returns one this tick, its `text` (and
-      // `color`, via the inline style below) replaces the auto-formatted `value`
-      // display entirely — never on an error tick, since a thrown script never reaches
-      // its own return statement, so `entry.leftBadge` is naturally null there anyway.
+      // leftBadge (Step 41, tightened): purely opt-in, same as rightBadge — a script
+      // must explicitly return `leftBadge: {text, color}` this tick for anything to
+      // show at all. No fallback to formatSimValue(value) anymore (an earlier version
+      // of this feature auto-displayed the raw value when leftBadge was omitted, but
+      // that meant `return { value }` with no leftBadge still showed a badge — reported
+      // directly against the "smart factory 3d demo" example's plain-value sensor
+      // scripts as unwanted). isUIOutput is the one exception: a UI Output widget's own
+      // written value IS its entire reason for existing (see comment above) and it
+      // can never set its own leftBadge (it's not itself scripted), so it keeps
+      // showing its value regardless.
       const useLeftBadge = !hasError && !!entry.leftBadge;
-      const display = hasError ? 'ERR' : (useLeftBadge ? entry.leftBadge.text : formatSimValue(entry.value));
-      const title = hasError ? entry.lastError : `tick ${entry.lastTick}: ${display}`;
-      // "changed" (Step 33) is a lower-priority visual than error — only applied when
-      // there's no error, so a node can't show both states confusingly at once.
-      const stateClass = hasError ? ' error' : (entry.changed ? ' changed' : '');
-      const colorStyle = useLeftBadge && entry.leftBadge.color ? ` style="background:${escapeHtml(entry.leftBadge.color)};"` : '';
-      simBadgeHtml = `<div class="fnode-sim-badge${stateClass}"${colorStyle} title="${escapeHtml(title)}">${escapeHtml(display)}</div>`;
+      if (hasError || useLeftBadge || isUIOutput) {
+        const display = hasError ? 'ERR' : (useLeftBadge ? entry.leftBadge.text : formatSimValue(entry.value));
+        const title = hasError ? entry.lastError : `tick ${entry.lastTick}: ${display}`;
+        // "changed" (Step 33) is a lower-priority visual than error — only applied when
+        // there's no error, so a node can't show both states confusingly at once.
+        const stateClass = hasError ? ' error' : (entry.changed ? ' changed' : '');
+        const colorStyle = useLeftBadge && entry.leftBadge.color ? ` style="background:${escapeHtml(entry.leftBadge.color)};"` : '';
+        simBadgeHtml = `<div class="fnode-sim-badge${stateClass}"${colorStyle} title="${escapeHtml(title)}">${escapeHtml(display)}</div>`;
+      }
     } else if (isUIOutput) {
       // Reported directly: "If UI element is connected to a part but the part script
       // does not set a value, it stays as null or similar" -- a visible placeholder

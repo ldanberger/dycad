@@ -985,9 +985,10 @@ recommended but not required.</p>
   <li><strong>response</strong> (optional) — a value sent <em>backward</em> to every node that feeds into this
   one, arriving as their <code>ctx.responses</code> one tick later. Useful for acknowledgement/feedback flows
   where a downstream node needs to signal something back upstream.</li>
-  <li><strong>leftBadge</strong> (optional) — <code>{ text, color }</code> to replace the automatic value badge
-  (bottom-left) with your own text/color for this tick. Only shows while the view's "Show Left Badge" toggle
-  (Filters panel) is on; omit it and the node falls back to showing its own <code>value</code> as usual.</li>
+  <li><strong>leftBadge</strong> (optional) — <code>{ text, color }</code> to show a freeform label on the node
+  (bottom-left). Only shows while the view's "Show Left Badge" toggle (Filters panel) is on, and only for the
+  tick a script actually returns one — omit it and no left badge shows at all that tick, it does NOT fall back
+  to displaying <code>value</code>.</li>
   <li><strong>rightBadge</strong> (optional) — <code>{ text, color }</code> to show a freeform label on the node
   (bottom-right), independent of the left badge. Only shows while the view's "Show Right Badge"
   toggle (Filters panel) is on, and only for the tick a script actually returns one.</li>
