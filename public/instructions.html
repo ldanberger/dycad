@@ -805,8 +805,12 @@ Enabled" in Root Properties, then write the script body in the Script field.</p>
     <tr><td><code>ctx.state</code></td><td>Whatever this part's own script returned as <code>state</code> last
     tick — empty on tick 0 or right after Reset. This is how a script remembers something between ticks.</td></tr>
     <tr><td><code>ctx.tick</code></td><td>The current tick number, starting at 0.</td></tr>
-    <tr><td><code>ctx.log(message)</code></td><td>Writes a line to the Message Log panel — use freely for
+    <tr><td><code>ctx.log(message)</code></td><td>Writes a line to the Message Log tab — use freely for
     narration or debugging while building a script.</td></tr>
+    <tr><td><code>ctx.logActivity(message)</code>, <code>ctx.logDebug(message)</code></td><td>Same as
+    <code>ctx.log(message)</code>, writing to the sibling Activity/Debug Log tabs instead — Message for brief
+    messages, Activity for more detail, Debug for deep/verbose dumps. See <code>CommonScript_DebugOutLog</code>
+    below for a shipped example that uses <code>logDebug</code>.</td></tr>
     <tr><td><code>ctx.secrets</code></td><td>Read-only access to your Local Secrets (File &gt; Load Local
     Secrets — e.g. an API key) that should never end up saved into a shared model file. Deliberately
     memory-only — never cached to localStorage either, so it must be re-loaded each browser session, unlike
@@ -883,7 +887,9 @@ no separate save step. The in-app dialog closes when you detach.</p>
     <tr><td><code>model</code></td><td>The currently-selected simulation model, or <code>null</code> if none is selected.</td></tr>
     <tr><td><code>findParts({type, model})</code></td><td>Look up parts by type and/or model.</td></tr>
     <tr><td><code>log(...)</code></td><td>Prints to the console's own output area (Console tab).</td></tr>
-    <tr><td><code>messageLog(...)</code></td><td>Writes to the persistent Message Log instead.</td></tr>
+    <tr><td><code>messageLog(...)</code></td><td>Writes to the persistent Message Log tab instead.</td></tr>
+    <tr><td><code>activityLog(...)</code>, <code>debugLog(...)</code></td><td>Same as <code>messageLog(...)</code>,
+    writing to the sibling Activity/Debug Log tabs instead.</td></tr>
     <tr><td><code>generateIndustry(app, industryKey, onProgress, placeInView)</code></td><td>Generates a full industry model.</td></tr>
     <tr><td><code>populateFromTemplate(app, tab, templateName)</code></td><td>Populates a view from a stream template.</td></tr>
     <tr><td><code>remap(app, tab, options)</code></td><td>options: <code>sortKeys</code>, <code>templateName</code>,
@@ -960,7 +966,11 @@ directly: it switches on <code>ctx.part.type</code>, logging a distinct message 
 own return statement is a working example of every field a part script's return can set —
 <code>value</code>, <code>state</code>, <code>response</code>, <code>leftBadge</code>, and <code>rightBadge</code> —
 and demonstrates <code>value</code>/<code>response</code> as objects (matching <code>state</code>'s own
-always-object convention), a recommended shape rather than one the engine requires.</p>
+always-object convention), a recommended shape rather than one the engine requires. A third,
+<code>CommonScript_DebugOutLog(ctx)</code>, is meant to be called from (or copied into) any part that
+<em>receives</em> input — i.e. is a connector's "to" — to dump every incoming value to the Debug Log tab
+(<code>ctx.logDebug</code>) in full, pretty-printed detail; when a value is itself an array it loops through
+each element individually rather than dumping the whole array as one block.</p>
 <p>A fourth kind of function belongs here too: a user-designed <strong>Remap layout</strong> (see "Remap" above),
 picked interactively from that dialog's Pattern dropdown ("Custom" reveals a second dropdown listing every
 matching function found here) rather than called from <code>main()</code>, a menu item, or a part script. The
@@ -1163,10 +1173,14 @@ created (so it's ready once you do place them together) but won't be visible on 
 <ul>
   <li><strong>Undo/Redo</strong> (Ctrl+Z / Ctrl+Shift+Z) covers the full model, not just the current view —
   it's safe even though views share underlying parts and connectors.</li>
-  <li><strong>The Message Log</strong> (left sidebar) records every warning/rejection message the app shows
-  you, not just the ones you happened to catch as a popup — worth checking after a bulk operation
-  (Smart Check View, a big drag-and-drop, an import) to see everything that happened, with Copy and Clear
-  buttons for convenience.</li>
+  <li><strong>The Log area</strong> (left sidebar) has 3 tabs — Message (brief), Activity (more detail), Debug
+  (deep/verbose) — each its own independent record, with its own Copy/Clear (acting on whichever tab is
+  currently open) and double-click-to-expand. The Message tab records every warning/rejection message the
+  app shows you, not just the ones you happened to catch as a popup — worth checking after a bulk operation
+  (Smart Check View, a big drag-and-drop, an import) to see everything that happened. Activity/Debug are
+  populated only by scripts that explicitly write to them (<code>ctx.logActivity</code>/<code>ctx.logDebug</code>
+  for a part script, <code>activityLog(...)</code>/<code>debugLog(...)</code> for the Script Console) — see
+  Simulation Scripting above.</li>
   <li><strong>Rejections give a specific reason</strong> — e.g. dragging a node into a section that doesn't
   allow its type names the section and what it does allow, rather than a generic "that didn't work."</li>
   <li><strong>A part's Note</strong> and <strong>a view's Margin</strong> are stored but not currently shown

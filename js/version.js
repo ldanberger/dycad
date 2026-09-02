@@ -5377,4 +5377,43 @@
 // entirely, which throws "ctx.outputs is not iterable" from the example's own
 // script. Verified live before writing tests. DESIGN_DOCUMENT.md SS8 and
 // public/instructions.html's ctx-object table updated; tests/README.md updated.
-export const APP_VERSION = '0.931';
+// v0.932: reported directly -- "change message log area to have three 'tabs':
+// message log (for brief messages), activity log (for details), and debug log,
+// and create commands to write to these from common script or through ctx. Write
+// a common_debugOutLog script that will be called from any element connected as
+// a 'to', to display deep to the new debug log all the input values looping
+// through arrays." The left panel's single "Message Log" section becomes 3 tabs
+// (.log-tab buttons, index.html) over 3 independent, equally-capped-at-500
+// arrays: store.messageLog (unchanged, brief), new store.activityLog (more
+// detail), new store.debugLog (deep/verbose). app.activeLogTab (main.js, pure UI
+// state, not persisted) picks which one renderMessageLog (render.js) shows in
+// the shared #message-log textarea, updates the active tab button, and updates
+// the header text (LOG_TABS, exported from render.js so main.js's click/copy/
+// clear/double-click handlers share the same tab->store-key->label map) --
+// Copy/Clear/double-click-to-expand all act on whichever tab is currently
+// active, not a fixed one. Two new write paths, both mirroring the pre-existing
+// ctx.log/messageLog(...) pair exactly: ctx.logActivity(...)/ctx.logDebug(...)
+// for a part script (runTick, simulation.js), and activityLog(...)/debugLog(...)
+// bindings in BOTH of the Script Console's own execution contexts
+// (promptScriptConsole's Run button and promptAutofill, main.js). pushMessageLog/
+// pushActivityLog/pushDebugLog (simulation.js) now share one internal
+// pushLog(store, arrayName, message) helper rather than three independent copies
+// of the same cap-at-500 splice logic. New CommonScript_DebugOutLog(ctx)
+// (state.js, right after CommonScript_Sim) -- the requested script itself: loops
+// ctx.inputs, and for any input whose value is an array, loops through each
+// element individually (an "array of N" summary line, then one line per
+// element) rather than dumping the whole array as one block -- everything
+// logged via ctx.logDebug as pretty-printed (2-space, multi-line) JSON, reusing
+// ctx.inputs' Step 42 fromPartType/connector.connectorType fields to name each
+// source; a part with zero inputs logs one explicit "no inputs connected this
+// tick" line rather than silently doing nothing. New check_activity_and_debug_
+// logs (the two write paths, via a real part script AND the real Script Console
+// dialog's Run button), check_common_script_debug_out_log (array-looping,
+// non-array, and zero-input cases, via real multi-part chains and real
+// simulation ticks), and check_log_tabs_ui (against the real left-panel DOM:
+// default tab, switching tabs swaps content/active-class/header, Copy/Clear
+// scoped to the active tab only) -- every changed/new behavior proven via TEMP
+// BREAK. Verified live before writing tests. DESIGN_DOCUMENT.md SS8,
+// public/instructions.html's ctx-object table/Script Console bindings table/
+// Tips section, and tests/README.md updated.
+export const APP_VERSION = '0.932';

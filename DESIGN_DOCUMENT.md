@@ -52,7 +52,7 @@ There is no client-side router and no history API usage — the whole app is one
 | `js/archimate.js` | ArchiMate 3.0 Exchange Format import: element/relationship/view parsing, junction flattening, nested-shape (Composition/Aggregation) detection |
 | `js/sfce.js` | Pure logic (no DOM) for the Load SFCE wizard and industry-tree operations: `flattenJsonRecords` (generic nested-JSON flattener), `buildRowsFromRecords`, `detectSharedFunctions`/`resolveSharedFunctions`, `buildIndustryTree`, `flattenIndustryTree` (for the SFCE Catalog page) |
 | `js/ddl.js` | Pure logic (no DOM) for Data Modeling's DDL import/export: `parseDDL` (a scoped `CREATE TABLE` subset — not a general SQL grammar), `generateDDL` (the reverse), `splitTopLevel` (paren/quote-aware delimiter splitting) |
-| `js/simulation.js` | Per-model tick engine (`stepSimulation`, `startContinuousRun`/`pauseContinuousRun`/`stopContinuousRun`), the `ctx` contract implementation, Message Log (`pushMessageLog`), simulation snapshot save/load |
+| `js/simulation.js` | Per-model tick engine (`stepSimulation`, `startContinuousRun`/`pauseContinuousRun`/`stopContinuousRun`), the `ctx` contract implementation, the 3-tab Log area (`pushMessageLog`/`pushActivityLog`/`pushDebugLog`), simulation snapshot save/load |
 | `js/view3d.js` | The 3D View tab: a rotatable/zoomable WebGL scene over `store.doc.parts`/`connectors` (never viewMembers/views). The only module that imports the vendored Three.js/OrbitControls (`js/vendor/`) — reached exclusively via a dynamic `import()` from `canvas.js`'s `renderView3DPage`, so the ~800KB vendored library never loads unless the tab is actually opened. Persists its renderer/scene/camera/controls per tab id across re-renders instead of tearing down and rebuilding the WebGL context on every `app.render()` call the way the 2D canvas page does |
 | `js/main.js` | `App` class: all UI-facing methods (every `prompt*` dialog, tab management, toast/message-log hookup, theme/panel-width persistence), global event wiring, the File/Advanced dropdown menus, bootstrap |
 | `js/version.js` | `APP_VERSION` plus a per-release changelog as code comments — the authoritative history of *why* things are the way they are; consult before assuming something is unintentional |
@@ -2315,8 +2315,9 @@ the 'from' attribute have not been set: set From to the pk of the from node/part
 To to the same field name in to node/part after creating it (numeric null fk), set
 cardinality as from: one and to: one or many."*
 - `promptAutofill` compiles `store.batchScriptCode` with the exact same bindings
-  (`app`/`store`/`model`/`findParts`/`log`/`messageLog`/the raw `commands.js` command
-  functions) `promptScriptConsole`'s own Run button uses via `new Function(...)` — but
+  (`app`/`store`/`model`/`findParts`/`log`/`messageLog`/`activityLog`/`debugLog`/the raw
+  `commands.js` command functions — the latter two added in Step 43, see below)
+  `promptScriptConsole`'s own Run button uses via `new Function(...)` — but
   extracts and calls a top-level `dataAutoFill` instead of `main`, so editing
   `dataAutoFill()` in Script Console genuinely changes what the menu item does,
   without needing a separate storage/editing mechanism of its own.
@@ -2619,6 +2620,45 @@ graph through an actual `sim.stepSimulation()` call, confirms every new field on
 (confirms the file is listed in `examples/index.json` and that Router's script genuinely
 logs the documented lines) — both proven via TEMP BREAK removing `outputs` from the `ctx`
 object entirely, which throws `ctx.outputs is not iterable` from the example's own script.
+
+**3-tab Log area (Step 43)**: reported directly — *"change message log area to have
+three 'tabs': message log (for brief messages), activity log (for details), and debug
+log, and create commands to write to these from common script or through ctx."* The
+left panel's single "Message Log" section becomes 3 tabs (`.log-tab` buttons,
+`index.html`) over 3 independent, equally-capped-at-500 arrays: `store.messageLog`
+(unchanged, brief), new `store.activityLog` (more detail), new `store.debugLog`
+(deep/verbose). `app.activeLogTab` (`main.js`, pure UI state, not persisted) picks which
+one `renderMessageLog` (`render.js`) shows in the shared `#message-log` textarea, updates
+the tab buttons' `active` class, and updates the header text (`LOG_TABS`, exported from
+`render.js` so `main.js`'s click/copy/clear/double-click handlers share the same
+tab→store-key→label map) — Copy/Clear/double-click-to-expand all act on whichever tab is
+currently active, not a fixed one. Two write paths, both new, mirroring the pre-existing
+`ctx.log`/`messageLog(...)` pair exactly: `ctx.logActivity(...)`/`ctx.logDebug(...)` for
+a part script (`runTick`, `simulation.js`, alongside the existing `ctx.log`), and
+`activityLog(...)`/`debugLog(...)` bindings in BOTH of the Script Console's own execution
+contexts (`promptScriptConsole`'s Run button and `promptAutofill`, `main.js`) alongside
+the existing `messageLog(...)` binding. `pushMessageLog`/`pushActivityLog`/`pushDebugLog`
+(`simulation.js`) now share one internal `pushLog(store, arrayName, message)` helper
+rather than three independent copies of the same cap-at-500 splice logic.
+**`CommonScript_DebugOutLog(ctx)`** (`state.js`, right after `CommonScript_Sim`): a third
+`CommonScript_<Name>` example, the requested script itself — *"Write a
+common_debugOutLog script that will be called from any element connected as a 'to', to
+display deep to the new debug log all the input values looping through arrays."* Meant
+to be called from (or copied into) any part that receives input; loops `ctx.inputs`, and
+for any input whose `value` is an array, loops through each element individually
+(logging an `array of N` summary line, then one line per element) rather than dumping
+the whole array as one block — everything logged via `ctx.logDebug` as pretty-printed
+(2-space, multi-line) JSON, matching the Debug tab's own "deep/verbose" purpose, and
+reusing `ctx.inputs`' Step 42 `fromPartType`/`connector.connectorType` fields to name
+each source. A part with zero inputs logs one explicit "no inputs connected this tick"
+line rather than silently doing nothing. New `check_activity_and_debug_logs` (the two
+write paths, via a real part script AND the real Script Console dialog's Run button),
+`check_common_script_debug_out_log` (array-looping, non-array, and zero-input cases, via
+real multi-part chains and real simulation ticks), and `check_log_tabs_ui` (against the
+real left-panel DOM: default tab, switching tabs swaps content/active-class/header, and
+Copy/Clear act only on the currently-active tab) — every changed/new behavior proven via
+TEMP BREAK. DESIGN_DOCUMENT.md (here), `public/instructions.html`'s ctx-object table and
+Script Console bindings table, and `tests/README.md` updated.
 
 **Packet protocol: `value` never auto-holds, `lastGoodValue` does (Step 35)**: reported
 directly, expanding on `value`/`response` — *"can value and response be objects?"*, then

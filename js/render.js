@@ -493,9 +493,19 @@ function renderSelectionInfo(app) {
   }
 }
 
-/** Left-panel "Message Log": scripts write to it via ctx.log(...) during a simulation
- * tick (see simulation.js). Read-only textarea, most recent message first, each line
- * prefixed with an HH:MM:SS timestamp. */
+/** Left-panel Log area (Step 43): three tabs over three independent, equally-capped
+ * arrays — Message (brief, ctx.log), Activity (more detail, ctx.logActivity), Debug
+ * (deep/verbose, ctx.logDebug) — see simulation.js's pushMessageLog/pushActivityLog/
+ * pushDebugLog. Read-only textarea, most recent message first, each line prefixed with
+ * an HH:MM:SS timestamp. Which tab is showing is app.activeLogTab (main.js), pure UI
+ * state — copy/clear/double-click-to-expand (main.js's own wiring) all act on
+ * whichever tab is currently active. */
+const LOG_TABS = {
+  message: { storeKey: 'messageLog', label: 'Message Log' },
+  activity: { storeKey: 'activityLog', label: 'Activity Log' },
+  debug: { storeKey: 'debugLog', label: 'Debug Log' },
+};
+
 function formatLogTimestamp(ts) {
   const d = new Date(ts);
   const pad = (n) => String(n).padStart(2, '0');
@@ -505,12 +515,20 @@ function formatLogTimestamp(ts) {
 function renderMessageLog(app) {
   const el = document.getElementById('message-log');
   if (!el) return;
-  const entries = app.store.messageLog || [];
+  const tabKey = app.activeLogTab || 'message';
+  const tab = LOG_TABS[tabKey] || LOG_TABS.message;
+  const entries = app.store[tab.storeKey] || [];
   el.value = entries
     .slice()
     .reverse()
     .map((e) => `[${formatLogTimestamp(e.ts)}] ${e.message}`)
     .join('\n');
+
+  const headerEl = document.getElementById('message-log-header');
+  if (headerEl) headerEl.textContent = tab.label;
+  for (const btn of document.querySelectorAll('.log-tab')) {
+    btn.classList.toggle('active', btn.dataset.logTab === tabKey);
+  }
 }
 
 const CMD_ICONS = {
@@ -2041,4 +2059,4 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderViewDisplayFilters, renderMessageLog, escapeHtml, kindFromType, iconSvgFor, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields, getAllFieldHeights, setAllFieldHeights, isAttributeForeignKey };
+export { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderViewDisplayFilters, renderMessageLog, LOG_TABS, escapeHtml, kindFromType, iconSvgFor, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields, getAllFieldHeights, setAllFieldHeights, isAttributeForeignKey };

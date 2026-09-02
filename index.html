@@ -126,9 +126,14 @@
         <div class="panel-title" style="justify-content:space-between;">
           <span class="dbl-edit-label" id="message-log-header" title="Double-click to open in a larger read-only view">Message Log</span>
           <span style="display:flex; gap:4px;">
-            <button class="icon-btn" id="message-log-copy-btn" title="Copy Message Log content">📋</button>
-            <button class="icon-btn" id="message-log-clear-btn" title="Clear Message Log content">🗑</button>
+            <button class="icon-btn" id="message-log-copy-btn" title="Copy active log tab content">📋</button>
+            <button class="icon-btn" id="message-log-clear-btn" title="Clear active log tab content">🗑</button>
           </span>
+        </div>
+        <div class="log-tabs">
+          <button class="log-tab active" data-log-tab="message" title="Brief, at-a-glance messages">Message</button>
+          <button class="log-tab" data-log-tab="activity" title="More detailed, blow-by-blow narration">Activity</button>
+          <button class="log-tab" data-log-tab="debug" title="Deep, verbose dumps">Debug</button>
         </div>
         <textarea id="message-log" class="message-log" readonly></textarea>
       </div>

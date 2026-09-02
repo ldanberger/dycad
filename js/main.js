@@ -1,14 +1,14 @@
 import { loadAllData } from './data.js';
 import { Store, ciEq, newId } from './state.js';
 import { parseArchimateXml } from './archimate.js';
-import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderViewDisplayFilters, renderMessageLog, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields, getAllFieldHeights, setAllFieldHeights, isAttributeForeignKey } from './render.js';
+import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderViewDisplayFilters, renderMessageLog, LOG_TABS, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields, getAllFieldHeights, setAllFieldHeights, isAttributeForeignKey } from './render.js';
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule, formatSimValue, segmentIntersectsRect } from './canvas.js';
 import { computeRoutedPath } from './routing.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
 import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, copyModel, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors } from './commands.js';
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection, computeSectionLayout, getAllowedTypesForView } from './sections.js';
-import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog } from './simulation.js';
+import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog, pushActivityLog, pushDebugLog } from './simulation.js';
 import { flattenJsonRecords, buildRowsFromRecords, detectSharedFunctions, resolveSharedFunctions, buildIndustryTree, flattenIndustryTree, GENERATE_UNIQUE_ID } from './sfce.js';
 
 /** Pretty-prints a Script Console result. JSON.stringify covers plain data (the common
@@ -361,7 +361,8 @@ function scriptConsoleInnerHTML(modelName, { standalone } = {}) {
             <tr><td><code>model</code></td><td>The currently-selected simulation model, or <code>null</code> if none is selected.</td></tr>
             <tr><td><code>findParts({type, model})</code></td><td>Look up parts by type and/or model.</td></tr>
             <tr><td><code>log(...)</code></td><td>Prints to this console's own output area (above, Console tab).</td></tr>
-            <tr><td><code>messageLog(...)</code></td><td>Writes to the persistent Message Log instead.</td></tr>
+            <tr><td><code>messageLog(...)</code></td><td>Writes to the persistent Message Log tab instead.</td></tr>
+            <tr><td><code>activityLog(...)</code>, <code>debugLog(...)</code></td><td>Same as <code>messageLog(...)</code>, writing to the sibling Activity/Debug Log tabs instead (Step 43) — Message for brief messages, Activity for more detail, Debug for deep/verbose dumps.</td></tr>
             <tr><td><code>generateIndustry(app, onProgress, placeInView)</code></td><td>Generates a full industry model.</td></tr>
             <tr><td><code>populateFromTemplate(app, tab, templateName)</code></td><td>Populates a view from a stream template.</td></tr>
             <tr><td><code>remap(app, tab, options)</code></td><td>options: <code>sortKeys, templateName</code>,
@@ -413,6 +414,10 @@ class App {
     this.store = store;
     this.connectState = null;
     this.clipboard = null;
+    // Which of the left panel's 3 Log tabs is currently shown (Step 43) — pure UI
+    // state, not persisted, not part of `store` (same treatment as e.g. simSelectedModel
+    // being separate from the doc itself). 'message' | 'activity' | 'debug'.
+    this.activeLogTab = 'message';
   }
 
   // ===================== RENDER =====================
@@ -731,12 +736,14 @@ class App {
     if (!tab || tab.type !== 'canvas') { this.toast('Open a canvas view with Data Entity Details tables first.', true); return; }
 
     const code = this.store.batchScriptCode || '';
-    const bindingNames = ['app', 'store', 'model', 'findParts', 'log', 'messageLog', 'generateIndustry', 'populateFromTemplate', 'remap', 'smartCheckView', 'smartCheckNode', 'insertSmartStream'];
+    const bindingNames = ['app', 'store', 'model', 'findParts', 'log', 'messageLog', 'activityLog', 'debugLog', 'generateIndustry', 'populateFromTemplate', 'remap', 'smartCheckView', 'smartCheckNode', 'insertSmartStream'];
     const logToMessageLog = (...args) => pushMessageLog(this.store, args.map((a) => (typeof a === 'string' ? a : stringifyForConsole(a))).join(' '));
+    const logToActivityLog = (...args) => pushActivityLog(this.store, args.map((a) => (typeof a === 'string' ? a : stringifyForConsole(a))).join(' '));
+    const logToDebugLog = (...args) => pushDebugLog(this.store, args.map((a) => (typeof a === 'string' ? a : stringifyForConsole(a))).join(' '));
     const bindingValues = [
       this, this.store, this.store.simSelectedModel || null,
       (query) => { const { type, model } = query || {}; return this.store.doc.parts.filter((p) => (!type || ciEq(p.type, type)) && (!model || ciEq(p.model, model))); },
-      logToMessageLog, logToMessageLog,
+      logToMessageLog, logToMessageLog, logToActivityLog, logToDebugLog,
       generateIndustry, populateFromTemplate, remap, smartCheckView, smartCheckNode, insertSmartStream,
     ];
 
@@ -1033,12 +1040,14 @@ class App {
       if (!code.trim()) return;
       const fnName = runFnSelect.value || 'main';
 
-      const bindingNames = ['app', 'store', 'model', 'findParts', 'log', 'messageLog', 'generateIndustry', 'populateFromTemplate', 'remap', 'smartCheckView', 'smartCheckNode', 'insertSmartStream'];
+      const bindingNames = ['app', 'store', 'model', 'findParts', 'log', 'messageLog', 'activityLog', 'debugLog', 'generateIndustry', 'populateFromTemplate', 'remap', 'smartCheckView', 'smartCheckNode', 'insertSmartStream'];
       const bindingValues = [
         this, this.store, this.store.simSelectedModel || null,
         findPartsForConsole,
         (...args) => appendOutput(args.map((a) => (typeof a === 'string' ? a : stringifyForConsole(a))).join(' ')),
         (msg) => pushMessageLog(this.store, typeof msg === 'string' ? msg : stringifyForConsole(msg)),
+        (msg) => pushActivityLog(this.store, typeof msg === 'string' ? msg : stringifyForConsole(msg)),
+        (msg) => pushDebugLog(this.store, typeof msg === 'string' ? msg : stringifyForConsole(msg)),
         generateIndustry, populateFromTemplate, remap, smartCheckView, smartCheckNode, insertSmartStream,
       ];
 
@@ -4571,27 +4580,38 @@ function wireGlobalEvents(app) {
     e.returnValue = '';
   });
 
-  // ===== Message Log header: double-click opens the full log in the generic read-only
-  // text-edit modal (Step 33) =====
+  // ===== Log area: 3 tabs (Message/Activity/Debug, Step 43) — clicking one switches
+  // app.activeLogTab and re-renders; header double-click, Copy, and Clear all act on
+  // whichever tab is currently active (Step 33's original single-log behavior, now
+  // scoped per tab instead of hardcoded to Message Log) =====
+  for (const btn of document.querySelectorAll('.log-tab')) {
+    btn.addEventListener('click', () => {
+      app.activeLogTab = btn.dataset.logTab;
+      app.render();
+    });
+  }
   document.getElementById('message-log-header').addEventListener('dblclick', () => {
+    const tab = LOG_TABS[app.activeLogTab] || LOG_TABS.message;
     const el = document.getElementById('message-log');
-    app.promptTextEdit({ title: 'Message Log', value: el.value, readonly: true, onSave: () => {} });
+    app.promptTextEdit({ title: tab.label, value: el.value, readonly: true, onSave: () => {} });
   });
   document.getElementById('message-log-copy-btn').addEventListener('click', async () => {
+    const tab = LOG_TABS[app.activeLogTab] || LOG_TABS.message;
     const el = document.getElementById('message-log');
-    if (!el.value) { app.toast('Message Log is empty.', true); return; }
+    if (!el.value) { app.toast(`${tab.label} is empty.`, true); return; }
     try {
       await navigator.clipboard.writeText(el.value);
-      app.toast('Message Log copied to clipboard.');
+      app.toast(`${tab.label} copied to clipboard.`);
     } catch {
       app.toast('Copy failed — clipboard access was blocked.', true);
     }
   });
   document.getElementById('message-log-clear-btn').addEventListener('click', () => {
-    if (store.messageLog.length === 0) { app.toast('Message Log is already empty.'); return; }
-    store.messageLog = [];
+    const tab = LOG_TABS[app.activeLogTab] || LOG_TABS.message;
+    if (store[tab.storeKey].length === 0) { app.toast(`${tab.label} is already empty.`); return; }
+    store[tab.storeKey] = [];
     app.render();
-    app.toast('Message Log cleared.');
+    app.toast(`${tab.label} cleared.`);
   });
   document.getElementById('help-btn').addEventListener('click', () => app.openOrSwitchDocs());
 

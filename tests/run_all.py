@@ -5706,6 +5706,201 @@ def check_connector_introspection_example(page):
     return True, "The 'connector introspection demo' example is reachable from File > Load Example, simulates with no errors, and Router's script genuinely logs each ctx.inputs/ctx.outputs entry's connector type and other part's type to the Message Log"
 
 
+def check_activity_and_debug_logs(page):
+    """Regression guard/new-feature check for the Step 43 3-tab Log area, reported
+    directly: "change message log area to have three 'tabs': message log (for brief
+    messages), activity log (for details), and debug log, and create commands to
+    write to these from common script or through ctx." store.activityLog/debugLog are
+    new, independent 500-capped arrays alongside the existing store.messageLog (same
+    prefix-with-[partLabel] convention). Two write paths, both new: ctx.logActivity(...)
+    /ctx.logDebug(...) for a part script (mirroring the existing ctx.log(...) exactly),
+    and activityLog(...)/debugLog(...) bindings in the Script Console's own execution
+    context (mirroring the existing messageLog(...) binding exactly). Covers, via a
+    real part script driven through an actual sim.stepSimulation() call: all three
+    ctx.log*(...) calls land in their own separate array with the correct
+    [partLabel]-prefixed message and none other; and, via the real Script Console
+    dialog's Run button: activityLog(...)/debugLog(...) genuinely write to
+    store.activityLog/debugLog from a main() function, exactly like messageLog(...)
+    already does for store.messageLog."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+      const model = store.defaultModel;
+
+      const before = { m: store.messageLog.length, a: store.activityLog.length, d: store.debugLog.length };
+      store.createPart({
+        type: 'BusinessProcess', label: 'RegrLogTabs', model, scriptEnabled: true,
+        script: "ctx.log('brief msg'); ctx.logActivity('activity msg'); ctx.logDebug('debug msg'); return { value: 1, state: {} };",
+      });
+      sim.stepSimulation(app, model);
+      const after = { m: store.messageLog.length, a: store.activityLog.length, d: store.debugLog.length };
+      const lastMsg = store.messageLog[store.messageLog.length - 1].message;
+      const lastAct = store.activityLog[store.activityLog.length - 1].message;
+      const lastDbg = store.debugLog[store.debugLog.length - 1].message;
+
+      app.promptScriptConsole();
+      await new Promise(r => setTimeout(r, 60));
+      const box = document.querySelector('.modal-box.modal-box-console');
+      const textarea = box.querySelector('#console-input');
+      textarea.value = "function main() { activityLog('console activity'); debugLog('console debug'); }";
+      const beforeConsole = { a: store.activityLog.length, d: store.debugLog.length };
+      box.querySelector('.run').click();
+      await new Promise(r => setTimeout(r, 150));
+      const afterConsole = { a: store.activityLog.length, d: store.debugLog.length };
+      const consoleLastAct = store.activityLog[store.activityLog.length - 1].message;
+      const consoleLastDbg = store.debugLog[store.debugLog.length - 1].message;
+      box.querySelector('.cancel').click();
+
+      return { before, after, lastMsg, lastAct, lastDbg, beforeConsole, afterConsole, consoleLastAct, consoleLastDbg };
+    }
+    """)
+    problems = []
+    if result["after"]["m"] != result["before"]["m"] + 1 or result["lastMsg"] != "[RegrLogTabs] brief msg":
+        problems.append(f"expected ctx.log to append exactly 1 correctly-prefixed entry to messageLog, got before={result['before']}, after={result['after']}, lastMsg={result['lastMsg']}")
+    if result["after"]["a"] != result["before"]["a"] + 1 or result["lastAct"] != "[RegrLogTabs] activity msg":
+        problems.append(f"expected ctx.logActivity to append exactly 1 correctly-prefixed entry to activityLog, got before={result['before']}, after={result['after']}, lastAct={result['lastAct']}")
+    if result["after"]["d"] != result["before"]["d"] + 1 or result["lastDbg"] != "[RegrLogTabs] debug msg":
+        problems.append(f"expected ctx.logDebug to append exactly 1 correctly-prefixed entry to debugLog, got before={result['before']}, after={result['after']}, lastDbg={result['lastDbg']}")
+    if result["afterConsole"]["a"] != result["beforeConsole"]["a"] + 1 or result["consoleLastAct"] != "console activity":
+        problems.append(f"expected the Script Console's activityLog(...) binding to write to store.activityLog, got beforeConsole={result['beforeConsole']}, afterConsole={result['afterConsole']}, consoleLastAct={result['consoleLastAct']}")
+    if result["afterConsole"]["d"] != result["beforeConsole"]["d"] + 1 or result["consoleLastDbg"] != "console debug":
+        problems.append(f"expected the Script Console's debugLog(...) binding to write to store.debugLog, got beforeConsole={result['beforeConsole']}, afterConsole={result['afterConsole']}, consoleLastDbg={result['consoleLastDbg']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "ctx.logActivity(...)/ctx.logDebug(...) (part scripts) and activityLog(...)/debugLog(...) (Script Console) both correctly write to the new, independent store.activityLog/store.debugLog arrays, mirroring the existing ctx.log(...)/messageLog(...) convention exactly"
+
+
+def check_common_script_debug_out_log(page):
+    """Regression guard/new-feature check for CommonScript_DebugOutLog(ctx), reported
+    directly: "Write a common_debugOutLog script that will be called from any element
+    connected as a 'to', to display deep to the new debug log all the input values
+    looping through arrays." The shipped CommonScript_DebugOutLog (state.js, right
+    after CommonScript_Sim) loops ctx.inputs; for an array value, loops each element
+    individually (rather than dumping the array as one block); everything logged via
+    ctx.logDebug as pretty-printed (multi-line) JSON, since this is specifically the
+    deep/verbose tab. Covers, via a real 2-part chain driven through actual
+    sim.stepSimulation() calls: a source sending an array value produces one summary
+    debug line plus one line PER element, each pretty-printed and naming the source's
+    label/type/connector type (reusing ctx.inputs' Step 42 fromPartType/connectorType
+    fields); a source sending a plain (non-array) value produces exactly one
+    pretty-printed debug line; and a part with zero inputs logs a single explicit
+    'no inputs connected this tick' line instead of silently doing nothing."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+      const model = store.defaultModel;
+
+      const arraySrc = store.createPart({ type: 'BusinessActor', label: 'RegrDbgArraySrc', model, scriptEnabled: true, script: "return { value: ['x', 'y'], state: {} };" });
+      const arraySink = store.createPart({ type: 'BusinessProcess', label: 'RegrDbgArraySink', model, scriptEnabled: true, script: "return CommonScript_DebugOutLog(ctx);" });
+      store.createConnector({ from: arraySrc.id, to: arraySink.id, model, connectorType: 'c', relationship: 'Association' });
+
+      const plainSrc = store.createPart({ type: 'BusinessActor', label: 'RegrDbgPlainSrc', model, scriptEnabled: true, script: "return { value: 42, state: {} };" });
+      const plainSink = store.createPart({ type: 'BusinessProcess', label: 'RegrDbgPlainSink', model, scriptEnabled: true, script: "return CommonScript_DebugOutLog(ctx);" });
+      store.createConnector({ from: plainSrc.id, to: plainSink.id, model, connectorType: 'c', relationship: 'Association' });
+
+      const isolatedSink = store.createPart({ type: 'BusinessProcess', label: 'RegrDbgIsolatedSink', model, scriptEnabled: true, script: "return CommonScript_DebugOutLog(ctx);" });
+
+      sim.stepSimulation(app, model); // tick 0: nothing committed yet from the sources
+      const before = store.debugLog.length;
+      sim.stepSimulation(app, model); // tick 1: sinks now see tick 0's committed values
+      const rt = store.simRuntime.get(model);
+      const errors = [arraySink, plainSink, isolatedSink].map((p) => rt.values.get(p.id)?.lastError).filter(Boolean);
+      const newLines = store.debugLog.slice(before).map((e) => e.message);
+
+      const arrayLines = newLines.filter((l) => l.includes('RegrDbgArraySink') && l.includes('RegrDbgArraySrc'));
+      const plainLines = newLines.filter((l) => l.includes('RegrDbgPlainSink') && l.includes('RegrDbgPlainSrc'));
+      const isolatedLines = newLines.filter((l) => l.includes('RegrDbgIsolatedSink'));
+
+      return { errors, arrayLines, plainLines, isolatedLines };
+    }
+    """)
+    problems = []
+    if result["errors"]:
+        return False, f"expected every CommonScript_DebugOutLog(ctx) call to run without error, got {result['errors']}"
+    arrayLines = result["arrayLines"]
+    if not any('array of 2' in l for l in arrayLines):
+        problems.append(f"expected an array value to log an 'array of 2' summary line, got {arrayLines}")
+    if not any('[0]' in l and 'BusinessActor' in l and "'c'" in l and '"x"' in l for l in arrayLines):
+        problems.append(f"expected the array's element 0 to be logged individually, pretty-printed, naming the source's type/connector type, got {arrayLines}")
+    if not any('[1]' in l and '"y"' in l for l in arrayLines):
+        problems.append(f"expected the array's element 1 to be logged individually, got {arrayLines}")
+    if len(result["plainLines"]) != 1 or '42' not in result["plainLines"][0]:
+        problems.append(f"expected a non-array value to log exactly one pretty-printed debug line containing '42', got {result['plainLines']}")
+    if len(result["isolatedLines"]) != 1 or 'no inputs connected this tick' not in result["isolatedLines"][0]:
+        problems.append(f"expected a part with zero inputs to log exactly one explicit 'no inputs connected this tick' line, got {result['isolatedLines']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "CommonScript_DebugOutLog(ctx) correctly loops ctx.inputs to the Debug Log, looping through array values element-by-element with pretty-printed JSON, logging non-array values directly, and logging an explicit no-inputs line for a part with none"
+
+
+def check_log_tabs_ui(page):
+    """Regression guard/new-feature check for the Step 43 Log area's 3-tab UI itself
+    (as opposed to the underlying write paths, covered by check_activity_and_debug_logs
+    above). Covers, against the REAL left-panel DOM: the Message tab is active by
+    default; clicking each of the 3 real .log-tab buttons switches the textarea's
+    content to that tab's own store.<x>Log entries, updates which button carries the
+    'active' class, and updates the header text to name that tab; and Copy/Clear act
+    ONLY on the currently-active tab -- clearing while Debug is active empties
+    store.debugLog but leaves store.messageLog/activityLog completely untouched."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      store.messageLog = [{ ts: Date.now(), message: 'msg-entry' }];
+      store.activityLog = [{ ts: Date.now(), message: 'activity-entry' }];
+      store.debugLog = [{ ts: Date.now(), message: 'debug-entry' }];
+      app.activeLogTab = 'message';
+      app.render();
+      await new Promise(r => setTimeout(r, 30));
+
+      const el = document.getElementById('message-log');
+      const header = () => document.getElementById('message-log-header').textContent;
+      const activeTab = () => document.querySelector('.log-tab.active')?.dataset.logTab;
+
+      const out = {};
+      out.defaultTab = activeTab();
+      out.defaultText = el.value;
+      out.defaultHeader = header();
+
+      document.querySelector('.log-tab[data-log-tab="activity"]').click();
+      await new Promise(r => setTimeout(r, 30));
+      out.activityTab = activeTab();
+      out.activityText = el.value;
+      out.activityHeader = header();
+
+      document.querySelector('.log-tab[data-log-tab="debug"]').click();
+      await new Promise(r => setTimeout(r, 30));
+      out.debugTab = activeTab();
+      out.debugText = el.value;
+      out.debugHeader = header();
+
+      // Clear while Debug is the active tab -- must only empty debugLog.
+      document.getElementById('message-log-clear-btn').click();
+      await new Promise(r => setTimeout(r, 30));
+      out.messageLogAfterClear = store.messageLog.length;
+      out.activityLogAfterClear = store.activityLog.length;
+      out.debugLogAfterClear = store.debugLog.length;
+
+      return out;
+    }
+    """)
+    problems = []
+    if result["defaultTab"] != "message" or "msg-entry" not in result["defaultText"] or result["defaultHeader"] != "Message Log":
+        problems.append(f"expected Message to be the default active tab showing messageLog content, got {result}")
+    if result["activityTab"] != "activity" or "activity-entry" not in result["activityText"] or "msg-entry" in result["activityText"] or result["activityHeader"] != "Activity Log":
+        problems.append(f"expected clicking the Activity tab to switch to activityLog content only and update the header, got {result}")
+    if result["debugTab"] != "debug" or "debug-entry" not in result["debugText"] or "activity-entry" in result["debugText"] or result["debugHeader"] != "Debug Log":
+        problems.append(f"expected clicking the Debug tab to switch to debugLog content only and update the header, got {result}")
+    if result["debugLogAfterClear"] != 0:
+        problems.append(f"expected Clear to empty debugLog while the Debug tab is active, got {result['debugLogAfterClear']} entries left")
+    if result["messageLogAfterClear"] != 1 or result["activityLogAfterClear"] != 1:
+        problems.append(f"expected Clear to leave messageLog/activityLog completely untouched while a DIFFERENT tab (Debug) is active, got messageLog={result['messageLogAfterClear']}, activityLog={result['activityLogAfterClear']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The real 3-tab Log area UI defaults to Message, switching tabs correctly swaps the textarea content/active class/header to that tab's own log, and Copy/Clear act only on the currently-active tab, leaving the other two untouched"
+
+
 def check_ui_dashboard_element_types_and_toolkit(page):
     """Regression guard/new-feature check for the new "UI" element group, reported
     directly: "create a new group 'UI' of elements text_out, text_in, numeric_out,
@@ -15659,6 +15854,9 @@ CHECKS = [
     check_left_badge_overrides_value_display,
     check_ctx_outputs_and_inputs_connector_metadata,
     check_connector_introspection_example,
+    check_activity_and_debug_logs,
+    check_common_script_debug_out_log,
+    check_log_tabs_ui,
     check_ui_dashboard_element_types_and_toolkit,
     check_ui_dashboard_property_panel,
     check_ui_dashboard_ctx_ui_engine,

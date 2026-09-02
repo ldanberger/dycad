@@ -40,6 +40,14 @@
  * type the "Enterprise" stream template uses, plus the full `{ value, state, response,
  * leftBadge, rightBadge }` return shape (see Catalogs > Stream Templates, `App.promptStreamTemplates`
  * in main.js, for a live read-only browser of the template data this switches over).
+ * `CommonScript_DebugOutLog()` (below, right after `CommonScript_Sim`) is a third
+ * example of this same kind, reported directly: "Write a common_debugOutLog script
+ * that will be called from any element connected as a 'to', to display deep to the
+ * new debug log all the input values looping through arrays." Meant to be called
+ * from any part that receives input (i.e. is a connector's 'to') — loops `ctx.inputs`
+ * and pretty-prints each value to the new Debug Log tab (`ctx.logDebug`, see the
+ * three-tab Log area below), looping through each element individually when a value
+ * is itself an array rather than dumping the whole array as one block.
  *
  * `CustomRemap_Example()` (below, after CommonScript_Example) is a FOURTH kind of
  * entry point, reported directly: "is it possible to build a small framework for user
@@ -430,6 +438,34 @@ function CommonScript_Sim(ctx) {
     rightBadge: { text: ctx.part.type, color: '#3b5bfd' },
   };
 }
+
+// CommonScript_DebugOutLog(ctx): a third CommonScript_<Name> example, meant to be
+// called from (or copied into) any part's script that RECEIVES input -- i.e. any
+// element connected as a connector's 'to' -- to dump every incoming value to the new
+// Debug Log tab in full detail. Doesn't return anything or touch value/state itself,
+// so a plain top-level statement like CommonScript_DebugOutLog(ctx); is enough
+// alongside whatever else the calling script already does with ctx.inputs. Loops
+// ctx.inputs, and for any input whose value is an array, loops through each element
+// individually (rather than dumping the whole array as one block) -- everything
+// logged as pretty-printed JSON (2-space indent, multi-line) rather than the compact
+// single-line form used elsewhere, since this is specifically the deep/verbose tab.
+function CommonScript_DebugOutLog(ctx) {
+  if (ctx.inputs.length === 0) {
+    ctx.logDebug('no inputs connected this tick');
+    return;
+  }
+  for (const inp of ctx.inputs) {
+    const who = inp.fromLabel + ' (' + inp.fromPartType + ", '" + inp.connector.connectorType + "' connector)";
+    if (Array.isArray(inp.value)) {
+      ctx.logDebug(who + ': array of ' + inp.value.length);
+      inp.value.forEach((item, i) => {
+        ctx.logDebug(who + '[' + i + ']: ' + JSON.stringify(item, null, 2));
+      });
+    } else {
+      ctx.logDebug(who + ': ' + JSON.stringify(inp.value, null, 2));
+    }
+  }
+}
 `;
 
 /** Store.smartStreamPresets' out-of-the-box default — named, reusable Insert Smart
@@ -630,10 +666,18 @@ class Store {
     // used only when creating new nodes). Initialized to defaultModel at boot purely as a
     // starting point; not persisted, not restored across Save/Load or a page refresh.
     this.simSelectedModel = this.doc.defaultModel;
-    // Global message console (left-panel "Message Log"): scripts can write arbitrary
-    // messages here via ctx.log(...) during a tick, independent of any one view — a
-    // running session console rather than a per-view record. Capped at 500 entries.
+    // Global message console (left-panel Log area, 3 tabs — Step 43): scripts can write
+    // arbitrary messages here via ctx.log(...)/ctx.logActivity(...)/ctx.logDebug(...)
+    // during a tick, or via the Script Console's own messageLog(...)/activityLog(...)/
+    // debugLog(...) bindings, independent of any one view — a running session console
+    // rather than a per-view record. Three SEPARATE arrays, one per tab, each capped at
+    // 500 entries independently (simulation.js's pushMessageLog/pushActivityLog/
+    // pushDebugLog): messageLog for brief, at-a-glance messages (the original, oldest
+    // tab); activityLog for more detailed blow-by-blow narration; debugLog for deep,
+    // verbose dumps (e.g. full pretty-printed values) too noisy for the other two.
     this.messageLog = [];
+    this.activityLog = [];
+    this.debugLog = [];
     // Local Secrets (File > Load Local Secrets): a flat key/value object read from a
     // user-loaded JSON file, for secrets (API keys etc.) that must never end up in a
     // save file AND must never be cached to localStorage (unlike Local Settings below) —

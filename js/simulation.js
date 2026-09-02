@@ -35,7 +35,7 @@ import { isSectionViewType, createSectionPlacer } from './sections.js';
 // (caught by the same per-part try/catch below, same as any other script error); they
 // simply sit defined-but-unused otherwise, same as in the Script Console's own
 // execution. `ctx` below is the ONLY parameter a part script itself receives:
-//   ctx = { part, inputs, outputs, responses, state, tick, log, secrets, setState, loadedFileName, findParts, currentView, defaultModel, createPart, createConnector, createNode, createNodeConnector }
+//   ctx = { part, inputs, outputs, responses, state, tick, log, logActivity, logDebug, secrets, setState, loadedFileName, findParts, currentView, defaultModel, createPart, createConnector, createNode, createNodeConnector }
 //     - part: the Part record itself (id, type, label, ...)
 //     - inputs: one entry per incoming connector (within this part's model) this tick —
 //         { fromPartId, fromLabel, fromPartType, connector: { relationship, streams, connectorType }, value, lastGoodValue, changed }
@@ -72,10 +72,16 @@ import { isSectionViewType, createSectionPlacer } from './sections.js';
 //       tick 0, or after Reset) — merged with any pending ctx.setState(...) patch from a
 //       previous tick's async callback (see setState below) before the script runs.
 //     - tick: the current tick number (0-based).
-//     - log(message): appends a timestamped line to the global Message Log panel
-//       (left sidebar, below Position) — independent of the per-node/per-tick
-//       Simulation Log, for whatever free-form narration a script author wants. Safe to
-//       call any number of times per tick; capped at 500 total entries.
+//     - log(message): appends a timestamped line to the global Message Log tab (left
+//       sidebar, below Position) — independent of the per-node/per-tick Simulation Log,
+//       for whatever free-form narration a script author wants. Safe to call any number
+//       of times per tick; capped at 500 total entries.
+//     - logActivity(message)/logDebug(message) (Step 43): same shape/behavior as log()
+//       above, writing to the sibling "Activity" and "Debug" tabs instead — three
+//       independently-capped (500 each) logs in the same left-panel area, for brief
+//       (Message) vs. more detailed (Activity) vs. deep/verbose (Debug) output. See
+//       CommonScript_DebugOutLog(ctx) (state.js) for a shipped example that uses
+//       logDebug specifically.
 //     - secrets: read-only mirror of store.localSecrets (File > Load Local Secrets) —
 //       for API keys etc. that should never end up in a save file, and deliberately never
 //       cached to localStorage either — must be re-loaded each session. e.g.
@@ -287,11 +293,33 @@ function deepEqual(a, b) {
   return true;
 }
 
-/** Appends a message to the global Message Log (left panel), capped at 500 entries.
- * Exposed to scripts as ctx.log(...) — see runTick below. */
+/** Shared by pushMessageLog/pushActivityLog/pushDebugLog below (Step 43) — appends to
+ * whichever of the left panel's three log tabs `arrayName` names, capped at 500 entries
+ * each, independently. */
+function pushLog(store, arrayName, message) {
+  const arr = store[arrayName];
+  arr.push({ ts: Date.now(), message: String(message) });
+  if (arr.length > 500) arr.splice(0, arr.length - 500);
+}
+
+/** Appends a message to the global Message Log (left panel, "Message" tab) — for brief,
+ * at-a-glance messages. Exposed to scripts as ctx.log(...) — see runTick below. */
 function pushMessageLog(store, message) {
-  store.messageLog.push({ ts: Date.now(), message: String(message) });
-  if (store.messageLog.length > 500) store.messageLog.splice(0, store.messageLog.length - 500);
+  pushLog(store, 'messageLog', message);
+}
+
+/** Appends to the Activity Log (left panel, "Activity" tab, Step 43) — for more detailed
+ * blow-by-blow narration than the Message Log. Exposed to scripts as
+ * ctx.logActivity(...) — see runTick below. */
+function pushActivityLog(store, message) {
+  pushLog(store, 'activityLog', message);
+}
+
+/** Appends to the Debug Log (left panel, "Debug" tab, Step 43) — for deep, verbose dumps
+ * too noisy for the other two tabs (e.g. CommonScript_DebugOutLog's full pretty-printed
+ * per-input values). Exposed to scripts as ctx.logDebug(...) — see runTick below. */
+function pushDebugLog(store, message) {
+  pushLog(store, 'debugLog', message);
 }
 
 /** Exposed to scripts as ctx.findParts({ type, model }) — see the script-contract comment
@@ -579,6 +607,8 @@ function runTick(app, modelName) {
         const out = fn({
           part, inputs, outputs, responses, state: prevState, tick: runtime.tick,
           log: (message) => pushMessageLog(store, `[${part.label}] ${message}`),
+          logActivity: (message) => pushActivityLog(store, `[${part.label}] ${message}`),
+          logDebug: (message) => pushDebugLog(store, `[${part.label}] ${message}`),
           secrets: { ...(store.localSecrets || {}) },
           setState: (patch) => {
             const existing = pendingStateUpdates.get(part.id) || {};
@@ -808,4 +838,4 @@ async function loadSimSnapshot(app, modelName, file) {
   }
 }
 
-export { runTick, stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog };
+export { runTick, stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog, pushActivityLog, pushDebugLog };
