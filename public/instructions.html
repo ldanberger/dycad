@@ -784,15 +784,21 @@ Enabled" in Root Properties, then write the script body in the Script field.</p>
   <tbody>
     <tr><td><code>ctx.part</code></td><td>The part record itself (id, type, label, ...).</td></tr>
     <tr><td><code>ctx.inputs</code></td><td>One entry per incoming connector this tick:
-    <code>{ fromPartId, fromLabel, connector: { relationship, streams }, value, lastGoodValue, changed }</code>.
+    <code>{ fromPartId, fromLabel, fromPartType, connector: { relationship, streams, connectorType }, value, lastGoodValue, changed }</code>.
     <code>value</code> is <code>undefined</code> whenever that neighbor produced nothing THIS tick — no value
     yet, an idle tick, or a script error, all read the same way; see "What a script must return" below.
     <code>lastGoodValue</code> is that neighbor's last actually-defined value, held across any number of such
     gaps — read this instead of <code>value</code> if you want to keep computing with whatever's freshest rather
     than reacting to the gap. <code>changed</code> is true when <code>lastGoodValue</code> just changed (a deep
     comparison, so an object/array with the same content twice in a row doesn't count).</td></tr>
+    <tr><td><code>ctx.outputs</code></td><td>One entry per OUTGOING connector of this part:
+    <code>{ toPartId, toLabel, toPartType, connector: { relationship, streams, connectorType } }</code>. Purely
+    structural — there's no per-connector value here, since this tick's single <code>value</code> return gets
+    broadcast identically to every outgoing connector. Useful for a script that wants to enumerate who/what
+    it's wired to (e.g. logging each connected part's type and each connector's type) without hardcoding any
+    neighbor's id — see the "connector introspection demo" example.</td></tr>
     <tr><td><code>ctx.responses</code></td><td>One entry per outgoing connector whose target sent a
-    <em>response</em> back last tick: <code>{ fromPartId, fromLabel, connector, value, changed }</code> — see
+    <em>response</em> back last tick: <code>{ fromPartId, fromLabel, connector: { relationship, streams, connectorType }, value, changed }</code> — see
     "Responses" below. Every entry here is already a real delivery (gaps are simply absent, no
     <code>lastGoodValue</code> needed); <code>changed</code> is true when this delivery's content differs from
     that same neighbor's previous delivery.</td></tr>

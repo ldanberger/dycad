@@ -2595,6 +2595,31 @@ by this opt-in rule, since a widget can never set its own `leftBadge`. The "ERR"
 (from `lastError`) always wins over `leftBadge`, since a thrown script never reaches its
 own return statement.
 
+**`ctx.outputs` (Step 42)**: reported directly, after asking what `ctx` field lists a
+part's outgoing connectors and being told there wasn't one — *"add a ctx.outputs list of
+outgoing connectors, and an example file where a node loops through all the connected
+inputs and connected outputs showing connector type and other (to/from) part type,
+display to message log."* `ctx.outputs` is new — one entry per OUTGOING connector of the
+part (within its own model), `{toPartId, toLabel, toPartType, connector: {relationship,
+streams, connectorType}}`. Purely structural, unlike `ctx.inputs`/`ctx.responses` — a
+script hasn't returned its own `value` yet when `ctx` is built, and that single `value`
+gets broadcast identically to every outgoing connector regardless, so there's no
+per-connector value to expose. `ctx.inputs` gained two matching new fields in the same
+change: `fromPartType` and `connector.connectorType` (previously `connector` only carried
+`relationship`/`streams`) — `ctx.responses[i].connector` gained `connectorType` too, for
+the same three-way symmetry. New `public/examples/connector introspection demo.json`:
+Requestor → Router over a `'c'` connector; Router fans out to Approval Service over an
+`'s'` connector and Audit Log over a `'c'` connector — Router's script loops `ctx.inputs`
+then `ctx.outputs`, logging each connector's type and the OTHER part's own type to the
+Message Log, without hardcoding any neighbor's id. New
+`check_ctx_outputs_and_inputs_connector_metadata` (drives a real multi-connector-type
+graph through an actual `sim.stepSimulation()` call, confirms every new field on both
+`ctx.inputs` and `ctx.outputs`, and confirms both read as empty arrays — not `undefined`
+— for a part with no connectors at all) and `check_connector_introspection_example`
+(confirms the file is listed in `examples/index.json` and that Router's script genuinely
+logs the documented lines) — both proven via TEMP BREAK removing `outputs` from the `ctx`
+object entirely, which throws `ctx.outputs is not iterable` from the example's own script.
+
 **Packet protocol: `value` never auto-holds, `lastGoodValue` does (Step 35)**: reported
 directly, expanding on `value`/`response` — *"can value and response be objects?"*, then
 *"can the changed flag ... be baked into script handler instead of needing the script to

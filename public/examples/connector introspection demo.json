@@ -1,0 +1,138 @@
+{
+  "version": "0.2",
+  "readme": {
+    "note": "ctx.inputs/ctx.outputs demo. Requestor sends a value to Router over a plain ('c') connector. Router fans out to two targets: Approval Service over a stream ('s') connector, and Audit Log over a plain ('c') connector. Step or Run Simulation, then check the Message Log (left sidebar): every tick, Router loops through ctx.inputs and logs each incoming connector's type plus the SENDING part's own type, then loops through ctx.outputs and logs each outgoing connector's type plus the RECEIVING part's own type -- all without hardcoding any neighbor's id."
+  },
+  "defaultModel": "Reference",
+  "currentView": "connector-introspection-demo",
+  "models": [
+    {
+      "modelName": "Reference"
+    }
+  ],
+  "views": [
+    {
+      "id": "connector-introspection-demo",
+      "viewName": "connector-introspection-demo",
+      "viewType": "ff",
+      "chkShowConnectorType": true,
+      "chkShowStreamType": false,
+      "chkShowKeys": false,
+      "chkShowElementTypes": true,
+      "chkShowDescription": true,
+      "chkShowOnPageCatalogs": false,
+      "chkShowSimValues": true,
+      "chkShowScriptBadge": false,
+      "margin": 50,
+      "sections": [],
+      "nodeWidth": 150,
+      "nodeHeight": 54,
+      "remapSortKeys": null,
+      "spacingScale": 1
+    }
+  ],
+  "parts": [
+    {
+      "id": "part-requestor",
+      "type": "BusinessActor",
+      "label": "Requestor",
+      "rawLabel": "Requestor",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "Sends a fresh request value to Router every tick, over a plain ('c') connector.",
+      "scriptEnabled": true,
+      "script": "const req = 'REQ-' + ctx.tick;\nreturn { value: req, state: {}, leftBadge: { text: req, color: '#2f8f4e' } };"
+    },
+    {
+      "id": "part-router",
+      "type": "BusinessProcess",
+      "label": "Router",
+      "rawLabel": "Router",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "Loops ctx.inputs and ctx.outputs and logs each connector's type plus the OTHER part's own type to the Message Log -- see the readme note above.",
+      "scriptEnabled": true,
+      "script": "// ctx.inputs: one entry per incoming connector this tick -- log the connector type\n// and the SENDING part's own type, without hardcoding which neighbor it is.\nfor (const inp of ctx.inputs) {\n  ctx.log(`IN  <- \"${inp.fromLabel}\" (${inp.fromPartType}) via a '${inp.connector.connectorType}' connector`);\n}\n\n// ctx.outputs: one entry per OUTGOING connector of this part -- purely structural\n// (no per-connector value here, since one script return broadcasts identically to\n// every outgoing connector). Log the connector type and the RECEIVING part's type.\nfor (const out of ctx.outputs) {\n  ctx.log(`OUT -> \"${out.toLabel}\" (${out.toPartType}) via a '${out.connector.connectorType}' connector`);\n}\n\nreturn {\n  value: { inputCount: ctx.inputs.length, outputCount: ctx.outputs.length },\n  state: {},\n  leftBadge: { text: `${ctx.inputs.length} in / ${ctx.outputs.length} out`, color: '#2f8f4e' },\n};"
+    },
+    {
+      "id": "part-approval",
+      "type": "ApplicationService",
+      "label": "Approval Service",
+      "rawLabel": "Approval Service",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "One of Router's two outputs -- reached over a stream ('s') connector.",
+      "scriptEnabled": false,
+      "script": ""
+    },
+    {
+      "id": "part-audit",
+      "type": "ApplicationComponent",
+      "label": "Audit Log",
+      "rawLabel": "Audit Log",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "order": 0,
+      "other": {},
+      "xIds": "",
+      "description": "The other of Router's two outputs -- reached over a plain ('c') connector.",
+      "scriptEnabled": false,
+      "script": ""
+    }
+  ],
+  "connectors": [
+    {
+      "id": "conn-requestor-router",
+      "from": "part-requestor",
+      "to": "part-router",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "connectorType": "c",
+      "relationship": "Association"
+    },
+    {
+      "id": "conn-router-approval",
+      "from": "part-router",
+      "to": "part-approval",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "connectorType": "s",
+      "relationship": "Stream"
+    },
+    {
+      "id": "conn-router-audit",
+      "from": "part-router",
+      "to": "part-audit",
+      "model": "Reference",
+      "streams": [],
+      "note": "",
+      "connectorType": "c",
+      "relationship": "Association"
+    }
+  ],
+  "viewMembers": [
+    { "id": "vm-requestor", "view": "connector-introspection-demo", "objectType": "part", "objectId": "part-requestor", "x": 60, "y": 140, "fillColor": "#ff5e61", "order": 0, "note": "", "linkedViewName": "", "isExternal": false, "sectionId": "" },
+    { "id": "vm-router", "view": "connector-introspection-demo", "objectType": "part", "objectId": "part-router", "x": 340, "y": 140, "fillColor": "#ff5e61", "order": 0, "note": "", "linkedViewName": "", "isExternal": false, "sectionId": "" },
+    { "id": "vm-approval", "view": "connector-introspection-demo", "objectType": "part", "objectId": "part-approval", "x": 620, "y": 60, "fillColor": "#ff5e61", "order": 0, "note": "", "linkedViewName": "", "isExternal": false, "sectionId": "" },
+    { "id": "vm-audit", "view": "connector-introspection-demo", "objectType": "part", "objectId": "part-audit", "x": 620, "y": 220, "fillColor": "#ff5e61", "order": 0, "note": "", "linkedViewName": "", "isExternal": false, "sectionId": "" },
+    { "id": "vm-conn-requestor-router", "view": "connector-introspection-demo", "objectType": "connector", "objectId": "conn-requestor-router", "order": 0, "note": "", "fromVmId": "vm-requestor", "toVmId": "vm-router" },
+    { "id": "vm-conn-router-approval", "view": "connector-introspection-demo", "objectType": "connector", "objectId": "conn-router-approval", "order": 0, "note": "", "fromVmId": "vm-router", "toVmId": "vm-approval" },
+    { "id": "vm-conn-router-audit", "view": "connector-introspection-demo", "objectType": "connector", "objectId": "conn-router-audit", "order": 0, "note": "", "fromVmId": "vm-router", "toVmId": "vm-audit" }
+  ],
+  "settingsUser": { "relationshipPairs": [] }
+}

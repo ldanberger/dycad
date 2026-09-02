@@ -5348,4 +5348,33 @@
 // validated) confirming zero errors and every expected leftBadge/rightBadge count
 // on the real DOM. smart factory 3d demo's readme updated to mention the
 // per-sensor left badges.
-export const APP_VERSION = '0.930';
+// v0.931: reported directly, after asking what ctx field lists a part's outgoing
+// connectors and being told there wasn't one -- "add a ctx.outputs list of outgoing
+// connectors, and an example file where a node loops through all the connected
+// inputs and connected outputs showing connector type and other (to/from) part
+// type, display to message log." ctx.outputs is new (simulation.js, runTick):
+// one entry per OUTGOING connector of a part within its own model --
+// { toPartId, toLabel, toPartType, connector: { relationship, streams,
+// connectorType } }. Purely structural, unlike ctx.inputs/ctx.responses -- a
+// script hasn't returned its own value yet when ctx is built, and that single
+// value broadcasts identically to every outgoing connector regardless, so
+// there's no per-connector value to expose. ctx.inputs gained two matching new
+// fields in the same change: fromPartType and connector.connectorType
+// (previously connector only carried relationship/streams); ctx.responses[i]
+// .connector gained connectorType too, for three-way symmetry. New
+// public/examples/connector introspection demo.json (added to examples/
+// index.json): Requestor -> Router over a 'c' connector; Router fans out to
+// Approval Service over an 's' connector and Audit Log over a 'c' connector --
+// Router's script loops ctx.inputs then ctx.outputs, logging each connector's
+// type and the OTHER part's own type to the Message Log, without hardcoding any
+// neighbor's id. New check_ctx_outputs_and_inputs_connector_metadata (a real
+// multi-connector-type graph driven through an actual sim.stepSimulation() call,
+// confirming every new field on both ctx.inputs/ctx.outputs, plus a part with no
+// connectors seeing both as empty arrays not undefined) and
+// check_connector_introspection_example (confirms the file is listed in
+// examples/index.json and that Router's script genuinely logs the documented
+// lines) -- both proven via TEMP BREAK removing outputs from the ctx object
+// entirely, which throws "ctx.outputs is not iterable" from the example's own
+// script. Verified live before writing tests. DESIGN_DOCUMENT.md SS8 and
+// public/instructions.html's ctx-object table updated; tests/README.md updated.
+export const APP_VERSION = '0.931';

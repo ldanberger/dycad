@@ -5576,6 +5576,136 @@ def check_left_badge_overrides_value_display(page):
     return True, "leftBadge (Step 41, tightened) is purely opt-in on the real on-screen canvas -- shown only when a script explicitly returns it, absent entirely (no auto-value fallback) otherwise -- except the pre-existing UI Output widget mechanism, which is unaffected, and ERR always wins regardless"
 
 
+def check_ctx_outputs_and_inputs_connector_metadata(page):
+    """Regression guard/new-feature check for ctx.outputs (Step 42), reported directly
+    after asking what ctx field lists outgoing connectors and being told there wasn't
+    one: "add a ctx.outputs list of outgoing connectors, and an example file where a
+    node loops through all the connected inputs and connected outputs showing
+    connector type and other (to/from) part type, display to message log." ctx.outputs
+    is new -- one entry per outgoing connector of a part, { toPartId, toLabel,
+    toPartType, connector: { relationship, streams, connectorType } } -- purely
+    structural (no per-connector value, unlike inputs/responses, since a script's
+    single `value` broadcasts identically to every outgoing connector). ctx.inputs
+    also gained two new fields as part of the same change: fromPartType and
+    connector.connectorType (previously connector only exposed relationship/streams).
+    Covers, via a real multi-connector-type graph and a real simulation tick: a part
+    with one incoming ('c') and two outgoing (one 's', one 'c') connectors sees
+    correct toLabel/toPartType/connector.connectorType for each ctx.outputs entry and
+    correct fromPartType/connector.connectorType on its ctx.inputs entry; a part with
+    NO connectors at all gets both ctx.inputs and ctx.outputs as empty arrays, not
+    undefined -- proven via TEMP BREAK removing the new outputs field entirely."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+      const model = store.defaultModel;
+
+      const a = store.createPart({ type: 'BusinessActor', label: 'RegrCtxOutA', model });
+      const b = store.createPart({
+        type: 'BusinessProcess', label: 'RegrCtxOutB', model, scriptEnabled: true,
+        script: "return { value: { inputs: ctx.inputs.map(i => ({ fromLabel: i.fromLabel, fromPartType: i.fromPartType, connectorType: i.connector.connectorType, relationship: i.connector.relationship })), outputs: ctx.outputs.map(o => ({ toLabel: o.toLabel, toPartType: o.toPartType, connectorType: o.connector.connectorType, relationship: o.connector.relationship })) }, state: {} };",
+      });
+      const c = store.createPart({ type: 'ApplicationService', label: 'RegrCtxOutC', model });
+      const d = store.createPart({ type: 'ApplicationComponent', label: 'RegrCtxOutD', model });
+      const isolated = store.createPart({
+        type: 'BusinessProcess', label: 'RegrCtxOutIsolated', model, scriptEnabled: true,
+        script: "return { value: { inputCount: ctx.inputs.length, outputCount: ctx.outputs.length }, state: {} };",
+      });
+
+      store.createConnector({ from: a.id, to: b.id, model, connectorType: 'c', relationship: 'Association' });
+      store.createConnector({ from: b.id, to: c.id, model, connectorType: 's', relationship: 'Stream' });
+      store.createConnector({ from: b.id, to: d.id, model, connectorType: 'c', relationship: 'Association' });
+
+      sim.stepSimulation(app, model);
+      const rt = store.simRuntime.get(model);
+      const bValue = rt.values.get(b.id)?.value;
+      const isolatedValue = rt.values.get(isolated.id)?.value;
+
+      return { bValue, isolatedValue };
+    }
+    """)
+    problems = []
+    inputs = result["bValue"]["inputs"] if result.get("bValue") else None
+    outputs = result["bValue"]["outputs"] if result.get("bValue") else None
+    if not inputs or len(inputs) != 1:
+        problems.append(f"expected B's ctx.inputs to have exactly 1 entry (from A), got {inputs}")
+    else:
+        inp = inputs[0]
+        if inp["fromLabel"] != "RegrCtxOutA" or inp["fromPartType"] != "BusinessActor" or inp["connectorType"] != "c" or inp["relationship"] != "Association":
+            problems.append(f"expected B's ctx.inputs[0] to correctly report A's label/type and the connector's type/relationship, got {inp}")
+    if not outputs or len(outputs) != 2:
+        problems.append(f"expected B's ctx.outputs to have exactly 2 entries (to C and D), got {outputs}")
+    else:
+        toC = next((o for o in outputs if o["toLabel"] == "RegrCtxOutC"), None)
+        toD = next((o for o in outputs if o["toLabel"] == "RegrCtxOutD"), None)
+        if not toC or toC["toPartType"] != "ApplicationService" or toC["connectorType"] != "s" or toC["relationship"] != "Stream":
+            problems.append(f"expected B's ctx.outputs to have a correct entry for C (ApplicationService, 's', Stream), got {toC}")
+        if not toD or toD["toPartType"] != "ApplicationComponent" or toD["connectorType"] != "c" or toD["relationship"] != "Association":
+            problems.append(f"expected B's ctx.outputs to have a correct entry for D (ApplicationComponent, 'c', Association), got {toD}")
+    if not result.get("isolatedValue") or result["isolatedValue"]["inputCount"] != 0 or result["isolatedValue"]["outputCount"] != 0:
+        problems.append(f"expected a part with no connectors at all to see empty ctx.inputs/ctx.outputs arrays (length 0), got {result.get('isolatedValue')}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "ctx.outputs (Step 42) correctly lists one entry per outgoing connector with toLabel/toPartType/connector.connectorType, ctx.inputs gained the matching fromPartType/connector.connectorType fields, and a part with no connectors sees both as empty arrays"
+
+
+def check_connector_introspection_example(page):
+    """Regression guard/new-feature check for the new "connector introspection demo"
+    example, reported directly alongside ctx.outputs itself: "...add ... an example
+    file where a node loops through all the connected inputs and connected outputs
+    showing connector type and other (to/from) part type, display to message log."
+    Requestor sends a value to Router over a 'c' connector; Router fans out to
+    Approval Service over an 's' connector and Audit Log over a 'c' connector.
+    Covers: the file is listed in examples/index.json (reachable from File > Load
+    Example); loads and simulates one real tick with no errors; and Router's script
+    actually logged the documented lines to the real Message Log -- one IN line
+    naming Requestor/BusinessActor/'c', and two OUT lines naming Approval Service/
+    ApplicationService/'s' and Audit Log/ApplicationComponent/'c'."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+
+      const manifestRes = await fetch('public/examples/index.json', { cache: 'no-store' });
+      const manifest = await manifestRes.json();
+      const listedInManifest = manifest.includes('connector introspection demo.json');
+
+      const res = await fetch('public/examples/connector introspection demo.json', { cache: 'no-store' });
+      const obj = await res.json();
+      store.loadFromJSON(obj);
+      store.tabs = [];
+      const homeView = store.findView(store.currentView) || store.doc.views[0];
+      const tab = app.createCanvasTab(homeView);
+      app.switchToTab(tab.id);
+
+      const before = store.messageLog.length;
+      sim.stepSimulation(app, store.defaultModel);
+      const rt = store.simRuntime.get(store.defaultModel);
+      const errors = [...rt.values.values()].filter(v => v.lastError).map(v => v.lastError);
+      const newLines = store.messageLog.slice(before).map((e) => e.message);
+
+      return { listedInManifest, errors, newLines };
+    }
+    """)
+    problems = []
+    if not result["listedInManifest"]:
+        problems.append("expected 'connector introspection demo.json' to be listed in examples/index.json")
+    if result["errors"]:
+        problems.append(f"expected the example to simulate with no errors, got {result['errors']}")
+    hasIn = any('IN' in l and 'Requestor' in l and 'BusinessActor' in l and "'c'" in l for l in result["newLines"])
+    hasOutApproval = any('OUT' in l and 'Approval Service' in l and 'ApplicationService' in l and "'s'" in l for l in result["newLines"])
+    hasOutAudit = any('OUT' in l and 'Audit Log' in l and 'ApplicationComponent' in l and "'c'" in l for l in result["newLines"])
+    if not hasIn:
+        problems.append(f"expected Router to log an IN line naming Requestor/BusinessActor/'c', got {result['newLines']}")
+    if not hasOutApproval:
+        problems.append(f"expected Router to log an OUT line naming Approval Service/ApplicationService/'s', got {result['newLines']}")
+    if not hasOutAudit:
+        problems.append(f"expected Router to log an OUT line naming Audit Log/ApplicationComponent/'c', got {result['newLines']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The 'connector introspection demo' example is reachable from File > Load Example, simulates with no errors, and Router's script genuinely logs each ctx.inputs/ctx.outputs entry's connector type and other part's type to the Message Log"
+
+
 def check_ui_dashboard_element_types_and_toolkit(page):
     """Regression guard/new-feature check for the new "UI" element group, reported
     directly: "create a new group 'UI' of elements text_out, text_in, numeric_out,
@@ -15527,6 +15657,8 @@ CHECKS = [
     check_common_script_callable_from_part_script,
     check_common_script_sim_covers_enterprise_types,
     check_left_badge_overrides_value_display,
+    check_ctx_outputs_and_inputs_connector_metadata,
+    check_connector_introspection_example,
     check_ui_dashboard_element_types_and_toolkit,
     check_ui_dashboard_property_panel,
     check_ui_dashboard_ctx_ui_engine,

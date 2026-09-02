@@ -35,10 +35,10 @@ import { isSectionViewType, createSectionPlacer } from './sections.js';
 // (caught by the same per-part try/catch below, same as any other script error); they
 // simply sit defined-but-unused otherwise, same as in the Script Console's own
 // execution. `ctx` below is the ONLY parameter a part script itself receives:
-//   ctx = { part, inputs, responses, state, tick, log, secrets, setState, loadedFileName, findParts, currentView, defaultModel, createPart, createConnector, createNode, createNodeConnector }
+//   ctx = { part, inputs, outputs, responses, state, tick, log, secrets, setState, loadedFileName, findParts, currentView, defaultModel, createPart, createConnector, createNode, createNodeConnector }
 //     - part: the Part record itself (id, type, label, ...)
 //     - inputs: one entry per incoming connector (within this part's model) this tick —
-//         { fromPartId, fromLabel, connector: { relationship, streams }, value, lastGoodValue, changed }
+//         { fromPartId, fromLabel, fromPartType, connector: { relationship, streams, connectorType }, value, lastGoodValue, changed }
 //       `value` is the SOURCE part's raw result from ITS most recent tick — undefined
 //       whenever that source produced nothing this round (no script ran, an unscripted
 //       idle node, a script that omitted `value`, or a thrown error — see "value never
@@ -50,9 +50,17 @@ import { isSectionViewType, createSectionPlacer } from './sections.js';
 //       react to a gap reads `value` and checks it for undefined. `changed` is true when
 //       `lastGoodValue` just changed (deep-compared, so an object/array with the same
 //       content twice in a row does NOT read as changed) — never true on tick 0.
+//     - outputs (Step 42): one entry per OUTGOING connector of this part (within this
+//       part's model) —
+//         { toPartId, toLabel, toPartType, connector: { relationship, streams, connectorType } }
+//       Purely structural, unlike inputs/responses — a script hasn't returned its own
+//       `value` yet when ctx is built, and that single value gets broadcast identically
+//       to every outgoing connector regardless, so there's no per-connector value to
+//       expose here. Lets a script enumerate who/what it's wired to (e.g. to log every
+//       connected part's type and each connector's type) without hardcoding neighbor ids.
 //     - responses (Step 34): one entry per OUTGOING connector of this part whose target
 //       had a pending response last tick —
-//         { fromPartId, fromLabel, connector: { relationship, streams }, value, changed }
+//         { fromPartId, fromLabel, connector: { relationship, streams, connectorType }, value, changed }
 //       fromPartId/fromLabel identify the RESPONDER (the connector's target), mirroring
 //       how inputs[i].fromPartId/fromLabel identify the forward sender — a script never
 //       has to hardcode which neighbor it's talking to. Unlike inputs, every entry here
@@ -482,10 +490,28 @@ function runTick(app, modelName) {
       return {
         fromPartId: fromPart ? fromPart.id : null,
         fromLabel: fromPart ? fromPart.label : '',
-        connector: { relationship: e.connector.relationship, streams: e.connector.streams || [] },
+        fromPartType: fromPart ? fromPart.type : '',
+        connector: { relationship: e.connector.relationship, streams: e.connector.streams || [], connectorType: e.connector.connectorType },
         value: prevEntry ? prevEntry.value : undefined,
         lastGoodValue: prevEntry ? prevEntry.lastGoodValue : undefined,
         changed: prevEntry ? !!prevEntry.changed : false,
+      };
+    });
+
+    // ctx.outputs: one entry per OUTGOING connector of this part (within this part's
+    // model), purely structural -- unlike inputs/responses, there's no per-connector
+    // value to expose here (a script hasn't returned its own `value` yet when ctx is
+    // built, and that single value is broadcast identically to every outgoing
+    // connector regardless -- see the top-of-file script-contract comment). Lets a
+    // script enumerate who/what it's wired to without hardcoding neighbor ids, e.g.
+    // to log each connector's type and the target part's type.
+    const outputs = (outgoing.get(part.id) || []).map((e) => {
+      const toPart = store.findPart(e.toPartId);
+      return {
+        toPartId: toPart ? toPart.id : null,
+        toLabel: toPart ? toPart.label : '',
+        toPartType: toPart ? toPart.type : '',
+        connector: { relationship: e.connector.relationship, streams: e.connector.streams || [], connectorType: e.connector.connectorType },
       };
     });
 
@@ -500,7 +526,7 @@ function runTick(app, modelName) {
         return {
           fromPartId: toPart ? toPart.id : null,
           fromLabel: toPart ? toPart.label : '',
-          connector: { relationship: e.connector.relationship, streams: e.connector.streams || [] },
+          connector: { relationship: e.connector.relationship, streams: e.connector.streams || [], connectorType: e.connector.connectorType },
           value: prevEntry.response,
           changed: !!prevEntry.responseChanged,
         };
@@ -551,7 +577,7 @@ function runTick(app, modelName) {
         // this file's own top-of-file script-contract comment for the full rationale.
         const fn = new Function('ctx', `${store.batchScriptCode || ''}\n${part.script}`);
         const out = fn({
-          part, inputs, responses, state: prevState, tick: runtime.tick,
+          part, inputs, outputs, responses, state: prevState, tick: runtime.tick,
           log: (message) => pushMessageLog(store, `[${part.label}] ${message}`),
           secrets: { ...(store.localSecrets || {}) },
           setState: (patch) => {
