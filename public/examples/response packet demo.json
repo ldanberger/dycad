@@ -38,7 +38,7 @@
       "xIds": "",
       "description": "Sends a new request every tick; reads Responder's ack back via ctx.responses. fromLabel identifies who responded, so this script never hardcodes Responder's identity.",
       "scriptEnabled": true,
-      "script": "// ctx.responses is an array — one entry per outgoing connector whose target sent a\n// response last tick. Empty most ticks; has an entry the one tick after Responder sets one.\nif (ctx.responses.length > 0) {\n  ctx.log('received response \"' + ctx.responses[0].value + '\" from ' + ctx.responses[0].fromLabel);\n}\nreturn { value: 'request-' + ctx.tick, state: {} };"
+      "script": "// ctx.responses is an array — one entry per outgoing connector whose target sent a\n// response last tick. Empty most ticks; has an entry the one tick after Responder sets one.\nif (ctx.responses.length > 0) {\n  ctx.log('received response \"' + ctx.responses[0].value + '\" from ' + ctx.responses[0].fromLabel);\n}\nconst req = 'request-' + ctx.tick;\nreturn { value: req, state: {}, leftBadge: { text: req, color: '#2f8f4e' } };"
     },
     {
       "id": "part-responder",
@@ -53,7 +53,7 @@
       "xIds": "",
       "description": "Echoes whatever it receives on ctx.inputs, and sends a `response` back the first time it sees a given value — the response broadcasts to every node that sent this part forward data (just Requester here), delivered one tick later.",
       "scriptEnabled": true,
-      "script": "// ctx.inputs[0].value is undefined until Requester's first tick has committed.\nif (ctx.inputs.length === 0 || ctx.inputs[0].value === undefined) return { value: null, state: {} };\nconst received = ctx.inputs[0].value;\n\n// Only send a response the FIRST time we see this particular value — the `response`\n// field is a single slot (not a queue), and the engine already guarantees it's never\n// auto-resent, but tracking lastAcked here is still good practice: it stops THIS\n// script's own logic from re-triggering on a value it's already handled.\nif (ctx.state.lastAcked === received) {\n  return { value: received, state: ctx.state };\n}\nreturn { value: received, state: { lastAcked: received }, response: 'ack:' + received };"
+      "script": "// ctx.inputs[0].value is undefined until Requester's first tick has committed.\nif (ctx.inputs.length === 0 || ctx.inputs[0].value === undefined) return { value: null, state: {} };\nconst received = ctx.inputs[0].value;\n\n// Only send a response the FIRST time we see this particular value — the `response`\n// field is a single slot (not a queue), and the engine already guarantees it's never\n// auto-resent, but tracking lastAcked here is still good practice: it stops THIS\n// script's own logic from re-triggering on a value it's already handled.\nif (ctx.state.lastAcked === received) {\n  return { value: received, state: ctx.state, leftBadge: { text: String(received), color: '#2f8f4e' } };\n}\nreturn { value: received, state: { lastAcked: received }, response: 'ack:' + received, leftBadge: { text: String(received), color: '#2f8f4e' } };"
     }
   ],
   "connectors": [

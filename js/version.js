@@ -5327,4 +5327,25 @@
 // always render regardless of leftBadge/error. DESIGN_DOCUMENT.md SS8 and
 // public/instructions.html's "What a script must return" leftBadge bullet updated;
 // tests/README.md updated.
-export const APP_VERSION = '0.929';
+// v0.930: direct follow-up to v0.929's opt-in leftBadge: "update all examples to
+// including the smart factory demo to return value and leftBadge settings for
+// display." Every scripted part across every bundled example that has a
+// chkShowSimValues:true view (basic script, variable reference, api call with
+// secrets, ui dashboard elements, createNode, createPart, findParts, response
+// packet, pipeline, and smart factory 3d demos -- right badge chain demo already
+// had leftBadge from v0.928) now explicitly returns leftBadge alongside value, so
+// each node's left badge is visibly populated under the new opt-in rule instead of
+// showing nothing. Text/color chosen per script's own value shape -- a plain
+// number/string badge shows String(value) directly; an object-shaped value (e.g.
+// DateTimeDemo, PacketEmitter) shows its most meaningful single field instead of a
+// raw JSON dump; an early "nothing received yet" branch (e.g. Responder's idle
+// switch-default case) deliberately still returns no leftBadge, matching how an
+// idle node already showed nothing before this feature existed. Smart factory 3d
+// demo's Alerting Service colors its own leftBadge red while deviated, matching
+// its already-established anomaly-detection logic. No engine/rendering code
+// changed -- data-only, verified via a live 5-tick simulation of every affected
+// example (script syntax individually node --check'd, JSON structure individually
+// validated) confirming zero errors and every expected leftBadge/rightBadge count
+// on the real DOM. smart factory 3d demo's readme updated to mention the
+// per-sensor left badges.
+export const APP_VERSION = '0.930';

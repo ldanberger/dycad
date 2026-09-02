@@ -44,7 +44,7 @@
       "xIds": "",
       "description": "Increments by 1 every tick.",
       "scriptEnabled": true,
-      "script": "let count = ctx.state.count || 0;\n\nif (ctx.tick === 0) {\n  count = 0;\n  ctx.log('starting counter at 0');\n} else {\n  count += 1;\n  ctx.log(`incremented to ${count}`);\n}\n\nreturn {\n  value: count,\n  state: { count },\n};"
+      "script": "let count = ctx.state.count || 0;\n\nif (ctx.tick === 0) {\n  count = 0;\n  ctx.log('starting counter at 0');\n} else {\n  count += 1;\n  ctx.log(`incremented to ${count}`);\n}\n\nreturn {\n  value: count,\n  state: { count },\n  leftBadge: { text: String(count), color: '#2f8f4e' },\n};"
     },
     {
       "id": "part-summer",
@@ -59,7 +59,7 @@
       "xIds": "",
       "description": "Sums whatever's coming in from upstream.",
       "scriptEnabled": true,
-      "script": "let sum = 0;\nfor (const inp of ctx.inputs) {\n  const v = Number(inp.value) || 0;\n  sum += v;\n  ctx.log(`received ${v} from ${inp.fromLabel || 'unknown'}`);\n}\n\nctx.log(`sum = ${sum}`);\n\nreturn {\n  value: sum,\n  state: {},\n};"
+      "script": "let sum = 0;\nfor (const inp of ctx.inputs) {\n  const v = Number(inp.value) || 0;\n  sum += v;\n  ctx.log(`received ${v} from ${inp.fromLabel || 'unknown'}`);\n}\n\nctx.log(`sum = ${sum}`);\n\nreturn {\n  value: sum,\n  state: {},\n  leftBadge: { text: String(sum), color: '#2f8f4e' },\n};"
     }
   ],
   "connectors": [

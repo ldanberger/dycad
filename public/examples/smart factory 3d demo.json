@@ -1,7 +1,7 @@
 {
   "version": "0.2",
   "readme": {
-    "note": "3D + simulation showcase: a small smart-factory monitoring model spanning every ArchiMate layer (General/Strategy/Business/Application/Technology/Data), two sections (Plant North / Plant South), and a real signal-flow simulation. Open Explore > 3D View to see it as a rotatable layered cube: each element group is its own Z-band, each type its own sub-layer, and the two Sections cluster their sensors/gateways into visually distinct bands within the Technology/Application layers. Click any cube to focus it and see its properties in the panel on the right; double-click (or keep zooming in on a focused cube) to jump to this same part on the 'factory-pipeline' 2D view. Then Step or Run Simulation (top toolbar) a few times: five Device sensors emit noisy periodic readings (watch their 3D markers turn blue and pulse most ticks -- 'changed' this tick), 'Vibration Sensor S1' intermittently drops offline (its marker flashes red every 5th tick -- a simulated fault), the two Sensor Gateways and Analytics Engine average their upstream readings (values take a few ticks to propagate through the whole chain, so Step several times or press Run). Once the combined risk score swings away from its own recent trend (e.g. right after that sensor fault recovers), the Analytics Engine raises an 'ANOMALY' badge (visible on the 2D canvas) and the Alerting Service logs an alert to the Message Log (left sidebar) -- an edge-triggered alert, so it logs once per swing, not once per tick. Everything not in the sensor chain (Actors, Capabilities, Goal, Driver, Process, Service) just shows a steady green 'normal' marker once simulation starts -- normal is a valid, common state too, not just filler."
+    "note": "3D + simulation showcase: a small smart-factory monitoring model spanning every ArchiMate layer (General/Strategy/Business/Application/Technology/Data), two sections (Plant North / Plant South), and a real signal-flow simulation. Open Explore > 3D View to see it as a rotatable layered cube: each element group is its own Z-band, each type its own sub-layer, and the two Sections cluster their sensors/gateways into visually distinct bands within the Technology/Application layers. Click any cube to focus it and see its properties in the panel on the right; double-click (or keep zooming in on a focused cube) to jump to this same part on the 'factory-pipeline' 2D view. Then Step or Run Simulation (top toolbar) a few times: five Device sensors emit noisy periodic readings, shown as a left-side badge on each node (2D canvas) alongside their 3D markers turning blue and pulsing most ticks -- 'changed' this tick), 'Vibration Sensor S1' intermittently drops offline (its marker flashes red every 5th tick -- a simulated fault), the two Sensor Gateways and Analytics Engine average their upstream readings and show that average in their own left badge too (values take a few ticks to propagate through the whole chain, so Step several times or press Run). Once the combined risk score swings away from its own recent trend (e.g. right after that sensor fault recovers), the Analytics Engine raises an 'ANOMALY' right-side badge (visible on the 2D canvas) and the Alerting Service logs an alert to the Message Log (left sidebar) -- an edge-triggered alert, so it logs once per swing, not once per tick. Everything not in the sensor chain (Actors, Capabilities, Goal, Driver, Process, Service) just shows a steady green 'normal' marker once simulation starts -- normal is a valid, common state too, not just filler."
   },
   "defaultModel": "Reference",
   "currentView": "factory-pipeline",
@@ -47,7 +47,7 @@
       "xIds": "",
       "description": "",
       "scriptEnabled": true,
-      "script": "// State: none -- this sensor reads no inputs, just emits a synthetic\n// waveform each tick (a real sensor's noisy periodic reading).\nconst base = 50, amp = 8, phase = 0;\nconst noise = (Math.random() * 4) - 2;\nconst value = Math.round((base + amp * Math.sin((ctx.tick + phase) / 3) + noise) * 10) / 10;\nreturn { value };",
+      "script": "// State: none -- this sensor reads no inputs, just emits a synthetic\n// waveform each tick (a real sensor's noisy periodic reading).\nconst base = 50, amp = 8, phase = 0;\nconst noise = (Math.random() * 4) - 2;\nconst value = Math.round((base + amp * Math.sin((ctx.tick + phase) / 3) + noise) * 10) / 10;\nreturn { value, leftBadge: { text: String(value), color: '#2f8f4e' } };",
       "section": "Plant North"
     },
     {
@@ -65,7 +65,7 @@
       "xIds": "",
       "description": "",
       "scriptEnabled": true,
-      "script": "// State: none -- this sensor reads no inputs, just emits a synthetic\n// waveform each tick (a real sensor's noisy periodic reading).\nconst base = 52, amp = 9, phase = 5;\nconst noise = (Math.random() * 4) - 2;\nconst value = Math.round((base + amp * Math.sin((ctx.tick + phase) / 3) + noise) * 10) / 10;\nreturn { value };",
+      "script": "// State: none -- this sensor reads no inputs, just emits a synthetic\n// waveform each tick (a real sensor's noisy periodic reading).\nconst base = 52, amp = 9, phase = 5;\nconst noise = (Math.random() * 4) - 2;\nconst value = Math.round((base + amp * Math.sin((ctx.tick + phase) / 3) + noise) * 10) / 10;\nreturn { value, leftBadge: { text: String(value), color: '#2f8f4e' } };",
       "section": "Plant North"
     },
     {
@@ -83,7 +83,7 @@
       "xIds": "",
       "description": "",
       "scriptEnabled": true,
-      "script": "// State: none -- this sensor reads no inputs, just emits a synthetic\n// waveform each tick (a real sensor's noisy periodic reading).\nconst base = 25, amp = 12, phase = 2;\nconst noise = (Math.random() * 4) - 2;\nconst value = Math.round((base + amp * Math.sin((ctx.tick + phase) / 3) + noise) * 10) / 10;\nreturn { value };",
+      "script": "// State: none -- this sensor reads no inputs, just emits a synthetic\n// waveform each tick (a real sensor's noisy periodic reading).\nconst base = 25, amp = 12, phase = 2;\nconst noise = (Math.random() * 4) - 2;\nconst value = Math.round((base + amp * Math.sin((ctx.tick + phase) / 3) + noise) * 10) / 10;\nreturn { value, leftBadge: { text: String(value), color: '#2f8f4e' } };",
       "section": "Plant North"
     },
     {
@@ -101,7 +101,7 @@
       "xIds": "",
       "description": "",
       "scriptEnabled": true,
-      "script": "// State: none -- this sensor reads no inputs, just emits a synthetic\n// waveform each tick (a real sensor's noisy periodic reading).\nconst base = 49, amp = 7, phase = 7;\nconst noise = (Math.random() * 4) - 2;\nconst value = Math.round((base + amp * Math.sin((ctx.tick + phase) / 3) + noise) * 10) / 10;\nreturn { value };",
+      "script": "// State: none -- this sensor reads no inputs, just emits a synthetic\n// waveform each tick (a real sensor's noisy periodic reading).\nconst base = 49, amp = 7, phase = 7;\nconst noise = (Math.random() * 4) - 2;\nconst value = Math.round((base + amp * Math.sin((ctx.tick + phase) / 3) + noise) * 10) / 10;\nreturn { value, leftBadge: { text: String(value), color: '#2f8f4e' } };",
       "section": "Plant South"
     },
     {
@@ -119,7 +119,7 @@
       "xIds": "",
       "description": "",
       "scriptEnabled": true,
-      "script": "// State: none. Every 5 ticks this sensor drops offline for one tick (a real\n// intermittent fault) -- watch its 3D marker flash red, then resume.\nif (ctx.tick > 0 && ctx.tick % 5 === 3) {\n  throw new Error('Sensor communication timeout');\n}\nconst base = 27, amp = 14, phase = 3;\nconst noise = (Math.random() * 4) - 2;\nconst value = Math.round((base + amp * Math.sin((ctx.tick + phase) / 3) + noise) * 10) / 10;\nreturn { value };",
+      "script": "// State: none. Every 5 ticks this sensor drops offline for one tick (a real\n// intermittent fault) -- watch its 3D marker flash red, then resume.\nif (ctx.tick > 0 && ctx.tick % 5 === 3) {\n  throw new Error('Sensor communication timeout');\n}\nconst base = 27, amp = 14, phase = 3;\nconst noise = (Math.random() * 4) - 2;\nconst value = Math.round((base + amp * Math.sin((ctx.tick + phase) / 3) + noise) * 10) / 10;\nreturn { value, leftBadge: { text: String(value), color: '#2f8f4e' } };",
       "section": "Plant South"
     },
     {
@@ -138,7 +138,7 @@
       "xIds": "",
       "description": "",
       "scriptEnabled": true,
-      "script": "// State: { lastValue } -- held so a tick with no fresh inputs (tick 0, or\n// every upstream sensor mid-fault at once) still outputs something sensible\n// instead of dropping to 0.\nconst nums = ctx.inputs.map((i) => Number(i.value)).filter((v) => !Number.isNaN(v));\nconst avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : (ctx.state.lastValue ?? 0);\nconst rounded = Math.round(avg * 10) / 10;\nreturn { value: rounded, state: { lastValue: rounded } };",
+      "script": "// State: { lastValue } -- held so a tick with no fresh inputs (tick 0, or\n// every upstream sensor mid-fault at once) still outputs something sensible\n// instead of dropping to 0.\nconst nums = ctx.inputs.map((i) => Number(i.value)).filter((v) => !Number.isNaN(v));\nconst avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : (ctx.state.lastValue ?? 0);\nconst rounded = Math.round(avg * 10) / 10;\nreturn { value: rounded, state: { lastValue: rounded }, leftBadge: { text: String(rounded), color: '#2f8f4e' } };",
       "section": "Plant North"
     },
     {
@@ -157,7 +157,7 @@
       "xIds": "",
       "description": "",
       "scriptEnabled": true,
-      "script": "// State: { lastValue } -- held so a tick with no fresh inputs (tick 0, or\n// every upstream sensor mid-fault at once) still outputs something sensible\n// instead of dropping to 0.\nconst nums = ctx.inputs.map((i) => Number(i.value)).filter((v) => !Number.isNaN(v));\nconst avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : (ctx.state.lastValue ?? 0);\nconst rounded = Math.round(avg * 10) / 10;\nreturn { value: rounded, state: { lastValue: rounded } };",
+      "script": "// State: { lastValue } -- held so a tick with no fresh inputs (tick 0, or\n// every upstream sensor mid-fault at once) still outputs something sensible\n// instead of dropping to 0.\nconst nums = ctx.inputs.map((i) => Number(i.value)).filter((v) => !Number.isNaN(v));\nconst avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : (ctx.state.lastValue ?? 0);\nconst rounded = Math.round(avg * 10) / 10;\nreturn { value: rounded, state: { lastValue: rounded }, leftBadge: { text: String(rounded), color: '#2f8f4e' } };",
       "section": "Plant South"
     },
     {
@@ -208,7 +208,7 @@
       "xIds": "",
       "description": "",
       "scriptEnabled": true,
-      "script": "// State: { lastValue, baseline } -- baseline is a slow-moving average of the risk\n// score; the badge fires on real ANOMALIES (score jumping away from its own recent\n// trend -- e.g. once Vibration Sensor S1 recovers from a fault and its reading\n// jumps back) rather than a hand-picked absolute threshold, so it stays meaningful\n// regardless of exactly how the upstream sensors are tuned.\nconst nums = ctx.inputs.map((i) => Number(i.value)).filter((v) => !Number.isNaN(v));\nconst avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : (ctx.state.lastValue ?? 0);\nconst score = Math.round(avg * 10) / 10;\nconst baseline = ctx.state.baseline !== undefined ? ctx.state.baseline * 0.9 + score * 0.1 : score;\nconst result = { value: score, state: { lastValue: score, baseline } };\nif (Math.abs(score - baseline) > 6) result.rightBadge = { text: 'ANOMALY', color: '#c0392b' };\nreturn result;",
+      "script": "// State: { lastValue, baseline } -- baseline is a slow-moving average of the risk\n// score; the badge fires on real ANOMALIES (score jumping away from its own recent\n// trend -- e.g. once Vibration Sensor S1 recovers from a fault and its reading\n// jumps back) rather than a hand-picked absolute threshold, so it stays meaningful\n// regardless of exactly how the upstream sensors are tuned.\nconst nums = ctx.inputs.map((i) => Number(i.value)).filter((v) => !Number.isNaN(v));\nconst avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : (ctx.state.lastValue ?? 0);\nconst score = Math.round(avg * 10) / 10;\nconst baseline = ctx.state.baseline !== undefined ? ctx.state.baseline * 0.9 + score * 0.1 : score;\nconst result = { value: score, state: { lastValue: score, baseline }, leftBadge: { text: String(score), color: '#2f8f4e' } };\nif (Math.abs(score - baseline) > 6) result.rightBadge = { text: 'ANOMALY', color: '#c0392b' };\nreturn result;",
       "section": ""
     },
     {
@@ -224,7 +224,7 @@
       "xIds": "",
       "description": "",
       "scriptEnabled": true,
-      "script": "// State: { baseline, wasDeviated } -- own copy of the same \"deviation from a\n// slow-moving baseline\" anomaly check the Analytics Engine uses. Logs only on the\n// RISING edge (the tick it first crosses the threshold), not on every tick it stays\n// deviated -- otherwise a single sustained swing floods the Message Log with one\n// line per tick instead of one meaningful \"alert raised\" moment.\nconst incoming = Number(ctx.inputs[0]?.value);\nif (Number.isNaN(incoming)) return { value: ctx.state.lastValue ?? 0, state: ctx.state };\nconst baseline = ctx.state.baseline !== undefined ? ctx.state.baseline * 0.9 + incoming * 0.1 : incoming;\nconst deviated = Math.abs(incoming - baseline) > 6;\nconst wasDeviated = !!ctx.state.wasDeviated;\nif (deviated && !wasDeviated) {\n  ctx.log(`Risk score ${incoming} deviated from its baseline (${Math.round(baseline * 10) / 10}) at tick ${ctx.tick} -- alert raised.`);\n}\nreturn { value: incoming, state: { baseline, wasDeviated: deviated, lastValue: incoming } };",
+      "script": "// State: { baseline, wasDeviated } -- own copy of the same \"deviation from a\n// slow-moving baseline\" anomaly check the Analytics Engine uses. Logs only on the\n// RISING edge (the tick it first crosses the threshold), not on every tick it stays\n// deviated -- otherwise a single sustained swing floods the Message Log with one\n// line per tick instead of one meaningful \"alert raised\" moment.\nconst incoming = Number(ctx.inputs[0]?.value);\nif (Number.isNaN(incoming)) return { value: ctx.state.lastValue ?? 0, state: ctx.state, leftBadge: { text: String(ctx.state.lastValue ?? 0), color: '#2f8f4e' } };\nconst baseline = ctx.state.baseline !== undefined ? ctx.state.baseline * 0.9 + incoming * 0.1 : incoming;\nconst deviated = Math.abs(incoming - baseline) > 6;\nconst wasDeviated = !!ctx.state.wasDeviated;\nif (deviated && !wasDeviated) {\n  ctx.log(`Risk score ${incoming} deviated from its baseline (${Math.round(baseline * 10) / 10}) at tick ${ctx.tick} -- alert raised.`);\n}\nreturn { value: incoming, state: { baseline, wasDeviated: deviated, lastValue: incoming }, leftBadge: { text: String(incoming), color: deviated ? '#c0392b' : '#2f8f4e' } };",
       "section": ""
     },
     {

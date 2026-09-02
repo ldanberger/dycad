@@ -44,7 +44,7 @@
       "xIds": "",
       "description": "Current date/time: plain JS Date() works inside a script, same as anywhere else.",
       "scriptEnabled": true,
-      "script": "// current date/time \u2014 plain JS, nothing special\nconst now = new Date();\nconst iso = now.toISOString();\nconst readable = now.toLocaleString();\nctx.log('current time: ' + readable);\nreturn { value: { iso, readable, tick: ctx.tick }, state: {} };"
+      "script": "// current date/time \u2014 plain JS, nothing special\nconst now = new Date();\nconst iso = now.toISOString();\nconst readable = now.toLocaleString();\nctx.log('current time: ' + readable);\nreturn { value: { iso, readable, tick: ctx.tick }, state: {}, leftBadge: { text: readable, color: '#2f8f4e' } };"
     },
     {
       "id": "part-attrs-demo",
@@ -59,7 +59,7 @@
       "xIds": "",
       "description": "Underlying part attributes: ctx.part gives you the node's own id/type/label/model.",
       "scriptEnabled": true,
-      "script": "// ctx.part is this node's own Part record \u2014 its identity, not incoming data\nconst info = { id: ctx.part.id, type: ctx.part.type, label: ctx.part.label, model: ctx.part.model };\nctx.log('I am \"' + ctx.part.label + '\" of type ' + ctx.part.type);\nreturn { value: info, state: {} };"
+      "script": "// ctx.part is this node's own Part record \u2014 its identity, not incoming data\nconst info = { id: ctx.part.id, type: ctx.part.type, label: ctx.part.label, model: ctx.part.model };\nctx.log('I am \"' + ctx.part.label + '\" of type ' + ctx.part.type);\nreturn { value: info, state: {}, leftBadge: { text: info.type, color: '#2f8f4e' } };"
     },
     {
       "id": "part-packet-emitter",
@@ -74,7 +74,7 @@
       "xIds": "",
       "description": "New variables in a script, folded into the outgoing packet \u2014 the object you return as `value` becomes what PacketReceiver sees as its incoming packet next tick.",
       "scriptEnabled": true,
-      "script": "// declare new local variables, then put them in the RETURNED value \u2014 that return\n// value is the outgoing packet every downstream connector will see as their input\nlet counter = (ctx.state.counter || 0) + 1;\nconst tag = 'batch-' + counter;\nconst payload = { counter, tag, generatedAt: new Date().toISOString() };\nctx.log('emitting packet ' + tag);\nreturn { value: payload, state: { counter } };"
+      "script": "// declare new local variables, then put them in the RETURNED value \u2014 that return\n// value is the outgoing packet every downstream connector will see as their input\nlet counter = (ctx.state.counter || 0) + 1;\nconst tag = 'batch-' + counter;\nconst payload = { counter, tag, generatedAt: new Date().toISOString() };\nctx.log('emitting packet ' + tag);\nreturn { value: payload, state: { counter }, leftBadge: { text: tag, color: '#2f8f4e' } };"
     },
     {
       "id": "part-packet-receiver",
@@ -89,7 +89,7 @@
       "xIds": "",
       "description": "Content in the incoming packet: ctx.inputs[i].value is exactly what the upstream node returned as `value` last tick. This node reads it, adds its own new variable, and passes an enriched packet onward.",
       "scriptEnabled": true,
-      "script": "// ctx.inputs is an array \u2014 one entry per incoming connector this tick.\n// value is undefined until the upstream node has actually produced something.\nif (ctx.inputs.length === 0) return { value: null, state: {} };\nconst incoming = ctx.inputs[0].value;\nif (!incoming) return { value: null, state: {} };\n\n// read fields off the incoming packet\nconst receivedTag = incoming.tag;\nconst receivedCounter = incoming.counter;\n\n// a NEW variable of this node's own\nconst receivedAt = new Date().toISOString();\n\nctx.log('received ' + receivedTag + ' (counter=' + receivedCounter + ') from ' + ctx.inputs[0].fromLabel);\n\n// fold the new variable INTO the outgoing packet, alongside everything received\nreturn { value: { ...incoming, receivedAt, receivedBy: ctx.part.label }, state: {} };"
+      "script": "// ctx.inputs is an array \u2014 one entry per incoming connector this tick.\n// value is undefined until the upstream node has actually produced something.\nif (ctx.inputs.length === 0) return { value: null, state: {} };\nconst incoming = ctx.inputs[0].value;\nif (!incoming) return { value: null, state: {} };\n\n// read fields off the incoming packet\nconst receivedTag = incoming.tag;\nconst receivedCounter = incoming.counter;\n\n// a NEW variable of this node's own\nconst receivedAt = new Date().toISOString();\n\nctx.log('received ' + receivedTag + ' (counter=' + receivedCounter + ') from ' + ctx.inputs[0].fromLabel);\n\n// fold the new variable INTO the outgoing packet, alongside everything received\nreturn { value: { ...incoming, receivedAt, receivedBy: ctx.part.label }, state: {}, leftBadge: { text: receivedTag, color: '#2f8f4e' } };"
     }
   ],
   "connectors": [

@@ -89,7 +89,7 @@
       "xIds": "",
       "description": "No incoming connectors — reads the model via ctx.findParts instead.",
       "scriptEnabled": true,
-      "script": "// ctx.findParts({ type, model }) looks up parts across the WHOLE document, not\n// just this node's own inputs/graph — both filters are optional. Here we scope it\n// to this part's own model so the demo still works if copied into a bigger doc.\nconst capabilities = ctx.findParts({ type: 'BusinessCapability', model: ctx.part.model })\n  .map((p) => ({ id: p.id, label: p.label }));\n\nctx.log(`Found ${capabilities.length} BusinessCapability part(s) in model \"${ctx.part.model}\":`);\nfor (const c of capabilities) {\n  ctx.log(`  - ${c.label} (${c.id})`);\n}\n\nreturn {\n  value: capabilities.length,\n  state: { capabilities },\n};"
+      "script": "// ctx.findParts({ type, model }) looks up parts across the WHOLE document, not\n// just this node's own inputs/graph — both filters are optional. Here we scope it\n// to this part's own model so the demo still works if copied into a bigger doc.\nconst capabilities = ctx.findParts({ type: 'BusinessCapability', model: ctx.part.model })\n  .map((p) => ({ id: p.id, label: p.label }));\n\nctx.log(`Found ${capabilities.length} BusinessCapability part(s) in model \"${ctx.part.model}\":`);\nfor (const c of capabilities) {\n  ctx.log(`  - ${c.label} (${c.id})`);\n}\n\nreturn {\n  value: capabilities.length,\n  state: { capabilities },\n  leftBadge: { text: String(capabilities.length), color: '#2f8f4e' },\n};"
     }
   ],
   "connectors": [],
