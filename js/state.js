@@ -38,14 +38,24 @@
  * example of this same kind, reported directly: meant to be called from (or copied
  * into) any part's script — dumps `ctx.inputs` verbatim as one compact-JSON line to the
  * new Debug Log tab (`ctx.logDebug`, see the three-tab Log area below), bracketed by
- * '-i--'/'-e--' marker lines. `CommonScript_Sim()` (below, right after
- * `CommonScript_DebugOutLog`, placed last) is a third example of this same kind —
- * meant to be copied into (or called from) a part's own script field directly,
- * classifying every connector by its `relationship` (`ctx.inputs` against
- * toCtxAction/toCtxPassthrough, `ctx.outputs` against fromCtxAction/
- * fromCtxPassthrough) into a running `value` array, dumping every intermediate to the
- * Debug Log, then returning the full `{ value, state, response, leftBadge, rightBadge }`
- * shape a part script's return can use.
+ * '-i--'/'-e--' marker lines. `CommonScript_GenericPartActions(ctx, opts)` (below,
+ * right after `CommonScript_DebugOutLog`, placed last — replaces the old
+ * per-relationship-only `CommonScript_Sim`, direct follow-up: "move the generic
+ * scripts from each part to one script ... with parameters as needed ... make
+ * simulation available by default for all files") is a third example of this same
+ * kind, and also the new OUT-OF-THE-BOX DEFAULT for every Part's own `script` field
+ * (see Store.createPart/migrateDoc below) — a single generic request/response
+ * dispatcher driven entirely by `ctx.part.type` (an INITIATOR that originates a fresh
+ * request every tick, a RESPONDER that terminates a request with a reply instead of
+ * relaying it, or — the default — a PASSTHROUGH that relays both directions) and each
+ * connector's own `relationship` (which action label a RESPONDER's reply gets), using
+ * only `connectorType: 'c'` connectors and `ctx.part.rawLabel` as every packet's
+ * subject. Every new Part ships with `scriptEnabled: false` and `script: 'return
+ * CommonScript_GenericPartActions(ctx);'` — simulation-ready the moment a person
+ * flips Script Enabled on, with `opts` (an optional second argument: `initiatorTypes`/
+ * `responderTypes`/`relationshipActions`) letting a script override just the
+ * classification without forking the whole function, and a person's own bespoke
+ * script remains a straight overwrite of that one-line default, same as always.
  *
  * `CustomRemap_Example()` (below, after CommonScript_Example) is a FOURTH kind of
  * entry point, reported directly: "is it possible to build a small framework for user
@@ -369,78 +379,132 @@ function CommonScript_DebugOutLog(ctx) {
   return;
 }
 
-// Common script: a second example, meant to be copied into (or called from) a PART's
-// own script field directly, rather than called from another script the way
-// CommonScript_Example above is -- reported directly, replacing the earlier
-// type-switch example with one that classifies every connector by its relationship
-// instead. ctx.inputs (this part as the 'to' side) are checked against toCtxAction/
-// toCtxPassthrough; ctx.outputs (this part as the 'from' side) are checked against
-// fromCtxAction/fromCtxPassthrough -- each match appends a { action, reason }
-// descriptor to value, a running array (rather than a bare scalar) since a part can
-// classify several connectors in one tick. Every intermediate is dumped to the Debug
-// Log before returning, then the full { value, state, response, leftBadge, rightBadge }
-// shape a part script's return can use -- see simulation.js's own script-contract
-// comment for exactly what each field does. Placed LAST among the CommonScript_<Name>
-// examples, after CommonScript_DebugOutLog above, as the more complete one.
-function CommonScript_Sim(ctx) {
-  const value = [];
-  const state = {};
-  const response = {};
-  const leftBadge = {};
-  const rightBadge = {};
+// Common script: THE shipped default for every Part's own 'script' field (see
+// Store.createPart/migrateDoc, below in this file) -- direct follow-up: "move the
+// generic scripts from each part to one script replacing CommonScript_Sim with
+// parameters as needed. This will reduce file size and simplify maintenance, and make
+// simulation available by default for all files. By default each part should now have
+// the script disabled and script field populated with the call to the generic
+// script, leaving user able to override with their own script as desired." Fully
+// replaces the old CommonScript_Sim (which only ever classified connectors by
+// relationship into a placeholder value array) with a genuinely generic
+// request/response dispatcher: behavior is driven purely by ctx.part.type -- an
+// INITIATOR (default: BusinessActor/BusinessRole/GeneralActor/
+// BusinessOrganizationUnit) autonomously originates a fresh request every tick and
+// logs whatever reply eventually comes back; a RESPONDER (default:
+// DataDataEntity/DataObject/DataEntityDetails/DataLogicalComponent/
+// DataPhysicalComponent/BusinessObject/BusinessCapability/Contract/Product) terminates
+// a forward request with a generic reply instead of relaying it further; everything
+// else is a generic PASSTHROUGH that relays a fresh request downstream and any reply
+// back upstream -- never a hardcoded part id/label (ctx.part.rawLabel is always the
+// packet's subject) or a per-part special case. 'opts' (all optional) lets a calling
+// script override just the classification without forking this whole function:
+// { initiatorTypes, responderTypes, relationshipActions }, each replacing (not
+// merging with) its own built-in default list/map below. Only connectorType 'c'
+// connectors carry this traffic -- 's' (Stream) edges are the separate tagging layer
+// and are ignored here. 'relationshipActions' is where each connector TYPE drives its
+// own action label on a RESPONDER's reply (e.g. an 'Access' connector -> "retrieved a
+// record for", a 'Composition' connector -> "reported inventory status for") -- see
+// simulation.js's own script-contract comment for what each returned field does.
+// Placed LAST among the CommonScript_<Name> examples, after CommonScript_DebugOutLog
+// above, as the more complete one.
+function CommonScript_GenericPartActions(ctx, opts) {
+  opts = opts || {};
+  const INITIATOR_TYPES = opts.initiatorTypes || ['BusinessActor', 'BusinessRole', 'GeneralActor', 'BusinessOrganizationUnit'];
+  const RESPONDER_TYPES = opts.responderTypes || ['DataDataEntity', 'DataObject', 'DataEntityDetails', 'DataLogicalComponent', 'DataPhysicalComponent', 'BusinessObject', 'BusinessCapability', 'Contract', 'Product'];
+  const RELATIONSHIP_ACTIONS = opts.relationshipActions || {
+    access: 'retrieved a record for', triggering: 'executed and acknowledged',
+    serving: 'served a result for', assignment: 'processed on behalf of',
+    flow: 'processed a data flow for', association: 'shared a reference for',
+    realization: 'realized an output for', composition: 'reported inventory status for',
+    aggregation: 'reported aggregated status for',
+  };
 
-  // current ctx is one of these, one broadcast packet prepared to send to all
-  const fromCtxAction = ['flow', 'triggering'];
+  const me = ctx.part.type;
+  const subject = ctx.part.rawLabel || ctx.part.label;
+  const seen = ctx.state.seen || {};           // fromPartId -> last request id already handled
+  const seenReply = ctx.state.seenReply || {}; // fromPartId -> last reply id already relayed/logged
 
-  // current ctx is one of these, to (broadcast) packet needs action
-  const toCtxAction = ['aggregation', 'composition', 'flow', 'realization', 'triggering'];
+  const inC = ctx.inputs.filter((i) => i.connector.connectorType === 'c');
+  const outC = ctx.outputs.filter((o) => o.connector.connectorType === 'c');
+  const repliesC = ctx.responses.filter((r) => r.connector.connectorType === 'c');
 
-  // current ctx is one of these, just pass packet along
-  const fromCtxPassthrough = ['aggregation', 'assignment', 'association', 'composition', 'realization'];
+  // ---------------------------------------------------------------- RESPONDER
+  if (RESPONDER_TYPES.includes(me)) {
+    const fresh = inC.find((i) => i.value && i.value.requestId !== undefined && seen[i.fromPartId] !== i.value.requestId);
+    if (!fresh) return { value: ctx.state.lastReply || null, state: ctx.state };
 
-  // current ctx is one of these, just pass packet along
-  const toCtxPassthrough = ['assignment', 'association'];
-
-  // process from (respond or pass through)
-  for (const inp of ctx.inputs) {
-    if (toCtxAction.includes(inp.connector.relationship.toLowerCase())) {
-      value.push({ action: 'some to action', reason: inp.connector.relationship });
-    }
-    if (toCtxPassthrough.includes(inp.connector.relationship.toLowerCase())) {
-      value.push({ action: 'some to passthrough', reason: inp.connector.relationship });
-    }
+    const action = RELATIONSHIP_ACTIONS[String(fresh.connector.relationship).toLowerCase()] || 'responded to';
+    const reply = {
+      requestId: fresh.value.requestId,
+      subject: fresh.value.subject,
+      answeredBy: subject,
+      action,
+      path: [...(fresh.value.path || []), subject],
+      data: subject + ': ' + action + ' request #' + fresh.value.requestId + ' from "' + fresh.value.subject + '"',
+    };
+    ctx.logActivity(me + ' "' + subject + '" ' + action + ' request #' + reply.requestId + ' (via ' + fresh.connector.relationship + ') from "' + fresh.fromLabel + '"');
+    return {
+      value: reply,
+      state: { ...ctx.state, seen: { ...seen, [fresh.fromPartId]: fresh.value.requestId }, lastReply: reply },
+      response: reply,
+      leftBadge: { text: 'answered #' + reply.requestId, color: '#2f8f4e' },
+    };
   }
 
-  for (const outp of ctx.outputs) {
-    if (fromCtxAction.includes(outp.connector.relationship.toLowerCase())) {
-      value.push({ action: 'some from action', reason: outp.connector.relationship });
+  // ---------------------------------------------------------------- INITIATOR
+  if (INITIATOR_TYPES.includes(me)) {
+    const nextSeenReply = { ...seenReply };
+    for (const r of repliesC) {
+      if (nextSeenReply[r.fromPartId] === r.value.requestId) continue;
+      ctx.log(me + ' "' + subject + '" received reply to request #' + r.value.requestId + ' from "' + r.fromLabel + '": ' + r.value.data);
+      nextSeenReply[r.fromPartId] = r.value.requestId;
     }
-    if (fromCtxPassthrough.includes(outp.connector.relationship.toLowerCase())) {
-      value.push({ action: 'some from passthrough', reason: outp.connector.relationship });
-    }
+    if (outC.length === 0) return { value: null, state: { ...ctx.state, seenReply: nextSeenReply } };
+
+    const requestId = ctx.tick;
+    const request = { requestId, subject, path: [subject] };
+    ctx.log(me + ' "' + subject + '" issuing request #' + requestId + ' to ' + outC.length + ' connector(s)');
+    return { value: request, state: { ...ctx.state, seenReply: nextSeenReply }, leftBadge: { text: 'req #' + requestId, color: '#c9862f' } };
   }
 
-  ctx.logDebug('--v--');
-  ctx.logDebug(JSON.stringify(value));
-  ctx.logDebug('--s--');
-  ctx.logDebug(JSON.stringify(state));
-  ctx.logDebug('--r--');
-  ctx.logDebug(JSON.stringify(response));
-  ctx.logDebug('--lb-');
-  ctx.logDebug(JSON.stringify(leftBadge));
-  ctx.logDebug('--rb--');
-  ctx.logDebug(JSON.stringify(rightBadge));
-  ctx.logDebug('--e--');
+  // ---------------------------------------------------------------- PASSTHROUGH
+  let value = ctx.state.lastForwarded || null;
+  let nextSeen = seen;
+  const freshIn = inC.find((i) => i.value && i.value.requestId !== undefined && seen[i.fromPartId] !== i.value.requestId);
+  if (freshIn) {
+    value = { ...freshIn.value, path: [...(freshIn.value.path || []), subject] };
+    nextSeen = { ...seen, [freshIn.fromPartId]: freshIn.value.requestId };
+    ctx.logDebug(me + ' "' + subject + '" relaying request #' + value.requestId + ' forward from "' + freshIn.fromLabel + '" (via ' + freshIn.connector.relationship + ')');
+  }
+
+  let response;
+  let nextSeenReply = seenReply;
+  const freshReply = repliesC.find((r) => r.value && r.value.requestId !== undefined && seenReply[r.fromPartId] !== r.value.requestId);
+  if (freshReply) {
+    response = { ...freshReply.value, path: [...(freshReply.value.path || []), subject] };
+    nextSeenReply = { ...seenReply, [freshReply.fromPartId]: freshReply.value.requestId };
+    ctx.logDebug(me + ' "' + subject + '" relaying reply #' + response.requestId + ' back via "' + freshReply.fromLabel + '"');
+  }
 
   return {
-    value: value,
-    state: state,
-    response: response,
-    leftBadge: leftBadge,
-    rightBadge: rightBadge,
+    value,
+    state: { ...ctx.state, seen: nextSeen, seenReply: nextSeenReply, lastForwarded: value },
+    response,
+    leftBadge: value ? { text: '#' + value.requestId, color: '#3a6fbf' } : undefined,
   };
 }
 `;
+
+/** The out-of-the-box default for every new Part's own `script` field (Store.createPart
+ * below, migrateDoc's backfill for a raw/foreign doc with no `script` key at all, and
+ * archimate.js's own part construction) — a single source of truth for the literal
+ * call text, so it's never hand-retyped (and risks drifting) at each of those sites.
+ * Also used by promptCodeSummary (main.js) to tell "no CUSTOM code to review here" (a
+ * blank script, or this exact unmodified default) apart from a part someone actually
+ * wrote/edited a script for — the shipped dispatcher is already-reviewed, known code,
+ * not something Code Summary's security-review purpose needs to surface again. */
+const DEFAULT_PART_SCRIPT = 'return CommonScript_GenericPartActions(ctx);';
 
 /** Store.smartStreamPresets' out-of-the-box default — named, reusable Insert Smart
  * Stream dialog settings (main.js's promptInsertSmartStream), saved/loaded via that
@@ -805,7 +869,14 @@ class Store {
   // computeStreamLanes/layoutTypeIntoLanes' grid entirely and renders at exactly this
   // position instead; Advanced > Reset Pinned 3D Positions clears every part's pin3D
   // back to null at once. Persisted (part of the document), so a pin survives Save/Load.
-  createPart({ type, label, rawLabel, model, streams = [], note = '', order = 0, other = {}, xIds = '', description = '', script = '', scriptEnabled = false, section = '', pin3D = null, attributes = [], uiTargetPartId = '', uiInputValue = null }) {
+  // script default: "make simulation available by default for all files" -- every new
+  // Part ships wired to call the shipped generic dispatcher (DEFAULT_PART_SCRIPT ->
+  // CommonScript_GenericPartActions, DEFAULT_BATCH_SCRIPT_CODE above) rather than an
+  // empty string, with scriptEnabled still defaulting to false so nothing actually
+  // runs until a person opts in. A caller that wants a truly blank/disabled script
+  // (e.g. a table part like DataEntityDetails, or copying an existing part's own
+  // script verbatim) still passes `script` explicitly, same as before.
+  createPart({ type, label, rawLabel, model, streams = [], note = '', order = 0, other = {}, xIds = '', description = '', script = DEFAULT_PART_SCRIPT, scriptEnabled = false, section = '', pin3D = null, attributes = [], uiTargetPartId = '', uiInputValue = null }) {
     const stamp = nowStamp();
     // uiTargetPartId/uiInputValue: UI dashboard elements only (isUIDashboardType,
     // above) — which OTHER part this widget mirrors/feeds, and (Input types) the
@@ -1221,7 +1292,12 @@ function migrateDoc(obj, nodeSizeMultiplier = 1.2) {
       other: p.other ?? {},
       xIds: p.xIds ?? '',
       description: p.description ?? '',
-      script: p.script ?? '',
+      // Only backfills when the field is genuinely absent (a script explicitly saved
+      // as '' -- every bundled example's non-scripted parts included -- is left
+      // alone) -- same "available by default for all files" default as
+      // Store.createPart above, for a raw/foreign document that never had a script
+      // field at all.
+      script: p.script ?? DEFAULT_PART_SCRIPT,
       scriptEnabled: p.scriptEnabled === true || p.scriptEnabled === 'true',
       section: p.section ?? '',
       pin3D: p.pin3D ?? null,
@@ -1289,4 +1365,4 @@ function connectorStyleFields(relationship, settings) {
   };
 }
 
-export { Store, newId, ciEq, migrateDoc, relationCodeFor, nowStamp, UI_DASHBOARD_TYPES, isUIDashboardType };
+export { Store, newId, ciEq, migrateDoc, relationCodeFor, nowStamp, UI_DASHBOARD_TYPES, isUIDashboardType, DEFAULT_PART_SCRIPT };

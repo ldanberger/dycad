@@ -1,3 +1,5 @@
+import { DEFAULT_PART_SCRIPT } from './state.js';
+
 // ===================== ARCHIMATE EXCHANGE FORMAT IMPORT =====================
 // Parses an ArchiMate 3.0 Exchange Format XML document (<model> root in the
 // http://www.opengroup.org/xsd/archimate/3.0/ namespace) into DyCAD Part/Connector/
@@ -139,7 +141,10 @@ function parseArchimateXml(xmlText, knownElementTypes, elementDefs, elementGroup
       id, type, label, rawLabel: label,
       model: modelName, streams: [], note: '', order: 0, other: {},
       xIds: '', description: getChildText(el, 'documentation'),
-      script: '', scriptEnabled: false,
+      // Same "available by default for all files" default as Store.createPart
+      // (state.js) -- scriptEnabled stays false, but the field is pre-wired to the
+      // shipped generic dispatcher rather than left blank.
+      script: DEFAULT_PART_SCRIPT, scriptEnabled: false,
     });
   }
   const partIds = new Set(parts.map((p) => p.id));

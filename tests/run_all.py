@@ -1782,7 +1782,13 @@ def check_code_summary(page):
     presently wired to run) and clearly marked ENABLED/disabled; each block identifies
     its source part (label, type, id); grouped by model; the Script Console's own
     persistent text (store.batchScriptCode) is ALSO included, not just per-part
-    scripts; and the modal is genuinely read-only (no Save/Cancel, just Close)."""
+    scripts; and the modal is genuinely read-only (no Save/Cancel, just Close). Also
+    covers the follow-up needed once every new Part started shipping wired to
+    DEFAULT_PART_SCRIPT (CommonScript_GenericPartActions) by default: a part left at
+    that exact unmodified default (whether or not scriptEnabled) is excluded too -- "no
+    CUSTOM code to review here," not "no script at all" -- while a part whose script
+    calls the SAME function with a custom opts override still counts as real code and
+    is included."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -1793,7 +1799,14 @@ def check_code_summary(page):
       p2.scriptEnabled = false;
       p2.script = 'return { value: 1 };';
       const p3 = store.createPart({ type: 'GeneralActor', label: 'NoScriptNode', model: store.defaultModel, streams: [] });
-      // p3 has no script at all -- should not appear in the summary
+      // p3 gets the shipped DEFAULT_PART_SCRIPT default (createPart's own default
+      // parameter, unmodified, left disabled) -- should not appear in the summary.
+      const p4 = store.createPart({
+        type: 'GeneralActor', label: 'CustomOptsNode', model: store.defaultModel, streams: [], scriptEnabled: true,
+        script: \"return CommonScript_GenericPartActions(ctx, { responderTypes: ['GeneralActor'] });\",
+      });
+      // p4 calls the same shipped function but with a custom opts override -- real,
+      // reviewable code, should still appear.
 
       document.getElementById('advanced-menu-btn').click();
       await new Promise(r => setTimeout(r, 60));
@@ -1806,17 +1819,22 @@ def check_code_summary(page):
         modalText: textarea ? textarea.value : null,
         readonly: textarea ? textarea.readOnly : null,
         actionButtonLabels: modalActions ? [...modalActions.querySelectorAll('button')].map(b => b.textContent.trim()) : [],
+        defaultScript: p3.script,
       };
     }
     """)
     problems = []
     text = result["modalText"] or ""
+    if result["defaultScript"] != 'return CommonScript_GenericPartActions(ctx);':
+        problems.append(f"expected NoScriptNode's own createPart default to be the shipped DEFAULT_PART_SCRIPT, got {result['defaultScript']!r}")
     if "Requester" not in text or "GeneralActor" not in text or "ENABLED" not in text:
         problems.append(f"expected the summary to include the enabled scripted part, its type, and ENABLED marker, got: {text[:400]}")
     if "DisabledScriptNode" not in text or "disabled" not in text:
         problems.append(f"expected the summary to include the DISABLED scripted part too (code exists regardless of scriptEnabled) with a 'disabled' marker, got: {text[:400]}")
     if "NoScriptNode" in text:
-        problems.append("expected a part with no script at all to be excluded from the summary")
+        problems.append("expected a part left at the shipped unmodified DEFAULT_PART_SCRIPT default to be excluded from the summary")
+    if "CustomOptsNode" not in text:
+        problems.append("expected a part calling CommonScript_GenericPartActions with a custom opts override to still be included (it's real, reviewable code)")
     if "Model: As-is" not in text or "Model:" not in text:
         problems.append(f"expected the summary to group scripts by model (a 'Model: As-is' section header, at least), got: {text[:400]}")
     if "Script Console" not in text or "main()" not in text:
@@ -1827,7 +1845,7 @@ def check_code_summary(page):
         problems.append(f"expected only a single 'Close' button (read-only modal), got {result['actionButtonLabels']}")
     if problems:
         return False, "; ".join(problems) + f" (full text: {text})"
-    return True, "Code Summary lists every scripted part (enabled or disabled) grouped by model, identifies its source part, excludes unscripted parts, includes the Script Console's own text, and opens as a genuinely read-only modal"
+    return True, "Code Summary lists every scripted part (enabled or disabled) grouped by model, identifies its source part, excludes both truly unscripted parts and ones left at the shipped unmodified DEFAULT_PART_SCRIPT default while still including a custom opts override of that same function, includes the Script Console's own text, and opens as a genuinely read-only modal"
 
 
 def check_script_console_and_code_summary_moved_to_advanced(page):
@@ -5466,95 +5484,201 @@ def check_common_script_callable_from_part_script(page):
     return True, "a part's own script can call ANY function store.batchScriptCode defines -- both the shipped CommonScript_Example(ctx) (logging 'called by <type> <label> <model>') and a person's own custom addition -- while an ordinary part script with no such dependency behaves exactly as before"
 
 
-def check_common_script_sim_classifies_connectors(page):
-    """Regression guard/new-feature check for the shipped CommonScript_Sim(ctx) example
-    (DEFAULT_BATCH_SCRIPT_CODE, state.js, placed last of the CommonScript_<Name>
-    examples, right after CommonScript_DebugOutLog), reported directly (Step 44) as a
-    full replacement for the earlier type-switch example. Classifies every incoming
-    connector (ctx.inputs, this part as the 'to' side) by relationship against
-    toCtxAction (['aggregation','composition','flow','realization','triggering']) and
-    toCtxPassthrough (['assignment','association']), and every outgoing connector
-    (ctx.outputs, this part as the 'from' side) against fromCtxAction
-    (['flow','triggering']) and fromCtxPassthrough
-    (['aggregation','assignment','association','composition','realization']) --
-    each match appends a { action, reason } descriptor to a running value array (not a
-    bare scalar, since several connectors can classify in one tick). Every
-    intermediate (value/state/response/leftBadge/rightBadge) is also dumped to the
-    Debug Log before returning the full 5-field shape. Covers, via a real 4-connector
-    graph and one real simulation tick: an incoming 'Aggregation' connector produces a
-    'some to action' entry, an incoming 'Assignment' connector a 'some to passthrough'
-    entry, an outgoing 'Triggering' connector a 'some from action' entry, an outgoing
-    'Composition' connector a 'some from passthrough' entry -- all four landing in the
-    same returned value array with the connector's own (non-lowercased) relationship
-    as `reason`; state/response/leftBadge/rightBadge all come back as {}; the Debug
-    Log gets the 10 documented marker/value lines; and a part with no connectors at
-    all returns an empty value array with no error."""
+def check_common_script_generic_part_actions_default(page):
+    """Regression guard/new-feature check for CommonScript_GenericPartActions(ctx, opts)
+    (DEFAULT_BATCH_SCRIPT_CODE, state.js), which fully REPLACES the old CommonScript_Sim
+    (removed) -- direct follow-up: "move the generic scripts from each part to one
+    script replacing CommonScript_Sim with parameters as needed. This will reduce file
+    size and simplify maintenance, and make simulation available by default for all
+    files. By default each part should now have the script disabled and script field
+    populated with the call to the generic script, leaving user able to override with
+    their own script as desired." Covers three things: (1) the new DEFAULT wiring --
+    Store.createPart with no explicit script/scriptEnabled now yields script: 'return
+    CommonScript_GenericPartActions(ctx);' with scriptEnabled still false, and
+    migrateDoc backfills the same default for a raw/foreign part with no `script` key
+    at all while leaving one explicitly saved as '' untouched (never disturbing an
+    existing file's deliberately-blank scripts); (2) the dispatcher's own generic
+    INITIATOR/RESPONDER/PASSTHROUGH behavior, built directly here (not via the bundled
+    "generic part actions demo" example, which check_generic_part_actions_example
+    already covers end to end) -- a BusinessActor initiator's request relays through a
+    BusinessProcess passthrough to a DataDataEntity responder (over an 'Access'
+    connector) and the reply round-trips all the way back, logged by the initiator;
+    (3) the 'opts' override parameter -- passing { responderTypes, relationshipActions
+    } reclassifies an ApplicationFunction (not a responder by default) into one with a
+    custom reply action, proving a script can override just the classification without
+    forking the whole function."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
       const sim = await import('./js/simulation.js');
+      const stateMod = await import('./js/state.js');
       const model = store.defaultModel;
 
-      const producer1 = store.createPart({ type: 'BusinessActor', label: 'RegrSimProducer1', model });
-      const producer2 = store.createPart({ type: 'BusinessActor', label: 'RegrSimProducer2', model });
-      const router = store.createPart({ type: 'BusinessProcess', label: 'RegrSimRouter', model, scriptEnabled: true, script: 'return CommonScript_Sim(ctx);' });
-      const consumer1 = store.createPart({ type: 'BusinessProcess', label: 'RegrSimConsumer1', model });
-      const consumer2 = store.createPart({ type: 'BusinessProcess', label: 'RegrSimConsumer2', model });
-      const isolated = store.createPart({ type: 'BusinessProcess', label: 'RegrSimIsolated', model, scriptEnabled: true, script: 'return CommonScript_Sim(ctx);' });
+      // (1) default wiring.
+      const freshPart = store.createPart({ type: 'BusinessProcess', label: 'RegrGenericDefault', model });
+      const defaultScript = freshPart.script;
+      const defaultScriptEnabled = freshPart.scriptEnabled;
+      const migrated = stateMod.migrateDoc({ parts: [{ id: 'x1', type: 'Unknown' }, { id: 'x2', type: 'Unknown', script: '' }], connectors: [], views: [], models: [] });
+      const backfilled = migrated.parts.find(p => p.id === 'x1').script;
+      const leftAlone = migrated.parts.find(p => p.id === 'x2').script;
 
-      store.createConnector({ from: producer1.id, to: router.id, model, connectorType: 'c', relationship: 'Aggregation' });
-      store.createConnector({ from: producer2.id, to: router.id, model, connectorType: 'c', relationship: 'Assignment' });
-      store.createConnector({ from: router.id, to: consumer1.id, model, connectorType: 'c', relationship: 'Triggering' });
-      store.createConnector({ from: router.id, to: consumer2.id, model, connectorType: 'c', relationship: 'Composition' });
+      // (2) generic dispatcher: initiator -> passthrough -> responder, and back.
+      const initiator = store.createPart({ type: 'BusinessActor', label: 'RegrGenInitiator', model, scriptEnabled: true });
+      const relay = store.createPart({ type: 'BusinessProcess', label: 'RegrGenRelay', model, scriptEnabled: true });
+      const responder = store.createPart({ type: 'DataDataEntity', label: 'RegrGenResponder', model, scriptEnabled: true });
+      store.createConnector({ from: initiator.id, to: relay.id, model, connectorType: 'c', relationship: 'Triggering' });
+      store.createConnector({ from: relay.id, to: responder.id, model, connectorType: 'c', relationship: 'Access' });
 
-      const before = store.debugLog.length;
-      sim.stepSimulation(app, model);
-      const rt = store.simRuntime.get(model);
-      const errors = [router, isolated].map((p) => rt.values.get(p.id)?.lastError).filter(Boolean);
-      const routerEntry = rt.values.get(router.id);
-      const isolatedEntry = rt.values.get(isolated.id);
-      const debugLines = store.debugLog.slice(before).filter((e) => e.message.startsWith('[RegrSimRouter]')).map((e) => e.message);
+      let errors = [];
+      for (let t = 0; t < 5; t++) {
+        sim.stepSimulation(app, model);
+        const rt = store.simRuntime.get(model);
+        errors.push(...[initiator, relay, responder].map(p => rt.values.get(p.id)?.lastError).filter(Boolean));
+      }
+      const rtFinal = store.simRuntime.get(model);
+      const responderValue = rtFinal.values.get(responder.id)?.value;
+      const initiatorLogHasReply = store.messageLog.some(e => e.message.includes('RegrGenInitiator') && e.message.includes('received reply'));
 
-      return { errors, routerEntry, isolatedEntry, debugLines };
+      // (3) opts override -- reclassify ApplicationFunction (not a default responder)
+      // as a responder, with a custom action label.
+      const custom = store.createPart({
+        type: 'ApplicationFunction', label: 'RegrGenCustomResponder', model, scriptEnabled: true,
+        script: "return CommonScript_GenericPartActions(ctx, { responderTypes: ['ApplicationFunction'], relationshipActions: { association: 'handled a custom action for' } });",
+      });
+      const customCaller = store.createPart({ type: 'BusinessActor', label: 'RegrGenCustomCaller', model, scriptEnabled: true });
+      store.createConnector({ from: customCaller.id, to: custom.id, model, connectorType: 'c', relationship: 'Association' });
+      let customErrors = [];
+      for (let t = 0; t < 2; t++) {
+        sim.stepSimulation(app, model);
+        const rt2 = store.simRuntime.get(model);
+        customErrors.push(...[custom, customCaller].map(p => rt2.values.get(p.id)?.lastError).filter(Boolean));
+      }
+      const customValue = store.simRuntime.get(model).values.get(custom.id)?.value;
+
+      return { defaultScript, defaultScriptEnabled, backfilled, leftAlone, errors, responderValue, initiatorLogHasReply, customErrors, customValue };
     }
     """)
     problems = []
+    if result["defaultScript"] != 'return CommonScript_GenericPartActions(ctx);':
+        problems.append(f"expected a freshly created part with no explicit script to default to calling CommonScript_GenericPartActions, got {result['defaultScript']!r}")
+    if result["defaultScriptEnabled"] is not False:
+        problems.append(f"expected a freshly created part's scriptEnabled to still default to false, got {result['defaultScriptEnabled']}")
+    if result["backfilled"] != 'return CommonScript_GenericPartActions(ctx);':
+        problems.append(f"expected migrateDoc to backfill a part with no 'script' key at all to the same generic default, got {result['backfilled']!r}")
+    if result["leftAlone"] != '':
+        problems.append(f"expected migrateDoc to leave a part's explicitly-saved empty script untouched, got {result['leftAlone']!r}")
     if result["errors"]:
-        return False, f"expected every CommonScript_Sim(ctx) call to run without error, got {result['errors']}"
-    entry = result["routerEntry"] or {}
-    value = entry.get("value")
-    if not isinstance(value, list) or len(value) != 4:
-        problems.append(f"expected router's returned value to be a 4-entry array (one per classified connector), got {value}")
-    else:
-        expected = [
-            {"action": "some to action", "reason": "Aggregation"},
-            {"action": "some to passthrough", "reason": "Assignment"},
-            {"action": "some from action", "reason": "Triggering"},
-            {"action": "some from passthrough", "reason": "Composition"},
-        ]
-        for exp in expected:
-            if exp not in value:
-                problems.append(f"expected value to contain {exp}, got {value}")
-    for field in ("state", "response"):
-        if entry.get(field) != {}:
-            problems.append(f"expected router's returned {field} to be {{}}, got {entry.get(field)}")
-    # An empty {} returned for leftBadge/rightBadge is still truthy-object, so
-    # simulation.js's own normalization (Step 41) fills in the {text, color} shape --
-    # {text: '', color: '#666666'} here, not the bare {} the script itself returned.
-    for field in ("leftBadge", "rightBadge"):
-        if entry.get(field) != {"text": "", "color": "#666666"}:
-            problems.append(f"expected router's returned {field} to be normalized to {{'text': '', 'color': '#666666'}}, got {entry.get(field)}")
-    isolated_value = (result["isolatedEntry"] or {}).get("value")
-    if isolated_value != []:
-        problems.append(f"expected a part with no connectors at all to return an empty value array, got {isolated_value}")
-    debug_lines = result["debugLines"]
-    expected_markers = ["--v--", "--s--", "{}", "--r--", "--lb-", "--rb--", "--e--"]
-    for marker in expected_markers:
-        if not any(marker in l for l in debug_lines):
-            problems.append(f"expected the Debug Log to include a line containing {marker!r}, got {debug_lines}")
+        problems.append(f"expected the initiator/passthrough/responder chain to simulate 5 ticks with no script errors, got {result['errors']}")
+    responder_value = result["responderValue"] or {}
+    if responder_value.get("action") != "retrieved a record for" or responder_value.get("subject") != "RegrGenInitiator":
+        problems.append(f"expected the DataDataEntity responder's reply to be actioned 'retrieved a record for' (from the 'Access' connector) with subject 'RegrGenInitiator', got {responder_value}")
+    if not result["initiatorLogHasReply"]:
+        problems.append("expected the initiator to eventually log a received reply, round-tripped through the passthrough and back")
+    if result["customErrors"]:
+        problems.append(f"expected the opts-overridden custom responder to run without error, got {result['customErrors']}")
+    custom_value = result["customValue"] or {}
+    if custom_value.get("action") != "handled a custom action for":
+        problems.append(f"expected an opts override ({{ responderTypes: ['ApplicationFunction'], relationshipActions: {{...}} }}) passed to CommonScript_GenericPartActions to reclassify an ApplicationFunction as a responder with the custom action wording, got {custom_value}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "CommonScript_Sim(ctx) classifies ctx.inputs/ctx.outputs by connector relationship into a running value array (action vs. passthrough, to vs. from), dumps every intermediate to the Debug Log, and returns state/response as {} and leftBadge/rightBadge normalized to {text: '', color: '#666666'} alongside it"
+    return True, "CommonScript_GenericPartActions is the shipped default script for every new Part (disabled by default; migrateDoc backfills legacy files with no script field the same way, without touching an explicitly-blank one), its generic INITIATOR/RESPONDER/PASSTHROUGH dispatch round-trips requests/responses correctly, and the opts override lets a script customize just the classification"
+
+
+def check_manage_part_scripts_dialog(page):
+    """Regression guard/new-feature check for Simulation > Manage Part Scripts...,
+    reported directly: "add a command under simulation for enabling/disabling part
+    scripts by presenting a dialog showing headers for order and filters (stream, part
+    type, model, etc, checkbox all/none) and list of parts for user to quickly
+    enable/disable." Covers: the menu item is reachable (Simulation menu, its own
+    group, above the log/snapshot commands) with no model-selected requirement (unlike
+    every other Simulation menu action); the dialog lists parts across ALL models (not
+    just the currently selected simulation model); Type/Model/Stream filters narrow the
+    row list; clicking a row's own checkbox toggles that ONE part's scriptEnabled
+    immediately on the real store (not just the DOM); clicking the Order column header
+    sorts by part.order; and the header "select all" checkbox, with a filter active,
+    enables/disables only the currently-matching rows in one go, leaving a
+    filtered-OUT part's scriptEnabled untouched."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = store.defaultModel;
+
+      const a = store.createPart({ type: 'BusinessActor', label: 'MPSActorA', model, order: 2, streams: ['StreamX'], scriptEnabled: false });
+      const b = store.createPart({ type: 'BusinessProcess', label: 'MPSProcessB', model: 'As-is', order: 1, streams: [], scriptEnabled: true });
+      const c = store.createPart({ type: 'BusinessActor', label: 'MPSActorC', model, order: 0, streams: [], scriptEnabled: false });
+
+      document.getElementById('simulation-menu-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      document.querySelector('#simulation-menu .dd-item[data-action=\\"managePartScripts\\"]').click();
+      await new Promise(r => setTimeout(r, 100));
+
+      const box = document.querySelector('.modal-overlay .modal-box');
+      const rowLabelsInOrder = () => [...box.querySelectorAll('#mps-tbody tr')].map(tr => tr.children[1] && tr.children[1].textContent);
+      const initialRows = rowLabelsInOrder();
+      const initialACheckbox = box.querySelector(`.mps-row-check[data-id=\\"${a.id}\\"]`).checked;
+
+      // Toggle A's own row checkbox -> real store mutation, immediately.
+      const aCheckbox = box.querySelector(`.mps-row-check[data-id=\\"${a.id}\\"]`);
+      aCheckbox.checked = true;
+      aCheckbox.dispatchEvent(new Event('change'));
+      const aEnabledAfterToggle = a.scriptEnabled;
+
+      // Sort by Order.
+      box.querySelector('.mps-sort[data-col=\\"order\\"]').click();
+      const rowsAfterOrderSort = rowLabelsInOrder();
+
+      // Filter to model 'As-is' -- only MPSProcessB should remain.
+      const modelSelect = box.querySelector('#mps-model');
+      modelSelect.value = 'As-is';
+      modelSelect.dispatchEvent(new Event('change'));
+      const rowsAfterModelFilter = rowLabelsInOrder();
+
+      // Reset filter, filter by stream 'StreamX' -- only MPSActorA should remain --
+      // then use the header select-all checkbox to disable it via the bulk path.
+      modelSelect.value = '';
+      modelSelect.dispatchEvent(new Event('change'));
+      const streamSelect = box.querySelector('#mps-stream');
+      streamSelect.value = 'StreamX';
+      streamSelect.dispatchEvent(new Event('change'));
+      const rowsAfterStreamFilter = rowLabelsInOrder();
+      const selectAll = box.querySelector('#mps-select-all');
+      selectAll.checked = false;
+      selectAll.dispatchEvent(new Event('change'));
+
+      const closeBtn = [...box.querySelectorAll('.modal-actions button')].find(b => b.textContent.trim() === 'Close');
+      closeBtn.click();
+      const modalGoneAfterClose = !document.querySelector('.modal-overlay');
+
+      return {
+        initialRows, initialACheckbox, aEnabledAfterToggle, rowsAfterOrderSort,
+        rowsAfterModelFilter, rowsAfterStreamFilter,
+        aEnabledAfterBulk: a.scriptEnabled, bEnabledUnaffected: b.scriptEnabled,
+        modalGoneAfterClose,
+      };
+    }
+    """)
+    problems = []
+    if sorted(result["initialRows"]) != sorted(["MPSActorA", "MPSProcessB", "MPSActorC"]):
+        problems.append(f"expected the dialog to list parts across ALL models (not just the default model), got {result['initialRows']}")
+    if result["initialACheckbox"] is not False:
+        problems.append(f"expected MPSActorA's row checkbox to start unchecked (scriptEnabled: false), got {result['initialACheckbox']}")
+    if result["aEnabledAfterToggle"] is not True:
+        problems.append(f"expected checking MPSActorA's own row checkbox to immediately set the real part.scriptEnabled to true, got {result['aEnabledAfterToggle']}")
+    if result["rowsAfterOrderSort"] != ["MPSActorC", "MPSProcessB", "MPSActorA"]:
+        problems.append(f"expected clicking the Order column header to sort rows by part.order ascending (C:0, B:1, A:2), got {result['rowsAfterOrderSort']}")
+    if result["rowsAfterModelFilter"] != ["MPSProcessB"]:
+        problems.append(f"expected filtering by Model 'As-is' to leave only MPSProcessB, got {result['rowsAfterModelFilter']}")
+    if result["rowsAfterStreamFilter"] != ["MPSActorA"]:
+        problems.append(f"expected filtering by Stream 'StreamX' to leave only MPSActorA, got {result['rowsAfterStreamFilter']}")
+    if result["aEnabledAfterBulk"] is not False:
+        problems.append(f"expected unchecking the header select-all checkbox (with the stream filter active) to disable MPSActorA, got {result['aEnabledAfterBulk']}")
+    if result["bEnabledUnaffected"] is not True:
+        problems.append(f"expected the bulk select-all toggle to leave MPSProcessB (filtered OUT at the time) untouched, got {result['bEnabledUnaffected']}")
+    if not result["modalGoneAfterClose"]:
+        problems.append("expected the Close button to remove the modal")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Simulation > Manage Part Scripts lists parts across all models with working Type/Model/Stream filters, a sortable Order column, per-row checkboxes that toggle scriptEnabled live on the real part, and a header select-all/none that bulk-toggles only the currently-filtered rows"
 
 
 def check_left_badge_overrides_value_display(page):
@@ -5780,6 +5904,79 @@ def check_connector_introspection_example(page):
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
     return True, "The 'connector introspection demo' example is reachable from File > Load Example, simulates with no errors, and Router's script genuinely logs each ctx.inputs/ctx.outputs entry's connector type and other part's type to the Message Log"
+
+
+def check_generic_part_actions_example(page):
+    """Regression guard/new-feature check for the "generic part actions demo" example,
+    reported directly: "write scripts for handling the activities of the simulation ...
+    not a specific case, this is to be generic for how each part responds ... use only
+    'c' connectors, use the raw label as the subject ... actions initiated by a part
+    (e.g. a business user requests something), actions that are responses (e.g. an
+    entity request to a data entity, or a business org unit doing inventory of its
+    capabilities) ... pass data through connectors and back." One identical script is
+    pasted onto all 9 parts -- behavior comes purely from ctx.part.type (INITIATOR/
+    RESPONDER/passthrough) and each connector's relationship, never a hardcoded id.
+    Covers: the file is listed in examples/index.json; every part shares the exact same
+    script text (proving genericity, not a per-part special case); simulating 9 ticks
+    produces no script errors; the 4-hop product-inquiry chain (Business User ->
+    Handle Product Inquiry -> Product Catalog Service -> Product Catalog System ->
+    Product) round-trips a reply using the SENDER'S rawLabel as subject all the way
+    back to Business User; and the fan-out capability-inventory poll (Finance
+    Department -> Budgeting/Reporting/Compliance, all 'c'/Composition) gets a reply
+    logged from all three capabilities."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+
+      const manifestRes = await fetch('public/examples/index.json', { cache: 'no-store' });
+      const manifest = await manifestRes.json();
+      const listedInManifest = manifest.includes('generic part actions demo.json');
+
+      const res = await fetch('public/examples/generic part actions demo.json', { cache: 'no-store' });
+      const obj = await res.json();
+      const uniqueScripts = new Set(obj.parts.map((p) => p.script));
+      const allConnectorsAreC = obj.connectors.every((c) => c.connectorType === 'c');
+
+      store.loadFromJSON(obj);
+      store.tabs = [];
+      const homeView = store.findView(store.currentView) || store.doc.views[0];
+      const tab = app.createCanvasTab(homeView);
+      app.switchToTab(tab.id);
+
+      const before = store.messageLog.length;
+      let errors = [];
+      for (let t = 0; t < 9; t++) {
+        sim.stepSimulation(app, store.defaultModel);
+        const rt = store.simRuntime.get(store.defaultModel);
+        errors.push(...[...rt.values.values()].filter(v => v.lastError).map(v => v.lastError));
+      }
+      const newLines = store.messageLog.slice(before).map((e) => e.message);
+
+      return { listedInManifest, uniqueScriptCount: uniqueScripts.size, allConnectorsAreC, errors, newLines };
+    }
+    """)
+    problems = []
+    if not result["listedInManifest"]:
+        problems.append("expected 'generic part actions demo.json' to be listed in examples/index.json")
+    if result["uniqueScriptCount"] != 1:
+        problems.append(f"expected exactly one shared script text across all 9 parts (generic, not per-part special-cased), got {result['uniqueScriptCount']} distinct script(s)")
+    if not result["allConnectorsAreC"]:
+        problems.append("expected every connector in this demo to use connectorType 'c', per the 'use only c connectors' instruction")
+    if result["errors"]:
+        problems.append(f"expected the example to simulate 9 ticks with no script errors, got {result['errors']}")
+    hasChainReply = any('Business User' in l and 'received reply to request #0' in l and 'Product' in l for l in result["newLines"])
+    hasCapReplies = all(
+        any(cap in l and 'Finance Department' in l and 'received reply' in l for l in result["newLines"])
+        for cap in ('Budgeting', 'Reporting', 'Compliance')
+    )
+    if not hasChainReply:
+        problems.append(f"expected Business User to eventually log a reply to request #0 (round-tripped through all 4 hops down to Product and back, using rawLabel subjects), got {result['newLines']}")
+    if not hasCapReplies:
+        problems.append(f"expected Finance Department to log a reply from each of Budgeting/Reporting/Compliance (generic fan-out request/response), got {result['newLines']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "The 'generic part actions demo' example is reachable from File > Load Example, uses one identical generic script across every part type and only 'c' connectors, and both the 4-hop chain and the 3-way capability fan-out round-trip requests/responses correctly using rawLabel as subject"
 
 
 def check_activity_and_debug_logs(page):
@@ -16044,10 +16241,12 @@ CHECKS = [
     check_local_secrets_settings_split,
     check_batch_script_code_persists_with_local_settings,
     check_common_script_callable_from_part_script,
-    check_common_script_sim_classifies_connectors,
+    check_common_script_generic_part_actions_default,
+    check_manage_part_scripts_dialog,
     check_left_badge_overrides_value_display,
     check_ctx_outputs_and_inputs_connector_metadata,
     check_connector_introspection_example,
+    check_generic_part_actions_example,
     check_activity_and_debug_logs,
     check_common_script_debug_out_log,
     check_log_tabs_ui,

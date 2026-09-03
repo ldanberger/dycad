@@ -5495,4 +5495,83 @@
 // check_generate_stream_prepopulates_from_existing (unchanged, still passing) already
 // covers the deriveStreamNames rewrite end to end through the real dialog. Verified
 // live before writing tests. DESIGN_DOCUMENT.md SS4 and tests/README.md updated.
-export const APP_VERSION = '0.934';
+// v0.935: direct follow-up -- "write scripts for handling the activities of the
+// simulation ... generic for how each part responds ... requires specific actions for
+// each type of part and each type of connector ... use only 'c' connectors, use the
+// raw label as the subject ... actions initiated by a part (e.g. a business user
+// requests something), actions that are responses (e.g. an entity request to a data
+// entity, or a business org unit doing inventory of its capabilities) ... pass data
+// through connectors and back." New "generic part actions demo" example
+// (public/examples/, listed in index.json) -- ONE identical script pasted onto all 9
+// parts, no application code touched: behavior is dispatched purely from
+// ctx.part.type (INITIATOR types like BusinessActor/BusinessOrganizationUnit originate
+// a fresh request every tick; RESPONDER types like DataDataEntity/BusinessCapability
+// terminate a request with a reply instead of relaying it; everything else is a
+// generic PASSTHROUGH that relays forward requests downstream and replies back
+// upstream) and each connector's own `relationship` (which action label a responder's
+// reply gets, e.g. Access -> "retrieved a record for", Composition -> "reported
+// inventory status for") -- filtering to connectorType 'c' only and using
+// ctx.part.rawLabel as every packet's subject, per the report. Two flows demonstrate
+// this: a 4-hop product-inquiry chain (Business User -> Handle Product Inquiry ->
+// Product Catalog Service -> Product Catalog System -> Product) round-tripping a reply
+// back up the same path one hop per tick, and a 3-way fan-out capability-inventory
+// poll (Finance Department -> Budgeting/Reporting/Compliance). Verified with a plain
+// Node script (Store + runTick, no browser) before writing the test, then via a real
+// TEMP BREAK (misclassifying the data entity's type so the chain dead-ends) confirming
+// the new check's failure message matches. New check_generic_part_actions_example
+// (tests/run_all.py).
+// v0.936: direct follow-up to v0.935's "generic part actions demo" -- "move the
+// generic scripts from each part to one script replacing CommonScript_Sim with
+// parameters as needed. This will reduce file size and simplify maintenance, and make
+// simulation available by default for all files. By default each part should now have
+// the script disabled and script field populated with the call to the generic
+// script, leaving user able to override with their own script as desired." Removed
+// CommonScript_Sim outright and replaced it with CommonScript_GenericPartActions(ctx,
+// opts) (state.js, DEFAULT_BATCH_SCRIPT_CODE) -- the same generic INITIATOR/RESPONDER/
+// PASSTHROUGH request-response dispatcher the demo's 9 parts used to each carry a
+// separate ~6KB copy of, now a single shared function with an opts override
+// ({ initiatorTypes, responderTypes, relationshipActions }) for customizing just the
+// classification. Store.createPart's own script default parameter changes from '' to
+// the new DEFAULT_PART_SCRIPT constant ('return CommonScript_GenericPartActions(ctx);'
+// -- exported from state.js so createPart/migrateDoc/archimate.js all share one
+// literal instead of retyping it), scriptEnabled staying false -- since essentially no
+// caller passes script explicitly for a brand-new part, this one change makes every
+// part created any way (manual creation, Generate Stream/Industry, Level Down, Split,
+// Data Modeling tables, a script's own ctx.createPart, ArchiMate import, ...)
+// simulation-ready the moment scriptEnabled is flipped on. migrateDoc backfills the
+// same default for a raw/foreign doc with no `script` key at all, leaving an
+// explicitly-saved '' untouched. Follow-on fix: Advanced > Code Summary's own "part
+// with no script" exclusion used to mean a literal empty string -- now that every new
+// part ships non-empty by default, it would have started listing every unscripted
+// part in the document, defeating its own security-review purpose; fixed to also
+// exclude a part left at the exact unmodified DEFAULT_PART_SCRIPT (already-reviewed,
+// shipped code) while still including one calling it with a custom opts override. The
+// "generic part actions demo" example's 9 parts each shrink to the one-line
+// 'return CommonScript_GenericPartActions(ctx);' call (left scriptEnabled: true, per
+// the report), cutting the file from ~56KB to ~13KB with identical simulated
+// behavior. check_common_script_sim_classifies_connectors replaced by
+// check_common_script_generic_part_actions_default (default wiring, migrateDoc
+// backfill, a real initiator/passthrough/responder round trip, and the opts
+// override); check_code_summary gained the two new exclusion/inclusion cases;
+// check_generic_part_actions_example updated for the shrunk demo file -- all proven
+// via a plain Node Store/runTick script first, then real TEMP BREAKs.
+//
+// Same session, direct follow-up requests: (1) "add a command under simulation for
+// enabling/disabling part scripts by presenting a dialog showing headers for order
+// and filters (stream, part type, model, etc, checkbox all/none) and list of parts
+// for user to quickly enable/disable" -- new Simulation > Manage Part Scripts...
+// (App.promptManagePartScripts, main.js), reusing promptAddExisting's own
+// filters+sortable-headers+select-all shape, except each row's checkbox toggles that
+// part's scriptEnabled live instead of building a selection for a later submit; lists
+// parts across the WHOLE document (Model is a filter, not a scope), reachable with no
+// simulation model selected (unlike every other Simulation menu action). New
+// check_manage_part_scripts_dialog, proven via TEMP BREAK (bulk toggle applied to
+// every part instead of just the filtered ones). (2) "add a summary table to
+// instructions in simulation scripting section regarding initiator types,
+// passthroughs etc. logic to help users understand what to expect of each type" --
+// public/instructions.html's Simulation Scripting section gained a "What to expect
+// from each role" pair of tables (INITIATOR/RESPONDER/PASSTHROUGH's default types and
+// per-tick behavior, plus the relationshipActions reply-wording map), and a mention of
+// the new Manage Part Scripts dialog. DESIGN_DOCUMENT.md and tests/README.md updated
+// for all of the above.
+export const APP_VERSION = '0.936';

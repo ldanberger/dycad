@@ -2878,6 +2878,120 @@ array) and `check_common_script_debug_out_log` was rewritten in place for the ne
 3-line shape — both proven via TEMP BREAK. `state.js`'s own top-of-file doc comment,
 `tests/README.md`, and this section were all updated for the new order/behavior.
 
+**`CommonScript_GenericPartActions(ctx, opts)` fully replaces `CommonScript_Sim`, and
+becomes every Part's new default `script`**: a follow-up built on top of the earlier
+"generic part actions demo" example (public/examples/, added the same session as this
+paragraph — a 9-part model where every part's own `script` field carried an identical,
+~6KB copy-pasted request/response dispatcher), reported directly: *"move the generic
+scripts from each part to one script replacing CommonScript_Sim with parameters as
+needed. This will reduce file size and simplify maintenance, and make simulation
+available by default for all files. By default each part should now have the script
+disabled and script field populated with the call to the generic script, leaving user
+able to override with their own script as desired."* Three changes: (1) the old
+`CommonScript_Sim` (connector-relationship classification into a placeholder value
+array, Step 44 above) is REMOVED, not extended, and a new `CommonScript_
+GenericPartActions(ctx, opts)` takes its place, last among the `CommonScript_<Name>`
+examples — a genuinely generic request/response dispatcher driven purely by
+`ctx.part.type` (an INITIATOR that originates a fresh request every tick, a RESPONDER
+that terminates a request with a reply instead of relaying it, or — the default — a
+PASSTHROUGH that relays both directions) and each connector's own `relationship`
+(which action label a RESPONDER's reply gets), reading only `connectorType: 'c'`
+connectors and using `ctx.part.rawLabel` as every packet's subject; `opts` (optional:
+`initiatorTypes`/`responderTypes`/`relationshipActions`) lets a calling script
+override just the classification, each replacing (not merging with) its own built-in
+default list/map, without forking the whole function — the literal answer to "with
+parameters as needed." (2) `Store.createPart`'s (`state.js`) own `script` default
+parameter changes from `''` to `'return CommonScript_GenericPartActions(ctx);'`
+(`scriptEnabled` stays `false`) — since essentially no caller across `commands.js`/
+`main.js`/`simulation.js`'s own `ctx.createPart` passes `script` explicitly for a
+brand-new part, this one default-parameter change makes every part created ANY way
+(manual creation, Generate Stream/Industry, Auto-Complete Streams, Level Down, Split,
+Data Modeling tables, a script's own `ctx.createPart`, ...) simulation-ready the
+moment `scriptEnabled` is flipped on — "available by default for all files" going
+forward. `migrateDoc`'s per-part mapping gets the matching `p.script ?? 'return
+CommonScript_GenericPartActions(ctx);'` fallback, so a raw/foreign document with no
+`script` key at all (loaded via Load JSON/Load/Load Example) is backfilled the same
+way — `??` only fires on a genuinely missing/undefined field, so a part that
+explicitly saved `script: ''` (every bundled example's non-scripted parts included) is
+left untouched. `archimate.js`'s own part-construction (bypasses `Store.createPart`
+entirely, building plain objects for `store.loadFromJSON`) gets the identical default
+for the same reason, so ArchiMate-imported models are simulation-ready out of the box
+too. (3) the "generic part actions demo" example is rewritten to actually USE this:
+every one of its 9 parts' `script` field shrinks to the one-line `'return
+CommonScript_GenericPartActions(ctx);'` (left `scriptEnabled: true`, per the reported
+instruction to "leave script enabled" on this specific demo, unlike the new
+create-time default), cutting the file from roughly 56KB to about 13KB — proving the
+shared-function design didn't change behavior at all: the same 4-hop product-inquiry
+chain and 3-way capability-inventory fan-out round-trip identically. `check_common_
+script_sim_classifies_connectors` is replaced by `check_common_script_generic_part_
+actions_default` (`tests/run_all.py`): the new create-time/migrateDoc defaults
+(including the "leaves an explicit empty script alone" case), a real initiator ->
+passthrough -> responder chain round-tripping over a real `sim.stepSimulation()` run,
+and the `opts` override reclassifying an otherwise-passthrough type into a responder
+with a custom reply action — proven via a plain Node `Store`/`runTick` script (no
+browser) before writing the test, then via a real TEMP BREAK. `check_generic_part_
+actions_example` was updated in place for the shrunk demo file (its "every part
+shares one script" assertion now checks the shared one-liner, not a shared ~6KB
+blob). `state.js`'s own top-of-file doc comment and this section were both updated.
+
+The one-line default call itself is now a single exported constant, `DEFAULT_PART_
+SCRIPT` (`state.js`, right after `DEFAULT_BATCH_SCRIPT_CODE`), rather than the same
+literal string retyped at each of `Store.createPart`'s default parameter, `migrateDoc`'s
+backfill, and `archimate.js`'s own part construction — a real follow-on bug surfaced
+this: Advanced > Code Summary's "part with no script" exclusion (`promptCodeSummary`,
+`main.js`) used to mean a truly empty string, and now that EVERY new part ships with a
+non-empty default script, that filter would have started listing every single
+unscripted part in the document, defeating the feature's own security-review purpose.
+Fixed by excluding a part whose script is blank OR exactly equal to `DEFAULT_PART_
+SCRIPT` (already-reviewed, shipped code — nothing new to surface) while still including
+one that calls the same function with a custom `opts` override (genuinely
+reviewable). `check_code_summary` gained two more parts covering exactly this
+distinction, proven via the same TEMP BREAK pass.
+
+**Simulation > Manage Part Scripts...** (`App.promptManagePartScripts`, `main.js`):
+a direct follow-up in the same session, once the default-everywhere change above made
+individually flipping "Part Script Enabled" per part impractical at any real scale —
+reported directly: *"add a command under simulation for enabling/disabling part
+scripts by presenting a dialog showing headers for order and filters (stream, part
+type, model, etc, checkbox all/none) and list of parts for user to quickly
+enable/disable."* Reuses `promptAddExisting`'s own established shape almost exactly
+(Type/Model/Stream `<select>` filters, a `<table>` with clickable sortable column
+headers, a header "select/deselect all" checkbox synced to the filtered rows'
+current state) rather than inventing a new list-with-filters pattern — the one
+difference is behavioral, not structural: `promptAddExisting`'s checkboxes build up a
+SELECTION for one eventual "Add Selected" submit, while this dialog's checkboxes ARE
+the action — each row's checkbox toggles that Part's own `scriptEnabled` immediately
+(the identical single-property, live-and-undoable change the property panel's own
+"Part Script Enabled" checkbox already makes), so there's nothing to Save/Cancel —
+just a Close button, like the read-only Stream Templates catalog. Lists every Part in
+the WHOLE document, deliberately not scoped to `store.simSelectedModel` — Model is one
+of the filters instead, since managing scripts is a document-wide setup task, not a
+per-simulation-run one. Columns are Label/Type/Model/Stream/Order, all sortable by
+clicking their header — Order included per the report, alongside the
+`promptAddExisting`-style trio. The header checkbox applies to whatever the CURRENT
+filters resolve to, as a single `recordAndRender()` — one undo step for the whole
+bulk toggle, matching how Smart Check Model's own "Fix Selected" batches its history
+entry rather than one per affected part — rather than the per-row toggle's own
+one-recordAndRender-per-click (each individual toggle is its own small, deliberate
+edit; a filtered bulk toggle is one coherent action). Reachable from the Simulation
+menu's own new group (a separator above and below it, between Reset Simulation and
+the log/snapshot commands), and — unlike every other Simulation menu action — does
+NOT require a simulation model to be selected first, handled as a special case ahead
+of `runSimAction`'s existing `if (!modelName) return` guard. New
+`check_manage_part_scripts_dialog` (`tests/run_all.py`): the dialog lists parts
+spanning multiple models at once; each filter narrows the row list correctly; a
+single row's own checkbox flips the real part's `scriptEnabled`; the Order header
+sorts numerically; and the header select-all/none, with a Stream filter active,
+toggles only the matching row while leaving an out-of-filter part's own
+`scriptEnabled` alone — proven via TEMP BREAK (the bulk toggle applied to every part
+instead of just the filtered rows). `public/instructions.html`'s Simulation Scripting
+intro paragraph, and a new "What to expect from each role" pair of summary tables
+(INITIATOR/RESPONDER/PASSTHROUGH's default types and per-tick behavior, and the
+`relationshipActions` reply-wording map) were added in the same pass — the latter
+also a direct follow-up: *"add a summary table to instructions in simulation
+scripting section regarding initiator types, passthroughs etc. logic to help users
+understand what to expect of each type."*
+
 **Catalogs > Stream Templates** (`App.promptStreamTemplates`, `main.js`): reported
 directly, immediately after the above — *"In Catalogs menu after SFCCE create a new
 separation line and then a new item 'Stream Templates' and command to open new form --

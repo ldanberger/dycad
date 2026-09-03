@@ -10,5 +10,6 @@
   "pipeline demo.json",
   "smart factory 3d demo.json",
   "ui dashboard elements demo.json",
-  "connector introspection demo.json"
+  "connector introspection demo.json",
+  "generic part actions demo.json"
 ]

@@ -33,8 +33,9 @@ no blank-canvas guessing required.</p>
   demonstration of most of the concepts on this page: <code>main()</code> at the top calls a chain of
   <code>BatchScript_*</code> functions in sequence (see "Simulation Scripting" below for the full script
   contract this all runs under), and further down are <code>dataAutoFill()</code> (what Data Modeling &gt;
-  Autofill calls), <code>CommonScript_Example</code>/<code>CommonScript_Sim</code> (callable from any Part's
-  own script), and <code>CustomRemap_Example</code> (selectable from Remap's Pattern dropdown).</li>
+  Autofill calls), <code>CommonScript_Example</code>/<code>CommonScript_GenericPartActions</code> (callable
+  from any Part's own script — the latter is also the default every new Part's own Script field is
+  pre-populated with), and <code>CustomRemap_Example</code> (selectable from Remap's Pattern dropdown).</li>
   <li>Click <strong>Run</strong> (or Ctrl+Enter) with <code>main()</code> selected in the Function dropdown —
   it's the default. This runs the whole starter chain: generates a full sample industry dataset, builds a
   "Business Functions" organization view (already laid out, zoomed, and opened in the 3D View too), then
@@ -776,7 +777,11 @@ entirely rather than left visible with no effect; they may return once actually 
 <h2 id="simulation">7. Simulation Scripting</h2>
 <p>Any part can carry a script that runs once per simulation "tick," letting you model how values or state
 flow and change across a live architecture — not just a static diagram. Turn it on per-part with "Part Script
-Enabled" in Root Properties, then write the script body in the Script field.</p>
+Enabled" in Root Properties, then write the script body in the Script field. To flip that checkbox on/off for
+many parts at once instead of one at a time, use <strong>Simulation &gt; Manage Part Scripts...</strong> — a
+dialog listing every part in the document (filterable by Type/Model/Stream, sortable by clicking a column
+header, Order included), where each row's own checkbox toggles that part's "Part Script Enabled" immediately,
+and the header checkbox enables/disables every row currently matching the filters at once.</p>
 
 <h3>What a script receives (the <code>ctx</code> object)</h3>
 <table class="docs-table">
@@ -964,17 +969,89 @@ anything its own <code>ctx</code> parameter provides — it has no access to <co
 directly, the same restriction any part script already has. A second shipped example,
 <code>CommonScript_DebugOutLog(ctx)</code>, is meant to be called from (or copied into) any part's script — it
 logs <code>ctx.inputs</code> verbatim as one compact-JSON line to the Debug Log tab (<code>ctx.logDebug</code>),
-bracketed by <code>'-i--'</code>/<code>'-e--'</code> marker lines. A third, <code>CommonScript_Sim(ctx)</code> —
-placed last, as the more complete of the two — is meant to be copied into (or called from) a part's own script
-field directly: it classifies every incoming connector (<code>ctx.inputs</code>, this part as the "to" side) and
-outgoing connector (<code>ctx.outputs</code>, this part as the "from" side) by <code>relationship</code> against
-two small lookup lists apiece (an "action" list and a "passthrough" list, one pair for incoming and one for
-outgoing), appending a <code>{ action, reason }</code> descriptor to a running <code>value</code> array for each
-match, dumping every intermediate to the Debug Log along the way. Its own return statement is a working example
-of every field a part script's return can set — <code>value</code>, <code>state</code>, <code>response</code>,
-<code>leftBadge</code>, and <code>rightBadge</code> — and demonstrates <code>value</code> as an array (matching
-<code>state</code>'s own always-object convention for the other fields), a recommended shape rather than one the
-engine requires.</p>
+bracketed by <code>'-i--'</code>/<code>'-e--'</code> marker lines. A third,
+<code>CommonScript_GenericPartActions(ctx, opts)</code> — placed last, as the most complete of the three — is the
+one every NEW Part's own Script field is pre-populated with (<code>return
+CommonScript_GenericPartActions(ctx);</code>, "Part Script Enabled" left off): a generic request/response
+dispatcher driven entirely by <code>ctx.part.type</code> — an INITIATOR (e.g. a Business Actor) originates a fresh
+request every tick and logs whatever reply eventually comes back; a RESPONDER (e.g. a Data Entity or a Business
+Capability) terminates a forward request with a generic reply instead of relaying it further; anything else is a
+generic PASSTHROUGH that relays a fresh request downstream and any reply back upstream — using only
+<code>'c'</code> (Connector) connectors and each part's own <code>rawLabel</code> as every packet's subject, never
+a hardcoded part id or label. Which relationship a request arrived on drives a RESPONDER's own reply wording too
+(e.g. an "Access" connector reads as "retrieved a record for", a "Composition" connector as "reported inventory
+status for"). Pass an optional second argument, <code>{ initiatorTypes, responderTypes, relationshipActions }</code>,
+to override just the classification without writing a whole new script — or replace the one-line default with a
+completely custom script at any time, same as any other Part. See the "generic part actions demo" example (File
+&gt; Load Example) for this running end to end across two flows.</p>
+
+<h4>What to expect from each role</h4>
+<p>Since every new Part ships wired to <code>CommonScript_GenericPartActions</code> by default, it's worth knowing
+which of the three roles your part's own <code>ctx.part.type</code> falls into BEFORE you turn "Part Script
+Enabled" on — this is what actually happens once you do, with no other script written at all:</p>
+<table class="docs-table">
+  <thead><tr><th>Role</th><th>Default types</th><th>What it does each tick</th><th>What you'll see</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>INITIATOR</strong></td>
+      <td><code>BusinessActor</code>, <code>BusinessRole</code>, <code>GeneralActor</code>,
+      <code>BusinessOrganizationUnit</code></td>
+      <td>Originates a brand-new request EVERY tick, broadcast identically to all of its outgoing <code>'c'</code>
+      connectors — it never waits to be asked. Also watches <code>ctx.responses</code> and logs (via
+      <code>ctx.log</code>) whenever a reply comes back from any downstream target, naming who replied.</td>
+      <td>A left badge like <code>req #3</code> that climbs every tick; Message Log lines announcing each request
+      issued and each reply received. With no outgoing connectors at all it still runs (nothing to log
+      each tick, no error).</td>
+    </tr>
+    <tr>
+      <td><strong>RESPONDER</strong></td>
+      <td><code>DataDataEntity</code>, <code>DataObject</code>, <code>DataEntityDetails</code>,
+      <code>DataLogicalComponent</code>, <code>DataPhysicalComponent</code>, <code>BusinessObject</code>,
+      <code>BusinessCapability</code>, <code>Contract</code>, <code>Product</code></td>
+      <td>Waits — does nothing until a genuinely NEW request arrives on an incoming <code>'c'</code> connector,
+      then answers it once with a <code>response</code> (delivered back upstream one tick later, per "Responses"
+      below) and STOPS relaying it any further. The reply's wording depends on the relationship the request
+      arrived on — see the table below.</td>
+      <td>A left badge like <code>answered #3</code> the tick it replies; an Activity Log line naming which
+      request it answered, via which connector relationship, and from whom.</td>
+    </tr>
+    <tr>
+      <td><strong>PASSTHROUGH</strong> (the default — every other type)</td>
+      <td><code>BusinessProcess</code>, <code>BusinessFunction</code>, <code>ApplicationService</code>,
+      <code>ApplicationComponent</code>, <code>ApplicationFunction</code>, and anything else not listed above</td>
+      <td>Purely relays: a fresh forward request on an incoming <code>'c'</code> connector is re-broadcast
+      downstream (tagging its own <code>rawLabel</code> onto the request's <code>path</code>), and any reply
+      arriving via <code>ctx.responses</code> is relayed straight back upstream, one hop per tick each
+      direction.</td>
+      <td>A left badge like <code>#3</code> once something has actually passed through it; a Debug Log line each
+      time it relays a request forward or a reply back. Sits idle (no badge) with nothing to relay.</td>
+    </tr>
+  </tbody>
+</table>
+<p>What a RESPONDER's reply says depends on the <code>relationship</code> of the connector the request arrived on
+— the built-in <code>relationshipActions</code> map:</p>
+<table class="docs-table">
+  <thead><tr><th>Connector relationship</th><th>Reply wording</th></tr></thead>
+  <tbody>
+    <tr><td><code>Access</code></td><td>"retrieved a record for"</td></tr>
+    <tr><td><code>Triggering</code></td><td>"executed and acknowledged"</td></tr>
+    <tr><td><code>Serving</code></td><td>"served a result for"</td></tr>
+    <tr><td><code>Assignment</code></td><td>"processed on behalf of"</td></tr>
+    <tr><td><code>Flow</code></td><td>"processed a data flow for"</td></tr>
+    <tr><td><code>Association</code></td><td>"shared a reference for"</td></tr>
+    <tr><td><code>Realization</code></td><td>"realized an output for"</td></tr>
+    <tr><td><code>Composition</code></td><td>"reported inventory status for"</td></tr>
+    <tr><td><code>Aggregation</code></td><td>"reported aggregated status for"</td></tr>
+    <tr><td>anything else</td><td>"responded to"</td></tr>
+  </tbody>
+</table>
+<p>Every one of these lists is just a built-in default — pass
+<code>{ initiatorTypes: [...], responderTypes: [...], relationshipActions: {...} }</code> as
+<code>CommonScript_GenericPartActions</code>'s second argument to override any of them for one specific part,
+without touching the shared function itself (see the "generic part actions demo" example's readme note, or Advanced
+&gt; Code Summary, for a worked example). Only <code>'c'</code> (Connector) traffic is read by any of the three
+roles — an <code>'s'</code> (Stream) connector is invisible to this dispatcher entirely.</p>
+
 <p>A fourth kind of function belongs here too: a user-designed <strong>Remap layout</strong> (see "Remap" above),
 picked interactively from that dialog's Pattern dropdown ("Custom" reveals a second dropdown listing every
 matching function found here) rather than called from <code>main()</code>, a menu item, or a part script. The
@@ -988,13 +1065,16 @@ script in the current document, for security review before running an unfamiliar
 run with full access to the document — creating parts/connectors, calling <code>findParts</code> — and to any
 configured API secrets). Every part with a script is listed regardless of whether its "Part Script Enabled"
 checkbox is currently on, since a disabled script could always be re-enabled later; each entry is clearly marked
-ENABLED or disabled and identifies its source part by label, type, and id, grouped by model.</p>
+ENABLED or disabled and identifies its source part by label, type, and id, grouped by model. A part left at the
+shipped, unmodified <code>return CommonScript_GenericPartActions(ctx);</code> default is left OUT of the summary
+— it's already-reviewed, known code, nothing new to check — while one calling that same function with a custom
+<code>opts</code> override, or any other custom script, still appears.</p>
 
 <h3>What a script must return</h3>
 <p>A script must return an object <code>{ value, state, response, leftBadge, rightBadge }</code> —
 <code>response</code>, <code>leftBadge</code>, and <code>rightBadge</code> are all optional. <code>value</code>
-and <code>response</code> can be any JS value — an object or array (as the shipped <code>CommonScript_Sim</code>
-example's <code>value</code> array and <code>state</code>'s own always-object convention illustrate) is a
+and <code>response</code> can be any JS value — an object (as the shipped <code>CommonScript_GenericPartActions</code>
+example's request/reply packets and <code>state</code>'s own always-object convention illustrate) is a
 recommended shape but not a required one.</p>
 <ul>
   <li><strong>value</strong> — what downstream connectors carry to their targets next tick. Leaving it out (or

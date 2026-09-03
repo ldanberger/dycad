@@ -1,5 +1,5 @@
 import { loadAllData } from './data.js';
-import { Store, ciEq, newId } from './state.js';
+import { Store, ciEq, newId, DEFAULT_PART_SCRIPT } from './state.js';
 import { parseArchimateXml } from './archimate.js';
 import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCommands, renderProperties, renderViewDisplayFilters, renderMessageLog, LOG_TABS, escapeHtml, groupFill, getCommandDefs, CMD_ICONS, getAllPinnedFields, setAllPinnedFields, getAllFieldHeights, setAllFieldHeights, isAttributeForeignKey } from './render.js';
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule, formatSimValue, segmentIntersectsRect } from './canvas.js';
@@ -1133,9 +1133,17 @@ class App {
    * it. Reuses promptTextEdit's readonly mode — the same "larger editor" modal a field's
    * own double-click-to-expand already opens, with the same monospace .text-edit-area —
    * rather than building a new modal for what's fundamentally the same "show me this text
-   * in a bigger read-only box" need. */
+   * in a bigger read-only box" need. Excludes a part whose script is blank OR exactly the
+   * unmodified DEFAULT_PART_SCRIPT (state.js) — since every new Part now ships wired to
+   * that shipped, already-reviewed default (see Store.createPart), this is "no CUSTOM
+   * code to review here," not "no script at all"; a part whose script was edited to
+   * anything else (including a DEFAULT_PART_SCRIPT call with opts, e.g. `return
+   * CommonScript_GenericPartActions(ctx, {...});`) still shows, same as before. */
   promptCodeSummary() {
-    const scripted = this.store.doc.parts.filter((p) => (p.script || '').trim().length > 0);
+    const scripted = this.store.doc.parts.filter((p) => {
+      const s = (p.script || '').trim();
+      return s.length > 0 && s !== DEFAULT_PART_SCRIPT;
+    });
     const batchCode = (this.store.batchScriptCode || '').trim();
     if (scripted.length === 0 && !batchCode) {
       this.promptTextEdit({ title: 'Code Summary', value: 'No parts in this document have a script, and the Script Console is empty.', readonly: true, onSave: () => {} });
@@ -1169,6 +1177,134 @@ class App {
       }
     }
     this.promptTextEdit({ title: 'Code Summary', value: lines.join('\n'), readonly: true, onSave: () => {} });
+  }
+
+  /** Simulation > Manage Part Scripts...: reported directly — "add a command under
+   * simulation for enabling/disabling part scripts by presenting a dialog showing
+   * headers for order and filters (stream, part type, model, etc, checkbox all/none)
+   * and list of parts for user to quickly enable/disable." Lists every Part in the
+   * whole document (deliberately NOT scoped to the currently selected simulation
+   * model — Model is one of the filters instead, mirroring promptAddExisting's own
+   * Type/Model/Stream filter row above), with the same clickable-header sort
+   * convention (Label/Type/Model/Stream/Order — Order included per the report). Each
+   * row's own checkbox toggles that ONE part's scriptEnabled immediately (the exact
+   * same live, single-property-change behavior the property panel's own "Part Script
+   * Enabled" checkbox already has — see renderShowFieldsPanel, render.js); the header
+   * checkbox instead applies to every row currently matching the active filters at
+   * once, as a single recordAndRender — one undo step for the whole bulk toggle,
+   * matching how other bulk operations in this codebase (e.g. Smart Check Model's
+   * "Fix Selected") batch their own history entry rather than spamming one per
+   * affected part. Every change already applies live, so there's nothing to
+   * Save/Cancel — a single Close button, same as the read-only Stream Templates
+   * catalog above. */
+  promptManagePartScripts() {
+    const store = this.store;
+    const allParts = store.doc.parts;
+    if (allParts.length === 0) { this.toast('No parts in this document.', true); return; }
+
+    const elTitleFor = (type) => elementByType(store, type)?.title || type;
+    const typeOptions = [...new Set(allParts.map((p) => p.type))].sort();
+    const modelOptions = [...new Set(allParts.map((p) => p.model))].sort();
+    const streamOptions = [...new Set(allParts.flatMap((p) => p.streams || []))].sort();
+
+    const uiState = { typeFilter: '', modelFilter: '', streamFilter: '', sortCol: 'label', sortDir: 'asc' };
+
+    const root = document.getElementById('modal-root');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal-box';
+    box.style.width = '760px';
+    box.style.maxWidth = '92vw';
+    box.innerHTML = `
+      <h3>Manage Part Scripts</h3>
+      <div style="font-size:11px;color:var(--text-muted);margin:-4px 0 12px 0;">Toggling a checkbox applies immediately (undoable, same as the property panel). Click a column header to sort.</div>
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <select id="mps-type"><option value="">All types</option>${typeOptions.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(elTitleFor(t))}</option>`).join('')}</select>
+        <select id="mps-model"><option value="">All models</option>${modelOptions.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}</select>
+        <select id="mps-stream"><option value="">All streams</option>${streamOptions.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')}</select>
+      </div>
+      <div style="max-height:400px; overflow:auto; border:1px solid var(--border); border-radius:6px;">
+        <table style="width:100%; border-collapse:collapse; font-size:12px;">
+          <thead><tr>
+            <th style="width:28px;"><input type="checkbox" id="mps-select-all" title="Enable/disable every row matching the current filters" /></th>
+            <th class="mps-sort" data-col="label" style="cursor:pointer; text-align:left; padding:5px 8px;">Label</th>
+            <th class="mps-sort" data-col="type" style="cursor:pointer; text-align:left; padding:5px 8px;">Type</th>
+            <th class="mps-sort" data-col="model" style="cursor:pointer; text-align:left; padding:5px 8px;">Model</th>
+            <th class="mps-sort" data-col="stream" style="cursor:pointer; text-align:left; padding:5px 8px;">Stream</th>
+            <th class="mps-sort" data-col="order" style="cursor:pointer; text-align:left; padding:5px 8px;">Order</th>
+          </tr></thead>
+          <tbody id="mps-tbody"></tbody>
+        </table>
+      </div>
+      <div class="modal-actions"><button class="cancel">Close</button></div>
+    `;
+    overlay.appendChild(box);
+    root.appendChild(overlay);
+
+    const renderRows = () => {
+      let rows = allParts.filter((p) =>
+        (!uiState.typeFilter || ciEq(p.type, uiState.typeFilter)) &&
+        (!uiState.modelFilter || ciEq(p.model, uiState.modelFilter)) &&
+        (!uiState.streamFilter || (p.streams || []).includes(uiState.streamFilter)));
+      rows = [...rows].sort((a, b) => {
+        if (uiState.sortCol === 'order') {
+          const cmp = (a.order || 0) - (b.order || 0);
+          return uiState.sortDir === 'asc' ? cmp : -cmp;
+        }
+        let va, vb;
+        if (uiState.sortCol === 'type') { va = elTitleFor(a.type); vb = elTitleFor(b.type); }
+        else if (uiState.sortCol === 'stream') { va = (a.streams || [])[0] || ''; vb = (b.streams || [])[0] || ''; }
+        else { va = a[uiState.sortCol] || ''; vb = b[uiState.sortCol] || ''; }
+        const cmp = String(va).localeCompare(String(vb));
+        return uiState.sortDir === 'asc' ? cmp : -cmp;
+      });
+      uiState.currentRows = rows;
+      const tbody = box.querySelector('#mps-tbody');
+      tbody.innerHTML = rows.map((p) => `
+        <tr>
+          <td style="padding:4px 8px;"><input type="checkbox" class="mps-row-check" data-id="${p.id}" ${p.scriptEnabled ? 'checked' : ''} /></td>
+          <td style="padding:4px 8px;">${escapeHtml(p.label)}</td>
+          <td style="padding:4px 8px;">${escapeHtml(elTitleFor(p.type))}</td>
+          <td style="padding:4px 8px;">${escapeHtml(p.model)}</td>
+          <td style="padding:4px 8px;">${escapeHtml((p.streams || []).join(', '))}</td>
+          <td style="padding:4px 8px;">${p.order ?? 0}</td>
+        </tr>`).join('') || `<tr><td colspan="6" style="text-align:center; padding:12px; color:var(--text-muted);">No matching parts</td></tr>`;
+      tbody.querySelectorAll('.mps-row-check').forEach((cb) => {
+        cb.addEventListener('change', () => {
+          const part = store.findPart(cb.dataset.id);
+          if (part) { part.scriptEnabled = cb.checked; this.recordAndRender(); }
+          syncSelectAllCheckbox();
+        });
+      });
+      syncSelectAllCheckbox();
+    };
+    const syncSelectAllCheckbox = () => {
+      const selectAllCb = box.querySelector('#mps-select-all');
+      const rows = uiState.currentRows || [];
+      selectAllCb.checked = rows.length > 0 && rows.every((p) => p.scriptEnabled);
+      selectAllCb.indeterminate = !selectAllCb.checked && rows.some((p) => p.scriptEnabled);
+    };
+    renderRows();
+
+    box.querySelector('#mps-select-all').addEventListener('change', (e) => {
+      const rows = uiState.currentRows || [];
+      rows.forEach((p) => { p.scriptEnabled = e.target.checked; });
+      this.recordAndRender();
+      renderRows();
+    });
+    box.querySelector('#mps-type').addEventListener('change', (e) => { uiState.typeFilter = e.target.value; renderRows(); });
+    box.querySelector('#mps-model').addEventListener('change', (e) => { uiState.modelFilter = e.target.value; renderRows(); });
+    box.querySelector('#mps-stream').addEventListener('change', (e) => { uiState.streamFilter = e.target.value; renderRows(); });
+    box.querySelectorAll('.mps-sort').forEach((th) => {
+      th.addEventListener('click', () => {
+        const col = th.dataset.col;
+        if (uiState.sortCol === col) uiState.sortDir = uiState.sortDir === 'asc' ? 'desc' : 'asc';
+        else { uiState.sortCol = col; uiState.sortDir = 'asc'; }
+        renderRows();
+      });
+    });
+    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
   }
 
   /** Clears every part's part.pin3D (right-click-drag positions set in the 3D View —
@@ -4718,6 +4854,10 @@ function wireGlobalEvents(app) {
   // Simulation model selector, entirely independent of store.defaultModel (used only
   // when creating new nodes) — never on the active tab/view.
   function runSimAction(action) {
+    // Manage Part Scripts spans the whole document (Model is one of its own filters,
+    // same as Code Summary/Add Existing) -- not scoped to the currently selected
+    // simulation model, so it's handled before that guard below.
+    if (action === 'managePartScripts') { app.promptManagePartScripts(); return; }
     const modelName = app.store.simSelectedModel;
     if (!modelName) { app.toast('No model selected.', true); return; }
     if (action === 'stepSimulation') {
@@ -5045,7 +5185,11 @@ function wireGlobalEvents(app) {
   // plus the log/snapshot commands that don't warrant their own toolbar button) —
   // Script Console and Code Summary moved to the Advanced menu, since neither one is
   // actually a simulation action (Script Console works with no model selected at all,
-  // and Code Summary reviews every model's scripts, not the selected one). =====
+  // and Code Summary reviews every model's scripts, not the selected one). "Manage
+  // Part Scripts..." (reported directly, see App.promptManagePartScripts above) is
+  // its own group, above the log/snapshot commands — a whole-document setup action
+  // (like Code Summary, NOT scoped to the currently selected simulation model),
+  // unlike everything else in this menu. =====
   const SIMULATION_LINKS = [
     { label: 'Run Simulation', action: 'runSimulation' },
     { label: 'Pause Simulation', action: 'pauseSimulation' },
@@ -5053,12 +5197,15 @@ function wireGlobalEvents(app) {
     { label: 'Step Simulation', action: 'stepSimulation' },
     { label: 'Stop Simulation', action: 'stopSimulation' },
     { label: 'Reset Simulation', action: 'resetSimulation' },
+    { separator: true },
+    { label: 'Manage Part Scripts...', action: 'managePartScripts' },
+    { separator: true },
     { label: 'Show Simulation Log', action: 'showSimLog' },
     { label: 'Save Simulation Snapshot', action: 'saveSimSnapshot' },
     { label: 'Load Simulation Snapshot', action: 'loadSimSnapshot' },
   ];
   const simulationMenu = document.getElementById('simulation-menu');
-  simulationMenu.innerHTML = SIMULATION_LINKS.map((l) => `<div class="dd-item" data-action="${l.action}">${l.label}</div>`).join('');
+  simulationMenu.innerHTML = SIMULATION_LINKS.map((l) => l.separator ? '<div class="dd-separator"></div>' : `<div class="dd-item" data-action="${l.action}">${l.label}</div>`).join('');
   simulationMenu.querySelectorAll('.dd-item').forEach((item) => {
     item.addEventListener('click', () => {
       runSimAction(item.dataset.action);
