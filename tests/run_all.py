@@ -15481,7 +15481,15 @@ def check_copy_model(page):
     untouched; and no viewMembers are created for any of the new parts. Also covers
     the real Copy Model toolbar button/dialog (#model-copy-btn): opens with a
     deduplicated "<source> copy" suggested name pre-filled, and switches Default Model
-    to the new copy on submit, same convention as Add Model."""
+    to the new copy on submit, same convention as Add Model. Direct follow-up bug
+    report: "i copied a model, added all parts to new view, with new model as default
+    i ran simulator. It runs the original not the new copied model pointed to by
+    default model or active on current view" -- store.simSelectedModel (the
+    Simulation toolbar's own, otherwise-independent model selector -- see its comment,
+    state.js) silently kept pointing at the OLD model after a copy even though Default
+    Model had already moved on, so Run/Step Simulation kept targeting the original.
+    Fixed by also switching simSelectedModel to the new copy, right alongside Default
+    Model, in the same submit handler."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -15540,6 +15548,8 @@ def check_copy_model(page):
       document.querySelector('.modal-box .submit').click();
       await new Promise(r => setTimeout(r, 30));
       out.switchedToNewModel = store.defaultModel === out.suggestedName;
+      out.simSelectedModelSwitched = store.simSelectedModel === out.suggestedName;
+      out.simModelSelectDomValue = document.getElementById('sim-model-select').value;
 
       return out;
     }
@@ -15573,9 +15583,13 @@ def check_copy_model(page):
         problems.append(f"expected the Copy Model dialog to suggest a '<source> copy'-style name, got {result['suggestedName']!r}")
     if not result["switchedToNewModel"]:
         problems.append("expected submitting Copy Model to switch Default Model to the new copy")
+    if not result["simSelectedModelSwitched"]:
+        problems.append("expected submitting Copy Model to ALSO switch store.simSelectedModel (the Simulation toolbar's own model target) to the new copy -- otherwise Run/Step Simulation silently keeps targeting the original model")
+    if result["simModelSelectDomValue"] != result["suggestedName"]:
+        problems.append(f"expected the real Simulation toolbar's #sim-model-select DOM dropdown to reflect the new copy after render, got {result['simModelSelectDomValue']!r}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, f"copyModel clones every part/connector tagged with the source model (script, scriptEnabled, attribute ids, and mirrorOf all correctly preserved/remapped) into a fresh model, leaves the original and unrelated models untouched, creates no viewMembers, and the real Copy Model button/dialog suggests a deduplicated name ({result['suggestedName']!r}) and switches Default Model to it"
+    return True, f"copyModel clones every part/connector tagged with the source model (script, scriptEnabled, attribute ids, and mirrorOf all correctly preserved/remapped) into a fresh model, leaves the original and unrelated models untouched, creates no viewMembers, and the real Copy Model button/dialog suggests a deduplicated name ({result['suggestedName']!r}) and switches BOTH Default Model and the Simulation toolbar's own model selector to it"
 
 
 def check_load_sfcce(page):

@@ -5601,4 +5601,20 @@
 // public/instructions.html's lead paragraph gained an "Open source" link, and its
 // Manage Part Scripts mention updated for the new Cancel/Apply behavior.
 // DESIGN_DOCUMENT.md and tests/README.md updated for (1) and (2).
-export const APP_VERSION = '0.937';
+// v0.938: bug fix, reported directly: "i copied a model, added all parts to new
+// view, with new model as default i ran simulator. It runs the original not the new
+// copied model pointed to by default model or active on current view." Root cause:
+// store.simSelectedModel (the Simulation toolbar's own model selector, targeted by
+// Run/Step/Stop/Reset Simulation) is deliberately independent of store.defaultModel
+// in general -- so switching Default Model elsewhere never yanks a running
+// simulation's target out from under it -- but Copy Model's own submit handler only
+// ever updated Default Model, never simSelectedModel, leaving it silently pointed at
+// the OLD model after a copy. Fixed by also setting store.simSelectedModel to the
+// new copy in both Copy Model's AND Add Model's submit handlers (same "you're about
+// to work in what you just created" convention both already apply to Default Model);
+// app.render()'s existing refreshSimToolbar() hook already picks up the change with
+// no further wiring. check_copy_model gained two new assertions (simSelectedModel
+// itself, and the real #sim-model-select dropdown's DOM value after render) --
+// proven via TEMP BREAK, which reproduces the exact reported symptom. DESIGN_
+// DOCUMENT.md and tests/README.md updated.
+export const APP_VERSION = '0.938';

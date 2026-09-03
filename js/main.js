@@ -5301,7 +5301,12 @@ function wireGlobalEvents(app) {
 
   document.getElementById('model-select').addEventListener('change', (e) => { store.defaultModel = e.target.value; app.render(); });
   document.getElementById('model-add-btn').addEventListener('click', () => {
-    app.promptModal({ title: 'Add Model', fields: [{ key: 'name', label: 'Model name', value: '' }], onSubmit: (v) => { if (v.name) { store.addModel(v.name); store.defaultModel = v.name; app.render(); } } });
+    // Switches Default Model AND the (independent — see store.simSelectedModel's own
+    // comment, state.js) Simulation toolbar's model selector to the new model, same
+    // "you're about to work in what you just created" convention as Copy Model below
+    // — deliberately NOT done by the plain model-select dropdown just above, which
+    // must never redirect a person away from a model they're actively simulating.
+    app.promptModal({ title: 'Add Model', fields: [{ key: 'name', label: 'Model name', value: '' }], onSubmit: (v) => { if (v.name) { store.addModel(v.name); store.defaultModel = v.name; store.simSelectedModel = v.name; app.render(); } } });
   });
   document.getElementById('model-remove-btn').addEventListener('click', async () => {
     if (await app.confirmModal(`Remove model "${store.defaultModel}"? Parts/connectors referencing it are kept but the model entry is removed.`)) {
@@ -5312,7 +5317,18 @@ function wireGlobalEvents(app) {
   // Reported directly: "We'll also need a model copy function, where everything
   // identified for a specific model will be copied into a new model." Deliberately
   // switches Default Model to the new copy afterward, same as Add Model above --
-  // matches the "you're about to work in what you just created" convention.
+  // matches the "you're about to work in what you just created" convention. Direct
+  // follow-up bug report: "i copied a model, added all parts to new view, with new
+  // model as default i ran simulator. It runs the original not the new copied model
+  // pointed to by default model or active on current view" -- store.simSelectedModel
+  // (the Simulation toolbar's OWN model selector, targeted by Run/Step/Stop/Reset
+  // Simulation) is deliberately independent of store.defaultModel in general (see its
+  // own comment, state.js -- switching Default Model elsewhere must never yank a
+  // running simulation's target out from under it), so it silently kept pointing at
+  // the OLD model after a copy, even though Default Model itself had already moved on.
+  // Fixed the same way Add Model now does: also switch simSelectedModel to the new
+  // copy here, since creating (or copying) a model is a one-time "you're about to work
+  // in what you just created" action, never a mid-simulation context switch.
   document.getElementById('model-copy-btn').addEventListener('click', () => {
     const source = store.defaultModel;
     let suggested = `${source} copy`, i = 2;
@@ -5325,6 +5341,7 @@ function wireGlobalEvents(app) {
         if (store.doc.models.some((m) => ciEq(m.modelName, v.name))) { app.toast(`A model named "${v.name}" already exists.`, true); return; }
         const { partCount, connectorCount } = copyModel(store, source, v.name);
         store.defaultModel = v.name;
+        store.simSelectedModel = v.name;
         app.recordAndRender();
         app.toast(`Copied model "${source}" to "${v.name}" (${partCount} part${partCount === 1 ? '' : 's'}, ${connectorCount} connector${connectorCount === 1 ? '' : 's'}).`, false, true);
       },

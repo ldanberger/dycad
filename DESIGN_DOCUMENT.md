@@ -3085,6 +3085,32 @@ break (iterating the LIVE `store.doc.parts` array instead of a `.filter()`'d cop
 while also pushing new parts onto that same array mid-loop) hung the test outright
 rather than just failing an assertion, itself a real confirmation the filter matters.
 
+**Model Copy also switches the Simulation toolbar's own model target**: a later direct
+bug report — *"i copied a model, added all parts to new view, with new model as
+default i ran simulator. It runs the original not the new copied model pointed to by
+default model or active on current view."* Root cause: `store.simSelectedModel` (the
+Simulation toolbar's OWN model selector, targeted by Run/Step/Stop/Reset Simulation —
+see its own comment, state.js: "Which model the Simulation toolbar... currently
+targets — entirely independent of this.doc.defaultModel") is deliberately decoupled
+from Default Model in general, so that switching Default Model elsewhere in the UI can
+never yank a running simulation out from under whoever's watching it — but Copy
+Model's own submit handler only ever updated Default Model, never `simSelectedModel`,
+so it silently kept pointing at the OLD (source) model after a copy, even though every
+other visible signal (Default Model, the newly populated view) suggested the NEW model
+was now "current." Fixed by also setting `store.simSelectedModel = v.name` in Copy
+Model's submit handler, right alongside `store.defaultModel`, and applied the identical
+fix to Add Model's own handler for the same "you're about to work in what you just
+created" reasoning — a one-time model-creation action is never the same case the
+general decoupling exists to protect against. `app.render()`'s existing
+`refreshSimToolbar()` hook (already called on every render) picks up the new
+`simSelectedModel` value automatically via `populateSimModelSelect`'s own
+already-valid-value passthrough, so no new render wiring was needed. `check_copy_model`
+gained two new assertions (`store.simSelectedModel` itself, and the real
+`#sim-model-select` DOM dropdown's value after render) — proven via TEMP BREAK
+(reverting just the `simSelectedModel` line), which reproduces the exact reported
+symptom: Default Model shows the copy, but the Simulation toolbar's own dropdown still
+reads the original.
+
 **UI dashboard elements** (`isUIDashboardType`, state.js; `ctx.ui`, simulation.js): a
 new element group for building simple sim-driven dashboards, reported directly —
 *"create a new group 'UI' of elements text_out, text_in, numeric_out, numeric_in ...
