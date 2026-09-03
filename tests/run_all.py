@@ -2516,7 +2516,13 @@ def check_batch_script_quickstart(page):
     FIRST one ever gets Smart Check View/Remap run on it by main() itself; the second
     is left exactly as insertSmartStream places it, with a Message Log reminder (exact
     text given in the report, reproduced verbatim below) telling a person which
-    settings to use if they want to Smart Check/Remap it too, interactively."""
+    settings to use if they want to Smart Check/Remap it too, interactively. Direct
+    follow-up, a later session: "Update this script with new parameter" (pasting
+    BatchScript_InsertSmartStreamExample2 with 'BusinessOrganizationUnit' added to its
+    own showTypes list, right after 'BusinessFunction') — the 12-type trace on 'Smart
+    Stream Example 2' becomes a 13-type one, picking up exactly one more part (the
+    Business Function's own containing org unit) that was already reachable but
+    previously filtered out; 23 -> 24 expected parts."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -2622,8 +2628,8 @@ def check_batch_script_quickstart(page):
         problems.append("expected exactly ONE tab open on the 'Smart Stream Example' view -- BatchScript_RemapExample should reuse InsertSmartStreamExample's own tab, not open a redundant second one")
     if not result["streamExample2ViewCreated"]:
         problems.append("expected BatchScript_InsertSmartStreamExample2 to create its own separate 'Smart Stream Example 2' view")
-    if result["streamExample2PartCount"] != 23:
-        problems.append(f"expected the broader 12-type trace to place 23 parts on 'Smart Stream Example 2' (same as the old one-pass 12-type shape), got {result['streamExample2PartCount']}")
+    if result["streamExample2PartCount"] != 24:
+        problems.append(f"expected the broader 13-type trace (BusinessOrganizationUnit added to showTypes) to place 24 parts on 'Smart Stream Example 2', got {result['streamExample2PartCount']}")
     if not result["streamExample2SingleTab"]:
         problems.append("expected exactly ONE tab open on the 'Smart Stream Example 2' view")
     if not result["streamExample2TabIsActive"]:
@@ -2654,7 +2660,7 @@ def check_batch_script_quickstart(page):
         problems.append(f"expected row type groupings {expected_row_type_sets}, got {result['rowTypeSets']}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "main() (run via the real Script Console UI) runs BatchScript_QuickStart, BatchScript_InsertSmartStreamExample, BatchScript_SmartCheckViewExample, BatchScript_RemapExample, then BatchScript_InsertSmartStreamExample2 in sequence, with pattern:'layered' correctly producing the 4-row hierarchy the first (7-type) trace implies, InsertSmartStreamExample2 unconditionally building its own separate 'Smart Stream Example 2' view (23 parts, the 12-type trace) and ending as the ACTIVE tab, and the exact reminder message logged afterward -- with the two 'Production Schedule' Data Entity parts on the first view confirmed as genuinely distinct (not a dedup bug) by tracing back to the source SFCCE data and buildIndustryTree's own documented id-derivation behavior"
+    return True, "main() (run via the real Script Console UI) runs BatchScript_QuickStart, BatchScript_InsertSmartStreamExample, BatchScript_SmartCheckViewExample, BatchScript_RemapExample, then BatchScript_InsertSmartStreamExample2 in sequence, with pattern:'layered' correctly producing the 4-row hierarchy the first (7-type) trace implies, InsertSmartStreamExample2 unconditionally building its own separate 'Smart Stream Example 2' view (24 parts, the 13-type trace) and ending as the ACTIVE tab, and the exact reminder message logged afterward -- with the two 'Production Schedule' Data Entity parts on the first view confirmed as genuinely distinct (not a dedup bug) by tracing back to the source SFCCE data and buildIndustryTree's own documented id-derivation behavior"
 
 
 def check_script_console_remap_and_smart_check_bindings(page):
@@ -5589,15 +5595,19 @@ def check_manage_part_scripts_dialog(page):
     reported directly: "add a command under simulation for enabling/disabling part
     scripts by presenting a dialog showing headers for order and filters (stream, part
     type, model, etc, checkbox all/none) and list of parts for user to quickly
-    enable/disable." Covers: the menu item is reachable (Simulation menu, its own
-    group, above the log/snapshot commands) with no model-selected requirement (unlike
-    every other Simulation menu action); the dialog lists parts across ALL models (not
-    just the currently selected simulation model); Type/Model/Stream filters narrow the
-    row list; clicking a row's own checkbox toggles that ONE part's scriptEnabled
-    immediately on the real store (not just the DOM); clicking the Order column header
-    sorts by part.order; and the header "select all" checkbox, with a filter active,
-    enables/disables only the currently-matching rows in one go, leaving a
-    filtered-OUT part's scriptEnabled untouched."""
+    enable/disable," then a direct follow-up: "manage part scripts needs a cancel
+    button to not change anything, and change close to apply." Covers: the menu item
+    is reachable (Simulation menu, its own group) with no model-selected requirement
+    (unlike every other Simulation menu action); the dialog lists parts across ALL
+    models; Type/Model/Stream filters narrow the row list; clicking the Order column
+    header sorts by part.order; a row's own checkbox only STAGES a scriptEnabled value
+    (the real part is untouched until Apply); Cancel discards every staged change with
+    no effect on the real document at all; a fresh dialog session starts with an empty
+    staging map (no leakage from a cancelled prior session); Apply commits every
+    staged change as one batch, leaving an untouched part exactly as it was; and the
+    header select-all/none checkbox, with a filter active, stages only the
+    currently-matching rows, leaving a filtered-OUT part's real scriptEnabled alone
+    even after Apply."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -5607,53 +5617,65 @@ def check_manage_part_scripts_dialog(page):
       const b = store.createPart({ type: 'BusinessProcess', label: 'MPSProcessB', model: 'As-is', order: 1, streams: [], scriptEnabled: true });
       const c = store.createPart({ type: 'BusinessActor', label: 'MPSActorC', model, order: 0, streams: [], scriptEnabled: false });
 
-      document.getElementById('simulation-menu-btn').click();
-      await new Promise(r => setTimeout(r, 60));
-      document.querySelector('#simulation-menu .dd-item[data-action=\\"managePartScripts\\"]').click();
-      await new Promise(r => setTimeout(r, 100));
+      const openDialog = async () => {
+        document.getElementById('simulation-menu-btn').click();
+        await new Promise(r => setTimeout(r, 60));
+        document.querySelector('#simulation-menu .dd-item[data-action=\\"managePartScripts\\"]').click();
+        await new Promise(r => setTimeout(r, 100));
+        return document.querySelector('.modal-overlay .modal-box');
+      };
+      const rowLabelsInOrder = (box) => [...box.querySelectorAll('#mps-tbody tr')].map(tr => tr.children[1] && tr.children[1].textContent);
+      const clickButton = (box, label) => [...box.querySelectorAll('.modal-actions button')].find(b => b.textContent.trim() === label).click();
 
-      const box = document.querySelector('.modal-overlay .modal-box');
-      const rowLabelsInOrder = () => [...box.querySelectorAll('#mps-tbody tr')].map(tr => tr.children[1] && tr.children[1].textContent);
-      const initialRows = rowLabelsInOrder();
+      // ---- Session 1: toggle a row, then Cancel -- nothing on the real document. ----
+      let box = await openDialog();
+      const initialRows = rowLabelsInOrder(box);
       const initialACheckbox = box.querySelector(`.mps-row-check[data-id=\\"${a.id}\\"]`).checked;
-
-      // Toggle A's own row checkbox -> real store mutation, immediately.
-      const aCheckbox = box.querySelector(`.mps-row-check[data-id=\\"${a.id}\\"]`);
+      let aCheckbox = box.querySelector(`.mps-row-check[data-id=\\"${a.id}\\"]`);
       aCheckbox.checked = true;
       aCheckbox.dispatchEvent(new Event('change'));
-      const aEnabledAfterToggle = a.scriptEnabled;
-
-      // Sort by Order.
+      const aRealRightAfterToggle = a.scriptEnabled; // must still be false -- staged only
       box.querySelector('.mps-sort[data-col=\\"order\\"]').click();
-      const rowsAfterOrderSort = rowLabelsInOrder();
-
-      // Filter to model 'As-is' -- only MPSProcessB should remain.
+      const rowsAfterOrderSort = rowLabelsInOrder(box);
       const modelSelect = box.querySelector('#mps-model');
       modelSelect.value = 'As-is';
       modelSelect.dispatchEvent(new Event('change'));
-      const rowsAfterModelFilter = rowLabelsInOrder();
+      const rowsAfterModelFilter = rowLabelsInOrder(box);
+      clickButton(box, 'Cancel');
+      const aRealAfterCancel = a.scriptEnabled;
+      const modalGoneAfterCancel = !document.querySelector('.modal-overlay');
 
-      // Reset filter, filter by stream 'StreamX' -- only MPSActorA should remain --
-      // then use the header select-all checkbox to disable it via the bulk path.
-      modelSelect.value = '';
-      modelSelect.dispatchEvent(new Event('change'));
+      // ---- Session 2: fresh dialog (no leakage from the cancelled one), toggle, Apply. ----
+      box = await openDialog();
+      const aCheckboxCheckedOnFreshOpen = box.querySelector(`.mps-row-check[data-id=\\"${a.id}\\"]`).checked;
+      aCheckbox = box.querySelector(`.mps-row-check[data-id=\\"${a.id}\\"]`);
+      aCheckbox.checked = true;
+      aCheckbox.dispatchEvent(new Event('change'));
+      const aRealBeforeApply = a.scriptEnabled; // still false -- staged only, pre-Apply
+      clickButton(box, 'Apply');
+      const aRealAfterApply = a.scriptEnabled;
+      const bUnaffectedByApply = b.scriptEnabled;
+      const modalGoneAfterApply = !document.querySelector('.modal-overlay');
+
+      // ---- Session 3: header select-all with a filter active, only affects the
+      // filtered-in row once Apply actually runs. ----
+      box = await openDialog();
       const streamSelect = box.querySelector('#mps-stream');
       streamSelect.value = 'StreamX';
       streamSelect.dispatchEvent(new Event('change'));
-      const rowsAfterStreamFilter = rowLabelsInOrder();
+      const rowsAfterStreamFilter = rowLabelsInOrder(box);
       const selectAll = box.querySelector('#mps-select-all');
       selectAll.checked = false;
       selectAll.dispatchEvent(new Event('change'));
-
-      const closeBtn = [...box.querySelectorAll('.modal-actions button')].find(b => b.textContent.trim() === 'Close');
-      closeBtn.click();
-      const modalGoneAfterClose = !document.querySelector('.modal-overlay');
+      const aRealBeforeBulkApply = a.scriptEnabled; // still true from session 2 -- staged only so far
+      clickButton(box, 'Apply');
 
       return {
-        initialRows, initialACheckbox, aEnabledAfterToggle, rowsAfterOrderSort,
-        rowsAfterModelFilter, rowsAfterStreamFilter,
-        aEnabledAfterBulk: a.scriptEnabled, bEnabledUnaffected: b.scriptEnabled,
-        modalGoneAfterClose,
+        initialRows, initialACheckbox, aRealRightAfterToggle, rowsAfterOrderSort,
+        rowsAfterModelFilter, aRealAfterCancel, modalGoneAfterCancel,
+        aCheckboxCheckedOnFreshOpen, aRealBeforeApply, aRealAfterApply, bUnaffectedByApply, modalGoneAfterApply,
+        rowsAfterStreamFilter, aRealBeforeBulkApply,
+        aRealAfterBulkApply: a.scriptEnabled, bStillUnaffected: b.scriptEnabled,
       };
     }
     """)
@@ -5662,23 +5684,37 @@ def check_manage_part_scripts_dialog(page):
         problems.append(f"expected the dialog to list parts across ALL models (not just the default model), got {result['initialRows']}")
     if result["initialACheckbox"] is not False:
         problems.append(f"expected MPSActorA's row checkbox to start unchecked (scriptEnabled: false), got {result['initialACheckbox']}")
-    if result["aEnabledAfterToggle"] is not True:
-        problems.append(f"expected checking MPSActorA's own row checkbox to immediately set the real part.scriptEnabled to true, got {result['aEnabledAfterToggle']}")
+    if result["aRealRightAfterToggle"] is not False:
+        problems.append(f"expected checking MPSActorA's row checkbox to only STAGE the change, leaving the real part.scriptEnabled false until Apply, got {result['aRealRightAfterToggle']}")
     if result["rowsAfterOrderSort"] != ["MPSActorC", "MPSProcessB", "MPSActorA"]:
         problems.append(f"expected clicking the Order column header to sort rows by part.order ascending (C:0, B:1, A:2), got {result['rowsAfterOrderSort']}")
     if result["rowsAfterModelFilter"] != ["MPSProcessB"]:
         problems.append(f"expected filtering by Model 'As-is' to leave only MPSProcessB, got {result['rowsAfterModelFilter']}")
+    if result["aRealAfterCancel"] is not False:
+        problems.append(f"expected Cancel to discard the staged toggle, leaving the real part.scriptEnabled false, got {result['aRealAfterCancel']}")
+    if not result["modalGoneAfterCancel"]:
+        problems.append("expected the Cancel button to remove the modal")
+    if result["aCheckboxCheckedOnFreshOpen"] is not False:
+        problems.append(f"expected a freshly (re)opened dialog to start from the real scriptEnabled value, not leak the cancelled session's staged change, got {result['aCheckboxCheckedOnFreshOpen']}")
+    if result["aRealBeforeApply"] is not False:
+        problems.append(f"expected the real part.scriptEnabled to still be false right before clicking Apply, got {result['aRealBeforeApply']}")
+    if result["aRealAfterApply"] is not True:
+        problems.append(f"expected Apply to commit the staged toggle, setting the real part.scriptEnabled to true, got {result['aRealAfterApply']}")
+    if result["bUnaffectedByApply"] is not True:
+        problems.append(f"expected Apply to leave MPSProcessB (never touched this session) exactly as it was, got {result['bUnaffectedByApply']}")
+    if not result["modalGoneAfterApply"]:
+        problems.append("expected the Apply button to remove the modal")
     if result["rowsAfterStreamFilter"] != ["MPSActorA"]:
         problems.append(f"expected filtering by Stream 'StreamX' to leave only MPSActorA, got {result['rowsAfterStreamFilter']}")
-    if result["aEnabledAfterBulk"] is not False:
-        problems.append(f"expected unchecking the header select-all checkbox (with the stream filter active) to disable MPSActorA, got {result['aEnabledAfterBulk']}")
-    if result["bEnabledUnaffected"] is not True:
-        problems.append(f"expected the bulk select-all toggle to leave MPSProcessB (filtered OUT at the time) untouched, got {result['bEnabledUnaffected']}")
-    if not result["modalGoneAfterClose"]:
-        problems.append("expected the Close button to remove the modal")
+    if result["aRealBeforeBulkApply"] is not True:
+        problems.append(f"expected the header select-all toggle to only STAGE the bulk change, leaving the real part.scriptEnabled true until Apply, got {result['aRealBeforeBulkApply']}")
+    if result["aRealAfterBulkApply"] is not False:
+        problems.append(f"expected Apply to commit the header select-all's bulk toggle, disabling MPSActorA, got {result['aRealAfterBulkApply']}")
+    if result["bStillUnaffected"] is not True:
+        problems.append(f"expected the filtered-OUT MPSProcessB to remain untouched even after Apply, got {result['bStillUnaffected']}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "Simulation > Manage Part Scripts lists parts across all models with working Type/Model/Stream filters, a sortable Order column, per-row checkboxes that toggle scriptEnabled live on the real part, and a header select-all/none that bulk-toggles only the currently-filtered rows"
+    return True, "Simulation > Manage Part Scripts lists parts across all models with working Type/Model/Stream filters and a sortable Order column; every checkbox (row or header select-all) only stages a change; Cancel discards staged changes with zero effect on the real document and a fresh session starts clean; and Apply commits every staged change as one batch, leaving any untouched or filtered-out part exactly as it was"
 
 
 def check_left_badge_overrides_value_display(page):

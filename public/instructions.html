@@ -4,7 +4,8 @@
 <p class="docs-lead">DyCAD is a browser-based enterprise architecture modeling and simulation tool,
 with optional <strong>Streams</strong> — a tagging and pattern-generation
 layer that lets you describe and regenerate whole business flows, not just draw individual boxes and lines.
-This page is a working reference, not a tutorial — skim the headings, come back to the section you need.</p>
+This page is a working reference, not a tutorial — skim the headings, come back to the section you need.
+Open source: <a href="https://github.com/ldanberger/dycad" target="_blank" rel="noopener">github.com/ldanberger/dycad</a>.</p>
 
 <nav class="docs-toc">
   <strong>Contents</strong>
@@ -780,8 +781,9 @@ flow and change across a live architecture — not just a static diagram. Turn i
 Enabled" in Root Properties, then write the script body in the Script field. To flip that checkbox on/off for
 many parts at once instead of one at a time, use <strong>Simulation &gt; Manage Part Scripts...</strong> — a
 dialog listing every part in the document (filterable by Type/Model/Stream, sortable by clicking a column
-header, Order included), where each row's own checkbox toggles that part's "Part Script Enabled" immediately,
-and the header checkbox enables/disables every row currently matching the filters at once.</p>
+header, Order included), where each row's own checkbox (and the header checkbox, for every row currently
+matching the filters at once) stages that part's "Part Script Enabled" state. Nothing is actually changed
+until you click <strong>Apply</strong>; <strong>Cancel</strong> closes the dialog without changing anything.</p>
 
 <h3>What a script receives (the <code>ctx</code> object)</h3>
 <table class="docs-table">

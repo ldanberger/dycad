@@ -1186,17 +1186,17 @@ class App {
    * whole document (deliberately NOT scoped to the currently selected simulation
    * model — Model is one of the filters instead, mirroring promptAddExisting's own
    * Type/Model/Stream filter row above), with the same clickable-header sort
-   * convention (Label/Type/Model/Stream/Order — Order included per the report). Each
-   * row's own checkbox toggles that ONE part's scriptEnabled immediately (the exact
-   * same live, single-property-change behavior the property panel's own "Part Script
-   * Enabled" checkbox already has — see renderShowFieldsPanel, render.js); the header
-   * checkbox instead applies to every row currently matching the active filters at
-   * once, as a single recordAndRender — one undo step for the whole bulk toggle,
+   * convention (Label/Type/Model/Stream/Order — Order included per the report).
+   * Direct follow-up: "manage part scripts needs a cancel button to not change
+   * anything, and change close to apply" — every checkbox (row or header select-all)
+   * only stages an intended scriptEnabled value in a local `pending` Map keyed by
+   * part id, never touching the real Part; nothing is written to the document until
+   * <strong>Apply</strong>, which walks `pending` once and applies every staged
+   * change as a SINGLE recordAndRender — one undo step for the whole dialog session,
    * matching how other bulk operations in this codebase (e.g. Smart Check Model's
    * "Fix Selected") batch their own history entry rather than spamming one per
-   * affected part. Every change already applies live, so there's nothing to
-   * Save/Cancel — a single Close button, same as the read-only Stream Templates
-   * catalog above. */
+   * affected part. <strong>Cancel</strong> just discards `pending` and closes —
+   * since nothing was ever written to the real document, there's nothing to revert. */
   promptManagePartScripts() {
     const store = this.store;
     const allParts = store.doc.parts;
@@ -1207,7 +1207,11 @@ class App {
     const modelOptions = [...new Set(allParts.map((p) => p.model))].sort();
     const streamOptions = [...new Set(allParts.flatMap((p) => p.streams || []))].sort();
 
-    const uiState = { typeFilter: '', modelFilter: '', streamFilter: '', sortCol: 'label', sortDir: 'asc' };
+    // pending: partId -> staged scriptEnabled value, applied to the real Part only on
+    // Apply (see effectiveEnabled below, which every render/sync path reads through
+    // instead of the Part's own current field).
+    const uiState = { typeFilter: '', modelFilter: '', streamFilter: '', sortCol: 'label', sortDir: 'asc', pending: new Map() };
+    const effectiveEnabled = (p) => uiState.pending.has(p.id) ? uiState.pending.get(p.id) : p.scriptEnabled;
 
     const root = document.getElementById('modal-root');
     const overlay = document.createElement('div');
@@ -1218,7 +1222,7 @@ class App {
     box.style.maxWidth = '92vw';
     box.innerHTML = `
       <h3>Manage Part Scripts</h3>
-      <div style="font-size:11px;color:var(--text-muted);margin:-4px 0 12px 0;">Toggling a checkbox applies immediately (undoable, same as the property panel). Click a column header to sort.</div>
+      <div style="font-size:11px;color:var(--text-muted);margin:-4px 0 12px 0;">Toggle checkboxes as needed, then Apply to save or Cancel to discard. Click a column header to sort.</div>
       <div style="display:flex; gap:8px; margin-bottom:10px;">
         <select id="mps-type"><option value="">All types</option>${typeOptions.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(elTitleFor(t))}</option>`).join('')}</select>
         <select id="mps-model"><option value="">All models</option>${modelOptions.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}</select>
@@ -1237,7 +1241,7 @@ class App {
           <tbody id="mps-tbody"></tbody>
         </table>
       </div>
-      <div class="modal-actions"><button class="cancel">Close</button></div>
+      <div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit">Apply</button></div>
     `;
     overlay.appendChild(box);
     root.appendChild(overlay);
@@ -1263,7 +1267,7 @@ class App {
       const tbody = box.querySelector('#mps-tbody');
       tbody.innerHTML = rows.map((p) => `
         <tr>
-          <td style="padding:4px 8px;"><input type="checkbox" class="mps-row-check" data-id="${p.id}" ${p.scriptEnabled ? 'checked' : ''} /></td>
+          <td style="padding:4px 8px;"><input type="checkbox" class="mps-row-check" data-id="${p.id}" ${effectiveEnabled(p) ? 'checked' : ''} /></td>
           <td style="padding:4px 8px;">${escapeHtml(p.label)}</td>
           <td style="padding:4px 8px;">${escapeHtml(elTitleFor(p.type))}</td>
           <td style="padding:4px 8px;">${escapeHtml(p.model)}</td>
@@ -1272,8 +1276,7 @@ class App {
         </tr>`).join('') || `<tr><td colspan="6" style="text-align:center; padding:12px; color:var(--text-muted);">No matching parts</td></tr>`;
       tbody.querySelectorAll('.mps-row-check').forEach((cb) => {
         cb.addEventListener('change', () => {
-          const part = store.findPart(cb.dataset.id);
-          if (part) { part.scriptEnabled = cb.checked; this.recordAndRender(); }
+          uiState.pending.set(cb.dataset.id, cb.checked);
           syncSelectAllCheckbox();
         });
       });
@@ -1282,15 +1285,14 @@ class App {
     const syncSelectAllCheckbox = () => {
       const selectAllCb = box.querySelector('#mps-select-all');
       const rows = uiState.currentRows || [];
-      selectAllCb.checked = rows.length > 0 && rows.every((p) => p.scriptEnabled);
-      selectAllCb.indeterminate = !selectAllCb.checked && rows.some((p) => p.scriptEnabled);
+      selectAllCb.checked = rows.length > 0 && rows.every((p) => effectiveEnabled(p));
+      selectAllCb.indeterminate = !selectAllCb.checked && rows.some((p) => effectiveEnabled(p));
     };
     renderRows();
 
     box.querySelector('#mps-select-all').addEventListener('change', (e) => {
       const rows = uiState.currentRows || [];
-      rows.forEach((p) => { p.scriptEnabled = e.target.checked; });
-      this.recordAndRender();
+      rows.forEach((p) => { uiState.pending.set(p.id, e.target.checked); });
       renderRows();
     });
     box.querySelector('#mps-type').addEventListener('change', (e) => { uiState.typeFilter = e.target.value; renderRows(); });
@@ -1305,6 +1307,14 @@ class App {
       });
     });
     box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+    box.querySelector('.submit').addEventListener('click', () => {
+      for (const [partId, enabled] of uiState.pending) {
+        const part = store.findPart(partId);
+        if (part) part.scriptEnabled = enabled;
+      }
+      if (uiState.pending.size > 0) this.recordAndRender();
+      overlay.remove();
+    });
   }
 
   /** Clears every part's part.pin3D (right-click-drag positions set in the 3D View —

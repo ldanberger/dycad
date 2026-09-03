@@ -2992,6 +2992,34 @@ also a direct follow-up: *"add a summary table to instructions in simulation
 scripting section regarding initiator types, passthroughs etc. logic to help users
 understand what to expect of each type."*
 
+**Manage Part Scripts gains Cancel/Apply staging**: a later direct follow-up —
+*"manage part scripts needs a cancel button to not change anything, and change close
+to apply."* The dialog's checkboxes (both the per-row one and the header
+select/deselect-all) no longer write straight to a Part's own `scriptEnabled` — each
+now only stages its intended value in a local `pending` Map (partId -> boolean),
+scoped to the one open dialog instance; a new `effectiveEnabled(p)` helper (`pending`
+value if staged, else the Part's own current `scriptEnabled`) is what every checkbox's
+rendered/synced state actually reads, so a staged-but-not-yet-applied toggle still
+displays correctly across filter/sort re-renders within the same session. **Cancel**
+(renamed from the old single "Close") simply removes the dialog — since nothing was
+ever written to the real document, there's nothing to revert, matching the report's
+"not change anything." **Apply** (renamed from "Close") walks `pending` once, writing
+every staged value to its real Part, then a SINGLE `recordAndRender()` if anything was
+actually staged (skipped entirely on an empty `pending`, e.g. a dialog opened and
+immediately closed with no edits) — one undo step for the whole session, same
+batching rationale as the header bulk-toggle's own single `recordAndRender()` already
+had. Reopening the dialog after a Cancel always starts from a fresh, empty `pending`
+map (built fresh each `promptManagePartScripts()` call), so a discarded session's
+staged choices can never leak into a later one. `check_manage_part_scripts_dialog`
+was rewritten in place to prove staging explicitly: toggling a checkbox and reading
+the real Part's `scriptEnabled` immediately afterward (still the OLD value); Cancel
+leaving it unchanged; a freshly reopened dialog reflecting the real value, not the
+cancelled session's staged one; Apply committing the staged value; and the header
+bulk-toggle's own staged change committing only for the currently-filtered part,
+leaving an out-of-filter part untouched even after Apply — proven via TEMP BREAK (a
+row checkbox writing directly to the real Part in addition to staging it, which
+failed four of the check's assertions at once).
+
 **Catalogs > Stream Templates** (`App.promptStreamTemplates`, `main.js`): reported
 directly, immediately after the above — *"In Catalogs menu after SFCCE create a new
 separation line and then a new item 'Stream Templates' and command to open new form --

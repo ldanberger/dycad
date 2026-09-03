@@ -5574,4 +5574,31 @@
 // per-tick behavior, plus the relationshipActions reply-wording map), and a mention of
 // the new Manage Part Scripts dialog. DESIGN_DOCUMENT.md and tests/README.md updated
 // for all of the above.
-export const APP_VERSION = '0.936';
+// v0.937: three direct follow-ups. (1) "manage part scripts needs a cancel button to
+// not change anything, and change close to apply" -- promptManagePartScripts's
+// checkboxes (both per-row and the header select/deselect-all) no longer write
+// straight to a Part's own scriptEnabled; each now only stages its intended value in
+// a local `pending` Map, read through a new effectiveEnabled(p) helper everywhere a
+// checkbox's own checked/indeterminate state is computed. Cancel just closes the
+// dialog (nothing was ever written, so there's nothing to revert); Apply walks
+// `pending` once, writes every staged value to its real Part, then a single
+// recordAndRender() if anything was actually staged -- one undo step for the whole
+// session, same as the header bulk-toggle's own batching already had. A fresh
+// promptManagePartScripts() call always starts from an empty `pending`, so a
+// cancelled session's staged choices never leak into a later one.
+// check_manage_part_scripts_dialog rewritten to prove staging explicitly (toggle,
+// read the real part unchanged; Cancel, still unchanged; reopen, still reflects the
+// real value; Apply, now committed; header bulk-toggle commits only the
+// currently-filtered part) -- proven via TEMP BREAK (a row checkbox writing directly
+// to the real Part in addition to staging it, failing four assertions at once).
+// (2) "Update this script with new parameter" (pasting BatchScript_
+// InsertSmartStreamExample2 with 'BusinessOrganizationUnit' added to its own
+// showTypes list, right after 'BusinessFunction') -- the 12-type trace on "Smart
+// Stream Example 2" becomes 13-type, picking up one more already-reachable part (the
+// Business Function's own containing org unit); check_batch_script_quickstart's
+// expected part count updated 23 -> 24. (3) "in the instructions first paragraph add
+// something like 'open source: https://github.com/ldanberger/dycad'" --
+// public/instructions.html's lead paragraph gained an "Open source" link, and its
+// Manage Part Scripts mention updated for the new Cancel/Apply behavior.
+// DESIGN_DOCUMENT.md and tests/README.md updated for (1) and (2).
+export const APP_VERSION = '0.937';
