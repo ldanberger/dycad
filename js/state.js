@@ -33,21 +33,19 @@
  * field, run once per simulation tick) — runTick (simulation.js) prepends this whole
  * text ahead of a part's script before compiling it, so CommonScript_Example is
  * callable BY NAME from any part's own script, using that script's own `ctx`. Naming
- * convention for future additions meant to be called this way:
- * `CommonScript_<Name>`. `CommonScript_Sim()` (below, right after `CustomRemap_Example`)
- * is a second example of this same kind — meant to be copied into (or called from) a
- * part's own script field directly, demonstrating a type-switch covering every element
- * type the "Enterprise" stream template uses, plus the full `{ value, state, response,
- * leftBadge, rightBadge }` return shape (see Catalogs > Stream Templates, `App.promptStreamTemplates`
- * in main.js, for a live read-only browser of the template data this switches over).
- * `CommonScript_DebugOutLog()` (below, right after `CommonScript_Sim`) is a third
- * example of this same kind, reported directly: "Write a common_debugOutLog script
- * that will be called from any element connected as a 'to', to display deep to the
- * new debug log all the input values looping through arrays." Meant to be called
- * from any part that receives input (i.e. is a connector's 'to') — loops `ctx.inputs`
- * and pretty-prints each value to the new Debug Log tab (`ctx.logDebug`, see the
- * three-tab Log area below), looping through each element individually when a value
- * is itself an array rather than dumping the whole array as one block.
+ * convention for future additions meant to be called this way: `CommonScript_<Name>`.
+ * `CommonScript_DebugOutLog()` (below, right after `CustomRemap_Example`) is a second
+ * example of this same kind, reported directly: meant to be called from (or copied
+ * into) any part's script — dumps `ctx.inputs` verbatim as one compact-JSON line to the
+ * new Debug Log tab (`ctx.logDebug`, see the three-tab Log area below), bracketed by
+ * '-i--'/'-e--' marker lines. `CommonScript_Sim()` (below, right after
+ * `CommonScript_DebugOutLog`, placed last) is a third example of this same kind —
+ * meant to be copied into (or called from) a part's own script field directly,
+ * classifying every connector by its `relationship` (`ctx.inputs` against
+ * toCtxAction/toCtxPassthrough, `ctx.outputs` against fromCtxAction/
+ * fromCtxPassthrough) into a running `value` array, dumping every intermediate to the
+ * Debug Log, then returning the full `{ value, state, response, leftBadge, rightBadge }`
+ * shape a part script's return can use.
  *
  * `CustomRemap_Example()` (below, after CommonScript_Example) is a FOURTH kind of
  * entry point, reported directly: "is it possible to build a small framework for user
@@ -356,115 +354,91 @@ function CustomRemap_Example(ctx) {
   return positions;
 }
 
-// Common script: a second example, this one meant to be copied into (or called from) a
-// PART's own script field directly, rather than called from another script the way
-// CommonScript_Example above is -- reported directly: request for a case-statement
-// example covering every element type the "Enterprise" stream template actually uses,
-// plus a generic example return statement. Switches on ctx.part.type.toLowerCase()
-// (case-insensitive, matching every other element-type comparison in this codebase) --
-// covers the "Enterprise" streamTemplate's (public/custom.json, settings.streamTemplates)
-// own value[] chain (GeneralActor -> BusinessService -> BusinessCapability ->
-// BusinessProcess -> ApplicationCapability -> ApplicationProcess ->
-// ApplicationLogicalComponent -> ApplicationPhysicalComponent -> DataDataEntity) plus the
-// 3 extra element types its passive[] pairs introduce (BusinessFunction,
-// ApplicationApplication, BusinessOrganizationUnit) -- see Catalogs > Stream Templates
-// for a live, read-only browser of this same template data instead of hand-cross-
-// referencing custom.json. The return statement afterward demonstrates the full
-// { value, state, response, leftBadge, rightBadge } shape a part script's return can
-// use -- see simulation.js's own script-contract comment for exactly what each field
-// does; response, leftBadge, and rightBadge are all optional, this just shows a real,
-// working example of each.
-function CommonScript_Sim(ctx) {
-  switch (ctx.part.type.toLowerCase()) {
-    case 'generalactor':
-      ctx.log('received .. ' + ctx.part.type);
-      break;
-    case 'businessservice':
-      ctx.log('received .. ' + ctx.part.type);
-      break;
-    case 'businesscapability':
-      ctx.log('received .. ' + ctx.part.type);
-      break;
-    case 'businessprocess':
-      ctx.log('received .. ' + ctx.part.type);
-      break;
-    case 'businessfunction':
-      ctx.log('received .. ' + ctx.part.type);
-      break;
-    case 'businessorganizationunit':
-      ctx.log('received .. ' + ctx.part.type);
-      break;
-    case 'applicationcapability':
-      ctx.log('received .. ' + ctx.part.type);
-      break;
-    case 'applicationprocess':
-      ctx.log('received .. ' + ctx.part.type);
-      break;
-    case 'applicationlogicalcomponent':
-      ctx.log('received .. ' + ctx.part.type);
-      break;
-    case 'applicationphysicalcomponent':
-      ctx.log('received .. ' + ctx.part.type);
-      break;
-    case 'applicationapplication':
-      ctx.log('received .. ' + ctx.part.type);
-      break;
-    case 'datadataentity':
-      ctx.log('received .. ' + ctx.part.type);
-      break;
-    default:
-      ctx.log('received unknown .. ' + ctx.part.type);
-  }
-
-  // Example return -- value passes through to every downstream connector's target as
-  // its ctx.inputs[i].value next tick, here an object (like state already always is)
-  // rather than a bare scalar, since that's usually the more useful shape once a part
-  // has more than one thing to say; state persists across ticks (merged forward
-  // automatically), here just counting how many times this part's script has run;
-  // response broadcasts back, one tick later, to whichever node(s) sent an input THIS
-  // tick (only meaningful once ctx.inputs.length > 0), also an object here; leftBadge
-  // and rightBadge each drive one of the node's two independent corner badges (any
-  // text + any CSS color) -- rightBadge (bottom-right) shown only while the view's
-  // "Show Right Badge" toggle is on; leftBadge (bottom-left) shown whenever "Show Left
-  // Badge" is on, REPLACING the auto-formatted value display for that tick -- exactly
-  // why it's worth having now that value itself is an object too rich to make a good
-  // short badge string on its own. Either badge (or response) simply isn't shown at
-  // all for a tick the script doesn't return it.
-  return {
-    value: { type: ctx.part.type, label: ctx.part.label, receivedFrom: ctx.inputs[0]?.value ?? null },
-    state: { ticksSeen: (ctx.state.ticksSeen || 0) + 1 },
-    response: ctx.inputs.length > 0 ? { ack: true, from: ctx.part.label, tick: ctx.tick } : undefined,
-    leftBadge: { text: String((ctx.state.ticksSeen || 0) + 1), color: '#2f8f4e' },
-    rightBadge: { text: ctx.part.type, color: '#3b5bfd' },
-  };
+// CommonScript_DebugOutLog(ctx): a second CommonScript_<Name> example, meant to be
+// called from (or copied into) any part's script -- reported directly, replacing the
+// earlier looping/pretty-printed version with a simpler single-block dump: logs
+// ctx.inputs verbatim (compact JSON, one line) to the Debug Log tab, bracketed by
+// '-i--'/'-e--' marker lines so repeated calls across ticks stay visually separable.
+// Doesn't return anything or touch value/state itself, so a plain top-level statement
+// like CommonScript_DebugOutLog(ctx); is enough alongside whatever else the calling
+// script already does with ctx.inputs.
+function CommonScript_DebugOutLog(ctx) {
+  ctx.logDebug('-i--');
+  ctx.logDebug(JSON.stringify(ctx.inputs));
+  ctx.logDebug('-e--');
+  return;
 }
 
-// CommonScript_DebugOutLog(ctx): a third CommonScript_<Name> example, meant to be
-// called from (or copied into) any part's script that RECEIVES input -- i.e. any
-// element connected as a connector's 'to' -- to dump every incoming value to the new
-// Debug Log tab in full detail. Doesn't return anything or touch value/state itself,
-// so a plain top-level statement like CommonScript_DebugOutLog(ctx); is enough
-// alongside whatever else the calling script already does with ctx.inputs. Loops
-// ctx.inputs, and for any input whose value is an array, loops through each element
-// individually (rather than dumping the whole array as one block) -- everything
-// logged as pretty-printed JSON (2-space indent, multi-line) rather than the compact
-// single-line form used elsewhere, since this is specifically the deep/verbose tab.
-function CommonScript_DebugOutLog(ctx) {
-  if (ctx.inputs.length === 0) {
-    ctx.logDebug('no inputs connected this tick');
-    return;
-  }
+// Common script: a second example, meant to be copied into (or called from) a PART's
+// own script field directly, rather than called from another script the way
+// CommonScript_Example above is -- reported directly, replacing the earlier
+// type-switch example with one that classifies every connector by its relationship
+// instead. ctx.inputs (this part as the 'to' side) are checked against toCtxAction/
+// toCtxPassthrough; ctx.outputs (this part as the 'from' side) are checked against
+// fromCtxAction/fromCtxPassthrough -- each match appends a { action, reason }
+// descriptor to value, a running array (rather than a bare scalar) since a part can
+// classify several connectors in one tick. Every intermediate is dumped to the Debug
+// Log before returning, then the full { value, state, response, leftBadge, rightBadge }
+// shape a part script's return can use -- see simulation.js's own script-contract
+// comment for exactly what each field does. Placed LAST among the CommonScript_<Name>
+// examples, after CommonScript_DebugOutLog above, as the more complete one.
+function CommonScript_Sim(ctx) {
+  const value = [];
+  const state = {};
+  const response = {};
+  const leftBadge = {};
+  const rightBadge = {};
+
+  // current ctx is one of these, one broadcast packet prepared to send to all
+  const fromCtxAction = ['flow', 'triggering'];
+
+  // current ctx is one of these, to (broadcast) packet needs action
+  const toCtxAction = ['aggregation', 'composition', 'flow', 'realization', 'triggering'];
+
+  // current ctx is one of these, just pass packet along
+  const fromCtxPassthrough = ['aggregation', 'assignment', 'association', 'composition', 'realization'];
+
+  // current ctx is one of these, just pass packet along
+  const toCtxPassthrough = ['assignment', 'association'];
+
+  // process from (respond or pass through)
   for (const inp of ctx.inputs) {
-    const who = inp.fromLabel + ' (' + inp.fromPartType + ", '" + inp.connector.connectorType + "' connector)";
-    if (Array.isArray(inp.value)) {
-      ctx.logDebug(who + ': array of ' + inp.value.length);
-      inp.value.forEach((item, i) => {
-        ctx.logDebug(who + '[' + i + ']: ' + JSON.stringify(item, null, 2));
-      });
-    } else {
-      ctx.logDebug(who + ': ' + JSON.stringify(inp.value, null, 2));
+    if (toCtxAction.includes(inp.connector.relationship.toLowerCase())) {
+      value.push({ action: 'some to action', reason: inp.connector.relationship });
+    }
+    if (toCtxPassthrough.includes(inp.connector.relationship.toLowerCase())) {
+      value.push({ action: 'some to passthrough', reason: inp.connector.relationship });
     }
   }
+
+  for (const outp of ctx.outputs) {
+    if (fromCtxAction.includes(outp.connector.relationship.toLowerCase())) {
+      value.push({ action: 'some from action', reason: outp.connector.relationship });
+    }
+    if (fromCtxPassthrough.includes(outp.connector.relationship.toLowerCase())) {
+      value.push({ action: 'some from passthrough', reason: outp.connector.relationship });
+    }
+  }
+
+  ctx.logDebug('--v--');
+  ctx.logDebug(JSON.stringify(value));
+  ctx.logDebug('--s--');
+  ctx.logDebug(JSON.stringify(state));
+  ctx.logDebug('--r--');
+  ctx.logDebug(JSON.stringify(response));
+  ctx.logDebug('--lb-');
+  ctx.logDebug(JSON.stringify(leftBadge));
+  ctx.logDebug('--rb--');
+  ctx.logDebug(JSON.stringify(rightBadge));
+  ctx.logDebug('--e--');
+
+  return {
+    value: value,
+    state: state,
+    response: response,
+    leftBadge: leftBadge,
+    rightBadge: rightBadge,
+  };
 }
 `;
 

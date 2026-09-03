@@ -305,6 +305,43 @@ clicking Run or closing the popup — steps the simulation from the main window 
 confirms the Message Log shows the just-typed text, not the stale compiled copy;
 proven via TEMP BREAK.
 
+**Reopen-while-detached freeze (Step 44)**: reported directly — *"when script editor is
+detached, and user goes back to app and double clicks to open script editor again, it
+occasionally freezes application completely."* Root cause: `promptScriptConsole` and
+`detachScriptConsole` (`main.js`) never actually enforced the single-live-editor
+invariant their OWN comment already documented (quoted just above — *"there's only ever
+one live editor open against `store.batchScriptCode` at a time"*) — it was only
+enforced in ONE direction (detaching closes the in-app modal). `promptScriptConsole` had
+no guard against opening a SECOND, simultaneously-live editor while the detached popup
+was already open, so reopening via the Advanced menu while already detached produced two
+fully-wired editors (in-app modal + popup) each independently attaching their own
+`input`/`keydown` listeners against the same store field. Separately,
+`detachScriptConsole` had no guard against re-entering itself while its own popup was
+already open — since `window.open('', 'dycad-script-console', ...)` targeting an
+already-open same-named window reuses that window rather than opening a second one, a
+second call still ran through the full `document.head`/`body` teardown-and-rebuild
+(`popup.document.body.innerHTML = ''`, then a fresh `scriptConsoleInnerHTML` render and a
+fresh `_wireScriptConsole` call), re-wiring a redundant second set of listeners
+(including a second `beforeunload` handler) onto a document whose FIRST set of listeners
+was still attached — consistent with the reported intermittent freeze under real,
+non-headless timing. Fixed by tracking the open popup on a new `App._scriptConsolePopup`
+field (set in `detachScriptConsole`, checked via `.closed` rather than nulled out
+elsewhere, since every close path — titlebar X, in-box Close, re-detach — eventually
+sets it): `promptScriptConsole` now checks `_scriptConsolePopup` first (focus it and
+return) and then checks for an already-open in-app modal (focus its input and return)
+before building anything; `detachScriptConsole` checks `_scriptConsolePopup` first
+(focus and return) before doing any `window.open`/rebuild work. New
+`check_script_console_reopen_while_detached_is_idempotent` (`tests/run_all.py`) covers,
+via real detach/reopen sequences with no page reload between steps: reopening in-app
+while the popup is already detached opens no second modal and no second OS window;
+calling `detachScriptConsole` again while its popup is already open opens no second
+window and does not replace the popup's `#console-input` DOM node (checked via node
+identity — a rebuild always creates a fresh node, which can't be told apart from a
+no-op by reading `.value` back alone, since a real edit already persists live into
+`store.batchScriptCode`, which a rebuild would then read right back out again); and,
+with no popup involved at all, calling `promptScriptConsole` twice back to back still
+opens exactly one modal — all three scenarios proven via TEMP BREAK.
+
 **Toolbar Save/Load, and 3D View's menu home — a reversal.** Reported directly:
 *"change 'Save JSON' button to 'Save' and 'Load JSON' to 'Load'."* Immediately
 corrected in the same exchange: *"remove 'Load' renamed from 'Load JSON' from the top
@@ -2770,6 +2807,41 @@ assertions and the fabricated `store.simRuntime` data in
 `check_export_svg_respects_content_checkboxes` were updated for the field rename; a new
 dedicated check proves the leftBadge-is-opt-in behavior, the UI Output widget exception,
 and ERR always winning.
+
+**Full replacement, and reordered last (Step 44)**: reported directly, replacing the
+type-switch example above wholesale rather than extending it — a relationship-
+classification example instead. `CommonScript_Sim(ctx)` now checks `ctx.inputs` (this
+part as the 'to' side of each incoming connector) against two relationship lists,
+`toCtxAction` (`['aggregation','composition','flow','realization','triggering']`) and
+`toCtxPassthrough` (`['assignment','association']`), and `ctx.outputs` (this part as
+the 'from' side of each outgoing connector) against `fromCtxAction`
+(`['flow','triggering']`) and `fromCtxPassthrough`
+(`['aggregation','assignment','association','composition','realization']`) — each match
+appends a `{ action, reason }` descriptor (`reason` is the connector's own, non-
+lowercased `relationship`) to a running `value` ARRAY rather than a bare object, since
+several connectors can classify in the same tick. Every intermediate
+(`value`/`state`/`response`/`leftBadge`/`rightBadge`, the last two literal empty
+objects `{}` here — `simulation.js`'s own Step 41 badge normalization still fills them
+in as `{text: '', color: '#666666'}` before they reach `store.simRuntime`, since a
+truthy-but-empty object is still "the script returned a badge") is dumped to the Debug
+Log (`--v--`/`--s--`/`--r--`/`--lb-`/`--rb--` markers bracketing each JSON value,
+`--e--` at the end) before the same full 5-field shape is returned. `CommonScript_
+DebugOutLog(ctx)` was simplified the same way — the Step 43 looping/pretty-printed
+per-array-element version replaced with a single-block dump: `ctx.inputs` logged
+verbatim as one compact-JSON line, bracketed by `'-i--'`/`'-e--'` markers, no special
+case for zero inputs (an empty `ctx.inputs` array just logs `[]` in the middle, same
+3-line shape either way). Both examples were also REORDERED — `CommonScript_
+DebugOutLog` now comes first (right after `CustomRemap_Example`), `CommonScript_Sim`
+last, as "the more complete one" of the two — so every file-location reference to
+either function above describes their positions as of when each paragraph was written,
+not the current layout. `check_common_script_sim_covers_enterprise_types` was replaced
+by `check_common_script_sim_classifies_connectors` (a real 4-connector graph — one of
+each of the 4 relationship buckets — driven through one real simulation tick, checking
+the returned `value` array's 4 entries, the `{}`-vs-normalized state of the other 4
+return fields, all 10 Debug Log lines, and a no-connectors part returning an empty
+array) and `check_common_script_debug_out_log` was rewritten in place for the new
+3-line shape — both proven via TEMP BREAK. `state.js`'s own top-of-file doc comment,
+`tests/README.md`, and this section were all updated for the new order/behavior.
 
 **Catalogs > Stream Templates** (`App.promptStreamTemplates`, `main.js`): reported
 directly, immediately after the above — *"In Catalogs menu after SFCCE create a new

@@ -2313,6 +2313,84 @@ def check_script_console_edits_persist_live_while_open(page):
     return True, "Editing the Script Console (in the detached popup, without clicking Run or closing) is immediately visible as store.batchScriptCode and immediately used by a real part script the next time it runs"
 
 
+def check_script_console_reopen_while_detached_is_idempotent(page):
+    """Regression guard for a reported freeze, Step 44: "when script editor is
+    detached, and user goes back to app and double clicks to open script editor
+    again, it occasionally freezes application completely." Root cause: neither
+    promptScriptConsole nor detachScriptConsole (main.js) actually enforced the
+    invariant their own comments already documented ("there's only ever one live
+    editor open against store.batchScriptCode at a time") -- promptScriptConsole had
+    no guard against opening a second in-app modal while the detached popup was
+    already live, producing two simultaneously-wired editors fighting over the same
+    store field; detachScriptConsole had no guard against re-entering itself while its
+    own popup was already open, which used to tear down and fully rebuild that live
+    window's document.head/body (re-wiring a redundant, second set of listeners,
+    including a second 'beforeunload' handler, onto it) instead of just focusing it.
+    Both methods now check first and return early. Covers, via real detach/reopen
+    sequences (no page reload between steps): reopening the in-app console while the
+    popup is already detached opens NO second modal and NO second OS window; calling
+    detachScriptConsole again while its popup is already open opens NO second window
+    and does NOT replace the popup's #console-input DOM node (proving the live
+    document wasn't torn down and rebuilt -- checked via node identity, a
+    document.body.innerHTML rebuild always creates a fresh node, and this can't be
+    told apart from a no-op just by reading .value back since a real edit already
+    persists live into store.batchScriptCode, which a rebuild would then read right
+    back out again); and, with no popup involved at all, calling promptScriptConsole
+    twice back to back still opens only ONE in-app modal, not two."""
+    page.evaluate("window.dycadApp.promptScriptConsole()")
+    page.wait_for_timeout(150)
+    with page.context.expect_page() as popup_info:
+        page.click(".modal-box.modal-box-console .detach")
+    popup = popup_info.value
+    popup.wait_for_load_state()
+    popup.wait_for_timeout(150)
+
+    problems = []
+    pages_after_detach = len(page.context.pages)
+    if pages_after_detach != 2:
+        problems.append(f"expected exactly 2 pages (main + 1 popup) after the first Detach, got {pages_after_detach}")
+
+    # "goes back to app ... to open script editor again" -- reopen via the same
+    # menu action while the popup is still live.
+    page.evaluate("window.dycadApp.promptScriptConsole()")
+    page.wait_for_timeout(200)
+    modal_count = page.evaluate("document.querySelectorAll('.modal-box.modal-box-console').length")
+    if modal_count != 0:
+        problems.append(f"expected reopening while detached to open NO second in-app modal, got {modal_count}")
+    pages_after_reopen = len(page.context.pages)
+    if pages_after_reopen != 2:
+        problems.append(f"expected reopening while detached to open no second OS window either, got {pages_after_reopen} pages")
+
+    # Mark the popup's actual #console-input DOM node, then call detachScriptConsole()
+    # again directly -- it must NOT tear down/rebuild the popup's document (which
+    # would replace this node with a fresh one, losing the marker) or open a second
+    # window.
+    popup.eval_on_selector("#console-input", "el => { el.dataset.regrMarker = 'original-node'; }")
+    page.evaluate("window.dycadApp.detachScriptConsole()")
+    page.wait_for_timeout(200)
+    pages_after_second_detach = len(page.context.pages)
+    if pages_after_second_detach != 2:
+        problems.append(f"expected calling detachScriptConsole() again while its popup is already open to open no second window, got {pages_after_second_detach} pages")
+    marker_survived = popup.eval_on_selector("#console-input", "el => el.dataset.regrMarker")
+    if marker_survived != "original-node":
+        problems.append(f"expected re-entering detachScriptConsole() to NOT rebuild the popup's live document (the #console-input node should be the SAME node, not a fresh one), got dataset.regrMarker={marker_survived!r}")
+
+    popup.close()
+    page.wait_for_timeout(200)
+
+    # With no popup involved at all, a rapid double-invocation must still only open
+    # ONE in-app modal.
+    page.evaluate("window.dycadApp.promptScriptConsole(); window.dycadApp.promptScriptConsole();")
+    page.wait_for_timeout(200)
+    modal_count2 = page.evaluate("document.querySelectorAll('.modal-box.modal-box-console').length")
+    if modal_count2 != 1:
+        problems.append(f"expected two back-to-back promptScriptConsole() calls (no popup open) to still open exactly 1 modal, got {modal_count2}")
+
+    if problems:
+        return False, "; ".join(problems)
+    return True, "promptScriptConsole/detachScriptConsole (main.js) now enforce the documented single-live-editor invariant symmetrically: reopening in-app while detached focuses the existing popup instead of opening a second editor, re-detaching an already-open popup focuses it instead of tearing down its live document, and double-invoking promptScriptConsole with no popup open still opens only one modal"
+
+
 def check_batch_script_quickstart(page):
     """Regression guard/new-feature check for the built-in default batch script
     (store.batchScriptCode's out-of-the-box default, DEFAULT_BATCH_SCRIPT_CODE in
@@ -5388,97 +5466,95 @@ def check_common_script_callable_from_part_script(page):
     return True, "a part's own script can call ANY function store.batchScriptCode defines -- both the shipped CommonScript_Example(ctx) (logging 'called by <type> <label> <model>') and a person's own custom addition -- while an ordinary part script with no such dependency behaves exactly as before"
 
 
-def check_common_script_sim_covers_enterprise_types(page):
+def check_common_script_sim_classifies_connectors(page):
     """Regression guard/new-feature check for the shipped CommonScript_Sim(ctx) example
-    (DEFAULT_BATCH_SCRIPT_CODE, state.js, right after CustomRemap_Example), reported
-    directly with a starter shape ("switch (ctx.part.type.toLowerCase()) { case
-    'generalactor': ctx.log(...); break; default: ctx.log(...) }") to extend to "all
-    known element types identified in streamTemplates where name = 'Enterprise'," plus
-    "a generic return statement with value, state, response, and badge settings" --
-    later updated (Step 41, "change simulator script so value can return an object,
-    same behaviour as state, and create new 5th return value for left badge... and
-    right badge...") so value/response are objects (matching state's own
-    always-object convention) and badge is split into leftBadge/rightBadge.
-    "Enterprise" (public/custom.json, settings.streamTemplates) uses 9 element types in
-    its own value[] chain (GeneralActor, BusinessService, BusinessCapability,
-    BusinessProcess, ApplicationCapability, ApplicationProcess,
-    ApplicationLogicalComponent, ApplicationPhysicalComponent, DataDataEntity) plus 3
-    more its passive[] pairs introduce (BusinessFunction, ApplicationApplication,
-    BusinessOrganizationUnit) -- 12 total. Covers, via real simulation ticks (not just
-    scanning the text): every one of the 12 types logs its own "received .. <Type>"
-    message via a real part whose script calls CommonScript_Sim(ctx); an unrecognized
-    type falls through to the default "received unknown .. <Type>" case; and the
-    example's own return statement actually works end to end with no simulation
-    error -- value is an object whose type/label match the part's own, state
-    increments a ticksSeen counter tick over tick, response is an object only set once
-    ctx.inputs.length > 0, and leftBadge/rightBadge are each real { text, color }
-    objects."""
+    (DEFAULT_BATCH_SCRIPT_CODE, state.js, placed last of the CommonScript_<Name>
+    examples, right after CommonScript_DebugOutLog), reported directly (Step 44) as a
+    full replacement for the earlier type-switch example. Classifies every incoming
+    connector (ctx.inputs, this part as the 'to' side) by relationship against
+    toCtxAction (['aggregation','composition','flow','realization','triggering']) and
+    toCtxPassthrough (['assignment','association']), and every outgoing connector
+    (ctx.outputs, this part as the 'from' side) against fromCtxAction
+    (['flow','triggering']) and fromCtxPassthrough
+    (['aggregation','assignment','association','composition','realization']) --
+    each match appends a { action, reason } descriptor to a running value array (not a
+    bare scalar, since several connectors can classify in one tick). Every
+    intermediate (value/state/response/leftBadge/rightBadge) is also dumped to the
+    Debug Log before returning the full 5-field shape. Covers, via a real 4-connector
+    graph and one real simulation tick: an incoming 'Aggregation' connector produces a
+    'some to action' entry, an incoming 'Assignment' connector a 'some to passthrough'
+    entry, an outgoing 'Triggering' connector a 'some from action' entry, an outgoing
+    'Composition' connector a 'some from passthrough' entry -- all four landing in the
+    same returned value array with the connector's own (non-lowercased) relationship
+    as `reason`; state/response/leftBadge/rightBadge all come back as {}; the Debug
+    Log gets the 10 documented marker/value lines; and a part with no connectors at
+    all returns an empty value array with no error."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
       const sim = await import('./js/simulation.js');
       const model = store.defaultModel;
-      const enterpriseTypes = ['GeneralActor', 'BusinessService', 'BusinessCapability', 'BusinessProcess',
-        'ApplicationCapability', 'ApplicationProcess', 'ApplicationLogicalComponent',
-        'ApplicationPhysicalComponent', 'DataDataEntity', 'BusinessFunction',
-        'ApplicationApplication', 'BusinessOrganizationUnit'];
 
-      const parts = enterpriseTypes.map((t) => store.createPart({
-        type: t, label: 'SimCover_' + t, model, script: 'return CommonScript_Sim(ctx);', scriptEnabled: true,
-      }));
-      const unknownPart = store.createPart({
-        type: 'TotallyUnknownElementType', label: 'SimCoverUnknown', model, script: 'return CommonScript_Sim(ctx);', scriptEnabled: true,
-      });
+      const producer1 = store.createPart({ type: 'BusinessActor', label: 'RegrSimProducer1', model });
+      const producer2 = store.createPart({ type: 'BusinessActor', label: 'RegrSimProducer2', model });
+      const router = store.createPart({ type: 'BusinessProcess', label: 'RegrSimRouter', model, scriptEnabled: true, script: 'return CommonScript_Sim(ctx);' });
+      const consumer1 = store.createPart({ type: 'BusinessProcess', label: 'RegrSimConsumer1', model });
+      const consumer2 = store.createPart({ type: 'BusinessProcess', label: 'RegrSimConsumer2', model });
+      const isolated = store.createPart({ type: 'BusinessProcess', label: 'RegrSimIsolated', model, scriptEnabled: true, script: 'return CommonScript_Sim(ctx);' });
 
-      const before = store.messageLog.length;
+      store.createConnector({ from: producer1.id, to: router.id, model, connectorType: 'c', relationship: 'Aggregation' });
+      store.createConnector({ from: producer2.id, to: router.id, model, connectorType: 'c', relationship: 'Assignment' });
+      store.createConnector({ from: router.id, to: consumer1.id, model, connectorType: 'c', relationship: 'Triggering' });
+      store.createConnector({ from: router.id, to: consumer2.id, model, connectorType: 'c', relationship: 'Composition' });
+
+      const before = store.debugLog.length;
       sim.stepSimulation(app, model);
-      const rt1 = store.simRuntime.get(model);
-      const newLines = store.messageLog.slice(before).map((e) => e.message);
-      const errors = [...parts, unknownPart].map((p) => rt1.values.get(p.id)?.lastError).filter(Boolean);
+      const rt = store.simRuntime.get(model);
+      const errors = [router, isolated].map((p) => rt.values.get(p.id)?.lastError).filter(Boolean);
+      const routerEntry = rt.values.get(router.id);
+      const isolatedEntry = rt.values.get(isolated.id);
+      const debugLines = store.debugLog.slice(before).filter((e) => e.message.startsWith('[RegrSimRouter]')).map((e) => e.message);
 
-      const loggedForEachType = enterpriseTypes.every((t) => newLines.some((m) => m.includes('received .. ' + t)));
-      const loggedUnknown = newLines.some((m) => m.includes('received unknown .. TotallyUnknownElementType'));
-
-      const entry1 = rt1.values.get(parts[0].id);
-      const valueIsObjectMatchingPart = entry1?.value && typeof entry1.value === 'object'
-        && entry1.value.type === 'GeneralActor' && entry1.value.label === 'SimCover_GeneralActor'
-        && entry1.value.receivedFrom === null;
-      const stateAfterTick1 = entry1?.state?.ticksSeen;
-      const leftBadgeOk = entry1?.leftBadge && entry1.leftBadge.text === '1' && typeof entry1.leftBadge.color === 'string';
-      const rightBadgeOk = entry1?.rightBadge && entry1.rightBadge.text === 'GeneralActor' && typeof entry1.rightBadge.color === 'string';
-      const noResponseWithNoInput = entry1?.response === undefined;
-
-      sim.stepSimulation(app, model);
-      const rt2 = store.simRuntime.get(model);
-      const entry2 = rt2.values.get(parts[0].id);
-      const stateAfterTick2 = entry2?.state?.ticksSeen;
-      const leftBadgeAfterTick2 = entry2?.leftBadge?.text;
-
-      return { errors, loggedForEachType, loggedUnknown, valueIsObjectMatchingPart, stateAfterTick1, stateAfterTick2, leftBadgeOk, rightBadgeOk, noResponseWithNoInput, leftBadgeAfterTick2 };
+      return { errors, routerEntry, isolatedEntry, debugLines };
     }
     """)
     problems = []
     if result["errors"]:
         return False, f"expected every CommonScript_Sim(ctx) call to run without error, got {result['errors']}"
-    if not result["loggedForEachType"]:
-        problems.append("expected every one of the 12 Enterprise element types to log its own 'received .. <Type>' message")
-    if not result["loggedUnknown"]:
-        problems.append("expected an unrecognized element type to fall through to the default 'received unknown .. <Type>' case")
-    if not result["valueIsObjectMatchingPart"]:
-        problems.append(f"expected the example return's value to be an object with type/label matching the part and receivedFrom null with no input, got {result['valueIsObjectMatchingPart']}")
-    if result["stateAfterTick1"] != 1 or result["stateAfterTick2"] != 2:
-        problems.append(f"expected the example return's state.ticksSeen to increment each tick (1, then 2), got {result['stateAfterTick1']}, {result['stateAfterTick2']}")
-    if not result["leftBadgeOk"]:
-        problems.append("expected the example return's leftBadge to be a real {text, color} object matching ticksSeen")
-    if not result["rightBadgeOk"]:
-        problems.append("expected the example return's rightBadge to be a real {text, color} object matching the part's own type")
-    if result["leftBadgeAfterTick2"] != '2':
-        problems.append(f"expected leftBadge.text to track ticksSeen across ticks (should be '2' on tick 2), got {result['leftBadgeAfterTick2']}")
-    if not result["noResponseWithNoInput"]:
-        problems.append("expected the example return's response to be omitted when ctx.inputs is empty")
+    entry = result["routerEntry"] or {}
+    value = entry.get("value")
+    if not isinstance(value, list) or len(value) != 4:
+        problems.append(f"expected router's returned value to be a 4-entry array (one per classified connector), got {value}")
+    else:
+        expected = [
+            {"action": "some to action", "reason": "Aggregation"},
+            {"action": "some to passthrough", "reason": "Assignment"},
+            {"action": "some from action", "reason": "Triggering"},
+            {"action": "some from passthrough", "reason": "Composition"},
+        ]
+        for exp in expected:
+            if exp not in value:
+                problems.append(f"expected value to contain {exp}, got {value}")
+    for field in ("state", "response"):
+        if entry.get(field) != {}:
+            problems.append(f"expected router's returned {field} to be {{}}, got {entry.get(field)}")
+    # An empty {} returned for leftBadge/rightBadge is still truthy-object, so
+    # simulation.js's own normalization (Step 41) fills in the {text, color} shape --
+    # {text: '', color: '#666666'} here, not the bare {} the script itself returned.
+    for field in ("leftBadge", "rightBadge"):
+        if entry.get(field) != {"text": "", "color": "#666666"}:
+            problems.append(f"expected router's returned {field} to be normalized to {{'text': '', 'color': '#666666'}}, got {entry.get(field)}")
+    isolated_value = (result["isolatedEntry"] or {}).get("value")
+    if isolated_value != []:
+        problems.append(f"expected a part with no connectors at all to return an empty value array, got {isolated_value}")
+    debug_lines = result["debugLines"]
+    expected_markers = ["--v--", "--s--", "{}", "--r--", "--lb-", "--rb--", "--e--"]
+    for marker in expected_markers:
+        if not any(marker in l for l in debug_lines):
+            problems.append(f"expected the Debug Log to include a line containing {marker!r}, got {debug_lines}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "CommonScript_Sim(ctx) logs a distinct message for all 12 element types the Enterprise stream template uses (plus a default for anything else), and its example return statement's object-shaped value/state/response and leftBadge/rightBadge all work correctly across real simulation ticks"
+    return True, "CommonScript_Sim(ctx) classifies ctx.inputs/ctx.outputs by connector relationship into a running value array (action vs. passthrough, to vs. from), dumps every intermediate to the Debug Log, and returns state/response as {} and leftBadge/rightBadge normalized to {text: '', color: '#666666'} alongside it"
 
 
 def check_left_badge_overrides_value_display(page):
@@ -5773,66 +5849,57 @@ def check_activity_and_debug_logs(page):
 
 def check_common_script_debug_out_log(page):
     """Regression guard/new-feature check for CommonScript_DebugOutLog(ctx), reported
-    directly: "Write a common_debugOutLog script that will be called from any element
-    connected as a 'to', to display deep to the new debug log all the input values
-    looping through arrays." The shipped CommonScript_DebugOutLog (state.js, right
-    after CommonScript_Sim) loops ctx.inputs; for an array value, loops each element
-    individually (rather than dumping the array as one block); everything logged via
-    ctx.logDebug as pretty-printed (multi-line) JSON, since this is specifically the
-    deep/verbose tab. Covers, via a real 2-part chain driven through actual
-    sim.stepSimulation() calls: a source sending an array value produces one summary
-    debug line plus one line PER element, each pretty-printed and naming the source's
-    label/type/connector type (reusing ctx.inputs' Step 42 fromPartType/connectorType
-    fields); a source sending a plain (non-array) value produces exactly one
-    pretty-printed debug line; and a part with zero inputs logs a single explicit
-    'no inputs connected this tick' line instead of silently doing nothing."""
+    directly (Step 44) as a full replacement for the earlier looping/pretty-printed
+    version: now a simple single-block dump, logging ctx.inputs verbatim as one
+    compact-JSON line to the Debug Log, bracketed by '-i--'/'-e--' marker lines rather
+    than looping per-element. Covers, via a real 2-part chain driven through actual
+    sim.stepSimulation() calls: a sink receiving a real committed value logs exactly 3
+    debug lines ('-i--', one compact-JSON line containing the source's committed
+    value, '-e--'); and a part with zero inputs still logs the same 3-line shape, with
+    the middle line being the empty array '[]' rather than a special-cased message,
+    since ctx.inputs is always an array."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
       const sim = await import('./js/simulation.js');
       const model = store.defaultModel;
 
-      const arraySrc = store.createPart({ type: 'BusinessActor', label: 'RegrDbgArraySrc', model, scriptEnabled: true, script: "return { value: ['x', 'y'], state: {} };" });
-      const arraySink = store.createPart({ type: 'BusinessProcess', label: 'RegrDbgArraySink', model, scriptEnabled: true, script: "return CommonScript_DebugOutLog(ctx);" });
-      store.createConnector({ from: arraySrc.id, to: arraySink.id, model, connectorType: 'c', relationship: 'Association' });
+      const src = store.createPart({ type: 'BusinessActor', label: 'RegrDbgSrc', model, scriptEnabled: true, script: "return { value: { a: 1, items: ['x', 'y'] }, state: {} };" });
+      const sink = store.createPart({ type: 'BusinessProcess', label: 'RegrDbgSink', model, scriptEnabled: true, script: "return CommonScript_DebugOutLog(ctx);" });
+      store.createConnector({ from: src.id, to: sink.id, model, connectorType: 'c', relationship: 'Association' });
 
-      const plainSrc = store.createPart({ type: 'BusinessActor', label: 'RegrDbgPlainSrc', model, scriptEnabled: true, script: "return { value: 42, state: {} };" });
-      const plainSink = store.createPart({ type: 'BusinessProcess', label: 'RegrDbgPlainSink', model, scriptEnabled: true, script: "return CommonScript_DebugOutLog(ctx);" });
-      store.createConnector({ from: plainSrc.id, to: plainSink.id, model, connectorType: 'c', relationship: 'Association' });
+      const isolated = store.createPart({ type: 'BusinessProcess', label: 'RegrDbgIsolated', model, scriptEnabled: true, script: "return CommonScript_DebugOutLog(ctx);" });
 
-      const isolatedSink = store.createPart({ type: 'BusinessProcess', label: 'RegrDbgIsolatedSink', model, scriptEnabled: true, script: "return CommonScript_DebugOutLog(ctx);" });
-
-      sim.stepSimulation(app, model); // tick 0: nothing committed yet from the sources
+      sim.stepSimulation(app, model); // tick 0: src commits its value
       const before = store.debugLog.length;
-      sim.stepSimulation(app, model); // tick 1: sinks now see tick 0's committed values
+      sim.stepSimulation(app, model); // tick 1: sink now sees tick 0's committed value
       const rt = store.simRuntime.get(model);
-      const errors = [arraySink, plainSink, isolatedSink].map((p) => rt.values.get(p.id)?.lastError).filter(Boolean);
-      const newLines = store.debugLog.slice(before).map((e) => e.message);
+      const errors = [sink, isolated].map((p) => rt.values.get(p.id)?.lastError).filter(Boolean);
+      const sinkLines = store.debugLog.slice(before).filter((e) => e.message.startsWith('[RegrDbgSink]')).map((e) => e.message);
+      const isolatedLines = store.debugLog.slice(before).filter((e) => e.message.startsWith('[RegrDbgIsolated]')).map((e) => e.message);
 
-      const arrayLines = newLines.filter((l) => l.includes('RegrDbgArraySink') && l.includes('RegrDbgArraySrc'));
-      const plainLines = newLines.filter((l) => l.includes('RegrDbgPlainSink') && l.includes('RegrDbgPlainSrc'));
-      const isolatedLines = newLines.filter((l) => l.includes('RegrDbgIsolatedSink'));
-
-      return { errors, arrayLines, plainLines, isolatedLines };
+      return { errors, sinkLines, isolatedLines };
     }
     """)
     problems = []
     if result["errors"]:
         return False, f"expected every CommonScript_DebugOutLog(ctx) call to run without error, got {result['errors']}"
-    arrayLines = result["arrayLines"]
-    if not any('array of 2' in l for l in arrayLines):
-        problems.append(f"expected an array value to log an 'array of 2' summary line, got {arrayLines}")
-    if not any('[0]' in l and 'BusinessActor' in l and "'c'" in l and '"x"' in l for l in arrayLines):
-        problems.append(f"expected the array's element 0 to be logged individually, pretty-printed, naming the source's type/connector type, got {arrayLines}")
-    if not any('[1]' in l and '"y"' in l for l in arrayLines):
-        problems.append(f"expected the array's element 1 to be logged individually, got {arrayLines}")
-    if len(result["plainLines"]) != 1 or '42' not in result["plainLines"][0]:
-        problems.append(f"expected a non-array value to log exactly one pretty-printed debug line containing '42', got {result['plainLines']}")
-    if len(result["isolatedLines"]) != 1 or 'no inputs connected this tick' not in result["isolatedLines"][0]:
-        problems.append(f"expected a part with zero inputs to log exactly one explicit 'no inputs connected this tick' line, got {result['isolatedLines']}")
+    sinkLines = result["sinkLines"]
+    if len(sinkLines) != 3:
+        problems.append(f"expected the sink to log exactly 3 debug lines (-i--, one JSON line, -e--), got {sinkLines}")
+    else:
+        if '-i--' not in sinkLines[0]:
+            problems.append(f"expected the first line to be the '-i--' marker, got {sinkLines[0]!r}")
+        if 'BusinessActor' not in sinkLines[1] or '"a":1' not in sinkLines[1] or '"x"' not in sinkLines[1] or '"y"' not in sinkLines[1]:
+            problems.append(f"expected the middle line to be one compact-JSON dump of ctx.inputs containing the source's type and committed value, got {sinkLines[1]!r}")
+        if '-e--' not in sinkLines[2]:
+            problems.append(f"expected the last line to be the '-e--' marker, got {sinkLines[2]!r}")
+    isolatedLines = result["isolatedLines"]
+    if isolatedLines != ['[RegrDbgIsolated] -i--', '[RegrDbgIsolated] []', '[RegrDbgIsolated] -e--']:
+        problems.append(f"expected a part with zero inputs to log the same 3-line shape with an empty array in the middle, got {isolatedLines}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "CommonScript_DebugOutLog(ctx) correctly loops ctx.inputs to the Debug Log, looping through array values element-by-element with pretty-printed JSON, logging non-array values directly, and logging an explicit no-inputs line for a part with none"
+    return True, "CommonScript_DebugOutLog(ctx) logs ctx.inputs verbatim as one compact-JSON line to the Debug Log, bracketed by '-i--'/'-e--' markers, including for a part with zero inputs (empty array, not a special-cased message)"
 
 
 def check_log_tabs_ui(page):
@@ -15799,6 +15866,7 @@ CHECKS = [
     check_script_console_run_function_picker,
     check_script_console_detach_to_window,
     check_script_console_edits_persist_live_while_open,
+    check_script_console_reopen_while_detached_is_idempotent,
     check_batch_script_quickstart,
     check_script_console_remap_and_smart_check_bindings,
     check_script_console_reference_tab,
@@ -15850,7 +15918,7 @@ CHECKS = [
     check_local_secrets_settings_split,
     check_batch_script_code_persists_with_local_settings,
     check_common_script_callable_from_part_script,
-    check_common_script_sim_covers_enterprise_types,
+    check_common_script_sim_classifies_connectors,
     check_left_badge_overrides_value_display,
     check_ctx_outputs_and_inputs_connector_metadata,
     check_connector_introspection_example,

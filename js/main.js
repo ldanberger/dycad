@@ -418,6 +418,12 @@ class App {
     // state, not persisted, not part of `store` (same treatment as e.g. simSelectedModel
     // being separate from the doc itself). 'message' | 'activity' | 'debug'.
     this.activeLogTab = 'message';
+    // Handle to the detached Script Console popup window (App.detachScriptConsole),
+    // while it's open — null otherwise. Lets promptScriptConsole/detachScriptConsole
+    // each check "is the other one already live?" and refocus instead of opening a
+    // second simultaneous editor against the same store.batchScriptCode (see both
+    // methods' own comments — Step 44 — for the bug this guards against).
+    this._scriptConsolePopup = null;
   }
 
   // ===================== RENDER =====================
@@ -866,8 +872,30 @@ class App {
    * `app`/`store` passed in — it just refers to them directly, same as main() does).
    * This is what lets one script file hold several named batch operations
    * (`BatchScript_<Name>` by convention) with main() picking which to run, without
-   * ever needing to rename anything to "the" entry point. */
+   * ever needing to rename anything to "the" entry point.
+   *
+   * Reported directly, step 44: "when script editor is detached, and user goes back to
+   * app and double clicks to open script editor again, it occasionally freezes
+   * application completely." Root cause: this method had no guard against opening a
+   * SECOND live editor while the detached popup (App.detachScriptConsole) was already
+   * open — despite that method's own comment already documenting the intended
+   * invariant ("there's only ever one live editor open against store.batchScriptCode
+   * at a time"), it was only enforced in one direction (detaching closes the in-app
+   * modal) and never the other. Re-opening via the menu while already detached
+   * produced two simultaneously-live editors, each independently wiring its own
+   * keydown/input listeners and fighting for focus against the same store field —
+   * consistent with the reported intermittent freeze. Now checked first, before
+   * building anything. */
   promptScriptConsole() {
+    if (this._scriptConsolePopup && !this._scriptConsolePopup.closed) {
+      this._scriptConsolePopup.focus();
+      return;
+    }
+    const existing = document.querySelector('.modal-box.modal-box-console');
+    if (existing) {
+      existing.querySelector('#console-input')?.focus();
+      return;
+    }
     const modelName = this.store.simSelectedModel;
     const root = document.getElementById('modal-root');
     const overlay = document.createElement('div');
@@ -905,14 +933,29 @@ class App {
    * executes whatever text currently sits in that document's own #console-input, not a
    * cached/saved copy. The in-app modal closes when detaching so there's only ever one
    * live editor open against store.batchScriptCode at a time -- two simultaneously-open
-   * copies (modal + popup) could silently clobber each other's edits on Run/Close. */
+   * copies (modal + popup) could silently clobber each other's edits on Run/Close.
+   *
+   * Reported directly, step 44 (see promptScriptConsole's own comment for the full
+   * bug report): also guards against re-entering THIS method while its own popup is
+   * already open -- calling window.open('', 'dycad-script-console', ...) a second time
+   * targets that SAME already-open window (browsers reuse a same-named target rather
+   * than opening a new one), which used to still run through the full document.head/
+   * body teardown-and-rebuild below and re-wire a second, redundant set of listeners
+   * (including a second 'beforeunload' handler) onto it -- tearing down a live
+   * document out from under its own still-attached listeners while the window was
+   * already open, rather than just focusing it. */
   detachScriptConsole() {
+    if (this._scriptConsolePopup && !this._scriptConsolePopup.closed) {
+      this._scriptConsolePopup.focus();
+      return;
+    }
     const modelName = this.store.simSelectedModel;
     const popup = window.open('', 'dycad-script-console', 'width=1100,height=850,resizable=yes');
     if (!popup) {
       this.toast("Could not open the detached console — check your browser's popup blocker.", true);
       return;
     }
+    this._scriptConsolePopup = popup;
     popup.document.title = `Script Console${modelName ? ` — ${modelName}` : ''} - DyCAD`;
     popup.document.head.innerHTML = '<meta charset="UTF-8"><link rel="stylesheet" href="css/styles.css">';
     popup.document.body.innerHTML = '';

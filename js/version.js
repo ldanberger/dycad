@@ -5416,4 +5416,53 @@
 // BREAK. Verified live before writing tests. DESIGN_DOCUMENT.md SS8,
 // public/instructions.html's ctx-object table/Script Console bindings table/
 // Tips section, and tests/README.md updated.
-export const APP_VERSION = '0.932';
+
+// v0.933: two unrelated requests in one turn. (1) Reported directly with pasted code
+// (containing a few real syntax errors -- a missing closing brace on
+// CommonScript_DebugOutLog, missing closing parens on four `.includes(...)` calls, a
+// `value.add(...)` call on a plain object literal instead of an array, and a stray
+// unquoted trailing comment -- all fixed while keeping the intended logic exactly as
+// given): "replace two console scripts, placing CommonScript_Sim last, with: ..."
+// CommonScript_DebugOutLog (state.js) is now a simple single-block dump -- logs
+// ctx.inputs verbatim as one compact-JSON line to the Debug Log, bracketed by
+// '-i--'/'-e--' markers, replacing the earlier per-array-element looping version.
+// CommonScript_Sim (state.js) is fully replaced (not extended) -- drops the old
+// type-switch example for one that classifies every connector by its relationship:
+// ctx.inputs (this part as the 'to' side) checked against toCtxAction/
+// toCtxPassthrough, ctx.outputs (this part as the 'from' side) checked against
+// fromCtxAction/fromCtxPassthrough, each match appending a { action, reason }
+// descriptor to a running `value` array; every intermediate is dumped to the Debug
+// Log before returning the full { value, state, response, leftBadge, rightBadge }
+// shape. Both examples were also reordered -- CommonScript_DebugOutLog now comes
+// first (right after CustomRemap_Example), CommonScript_Sim last, as the more
+// complete one -- state.js's own top-of-file doc comment updated to match.
+// check_common_script_sim_covers_enterprise_types replaced with
+// check_common_script_sim_classifies_connectors (a real 4-connector graph, one tick,
+// covering all 4 relationship buckets plus a no-connectors part); check_common_
+// script_debug_out_log rewritten for the new 3-line shape -- both proven via TEMP
+// BREAK. (2) Reported directly: "when script editor is detached, and user goes back
+// to app and double clicks to open script editor again, it occasionally freezes
+// application completely." Root cause: promptScriptConsole/detachScriptConsole
+// (main.js) never actually enforced the single-live-editor invariant their own
+// comment already documented -- it was only enforced in ONE direction (detaching
+// closes the in-app modal). Reopening via the menu while already detached had no
+// guard and produced two simultaneously-live, independently-wired editors against
+// the same store.batchScriptCode; separately, calling detachScriptConsole again
+// while its own popup was already open used to still tear down and fully rebuild
+// that live window's document.head/body (re-wiring a redundant second set of
+// listeners, including a second beforeunload handler) instead of just focusing it --
+// consistent with the reported intermittent freeze under real, non-headless timing
+// (not reproduced headlessly despite a deliberate repro attempt, but the invariant
+// violation itself was confirmed directly and is a real bug regardless). Fixed by
+// tracking the open popup on a new App._scriptConsolePopup field (checked via
+// .closed, never nulled out explicitly): promptScriptConsole now checks it first
+// (focus and return), then checks for an already-open in-app modal (focus its input
+// and return), before building anything; detachScriptConsole checks it first (focus
+// and return) before any window.open/rebuild work. New check_script_console_reopen_
+// while_detached_is_idempotent (tests/run_all.py) covers all three angles -- proven
+// via TEMP BREAK on each guard independently, including a DOM-node-identity check
+// (not just .value) to actually detect a rebuild rather than being masked by the
+// pre-existing live-persist-on-input feature. Verified live before writing tests.
+// DESIGN_DOCUMENT.md SS8, public/instructions.html's CommonScript prose/Detach
+// paragraph, and tests/README.md updated.
+export const APP_VERSION = '0.933';
