@@ -91,6 +91,41 @@ filled with defaults. Every field ever added to Part/Connector/View/ViewMember/S
 has a corresponding `??`-default line here; this is why decades-old-feeling save files
 still load without crashing.
 
+**`Part.rawLabel`, actually wired up (Step 45)**: asked directly whether it was live —
+*"what is RawLabel currently used for? Was meant to be the label portion without
+element prefix or suffix, but currently appears same as label"* — confirmed true: every
+`createPart` call site, including `createStream`'s own, set `rawLabel` to the exact
+same value as `label`, so the field (per `RECREATION_PROMPT.md` §1's original Phase 1
+spec — *"the label before any prefix/suffix decoration from the element definition is
+applied"*) had never actually been populated with anything but `label` itself. Fixed
+directly: `Store.createPart` (`state.js`) gains an optional `rawLabel` parameter,
+defaulting to `label` when omitted — every caller with no decoration concept at all
+(manual part creation, `ctx.createPart`, ArchiMate import) is completely unaffected.
+The three `commands.js` call sites that actually build a `joinLabel(el, rawName)`-
+decorated label now thread the true pre-decoration `rawName` through explicitly:
+`createStream`'s main `template.value[]`-chain loop, `createPassiveNode` (the
+`passive[]`-pair loop), and `autoCompleteStreams`' `resolve()` (which deliberately uses
+the stream's own name as `rawName` for every category — see that function's
+pre-existing comment). `deriveStreamNames` (the Generate Stream dialog's "prepopulate
+from an existing stream" support, §7 area) now reads `part.rawLabel` directly instead
+of reverse-engineering it from the decorated `label` — the `unjoinLabel` helper that
+used to do that guess-work (regex-stripping a known prefix/suffix back off, with its own
+comment admitting it wasn't a general-purpose inverse) is removed as dead code, since
+nothing else called it and `rawLabel` now genuinely holds what it was reconstructing.
+New `check_raw_label_wired_up` (`tests/run_all.py`) covers all three real creation
+paths — SFCCE (main-loop decoration on BusinessCapability/ApplicationCapability, no
+decoration on DataDataEntity, passive-loop no-decoration on BusinessFunction), the
+"Test" template (passive-loop decoration on GeneralActor, the one type in its
+`passive[]` list not also in its own `value[]`, so it's only ever created via
+`createPassiveNode`), and a real Auto-Complete Streams dialog run (Enterprise template,
+decorated BusinessCapability) — plus a plain manual `createPart` call confirming the
+no-`rawLabel`-argument default is unchanged; proven via TEMP BREAK (reverting
+`createPart`'s default back to always mirroring `label`, which collapses every
+decorated case in the test back to `label === rawLabel`). The pre-existing
+`check_generate_stream_prepopulates_from_existing` (unchanged) already covers the
+`deriveStreamNames` rewrite end to end through the real dialog, since it exercises
+exactly the same "Manage"/"Provide"-decorated SFCCE types.
+
 ## 5. UI architecture
 
 ### 5.1 Schema-driven property panels

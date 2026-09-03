@@ -169,17 +169,18 @@ function createStream(app, {
     const resolvedType = el?.type || 'Unknown';
 
     let label;
+    let rawName; // the pre-joinLabel bare name, for the new part's rawLabel
     let category;
     if (ciEq(resolvedType, 'businessFunction')) {
-      label = joinLabel(el, functionName); category = 'function';
+      rawName = functionName; label = joinLabel(el, rawName); category = 'function';
     } else if (entBeginIdx >= 0 && i >= entBeginIdx) {
-      label = joinLabel(el, entityName); category = 'entity';
+      rawName = entityName; label = joinLabel(el, rawName); category = 'entity';
     } else if (appCapBeginIdx >= 0 && i >= appCapBeginIdx) {
-      label = joinLabel(el, applicationCapabilityName); category = 'applicationCapability';
+      rawName = applicationCapabilityName; label = joinLabel(el, rawName); category = 'applicationCapability';
     } else if (capBeginIdx >= 0 && i >= capBeginIdx) {
-      label = joinLabel(el, capabilityName); category = 'capability';
+      rawName = capabilityName; label = joinLabel(el, rawName); category = 'capability';
     } else {
-      label = functionName; category = 'function';
+      rawName = functionName; label = functionName; category = 'function';
     }
     // xId-based reuse only applies to the position whose type is the PRECISE semantic
     // match for its category — the broad index range (capBeginIdx..entBeginIdx, etc.)
@@ -239,7 +240,7 @@ function createStream(app, {
       if (!(part.streams || []).includes(streamName)) part.streams = [...(part.streams || []), streamName];
     } else {
       part = store.createPart({
-        type: resolvedType, label, model: modelName, streams: [streamName],
+        type: resolvedType, label, rawLabel: rawName, model: modelName, streams: [streamName],
         note: noteText, order: 0, other: { src: rawType },
         description: catDescription, xIds: catXId, section: catSection,
       });
@@ -603,7 +604,7 @@ function autoCompleteStreams(app, template, streamName, modelName, viewId, decis
       : store.doc.parts.find((p) => ciEq(p.label, label) && ciEq(p.type, resolvedType) && ciEq(p.model, modelName));
     if (!part) {
       if (!decision.createPart) return null;
-      part = store.createPart({ type: resolvedType, label, model: modelName, streams: [streamName], note: 'ac', other: { src: rawType } });
+      part = store.createPart({ type: resolvedType, label, rawLabel: streamName, model: modelName, streams: [streamName], note: 'ac', other: { src: rawType } });
       if (lookupCache) cacheRegisterPart(lookupCache, part);
       newPartsCount += 1;
     } else if (!(part.streams || []).includes(streamName)) {
@@ -719,40 +720,32 @@ function joinLabel(el, name) {
   return [el?.prefix, name, el?.suffix].filter((s) => s && String(s).trim().length).join(' ').trim() || name;
 }
 
-/** Reverses joinLabel for one specific element type's CURRENT prefix/suffix — used only
- * by deriveStreamNames below to recover a raw name from an already-generated label. Not
- * a general-purpose inverse: a label whose raw name was left blank (so the label is just
- * the bare prefix/suffix) can't be told apart from a raw name that happens to equal the
- * prefix/suffix text — an acceptable, rare imperfection for a "prepopulate a dialog
- * field, still editable" convenience, not data used for anything authoritative. */
-function unjoinLabel(el, label) {
-  const prefix = (el?.prefix || '').trim();
-  const suffix = (el?.suffix || '').trim();
-  let name = String(label ?? '');
-  if (prefix && name.startsWith(`${prefix} `)) name = name.slice(prefix.length + 1);
-  if (suffix && name.endsWith(` ${suffix}`)) name = name.slice(0, name.length - suffix.length - 1);
-  return name;
-}
-
 /**
- * Best-effort reconstruction of the raw function/capability/applicationCapability/entity names
- * that produced an existing stream's parts — for the Generate Stream dialog's "pick an
+ * Reconstructs the raw function/capability/applicationCapability/entity names that
+ * produced an existing stream's parts — for the Generate Stream dialog's "pick an
  * existing stream to prepopulate the rest of the fields from" flow. Reads only the 4
  * canonical "precise category match" types createStream itself singles out
  * (BusinessFunction/BusinessCapability/ApplicationCapability/DataDataEntity — see
- * createStream's own isPreciseCategoryMatch comment), since those converge on the exact
- * same joinLabel(el, rawName) shape regardless of which stream template originally
- * generated them — this works without needing to know (or guess) that template. A type
- * with no part tagged in this stream comes back null (e.g. every stream lacks a
- * Application Capability unless it was generated via a template with applicationCapabilityNameBegin),
- * letting the caller leave that dialog field's own default untouched rather than
- * blanking it.
+ * createStream's own isPreciseCategoryMatch comment), since those are exactly the
+ * positions createStream's own main loop sets a real rawLabel on (the pre-joinLabel
+ * bare name — see Store.createPart's own comment, state.js) regardless of which stream
+ * template originally generated them — this works without needing to know (or guess)
+ * that template. Reads part.rawLabel directly rather than reverse-engineering it from
+ * the decorated label (an earlier version of this function did that, via a since-removed
+ * unjoinLabel helper, back when rawLabel was set to the same value as label everywhere
+ * and so couldn't be read directly — see js/version.js's changelog for when rawLabel was
+ * actually wired up). A type with no part tagged in this stream comes back null (e.g.
+ * every stream lacks an Application Capability unless it was generated via a template
+ * with applicationCapabilityNameBegin), letting the caller leave that dialog field's own
+ * default untouched rather than blanking it. A part from before rawLabel was wired up
+ * (or otherwise never given a real one) falls back to migrateDoc's rawLabel ?? label
+ * default, same graceful degradation as reading rawLabel anywhere else in the app.
  */
 function deriveStreamNames(store, streamName) {
   const findByType = (type) => store.doc.parts.find((p) => ciEq(p.type, type) && (p.streams || []).includes(streamName));
   const extract = (type) => {
     const part = findByType(type);
-    return part ? unjoinLabel(elementByType(store, type), part.label) : null;
+    return part ? (part.rawLabel ?? part.label) : null;
   };
   return {
     functionName: extract('BusinessFunction'),
@@ -798,7 +791,8 @@ function createPassiveNode(app, viewId, type, streamName, modelName, functionNam
   const resolvedType = el?.type || 'Unknown';
   const isUnknownFallback = ciEq(resolvedType, 'Unknown') && !ciEq(type, 'Unknown');
   const fullNote = isUnknownFallback ? `${note} (unknown type: ${type})` : note;
-  const label = ciEq(resolvedType, 'businessFunction') ? joinLabel(el, functionName) : joinLabel(el, capabilityName || entityName || type);
+  const rawName = ciEq(resolvedType, 'businessFunction') ? functionName : (capabilityName || entityName || type);
+  const label = joinLabel(el, rawName);
   const isFunctionType = ciEq(resolvedType, 'businessFunction');
   const isFunctionWithXId = isFunctionType && functionxIds;
 
@@ -819,7 +813,7 @@ function createPassiveNode(app, viewId, type, streamName, modelName, functionNam
     if (!(part.streams || []).includes(streamName)) part.streams = [...(part.streams || []), streamName];
   } else {
     part = store.createPart({
-      type: resolvedType, label, model: modelName, streams: [streamName], note: fullNote, other: { src: type },
+      type: resolvedType, label, rawLabel: rawName, model: modelName, streams: [streamName], note: fullNote, other: { src: type },
       description: isFunctionWithXId ? functionDescription : undefined, xIds: isFunctionWithXId ? functionxIds : undefined,
       // Every passive node belongs to this same function's own stream (see the matching
       // comment at the main value[] loop's catSection above) — not just the function-type

@@ -8211,6 +8211,132 @@ def check_remap_copy_call_on_right_click(page):
     return True, "right-clicking Remap's submit button copies a valid remap(app, tab, {...}) call reflecting the current form to the clipboard, without actually submitting"
 
 
+def check_raw_label_wired_up(page):
+    """Regression guard/new-feature check for Part.rawLabel, asked about directly: "what
+    is RawLabel currently used for? Was meant to be the label portion without element
+    prefix or suffix, but currently appears same as label" -- confirmed true (every
+    createPart call site, including createStream's own, set rawLabel to the exact same
+    value as label), then "Wire it up properly." Store.createPart (state.js) now accepts
+    an optional rawLabel, defaulting to label when omitted (every caller with no
+    decoration concept — manual creation, ctx.createPart, ArchiMate import — is
+    unaffected). The three commands.js call sites that actually compute a
+    joinLabel(el, rawName)-decorated label now pass that pre-decoration rawName through
+    explicitly: createStream's main value[]-chain loop, createPassiveNode (the
+    passive[]-pair loop), and autoCompleteStreams' resolve() (which deliberately uses
+    the stream's own name as rawName for every category, per its own pre-existing
+    comment). deriveStreamNames (the Generate Stream dialog's "prepopulate from an
+    existing stream" support) now reads part.rawLabel directly instead of the old
+    unjoinLabel regex-guess (removed as dead code once nothing else used it), since
+    rawLabel now actually holds the true pre-decoration name. Covers, via real
+    createStream calls (SFCCE and the "Test" template, whose capabilityNameBegin lets
+    every main-chain position render through capabilityName), the real Auto-Complete
+    Streams dialog end to end, and a plain manual createPart: a main-loop position with
+    real prefix/suffix decoration (BusinessCapability "Manage", ApplicationCapability
+    "Manage") gets label != rawLabel, rawLabel exactly the typed name; a main-loop
+    position with no decoration (DataDataEntity) gets label === rawLabel; a passive-loop
+    position with no decoration (BusinessFunction, created via the BusinessFunction->
+    BusinessProcess passive pair since BusinessFunction isn't itself in SFCCE's value[])
+    also gets label === rawLabel; a passive-loop position that DOES have real decoration
+    (GeneralActor's "Consumer" suffix, exercised via the "Test" template's GeneralActor->
+    thingamajig passive pair, since GeneralActor isn't in Test's own value[]) gets label
+    != rawLabel with rawLabel exactly the typed capability name; Auto-Complete Streams'
+    real dialog creates a BusinessCapability part with label "Manage <streamName>" and
+    rawLabel exactly <streamName>; and a plain store.createPart({...}) call with no
+    rawLabel argument at all still gets rawLabel === label, unchanged from before this
+    fix — proven via TEMP BREAK (reverting the createPart default to rawLabel: label,
+    which collapses every decorated case back to label === rawLabel)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      const model = store.defaultModel;
+
+      // (1) SFCCE: main-loop decoration (BusinessCapability/ApplicationCapability),
+      // main-loop no-decoration (DataDataEntity), passive-loop no-decoration
+      // (BusinessFunction, via the BusinessFunction->BusinessProcess passive pair).
+      const view1 = store.addView('RegrRawLabelSFCCE_' + Date.now());
+      view1.viewType = 'ff';
+      commands.createStream(app, {
+        templateName: 'SFCCE', streamName: 'RegrRLStream1',
+        functionName: 'RegrRLFunc', capabilityName: 'RegrRLCap',
+        applicationCapabilityName: 'RegrRLAppCap', entityName: 'RegrRLEnt',
+        modelName: model, viewName: view1.id, silent: true,
+      });
+      const byType = (t) => store.doc.parts.find(p => p.type === t && (p.streams || []).includes('RegrRLStream1'));
+      const cap = byType('BusinessCapability');
+      const appCap = byType('ApplicationCapability');
+      const ent = byType('DataDataEntity');
+      const func = byType('BusinessFunction');
+
+      // (2) "Test" template: passive-loop decoration. GeneralActor isn't in Test's own
+      // value[], so it's only ever created via the GeneralActor->thingamajig passive
+      // pair -- and GeneralActor has a real suffix ("Consumer"), unlike SFCCE's passive
+      // types, so this is the one case that actually exercises createPassiveNode's
+      // OWN joinLabel call with real decoration.
+      const view2 = store.addView('RegrRawLabelTest_' + Date.now());
+      view2.viewType = 'ff';
+      commands.createStream(app, {
+        templateName: 'Test', streamName: 'RegrRLStream2',
+        functionName: 'RegrRLFunc2', capabilityName: 'RegrRLCap2', entityName: 'RegrRLEnt2',
+        modelName: model, viewName: view2.id, silent: true,
+      });
+      const actor = store.doc.parts.find(p => p.type === 'GeneralActor' && (p.streams || []).includes('RegrRLStream2'));
+
+      // (3) Plain manual creation, no rawLabel argument at all.
+      const manual = store.createPart({ type: 'BusinessActor', label: 'RegrRLManual', model, streams: [] });
+
+      // (4) The real Auto-Complete Streams dialog (Smart Check View), Enterprise
+      // template, which also decorates BusinessCapability with "Manage".
+      const streamName3 = 'RegrRLStream3_' + Date.now();
+      store.createPart({ type: 'Unknown', label: 'seed', model, streams: [streamName3] });
+      const homeTab = store.tabs.find(t => t.type === 'canvas');
+      app.switchToTab(homeTab.id);
+      app.promptSmartCheckView();
+      await new Promise(r => setTimeout(r, 30));
+      document.getElementById('scv-missing-connectors').checked = false;
+      document.getElementById('scv-autocomplete').checked = true;
+      document.getElementById('scv-autocomplete').dispatchEvent(new Event('change', { bubbles: true }));
+      document.getElementById('scv-autocomplete-template').value = 'Enterprise';
+      await new Promise(r => setTimeout(r, 30));
+      document.querySelector('.modal-overlay .submit').click();
+      await new Promise(r => setTimeout(r, 60));
+      document.querySelector('.modal-box .submit').click();
+      await new Promise(r => setTimeout(r, 60));
+      const acsCap = store.doc.parts.find(p => p.type === 'BusinessCapability' && (p.streams || []).includes(streamName3));
+
+      return {
+        cap: cap && { label: cap.label, rawLabel: cap.rawLabel },
+        appCap: appCap && { label: appCap.label, rawLabel: appCap.rawLabel },
+        ent: ent && { label: ent.label, rawLabel: ent.rawLabel },
+        func: func && { label: func.label, rawLabel: func.rawLabel },
+        actor: actor && { label: actor.label, rawLabel: actor.rawLabel },
+        manual: { label: manual.label, rawLabel: manual.rawLabel },
+        acsCap: acsCap && { label: acsCap.label, rawLabel: acsCap.rawLabel },
+        streamName3,
+      };
+    }
+    """)
+    problems = []
+    if not result.get("cap") or result["cap"]["label"] != "Manage RegrRLCap" or result["cap"]["rawLabel"] != "RegrRLCap":
+        problems.append(f"expected SFCCE's BusinessCapability (main-loop, decorated) to be label='Manage RegrRLCap', rawLabel='RegrRLCap', got {result.get('cap')}")
+    if not result.get("appCap") or result["appCap"]["label"] != "Manage RegrRLAppCap" or result["appCap"]["rawLabel"] != "RegrRLAppCap":
+        problems.append(f"expected SFCCE's ApplicationCapability (main-loop, decorated) to be label='Manage RegrRLAppCap', rawLabel='RegrRLAppCap', got {result.get('appCap')}")
+    if not result.get("ent") or result["ent"]["label"] != result["ent"]["rawLabel"] or result["ent"]["rawLabel"] != "RegrRLEnt":
+        problems.append(f"expected SFCCE's DataDataEntity (main-loop, no decoration) to have label === rawLabel === 'RegrRLEnt', got {result.get('ent')}")
+    if not result.get("func") or result["func"]["label"] != result["func"]["rawLabel"] or result["func"]["rawLabel"] != "RegrRLFunc":
+        problems.append(f"expected SFCCE's BusinessFunction (passive-loop, no decoration) to have label === rawLabel === 'RegrRLFunc', got {result.get('func')}")
+    if not result.get("actor") or result["actor"]["label"] != "RegrRLCap2 Consumer" or result["actor"]["rawLabel"] != "RegrRLCap2":
+        problems.append(f"expected the 'Test' template's GeneralActor (passive-loop, decorated via createPassiveNode) to be label='RegrRLCap2 Consumer', rawLabel='RegrRLCap2', got {result.get('actor')}")
+    if result["manual"]["label"] != "RegrRLManual" or result["manual"]["rawLabel"] != "RegrRLManual":
+        problems.append(f"expected a plain manual createPart call (no rawLabel argument) to still get rawLabel === label, got {result['manual']}")
+    expected_acs_label = f"Manage {result['streamName3']}"
+    if not result.get("acsCap") or result["acsCap"]["label"] != expected_acs_label or result["acsCap"]["rawLabel"] != result["streamName3"]:
+        problems.append(f"expected Auto-Complete Streams' real BusinessCapability creation to be label={expected_acs_label!r}, rawLabel={result['streamName3']!r}, got {result.get('acsCap')}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Part.rawLabel is now genuinely the pre-decoration name across all three real creation paths (createStream's main loop, createPassiveNode, autoCompleteStreams), always distinct from label wherever the element type has a real prefix/suffix and equal to it otherwise, while a plain manual createPart with no rawLabel argument is unaffected"
+
+
 def check_generate_stream_prepopulates_from_existing(page):
     """Regression guard for Generate Stream's Stream Name field: it's a text input backed
     by a <datalist> of existing stream names (not a locked-down <select>), so typing a
@@ -15954,6 +16080,7 @@ CHECKS = [
     check_remap_selected_only_anchors_at_original_position,
     check_spacing_axis_toggle,
     check_remap_copy_call_on_right_click,
+    check_raw_label_wired_up,
     check_generate_stream_prepopulates_from_existing,
     check_node_size_multiplier,
     check_smart_check_node,

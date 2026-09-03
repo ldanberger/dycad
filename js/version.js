@@ -5465,4 +5465,34 @@
 // pre-existing live-persist-on-input feature. Verified live before writing tests.
 // DESIGN_DOCUMENT.md SS8, public/instructions.html's CommonScript prose/Detach
 // paragraph, and tests/README.md updated.
-export const APP_VERSION = '0.933';
+
+// v0.934: direct follow-up question, then instruction -- "what is RawLabel currently
+// used for? Was meant to be the label portion without element prefix or suffix, but
+// currently appears same as label" (confirmed true by tracing every createPart call
+// site: every one, including createStream's own, set rawLabel to the exact same value
+// as label -- RECREATION_PROMPT.md SS1's original Phase 1 spec had never actually been
+// implemented), then "Wire it up properly." Store.createPart (state.js) gains an
+// optional rawLabel parameter, defaulting to label when omitted -- every caller with
+// no decoration concept (manual creation, ctx.createPart, ArchiMate import) is
+// unaffected. The three commands.js call sites that actually build a joinLabel(el,
+// rawName)-decorated label now thread the true pre-decoration rawName through
+// explicitly: createStream's main template.value[]-chain loop, createPassiveNode (the
+// passive[]-pair loop), and autoCompleteStreams' resolve() (which already deliberately
+// used the stream's own name as rawName for every category). deriveStreamNames (the
+// Generate Stream dialog's "prepopulate from an existing stream" support) now reads
+// part.rawLabel directly instead of reverse-engineering it from the decorated label --
+// the unjoinLabel helper that used to guess it (regex-stripping a known prefix/suffix
+// back off, its own comment admitting it wasn't a general-purpose inverse) is removed
+// as dead code, since nothing else called it. New check_raw_label_wired_up
+// (tests/run_all.py) covers all three real creation paths via SFCCE (main-loop
+// decoration on BusinessCapability/ApplicationCapability, no decoration on
+// DataDataEntity, passive-loop no-decoration on BusinessFunction), the "Test" template
+// (passive-loop decoration on GeneralActor, the one type in its passive[] list not
+// also in its own value[], so it's only ever created via createPassiveNode), and a
+// real Auto-Complete Streams dialog run (Enterprise template, decorated
+// BusinessCapability) -- plus a plain manual createPart call confirming the
+// no-argument default is unchanged -- proven via TEMP BREAK. The pre-existing
+// check_generate_stream_prepopulates_from_existing (unchanged, still passing) already
+// covers the deriveStreamNames rewrite end to end through the real dialog. Verified
+// live before writing tests. DESIGN_DOCUMENT.md SS4 and tests/README.md updated.
+export const APP_VERSION = '0.934';

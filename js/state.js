@@ -805,7 +805,7 @@ class Store {
   // computeStreamLanes/layoutTypeIntoLanes' grid entirely and renders at exactly this
   // position instead; Advanced > Reset Pinned 3D Positions clears every part's pin3D
   // back to null at once. Persisted (part of the document), so a pin survives Save/Load.
-  createPart({ type, label, model, streams = [], note = '', order = 0, other = {}, xIds = '', description = '', script = '', scriptEnabled = false, section = '', pin3D = null, attributes = [], uiTargetPartId = '', uiInputValue = null }) {
+  createPart({ type, label, rawLabel, model, streams = [], note = '', order = 0, other = {}, xIds = '', description = '', script = '', scriptEnabled = false, section = '', pin3D = null, attributes = [], uiTargetPartId = '', uiInputValue = null }) {
     const stamp = nowStamp();
     // uiTargetPartId/uiInputValue: UI dashboard elements only (isUIDashboardType,
     // above) — which OTHER part this widget mirrors/feeds, and (Input types) the
@@ -813,7 +813,15 @@ class Store {
     // (simulation.js). Present on every Part, same as pin3D/attributes are, even
     // though only 4 types ever actually use them — never read/written for anything
     // else.
-    const part = { id: newId(), type, label: label ?? '', rawLabel: label ?? '', model, streams, note, order, other, xIds, description, script, scriptEnabled: !!scriptEnabled, section, pin3D, attributes, uiTargetPartId, uiInputValue, createdAt: stamp, updatedAt: stamp };
+    // rawLabel: the label BEFORE any element-type prefix/suffix decoration
+    // (commands.js's joinLabel) is applied -- e.g. label "Manage Billing" / rawLabel
+    // "Billing" for an ApplicationCapability (prefix "Manage"). A caller that actually
+    // computed a decorated label (createStream's main loop, createPassiveNode,
+    // autoCompleteStreams -- all commands.js) passes the true pre-decoration name
+    // through explicitly; every other caller (manual part creation, ctx.createPart,
+    // ArchiMate import, ...) has no decoration concept at all, so omitting rawLabel
+    // here falls back to label itself, same as before this field existed.
+    const part = { id: newId(), type, label: label ?? '', rawLabel: (rawLabel ?? label) ?? '', model, streams, note, order, other, xIds, description, script, scriptEnabled: !!scriptEnabled, section, pin3D, attributes, uiTargetPartId, uiInputValue, createdAt: stamp, updatedAt: stamp };
     this.doc.parts.push(part);
     return part;
   }
