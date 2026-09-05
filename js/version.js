@@ -5648,4 +5648,48 @@
 // check_pinned_fields_default_includes_script,
 // check_properties_panel_preserves_scroll_during_render) -- all proven via TEMP
 // BREAK. DESIGN_DOCUMENT.md and tests/README.md updated.
-export const APP_VERSION = '0.939';
+// v0.940: UI dashboard elements (Text/Numeric Output/Input) no longer use the sim
+// badge, reported directly: "use the node space otherwise used for description as
+// input field for inputs and to display the output values, instead of using the
+// badges. Leave badges available for scripts." buildNodeEl (canvas.js) now
+// repurposes the node's own description slot: _out widgets show their value as
+// plain read-only text there (.fnode-ui-value, same "--" unset placeholder, still
+// always visible regardless of chkShowSimValues); _in widgets get a REAL,
+// live-editable <input> there instead (.fnode-ui-input) -- pre-filled from
+// part.uiInputValue, committing on 'change' with the same string-vs-Number
+// conversion the property panel's own "Value" field already used. The ordinary
+// sim-value badge logic no longer has any UI-dashboard special case at all --
+// dashboard widgets simply never touch it, in either direction, so badges stay
+// exactly as they were for scripts. Because renderCanvasPage rebuilds the whole
+// canvas page on every render (including every sim tick, default 500ms),
+// renderCanvasPage now captures a focused .fnode-ui-input's {vmId, value,
+// selectionStart/End} before the teardown and restores focus + the live
+// (possibly uncommitted) value + cursor position after rebuilding -- otherwise a
+// tick landing mid-keystroke would have silently discarded whatever was typed.
+// wireCanvasInteractions' node-level dblclick/contextmenu/pointerdown handlers all
+// gained an early bail-out so clicking/typing into the input behaves like a normal
+// text field instead of starting a node drag or hijacking right-click. Also: a UI
+// dashboard part's own `description` field is now stripped from Root Properties
+// (render.js) since it has nowhere left to display, matching the "no dead visible
+// field" precedent already set for viewMember's fontColor/fontSize/borderColor.
+// Three new checks (check_ui_dashboard_canvas_value_and_input_rendering,
+// check_ui_dashboard_canvas_input_preserves_focus_during_rerender,
+// check_ui_dashboard_description_hidden_from_root_properties); the pre-existing
+// check_ui_dashboard_output_badge_visibility renamed to check_ui_dashboard_output_
+// value_display_always_visible and updated for the new mechanism, and check_left_
+// badge_overrides_value_display's own UI-Output control case updated the same way
+// -- all proven via TEMP BREAK. DESIGN_DOCUMENT.md, tests/README.md, and
+// instructions.html updated.
+// v0.941: fix bug, reported directly (against the "ui dashboard elements demo.json"
+// example): "the ui element text output appears to cut off the text: ...it shows
+// just 'Discount app..' which isn't the full width of available text area." Root
+// cause: dashboardValueHtml (canvas.js, new in v0.940) reused formatSimValue to
+// render a UI Output's value into the new .fnode-ui-value description slot, but
+// formatSimValue truncates any string over 12 characters -- a limit tuned for the
+// tiny .fnode-sim-badge pill it replaced, not the roomier, line-clamped slot that
+// actually has space to show it. Fixed with a new formatUiDashboardValue (identical
+// formatting, no truncation); formatSimValue itself, and the badge that still uses
+// it for ordinary scripted parts' leftBadge, are untouched. New
+// check_ui_dashboard_output_value_not_truncated, proven via TEMP BREAK reproducing
+// the exact reported truncated text. DESIGN_DOCUMENT.md and tests/README.md updated.
+export const APP_VERSION = '0.941';

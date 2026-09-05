@@ -336,6 +336,21 @@ button, select, input { font-family: inherit; font-size: inherit; color: inherit
 .fnode .fnode-type { font-size: 9px; opacity: .7; text-transform: uppercase; letter-spacing: .03em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fnode .fnode-label { font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.2; }
 .fnode .fnode-description { font-size: 10px; opacity: .8; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.15; }
+/* UI dashboard elements (UITextOutput/UINumericOutput/UITextInput/UINumericInput):
+   repurposes the same node-space normally used for .fnode-description -- reported
+   directly: "use the node space otherwise used for description as input field for
+   inputs and to display the output values, instead of using the badges." .fnode-ui-value
+   (Output, a plain read-only div, reuses .fnode-description's own sizing/line-clamp above)
+   and .fnode-ui-input (Input, a REAL <input> -- can't share .fnode-description's
+   -webkit-box display, which doesn't apply to replaced elements) are deliberately kept
+   visually consistent with each other and with ordinary .fnode-description text. */
+.fnode .fnode-ui-value.error { color: #c0392b; font-weight: 600; }
+.fnode .fnode-ui-input {
+  font-size: 10px; width: 100%; box-sizing: border-box; border: 1px solid rgba(0,0,0,.2);
+  border-radius: 3px; padding: 1px 4px; background: rgba(255,255,255,.7); color: inherit;
+  font-family: inherit; cursor: text; user-select: text;
+}
+[data-theme="dark"] .fnode .fnode-ui-input { background: rgba(0,0,0,.25); border-color: rgba(255,255,255,.25); }
 .fnode .fnode-attributes { margin-top: 3px; padding-top: 3px; border-top: 1px solid rgba(0,0,0,.15); }
 .fnode .fnode-attr-row { font-size: 9.5px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fnode .fnode-badge {

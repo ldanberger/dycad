@@ -1125,7 +1125,8 @@ else on a canvas, a UI element doesn't connect to its part with a line — selec
 <strong>Bound Part</strong> field in Root Properties to pick which part it mirrors or feeds (the list shows
 every part in the document, labeled with its type and model, so binding across two different models is a
 deliberate, visible choice — see "Model Copy" below). An Input element also gets a <strong>Value</strong>
-field there, for whatever you want to type in.</p>
+field there, for whatever you want to type in — the exact same value also appears as a real, editable box
+right on the node itself (see below), so you rarely need to open Root Properties just to change it.</p>
 <p>A bound part's script reads and writes these through a new <code>ctx.ui</code> object, refreshed every
 simulation tick — four plain objects (<code>UITextInput</code>, <code>UITextOutput</code>,
 <code>UINumericInput</code>, <code>UINumericOutput</code>), each keyed by the BOUND ELEMENT'S OWN LABEL, so one
@@ -1139,10 +1140,15 @@ return { value: 1 };</pre>
 <p>This is a separate channel from <code>ctx.inputs</code>/<code>ctx.value</code> — not related to connectors at
 all. A value a script writes with no matching UI element bound to it is simply ignored; a UI element bound to a
 part whose script never addresses its label reads back <code>undefined</code> (shown as a "—" placeholder, not
-carried over from an earlier tick — same as an ordinary value badge, an Output element's value always reflects
-what its part wrote THIS tick, nothing more). Output elements show their value as the same badge a scripted
-part's own value uses, but always visible regardless of the view's "Show Left Badge" setting, since for these
-elements the badge is the whole point.</p>
+carried over from an earlier tick — an Output element's value always reflects what its part wrote THIS tick,
+nothing more). Output/Input elements don't use the left/right sim badges at all — those stay reserved for a
+script's own <code>leftBadge</code>/<code>rightBadge</code> (above). Instead, each UI element shows its value
+right in the node's own body, in the same spot an ordinary part's Description would go: a Text/Numeric Output
+node displays its current value as plain text (a "—" placeholder when nothing's been written yet), always
+visible regardless of the view's "Show Left Badge" setting, since for these elements that display IS the whole
+point; a Text/Numeric Input node instead shows a real, editable box right there — type into it and press Enter
+or click elsewhere to commit, exactly like editing the same field in Root Properties. Because a UI element's own
+Description no longer has anywhere to display, that field is hidden from its Root Properties panel too.</p>
 <p><strong>Model Copy</strong> (the 📋 button next to the Default Model selector, top toolbar) clones every part
 and connector tagged with one model — including scripts and any UI element bindings — into a brand-new model
 with the same labels, letting you compare two versions of the same simulation side by side: build one dashboard

@@ -154,6 +154,30 @@ function renderCanvasPage(app, tab, container) {
   if (!tab.viewport) tab.viewport = { x: 0, y: 0, zoom: 1 };
   if (!tab.viewport.zoom) tab.viewport.zoom = 1;
 
+  // A running simulation calls app.render() on every tick (default 500ms), which
+  // rebuilds this ENTIRE page (container.innerHTML = '' below) even when nothing about
+  // THIS view changed -- for an ordinary node that's invisible (no live focus to lose),
+  // but a UIInput widget's new on-canvas <input> (buildNodeEl's dashboardValueHtml) can
+  // genuinely be mid-edit, focused, with characters typed but not yet committed (commit
+  // only happens on 'change', i.e. blur/Enter -- see wireCanvasInteractions below).
+  // Without this, a tick landing mid-keystroke would silently discard whatever was
+  // typed, the same class of bug just fixed for the properties panel's scroll position
+  // (see propertiesIdentityKey, render.js) but worse here since it's actual data loss,
+  // not just a lost scroll offset. Captured before the teardown and restored after the
+  // same input (same vmId) is rebuilt below -- re-focusing it, restoring its live
+  // (possibly uncommitted) text, and restoring the cursor/selection position so an
+  // in-progress edit visually continues uninterrupted across the rebuild.
+  let focusedUiInput = null;
+  const prevActive = document.activeElement;
+  if (prevActive && prevActive.classList?.contains('fnode-ui-input') && container.contains(prevActive)) {
+    focusedUiInput = {
+      vmId: prevActive.dataset.vmId,
+      value: prevActive.value,
+      selectionStart: prevActive.selectionStart,
+      selectionEnd: prevActive.selectionEnd,
+    };
+  }
+
   container.innerHTML = '';
   const scroll = document.createElement('div');
   scroll.className = 'canvas-scroll';
@@ -238,6 +262,17 @@ function renderCanvasPage(app, tab, container) {
 
   wireCanvasInteractions(app, tab, scroll, surface, svg, edgeLayer, nodeEls);
   buildZoomControls(app, tab, container, scroll, surface);
+
+  if (focusedUiInput) {
+    const revivedEl = nodeEls.get(focusedUiInput.vmId)?.querySelector('.fnode-ui-input');
+    if (revivedEl) {
+      revivedEl.value = focusedUiInput.value;
+      revivedEl.focus();
+      if (focusedUiInput.selectionStart != null && revivedEl.setSelectionRange) {
+        try { revivedEl.setSelectionRange(focusedUiInput.selectionStart, focusedUiInput.selectionEnd); } catch { /* type="number" doesn't support setSelectionRange in some browsers -- losing cursor position there is harmless */ }
+      }
+    }
+  }
 }
 
 // One click of Spacing +/- on a 2+-node selection multiplies the selection's own
@@ -651,6 +686,25 @@ function formatSimValue(v) {
   }
 }
 
+/** Same value formatting as formatSimValue, minus its 12-character truncation --
+ * that limit was tuned for the tiny .fnode-sim-badge pill, not the much roomier
+ * .fnode-ui-value description slot a UI Output widget's value now renders into
+ * (buildNodeEl, below). Reported directly: "the ui element text output appears to
+ * cut off the text... 'Discount app..' which isn't the full width of available text
+ * area" -- reusing formatSimValue as-is was truncating to 12 chars regardless of how
+ * much room the node actually had; CSS's own line-clamp (.fnode-description, 2
+ * lines) already handles genuine overflow, so no length cap is needed here at all. */
+function formatUiDashboardValue(v) {
+  if (v === undefined) return '—';
+  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(2);
+  if (typeof v === 'string') return v;
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
 function buildNodeEl(app, tab, vm, part) {
   const el = document.createElement('div');
   el.className = 'fnode' + (vm.isExternal ? ' external' : '') + (tab.selection.has(vm.id) ? ' selected' : '');
@@ -701,41 +755,40 @@ function buildNodeEl(app, tab, vm, part) {
     attributesHtml = `<div class="fnode-attributes">${rows}</div>`;
   }
 
-  let simBadgeHtml = '';
-  // UI dashboard Output widgets (UITextOutput/UINumericOutput) always show their
-  // value badge regardless of chkShowSimValues -- the badge IS the widget's entire
-  // reason for existing, unlike a real architecture part where it's a secondary
-  // annotation a person opts into per view. A fresh view's own chkShowSimValues
-  // defaults to false, so relying on that toggle here would leave a brand-new
-  // dashboard looking completely broken until someone finds and enables "Show Left
-  // Badge" in Filters.
+  // UI dashboard elements: reported directly, "use the node space otherwise used
+  // for description as input field for inputs and to display the output values,
+  // instead of using the badges. Leave badges available for scripts." UIOutput
+  // widgets used to force their value into the ordinary sim-value left badge
+  // regardless of chkShowSimValues; UIInput widgets had NO on-canvas representation
+  // at all (only the Root Properties "Value" field). Both now repurpose the same
+  // visual slot/sizing normally used for part.description instead — see
+  // dashboardValueHtml below — so `isUIOutput` plays no special role in the
+  // ORDINARY sim-value badge logic anymore; that badge is now purely opt-in
+  // (view.chkShowSimValues + a script's own returned leftBadge), exactly the same
+  // for every part type, UI dashboard or not.
   const isUIOutput = ciEq(part.type, 'UITextOutput') || ciEq(part.type, 'UINumericOutput');
-  if (view?.chkShowSimValues || isUIOutput) {
+  const isUIInput = ciEq(part.type, 'UITextInput') || ciEq(part.type, 'UINumericInput');
+
+  let simBadgeHtml = '';
+  if (view?.chkShowSimValues) {
     // Badges reflect the PART's shared simulation state (scoped to its own model), not
     // anything view/tab-specific — every viewMember referencing the same part shows the
     // identical value, in every view, regardless of which model is currently selected in
-    // the Simulation toolbar. A UI Output widget's own "value" is written here as a
-    // SIDE EFFECT of its bound target part's own tick (runTick, simulation.js) — see
-    // that function's own ctx.ui comment — so this lookup needs no special case at all,
-    // it's the exact same store.simRuntime.get(part.model).values.get(part.id) shape
-    // any other scripted part's badge already uses.
+    // the Simulation toolbar.
     const runtime = app.store.simRuntime.get(part.model);
     const entry = runtime ? runtime.values.get(part.id) : null;
     if (entry) {
       const hasError = !!entry.lastError;
-      // leftBadge (Step 41, tightened): purely opt-in, same as rightBadge — a script
-      // must explicitly return `leftBadge: {text, color}` this tick for anything to
-      // show at all. No fallback to formatSimValue(value) anymore (an earlier version
-      // of this feature auto-displayed the raw value when leftBadge was omitted, but
-      // that meant `return { value }` with no leftBadge still showed a badge — reported
+      // leftBadge (Step 41, tightened): purely opt-in — a script must explicitly
+      // return `leftBadge: {text, color}` this tick for anything to show at all. No
+      // fallback to formatSimValue(value) (an earlier version of this feature
+      // auto-displayed the raw value when leftBadge was omitted, but that meant
+      // `return { value }` with no leftBadge still showed a badge — reported
       // directly against the "smart factory 3d demo" example's plain-value sensor
-      // scripts as unwanted). isUIOutput is the one exception: a UI Output widget's own
-      // written value IS its entire reason for existing (see comment above) and it
-      // can never set its own leftBadge (it's not itself scripted), so it keeps
-      // showing its value regardless.
+      // scripts as unwanted).
       const useLeftBadge = !hasError && !!entry.leftBadge;
-      if (hasError || useLeftBadge || isUIOutput) {
-        const display = hasError ? 'ERR' : (useLeftBadge ? entry.leftBadge.text : formatSimValue(entry.value));
+      if (hasError || useLeftBadge) {
+        const display = hasError ? 'ERR' : entry.leftBadge.text;
         const title = hasError ? entry.lastError : `tick ${entry.lastTick}: ${display}`;
         // "changed" (Step 33) is a lower-priority visual than error — only applied when
         // there's no error, so a node can't show both states confusingly at once.
@@ -743,13 +796,31 @@ function buildNodeEl(app, tab, vm, part) {
         const colorStyle = useLeftBadge && entry.leftBadge.color ? ` style="background:${escapeHtml(entry.leftBadge.color)};"` : '';
         simBadgeHtml = `<div class="fnode-sim-badge${stateClass}"${colorStyle} title="${escapeHtml(title)}">${escapeHtml(display)}</div>`;
       }
-    } else if (isUIOutput) {
-      // Reported directly: "If UI element is connected to a part but the part script
-      // does not set a value, it stays as null or similar" -- a visible placeholder
-      // (rather than no badge at all) so an unset/not-yet-bound widget still reads as
-      // "a working widget with nothing to show yet," not as broken/unrendered.
-      simBadgeHtml = `<div class="fnode-sim-badge" title="No value set yet">—</div>`;
     }
+  }
+
+  // Replaces the ordinary description slot for the four UI dashboard types only —
+  // UIOutput shows its live value (read-only text, same "No value set yet"
+  // placeholder convention the old forced badge used); UIInput gets a REAL,
+  // live-editable <input> there instead, committing into part.uiInputValue via the
+  // 'change' listener wired in wireCanvasInteractions below (same field/conversion
+  // the property panel's own "Value" field already uses). Always shown regardless
+  // of showDescription (view.chkShowDescription) — same "the widget IS this,
+  // there's no opting out" reasoning the old forced badge used — and part.description
+  // itself is hidden from these types' Root Properties (render.js) since it no
+  // longer has anywhere to display.
+  let dashboardValueHtml = '';
+  if (isUIOutput) {
+    const runtime = app.store.simRuntime.get(part.model);
+    const entry = runtime ? runtime.values.get(part.id) : null;
+    const hasError = !!entry?.lastError;
+    const display = hasError ? 'ERR' : (entry ? formatUiDashboardValue(entry.value) : '—');
+    const title = hasError ? entry.lastError : (entry ? `tick ${entry.lastTick}: ${display}` : 'No value set yet');
+    dashboardValueHtml = `<div class="fnode-description fnode-ui-value${hasError ? ' error' : ''}" title="${escapeHtml(title)}">${escapeHtml(display)}</div>`;
+  } else if (isUIInput) {
+    const isNumeric = ciEq(part.type, 'UINumericInput');
+    const current = part.uiInputValue ?? '';
+    dashboardValueHtml = `<input type="${isNumeric ? 'number' : 'text'}" class="fnode-ui-value fnode-ui-input" data-vm-id="${escapeHtml(vm.id)}" value="${escapeHtml(String(current))}" title="Value fed to this widget's Bound Part next tick" />`;
   }
 
   // Script-controlled badge: separate from the auto-computed value badge above — full
@@ -771,7 +842,7 @@ function buildNodeEl(app, tab, vm, part) {
       <span class="fnode-icon" title="${escapeHtml(part.type)}">${iconSvgFor(app, elDef)}</span>
     </div>
     <div class="fnode-label"${noClampStyle}>${escapeHtml(part.label)}</div>
-    ${showDescription && part.description ? `<div class="fnode-description"${noClampStyle}>${escapeHtml(part.description)}</div>` : ''}
+    ${(isUIOutput || isUIInput) ? dashboardValueHtml : (showDescription && part.description ? `<div class="fnode-description"${noClampStyle}>${escapeHtml(part.description)}</div>` : '')}
     ${attributesHtml}
     ${showKeys ? `<div class="fnode-type" style="opacity:.5;">vm:${escapeHtml(vm.id)}<br>obj:${escapeHtml(part.id)}</div>` : ''}
     ${part.order > 0 ? `<div class="fnode-badge">${part.order}</div>` : ''}
@@ -933,12 +1004,39 @@ function wireCanvasInteractions(app, tab, scroll, surface, svg, edgeLayer, nodeE
   const zoom = () => tab.viewport?.zoom || 1;
 
   for (const [vmId, el] of nodeEls) {
+    // UIInput widgets' own on-canvas <input> (see buildNodeEl's dashboardValueHtml) needs
+    // normal browser text-editing behavior -- double-click-to-select-a-word, right-click
+    // for the native cut/copy/paste menu, click-to-place-cursor without starting a node
+    // drag or clearing the current selection. Every listener below that would otherwise
+    // intercept those gestures at the whole-node level bails out first when the event
+    // actually targets the input.
+    const isUiInputTarget = (e) => !!e.target.closest('.fnode-ui-input');
+
+    // Commits on 'change' (blur/Enter), same as every other renderShowFieldsPanel-
+    // driven text/number field including this exact part.uiInputValue field's OTHER
+    // home, the property panel's own "Value" field (render.js) -- same conversion
+    // (Number() for UINumericInput, raw string otherwise) so the two stay consistent
+    // no matter which one a person actually edits.
+    const uiInputEl = el.querySelector('.fnode-ui-input');
+    if (uiInputEl) {
+      uiInputEl.addEventListener('change', (e) => {
+        const vm = app.store.findViewMember(vmId);
+        const part = vm && app.store.findPart(vm.objectId);
+        if (!part) return;
+        part.uiInputValue = ciEq(part.type, 'UINumericInput') ? (Number(e.target.value) || 0) : e.target.value;
+        app.store.touchPart(part);
+        app.recordAndRender();
+      });
+    }
+
     el.addEventListener('dblclick', (e) => {
+      if (isUiInputTarget(e)) return;
       e.stopPropagation();
       app.openOrCreateLinkedView(tab, vmId);
     });
 
     el.addEventListener('contextmenu', (e) => {
+      if (isUiInputTarget(e)) return;
       e.preventDefault();
       e.stopPropagation();
       tab.selection.clear();
@@ -969,7 +1067,7 @@ function wireCanvasInteractions(app, tab, scroll, surface, svg, edgeLayer, nodeE
     });
 
     el.addEventListener('pointerdown', (e) => {
-      if (e.target.classList.contains('fnode-handle')) return;
+      if (e.target.classList.contains('fnode-handle') || isUiInputTarget(e)) return;
       e.stopPropagation();
       const additive = e.shiftKey || e.ctrlKey || e.metaKey;
       let selectionChanged = false;

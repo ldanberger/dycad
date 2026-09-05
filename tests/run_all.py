@@ -5735,11 +5735,14 @@ def check_left_badge_overrides_value_display(page):
     script that never returns leftBadge (an ordinary value-only script, matching the
     reported "smart factory 3d demo" sensor scripts) shows NO badge at all — not the
     old auto-formatted value; a UI Output widget (a separate, pre-existing mechanism
-    unrelated to this opt-in rule — see check_ui_dashboard_output_badge_visibility)
-    keeps showing its own written value regardless, since it can never set its own
-    leftBadge; and — proving ERR always wins — a script that throws shows "ERR" even
-    on a tick where a PRIOR successful tick had set a leftBadge (a thrown script never
-    reaches its own return statement, so leftBadge can never coexist with an error)."""
+    unrelated to this opt-in rule — see check_ui_dashboard_output_value_display_always_visible
+    — that shows its own written value in the node's description slot, NOT a badge,
+    since the "use the node space otherwise used for description... instead of using
+    the badges" follow-up) keeps showing its own written value regardless, since it
+    can never set its own leftBadge; and — proving ERR always wins — a script that
+    throws shows "ERR" even on a tick where a PRIOR successful tick had set a
+    leftBadge (a thrown script never reaches its own return statement, so leftBadge
+    can never coexist with an error)."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -5782,7 +5785,12 @@ def check_left_badge_overrides_value_display(page):
         withBadgeText: badgeEl(vmWith.id)?.textContent ?? null,
         withBadgeBg: badgeEl(vmWith.id)?.getAttribute('style') ?? null,
         noBadgeAbsent: badgeEl(vmNo.id) === null,
-        uiOutputText: badgeEl(vmUiOut.id)?.textContent ?? null,
+        // UI Output widgets show their value in the description slot (.fnode-ui-value),
+        // NOT a badge, since the "use the node space otherwise used for description...
+        // instead of using the badges" follow-up -- see
+        // check_ui_dashboard_output_value_display_always_visible for the dedicated check.
+        uiOutputHasNoBadge: badgeEl(vmUiOut.id) === null,
+        uiOutputValueText: document.querySelector(`.fnode[data-vm-id="${vmUiOut.id}"] .fnode-ui-value`)?.textContent ?? null,
         errFirstTickText: badgeEl(vmErr.id)?.textContent ?? null,
       };
 
@@ -5801,8 +5809,10 @@ def check_left_badge_overrides_value_display(page):
         problems.append(f"expected leftBadge.color to set the badge's background via inline style, got {result['withBadgeBg']}")
     if not result["noBadgeAbsent"]:
         problems.append("expected a script with no leftBadge to show NO badge at all (no fallback to the auto-formatted value)")
-    if result["uiOutputText"] != "99":
-        problems.append(f"expected a UI Output widget (which can never set its own leftBadge) to keep showing its own written value ('99'), got {result['uiOutputText']}")
+    if not result["uiOutputHasNoBadge"]:
+        problems.append("expected a UI Output widget to show NO badge at all (its value moved to the description slot)")
+    if result["uiOutputValueText"] != "99":
+        problems.append(f"expected a UI Output widget (which can never set its own leftBadge) to keep showing its own written value ('99') in the description slot, got {result['uiOutputValueText']}")
     if result["errFirstTickText"] != "BEFORE-ERR":
         problems.append(f"test setup: expected the first, non-throwing tick to show its own leftBadge, got {result['errFirstTickText']}")
     if result["errSecondTickText"] != "ERR":
@@ -6575,22 +6585,27 @@ def check_sim_value_no_auto_hold_and_last_good_tracking(page):
     return True, "value never auto-holds (blanks the instant a tick returns nothing, including thrown errors -- not hidden from downstream), lastGoodValue persists the last real reading across any number of gap ticks and is exposed via ctx.inputs[i]/the part's own runtime entry, changed/ctx.responses[i].changed are deep-compared against this lastGood lineage (no spurious flips on identical-content re-deliveries or on gap ticks), and snapshot save/load round-trips both new fields"
 
 
-def check_ui_dashboard_output_badge_visibility(page):
-    """Regression guard/new-feature check for UI Output widgets' canvas badge,
-    reported directly: "_out will act like badges where they display a specific
-    value." Reuses the EXISTING value-badge mechanism (.fnode-sim-badge,
-    store.simRuntime.get(part.model).values.get(part.id)) rather than a new
-    rendering path, but Output widgets show it regardless of the view's own
-    chkShowSimValues toggle (which defaults to FALSE on a new view) — otherwise a
-    brand-new dashboard would look completely broken until someone found and
-    enabled "Show Left Badge" in Filters, since the badge IS the widget's entire
-    reason for existing rather than a secondary annotation. Covers: a bound,
-    ticked Output widget shows its real value as a badge even with
-    chkShowSimValues off; an unset Output widget shows a "—" placeholder rather
-    than nothing at all (reported directly: "If UI element is connected to a part
-    but the part script does not set a value, it stays as null or similar");
-    and — regression safety — an ORDINARY scripted part with chkShowSimValues off
-    shows NO badge at all, same as before this feature existed."""
+def check_ui_dashboard_output_value_display_always_visible(page):
+    """Regression guard/new-feature check for UI Output widgets' canvas value display,
+    reported directly (original wording): "_out will act like badges where they
+    display a specific value," then superseded by a direct follow-up: "use the node
+    space otherwise used for description as input field for inputs and to display the
+    output values, instead of using the badges. Leave badges available for scripts."
+    (Was originally a repurposing of the ordinary value-badge mechanism,
+    .fnode-sim-badge; now buildNodeEl's dashboardValueHtml renders it into the node's
+    description slot instead — see check_ui_dashboard_canvas_value_and_input_rendering
+    for the broader new-mechanism coverage.) This check specifically preserves the ONE
+    property that mechanism swap must NOT lose: Output widgets show their value
+    regardless of the view's own chkShowSimValues toggle (which defaults to FALSE on a
+    new view) — otherwise a brand-new dashboard would look completely broken until
+    someone found and enabled "Show Left Badge" in Filters, since the display IS the
+    widget's entire reason for existing rather than a secondary annotation. Covers: a
+    bound, ticked Output widget shows its real value even with chkShowSimValues off,
+    and shows NO badge at all; an unset Output widget shows a "—" placeholder rather
+    than nothing at all (reported directly: "If UI element is connected to a part but
+    the part script does not set a value, it stays as null or similar"); and —
+    regression safety — an ORDINARY scripted part with chkShowSimValues off shows NO
+    badge at all, same as before this feature existed."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -6613,10 +6628,12 @@ def check_ui_dashboard_output_badge_visibility(page):
       await new Promise(r => setTimeout(r, 60));
 
       const badgeText = (vmId) => document.querySelector(`.fnode[data-vm-id="${vmId}"] .fnode-sim-badge`)?.textContent ?? null;
+      const valueText = (vmId) => document.querySelector(`.fnode[data-vm-id="${vmId}"] .fnode-ui-value`)?.textContent ?? null;
       return {
         viewChkShowSimValuesOff: !view.chkShowSimValues,
-        outputBadgeShown: badgeText(outVm.id) === '77',
-        unboundBadgeShowsPlaceholder: badgeText(unboundVm.id) === '—',
+        outputValueShown: valueText(outVm.id) === '77',
+        outputHasNoBadge: badgeText(outVm.id) === null,
+        unboundShowsPlaceholder: valueText(unboundVm.id) === '—',
         normalPartHasNoBadge: badgeText(targetVm.id) === null,
       };
     }
@@ -6624,15 +6641,17 @@ def check_ui_dashboard_output_badge_visibility(page):
     problems = []
     if not result["viewChkShowSimValuesOff"]:
         problems.append("test setup: expected chkShowSimValues off")
-    if not result["outputBadgeShown"]:
-        problems.append("expected a bound, ticked Output widget to show its value as a badge even with chkShowSimValues off")
-    if not result["unboundBadgeShowsPlaceholder"]:
-        problems.append("expected an unset Output widget to show a '—' placeholder badge")
+    if not result["outputValueShown"]:
+        problems.append("expected a bound, ticked Output widget to show its value in the description slot even with chkShowSimValues off")
+    if not result["outputHasNoBadge"]:
+        problems.append("expected a UI Output widget to show NO badge at all -- its value now lives in the description slot, not a badge")
+    if not result["unboundShowsPlaceholder"]:
+        problems.append("expected an unset Output widget to show a '—' placeholder in the description slot")
     if not result["normalPartHasNoBadge"]:
         problems.append("expected an ORDINARY scripted part to show NO badge with chkShowSimValues off — regression")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "UI Output widgets always show their value badge (with a '—' placeholder when unset) regardless of chkShowSimValues, while ordinary parts still correctly respect that view toggle"
+    return True, "UI Output widgets always show their value in the node's description slot (with a '—' placeholder when unset) regardless of chkShowSimValues, and never via a badge, while ordinary parts still correctly respect that view toggle"
 
 
 def check_copy_model_remaps_ui_bindings(page):
@@ -16437,6 +16456,278 @@ def check_properties_panel_preserves_scroll_during_render(page):
     return True, "re-rendering the properties panel while the same node/edge/view stays selected (e.g. every simulation tick) now preserves the user's scroll position, while a genuine selection change still resets it to top"
 
 
+def check_ui_dashboard_canvas_value_and_input_rendering(page):
+    """New feature, reported directly: "use the node space otherwise used for
+    description as input field for inputs and to display the output values, instead
+    of using the badges. Leave badges available for scripts." UITextOutput/
+    UINumericOutput used to force their value into the ordinary sim-value left badge
+    (fnode-sim-badge); UITextInput/UINumericInput had NO on-canvas representation at
+    all. Both now repurpose the SAME visual slot/sizing normally used for
+    part.description instead (buildNodeEl's dashboardValueHtml, canvas.js): Output
+    types get a plain read-only value display (.fnode-ui-value, with the same "No
+    value set yet" -- em dash -- placeholder convention the old forced badge used for
+    an unbound/never-ticked widget); Input types get a REAL, live-editable <input>
+    there (.fnode-ui-input), pre-filled from part.uiInputValue and committing back to
+    it on 'change' with the same string-vs-Number conversion the property panel's own
+    "Value" field already uses. Covers: neither UI type shows a badge anymore (even
+    with view.chkShowSimValues on); an ordinary SCRIPTED part's own leftBadge keeps
+    working completely unaffected -- proving "leave badges available for scripts"
+    specifically, not just "badges stopped rendering somehow"; a bound-and-ticked
+    Output shows its real value; an unbound Output shows the placeholder; an Input
+    shows a real <input> pre-filled with the part's current uiInputValue; and
+    committing a new value through that real DOM input (a 'change' event, not calling
+    any internal function directly) updates the underlying part with correct type
+    conversion for both UITextInput and UINumericInput."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+      const view = store.addView('RegrUiCanvasValue_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      view.chkShowSimValues = true;
+
+      const target = store.createPart({ type: 'BusinessFunction', label: 'RegrUiCanvasValue_Target', model: store.defaultModel, streams: [], script: 'ctx.ui.UINumericOutput[\"Out\"] = 42; return {};', scriptEnabled: true });
+      const scripted = store.createPart({ type: 'BusinessFunction', label: 'RegrUiCanvasValue_Scripted', model: store.defaultModel, streams: [], script: 'return { value: 1, leftBadge: { text: \"still works\", color: \"#333\" } };', scriptEnabled: true });
+      const numOutBound = store.createPart({ type: 'UINumericOutput', label: 'Out', model: store.defaultModel, streams: [], uiTargetPartId: target.id });
+      const numOutUnbound = store.createPart({ type: 'UINumericOutput', label: 'OutUnbound', model: store.defaultModel, streams: [] });
+      const textIn = store.createPart({ type: 'UITextInput', label: 'TxtIn', model: store.defaultModel, streams: [], uiInputValue: 'hello' });
+      const numIn = store.createPart({ type: 'UINumericInput', label: 'NumIn', model: store.defaultModel, streams: [], uiInputValue: 7 });
+
+      const vmTarget = store.createViewMember({ view: view.id, objectType: 'part', objectId: target.id, x: 40, y: 40 });
+      const vmScripted = store.createViewMember({ view: view.id, objectType: 'part', objectId: scripted.id, x: 40, y: 160 });
+      const vmOutBound = store.createViewMember({ view: view.id, objectType: 'part', objectId: numOutBound.id, x: 240, y: 40 });
+      const vmOutUnbound = store.createViewMember({ view: view.id, objectType: 'part', objectId: numOutUnbound.id, x: 440, y: 40 });
+      const vmTextIn = store.createViewMember({ view: view.id, objectType: 'part', objectId: textIn.id, x: 240, y: 160 });
+      const vmNumIn = store.createViewMember({ view: view.id, objectType: 'part', objectId: numIn.id, x: 440, y: 160 });
+
+      store.simSelectedModel = store.defaultModel;
+      app.render();
+      sim.runTick(app, store.defaultModel);
+      app.render();
+
+      const q = (vmId, sel) => document.querySelector(`.fnode[data-vm-id=\"${vmId}\"] ${sel}`);
+      const out = {
+        outBoundBadgePresent: !!q(vmOutBound.id, '.fnode-sim-badge'),
+        outBoundValueText: q(vmOutBound.id, '.fnode-ui-value')?.textContent,
+        outUnboundBadgePresent: !!q(vmOutUnbound.id, '.fnode-sim-badge'),
+        outUnboundValueText: q(vmOutUnbound.id, '.fnode-ui-value')?.textContent,
+        scriptedBadgeText: q(vmScripted.id, '.fnode-sim-badge')?.textContent,
+        textInInputPresent: !!q(vmTextIn.id, '.fnode-ui-input'),
+        textInInputValue: q(vmTextIn.id, '.fnode-ui-input')?.value,
+        textInInputType: q(vmTextIn.id, '.fnode-ui-input')?.type,
+        numInInputValue: q(vmNumIn.id, '.fnode-ui-input')?.value,
+        numInInputType: q(vmNumIn.id, '.fnode-ui-input')?.type,
+      };
+
+      // Commit a new value through the REAL DOM input (not an internal function call).
+      const textInEl = q(vmTextIn.id, '.fnode-ui-input');
+      textInEl.value = 'goodbye';
+      textInEl.dispatchEvent(new Event('change', { bubbles: true }));
+      out.textInCommitted = store.findPart(textIn.id).uiInputValue;
+
+      const numInEl = q(vmNumIn.id, '.fnode-ui-input');
+      numInEl.value = '99';
+      numInEl.dispatchEvent(new Event('change', { bubbles: true }));
+      const committedNum = store.findPart(numIn.id).uiInputValue;
+      out.numInCommitted = committedNum;
+      out.numInCommittedIsNumber = typeof committedNum === 'number';
+
+      return out;
+    }
+    """)
+    problems = []
+    if result["outBoundBadgePresent"]:
+        problems.append("expected a bound UI Output to NOT show a sim badge anymore")
+    if result["outBoundValueText"] != '42':
+        problems.append(f"expected a bound, ticked UI Output to show its real value ('42') in the description slot, got {result['outBoundValueText']!r}")
+    if result["outUnboundBadgePresent"]:
+        problems.append("expected an unbound UI Output to NOT show a sim badge anymore")
+    if result["outUnboundValueText"] != '—':
+        problems.append(f"expected an unbound UI Output to show the '—' placeholder in the description slot, got {result['outUnboundValueText']!r}")
+    if result["scriptedBadgeText"] != 'still works':
+        problems.append(f"expected an ORDINARY scripted part's own leftBadge to keep working unaffected, got {result['scriptedBadgeText']!r} -- badges must stay available for scripts")
+    if not result["textInInputPresent"] or result["textInInputType"] != 'text':
+        problems.append(f"expected UITextInput to show a real text <input> in the description slot, got present={result['textInInputPresent']} type={result['textInInputType']!r}")
+    if result["textInInputValue"] != 'hello':
+        problems.append(f"expected UITextInput's canvas input to be pre-filled from part.uiInputValue ('hello'), got {result['textInInputValue']!r}")
+    if result["numInInputType"] != 'number':
+        problems.append(f"expected UINumericInput to show a real number <input>, got type={result['numInInputType']!r}")
+    if result["numInInputValue"] != '7':
+        problems.append(f"expected UINumericInput's canvas input to be pre-filled from part.uiInputValue ('7'), got {result['numInInputValue']!r}")
+    if result["textInCommitted"] != 'goodbye':
+        problems.append(f"expected committing a new value through the real canvas <input> (a 'change' event) to update part.uiInputValue, got {result['textInCommitted']!r}")
+    if result["numInCommitted"] != 99 or not result["numInCommittedIsNumber"]:
+        problems.append(f"expected committing '99' through UINumericInput's canvas input to store a real Number 99, got {result['numInCommitted']!r} (isNumber={result['numInCommittedIsNumber']})")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "UI dashboard Output/Input widgets now use the node's description slot for their live value/editable input instead of the sim badge, while an ordinary scripted part's own leftBadge keeps working unaffected"
+
+
+def check_ui_dashboard_canvas_input_preserves_focus_during_rerender(page):
+    """Regression guard for the on-canvas UIInput <input> (see
+    check_ui_dashboard_canvas_value_and_input_rendering) surviving a simulation tick's
+    re-render mid-edit. renderCanvasPage rebuilds the ENTIRE canvas page
+    (container.innerHTML = '') on every app.render() call, including every simulation
+    tick (default 500ms) -- for an ordinary node that's invisible, but a UIInput
+    widget's <input> commits only on 'change' (blur/Enter), so a tick landing while
+    someone is mid-keystroke would previously have silently discarded whatever was
+    typed, the same class of bug as the properties panel's own scroll-reset issue
+    (check_properties_panel_preserves_scroll_during_render) but worse here since it's
+    actual data loss. Fixed by capturing the focused .fnode-ui-input's {vmId, value,
+    selectionStart/End} before the teardown and restoring focus + the live
+    (uncommitted) value + cursor position onto the freshly rebuilt element afterward.
+    Confirms: an uncommitted, mid-typed value survives a re-render with focus intact;
+    the underlying part is NOT updated by the mere re-render (only an actual 'change'
+    commits); and a genuinely different tab's canvas re-render does not disturb an
+    unrelated node's input (sanity: the mechanism is scoped to the currently focused
+    element only)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.addView('RegrUiCanvasFocus_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const textIn = store.createPart({ type: 'UITextInput', label: 'RegrUiCanvasFocus_In', model: store.defaultModel, streams: [], uiInputValue: 'original' });
+      const vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: textIn.id, x: 40, y: 40 });
+      app.render();
+
+      const inputEl = document.querySelector(`.fnode[data-vm-id=\"${vm.id}\"] .fnode-ui-input`);
+      inputEl.focus();
+      inputEl.value = 'mid-typing, not yet committed';
+      inputEl.setSelectionRange(5, 5);
+
+      // Simulate a sim tick's re-render: same selection/tab, nothing about this
+      // widget itself changed, but app.render() rebuilds the whole canvas anyway.
+      app.render();
+
+      const revived = document.querySelector(`.fnode[data-vm-id=\"${vm.id}\"] .fnode-ui-input`);
+      return {
+        sameElementReplaced: revived !== inputEl, // the DOM node itself really was torn down and rebuilt
+        valuePreserved: revived ? revived.value : null,
+        stillFocused: document.activeElement === revived,
+        cursorPreserved: revived ? [revived.selectionStart, revived.selectionEnd] : null,
+        partValueUnchanged: store.findPart(textIn.id).uiInputValue,
+      };
+    }
+    """)
+    problems = []
+    if not result["sameElementReplaced"]:
+        problems.append("test setup: expected app.render() to actually tear down and rebuild the input element (a real regression test needs a real rebuild, not a no-op)")
+    if result["valuePreserved"] != 'mid-typing, not yet committed':
+        problems.append(f"expected the uncommitted, mid-typed value to survive a re-render, got {result['valuePreserved']!r}")
+    if not result["stillFocused"]:
+        problems.append("expected the rebuilt input to still have focus after a re-render mid-edit")
+    if result["cursorPreserved"] != [5, 5]:
+        problems.append(f"expected the cursor position to be restored to [5, 5], got {result['cursorPreserved']}")
+    if result["partValueUnchanged"] != 'original':
+        problems.append(f"expected the underlying part to be UNCHANGED by a mere re-render (only a real 'change' event should commit) -- got {result['partValueUnchanged']!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "a UI Input widget's on-canvas <input>, when focused with an uncommitted mid-edit, survives a full canvas re-render (e.g. a simulation tick) with its value, focus, and cursor position intact, without the mere re-render committing anything to the underlying part"
+
+
+def check_ui_dashboard_description_hidden_from_root_properties(page):
+    """Regression guard, follow-up to check_ui_dashboard_canvas_value_and_input_rendering:
+    since canvas.js's buildNodeEl now repurposes the on-canvas description slot for a UI
+    dashboard part's live value/input (see above), that part's own `description` field
+    no longer displays anywhere on canvas -- leaving it editable in Root Properties with
+    zero visible effect would be the same class of silently-dead field already fixed
+    once for viewMember's fontColor/fontSize/borderColor. renderPartProperties's merged
+    spec for isUIDashboardType parts now also strips `description` (alongside the
+    pre-existing script/scriptEnabled/attributes stripping), confirmed against a real
+    node selection, while an ordinary (non-dashboard) part's description field is
+    completely unaffected."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.addView('RegrUiDescHidden_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const uiPart = store.createPart({ type: 'UITextOutput', label: 'RegrUiDescHidden_UI', model: store.defaultModel, streams: [] });
+      const ordinaryPart = store.createPart({ type: 'BusinessFunction', label: 'RegrUiDescHidden_Ordinary', model: store.defaultModel, streams: [] });
+      const uiVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: uiPart.id, x: 40, y: 40 });
+      const ordinaryVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: ordinaryPart.id, x: 200, y: 40 });
+
+      tab.selection = new Set([uiVm.id]);
+      app.render();
+      const uiDescPresent = !!document.getElementById('sf-part-description');
+
+      tab.selection = new Set([ordinaryVm.id]);
+      app.render();
+      const ordinaryDescPresent = !!document.getElementById('sf-part-description');
+
+      return { uiDescPresent, ordinaryDescPresent };
+    }
+    """)
+    problems = []
+    if result["uiDescPresent"]:
+        problems.append("expected a UI dashboard part's Description field to be stripped from Root Properties (it has no visible effect on canvas anymore)")
+    if not result["ordinaryDescPresent"]:
+        problems.append("expected an ordinary (non-dashboard) part's Description field to be completely unaffected")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "a UI dashboard part's Description field is now hidden from Root Properties (its on-canvas slot is repurposed for the widget's own value/input), while ordinary parts are unaffected"
+
+
+def check_ui_dashboard_output_value_not_truncated(page):
+    """Regression guard, reported directly: "the ui element text output appears to cut
+    off the text: using example 'ui dashboard elements demo.json' it shows just
+    'Discount app..' which isn't the full width of available text area." buildNodeEl's
+    dashboardValueHtml (canvas.js) originally reused formatSimValue to render a UI
+    Output widget's value into the new .fnode-ui-value description slot (see
+    check_ui_dashboard_canvas_value_and_input_rendering) -- but formatSimValue
+    truncates any string over 12 characters (with a trailing "…"), a limit tuned for
+    the tiny .fnode-sim-badge pill this slot replaced, not the much roomier
+    description-sized area (which already wraps up to 2 lines via CSS line-clamp, so
+    no length cap is needed at all here). Fixed with a dedicated
+    formatUiDashboardValue (no truncation, otherwise identical number/string/object
+    formatting). Covers: a long string value (>12 chars, matching the exact reported
+    example's "Discount applied (SAVE10)") renders in FULL in the description slot;
+    a non-integer number still formats to 2 decimal places, same as the badge
+    convention; and — regression safety — an ordinary scripted part's own leftBadge
+    (a genuinely different, small pill) is completely unaffected and still uses
+    formatSimValue's own behavior (out of scope for this fix, verified unchanged)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sim = await import('./js/simulation.js');
+      const view = store.addView('RegrUiValueTruncate_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const target = store.createPart({
+        type: 'BusinessFunction', label: 'RegrUiValueTruncate_Target', model: store.defaultModel, streams: [],
+        scriptEnabled: true,
+        script: "ctx.ui.UITextOutput['LongText'] = 'Discount applied (SAVE10)'; ctx.ui.UINumericOutput['Decimal'] = 12.3456; return {};",
+      });
+      const textOut = store.createPart({ type: 'UITextOutput', label: 'LongText', model: store.defaultModel, streams: [], uiTargetPartId: target.id });
+      const numOut = store.createPart({ type: 'UINumericOutput', label: 'Decimal', model: store.defaultModel, streams: [], uiTargetPartId: target.id });
+      const vmTextOut = store.createViewMember({ view: view.id, objectType: 'part', objectId: textOut.id, x: 40, y: 40 });
+      const vmNumOut = store.createViewMember({ view: view.id, objectType: 'part', objectId: numOut.id, x: 240, y: 40 });
+
+      store.simSelectedModel = store.defaultModel;
+      app.render();
+      sim.runTick(app, store.defaultModel);
+      app.render();
+
+      const valueText = (vmId) => document.querySelector(`.fnode[data-vm-id="${vmId}"] .fnode-ui-value`)?.textContent ?? null;
+      return {
+        longTextFull: valueText(vmTextOut.id),
+        decimalFormatted: valueText(vmNumOut.id),
+      };
+    }
+    """)
+    problems = []
+    if result["longTextFull"] != 'Discount applied (SAVE10)':
+        problems.append(f"expected the full, untruncated string ('Discount applied (SAVE10)', 26 chars) to render in the description slot, got {result['longTextFull']!r}")
+    if result["decimalFormatted"] != '12.35':
+        problems.append(f"expected a non-integer number to still format to 2 decimal places ('12.35'), got {result['decimalFormatted']!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "a UI Output widget's value now renders in full in the description slot (no more 12-character badge-style truncation), while number formatting stays consistent with the badge convention"
+
+
 CHECKS = [
     check_boots_clean,
     check_example_simulates,
@@ -16542,7 +16833,7 @@ CHECKS = [
     check_ui_dashboard_property_panel,
     check_ui_dashboard_ctx_ui_engine,
     check_sim_value_no_auto_hold_and_last_good_tracking,
-    check_ui_dashboard_output_badge_visibility,
+    check_ui_dashboard_output_value_display_always_visible,
     check_copy_model_remaps_ui_bindings,
     check_ui_dashboard_cross_model_binding,
     check_smart_stream_preset_local_persistence,
@@ -16643,6 +16934,10 @@ CHECKS = [
     check_attributes_field_only_for_data_entity_details,
     check_pinned_fields_default_includes_script,
     check_properties_panel_preserves_scroll_during_render,
+    check_ui_dashboard_canvas_value_and_input_rendering,
+    check_ui_dashboard_canvas_input_preserves_focus_during_rerender,
+    check_ui_dashboard_description_hidden_from_root_properties,
+    check_ui_dashboard_output_value_not_truncated,
 ]
 
 

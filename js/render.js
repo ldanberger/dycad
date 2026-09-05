@@ -1794,6 +1794,19 @@ function renderPartProperties(app, vm) {
   // always-visible, meaningless empty "+ Add Attribute" table. Stripped from the
   // merged spec the same way script/scriptEnabled are above.
   //
+  // `description` is ALSO stripped for these four types specifically: reported
+  // directly, "use the node space otherwise used for description as input field for
+  // inputs and to display the output values, instead of using the badges" — canvas.js's
+  // buildNodeEl now repurposes that exact visual slot for the widget's own live value
+  // (read-only text for Output, a real editable <input> for Input), so a UI dashboard
+  // part's own `description` field no longer has anywhere left to display. Leaving it
+  // editable in Root Properties with zero visible effect would be exactly the kind of
+  // silently-dead field already fixed once for viewMember's fontColor/fontSize/
+  // borderColor (see DESIGN_DOCUMENT.md §11) — stripped outright here rather than
+  // `show:'h'`, matching how script/scriptEnabled/attributes are already handled in
+  // this same merged spec, for the same reason: it isn't a generically-dead field
+  // worth documenting as hidden-but-present, it's simply meaningless for this type.
+  //
   // Computed BEFORE renderPinnedSection (below), not after, so pinning one of these
   // synthesized/stripped fields is reflected consistently in the Pinned section too —
   // it used to be built after, so renderPinnedSection's own custom.json-only lookup
@@ -1805,7 +1818,7 @@ function renderPartProperties(app, vm) {
     const baseFields = app.store.settings.showFields?.part?.fields || {};
     const merged = {};
     for (const [name, def] of Object.entries(baseFields)) {
-      if (name === 'script' || name === 'scriptEnabled' || name === 'attributes') continue;
+      if (name === 'script' || name === 'scriptEnabled' || name === 'attributes' || name === 'description') continue;
       merged[name] = { ...def, __sourceEntityKey: 'part' };
     }
     merged.uiTargetPartId = { show: 's', access: 'w', label: 'Bound Part', __sourceEntityKey: 'part' };
