@@ -3696,6 +3696,28 @@ call shape exactly. New `check_generate_view_redraws_with_show_all_text`
 element has no line-clamp truncation — proven via TEMP BREAK disabling the redraw
 call outright.
 
+**Tab bar's phantom vertical scrollbar** — reported directly: *"why are there up and
+down scroller arrows on the tab line? there appears no way to increase the tab line
+rows and when tabs fill the one row they continue right with a horizontal scroll
+bar."* Root cause was a CSS Overflow spec subtlety, confirmed via a live computed-
+style check (opening 20 tabs and reading `getComputedStyle(#tabs-row)`): `#tabs-row`
+(`css/styles.css`) set `overflow-x: auto` with no explicit `overflow-y` — per spec, a
+`visible` value on one axis paired with a non-`visible` value on the other computes
+as `auto` instead of staying `visible`, so `overflow-y` silently became `auto` too,
+confirmed directly (`getComputedStyle` reported `overflowY: 'auto'` despite the CSS
+never setting it). A genuine but spurious ~1px vertical overflow (`scrollHeight: 38`
+vs `clientHeight: 37` in the same live check) — from `.tab-item.active`'s own
+`margin-bottom: -1px` trick, ordinary box-model rounding, not a real second row of
+tabs — was enough to trigger a vertical scrollbar that could never do anything useful
+(tabs only ever continue horizontally; there is no multi-row tab layout at all).
+Fixed with one explicit `overflow-y: hidden` on `#tabs-row`. New
+`check_tabs_row_no_spurious_vertical_scrollbar` (`tests/run_all.py`): opens 20 tabs
+to force genuine horizontal overflow, confirms computed `overflow-y` is `hidden`
+while `overflow-x` stays `auto` and horizontal overflow still genuinely occurs —
+proven via TEMP BREAK removing the new rule, which reproduced the exact computed
+`auto` value the report described, even though the CSS never wrote that value for
+that axis.
+
 ## 9. The 3D View subsystem (`view3d.js`)
 
 A rotatable/zoomable WebGL scene over `store.doc.parts`/`connectors` directly —

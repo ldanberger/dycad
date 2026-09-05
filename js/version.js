@@ -5839,4 +5839,19 @@
 // link, reported directly, to create a default set of basic parts and views (some
 // will be missing parts, noted via each view's own Parts Needed marker).
 // DESIGN_DOCUMENT.md and tests/README.md updated.
-export const APP_VERSION = '0.946';
+// v0.947: fix bug, reported directly: "why are there up and down scroller arrows
+// on the tab line? there appears no way to increase the tab line rows and when
+// tabs fill the one row they continue right with a horizontal scroll bar." Root
+// cause: #tabs-row (css/styles.css) set overflow-x: auto with no explicit
+// overflow-y -- per the CSS Overflow spec, a 'visible' value on one axis paired
+// with a non-'visible' value on the other computes as 'auto' instead, confirmed
+// directly via getComputedStyle (overflowY reported 'auto' despite never being
+// set). A spurious ~1px vertical overflow (.tab-item.active's own
+// margin-bottom:-1px trick, ordinary box-model rounding, not a real second row)
+// was enough to trigger a vertical scrollbar that could never do anything useful
+// -- tabs only ever continue horizontally, there is no multi-row tab layout at
+// all. Fixed with one explicit overflow-y: hidden. New
+// check_tabs_row_no_spurious_vertical_scrollbar (tests/run_all.py), proven via
+// TEMP BREAK removing the new rule, which reproduced the exact computed 'auto'
+// value. DESIGN_DOCUMENT.md and tests/README.md updated.
+export const APP_VERSION = '0.947';

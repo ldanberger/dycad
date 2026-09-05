@@ -107,6 +107,18 @@ button, select, input { font-family: inherit; font-size: inherit; color: inherit
   gap: 4px;
   padding: 6px 8px 0 8px;
   overflow-x: auto;
+  /* Reported directly: "why are there up and down scroller arrows on the tab
+     line? ... when tabs fill the one row they continue right with a horizontal
+     scroll bar." Setting overflow-x alone makes the browser compute overflow-y
+     as 'auto' too (per the CSS Overflow spec: a 'visible' value paired with a
+     non-'visible' value on the other axis is treated as 'auto', not left
+     'visible') -- so a spurious ~1px vertical overflow (from .tab-item.active's
+     own margin-bottom:-1px trick, well within normal box-model rounding) was
+     enough to show a vertical scrollbar/arrows that don't do anything useful:
+     tabs never wrap into more than one row, they only ever continue
+     horizontally. Explicit overflow-y: hidden stops the browser from silently
+     opting this axis into 'auto' as well. */
+  overflow-y: hidden;
 }
 .tabs-list { display: flex; align-items: flex-end; gap: 2px; }
 .tab-item {

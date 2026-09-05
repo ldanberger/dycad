@@ -17321,6 +17321,54 @@ def check_generate_view_redraws_with_show_all_text(page):
     return True, "Generate View now persists chkShowAllText=true on each generated view and actually redraws so long descriptions render in full, not truncated to 2 lines"
 
 
+def check_tabs_row_no_spurious_vertical_scrollbar(page):
+    """Regression guard, reported directly: "why are there up and down scroller
+    arrows on the tab line? there appears no way to increase the tab line rows and
+    when tabs fill the one row they continue right with a horizontal scroll bar."
+    Root cause: #tabs-row (css/styles.css) set overflow-x: auto with no explicit
+    overflow-y — per the CSS Overflow spec, pairing 'visible' on one axis with a
+    non-'visible' value on the other computes the 'visible' one as 'auto' instead,
+    so the browser silently opted the vertical axis into scrolling too. A spurious
+    ~1px vertical overflow (from .tab-item.active's own margin-bottom:-1px trick,
+    ordinary box-model rounding, not a real second row of content) was enough to
+    trigger a vertical scrollbar/arrows that could never actually do anything useful
+    -- tabs only ever continue horizontally, never wrap to a second row. Fixed with
+    an explicit overflow-y: hidden. Opens enough tabs to force genuine horizontal
+    overflow and confirms: computed overflow-y is 'hidden' (not 'auto'/'scroll'),
+    horizontal overflow still genuinely occurs (scrollWidth > clientWidth) and
+    overflow-x stays 'auto' (the real horizontal scrolling this row needs is
+    unaffected) — proven via TEMP BREAK removing the new overflow-y rule, which
+    reproduced the exact computed 'auto' value even though never written for that
+    axis."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      for (let i = 0; i < 20; i++) {
+        const view = store.addView('RegrTabsRow_' + i + '_' + Date.now(), 'ff');
+        app.createCanvasTab(view);
+      }
+      app.render();
+      const row = document.getElementById('tabs-row');
+      const cs = getComputedStyle(row);
+      return {
+        overflowX: cs.overflowX,
+        overflowY: cs.overflowY,
+        hasHorizontalOverflow: row.scrollWidth > row.clientWidth,
+      };
+    }
+    """)
+    problems = []
+    if result["overflowY"] not in ("hidden",):
+        problems.append(f"expected #tabs-row's computed overflow-y to be 'hidden' (not silently 'auto'), got {result['overflowY']!r}")
+    if result["overflowX"] != "auto":
+        problems.append(f"expected #tabs-row's overflow-x to remain 'auto' (real horizontal scrolling still needed), got {result['overflowX']!r}")
+    if not result["hasHorizontalOverflow"]:
+        problems.append("test setup itself is wrong — expected enough tabs to genuinely overflow horizontally")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "the tab row no longer gets a spurious vertical scrollbar (overflow-y explicitly hidden) while horizontal tab overflow/scrolling still works correctly"
+
+
 CHECKS = [
     check_boots_clean,
     check_example_simulates,
@@ -17539,6 +17587,7 @@ CHECKS = [
     check_generate_view_creates_parts_needed_marker,
     check_remap_sort_priority_includes_raw_label,
     check_generate_view_redraws_with_show_all_text,
+    check_tabs_row_no_spurious_vertical_scrollbar,
 ]
 
 
