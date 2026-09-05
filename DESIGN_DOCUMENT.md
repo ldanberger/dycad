@@ -3696,6 +3696,41 @@ call shape exactly. New `check_generate_view_redraws_with_show_all_text`
 element has no line-clamp truncation — proven via TEMP BREAK disabling the redraw
 call outright.
 
+**Example file: a data set with every Generate View type, not just Generate
+Industry's own output** — reported directly: *"not restricted to parts from
+'generate industry', create a full data set of any industry that will have all
+parts needed for all the 'generate view' views. If possible on the 'home' view add
+a text note with the prompt details on how to gather the information again."*
+`generateIndustry`'s own Function→Capability→Application Capability→Entity chain
+can never by itself produce most of the 42 distinct element types
+`GENERATE_VIEW_GROUPS` (§ above) actually spans — `BusinessActor`/`BusinessRole`,
+`Node`/`Device`, `CommunicationNetwork`, `Constraint`/`Requirement`/`Principle`, and
+so on are simply outside what that one template-chain mechanism generates — so no
+amount of running Generate Industry could ever populate all 13 Generate View
+definitions without missing-type gaps. `public/examples/full generate view data set
+demo.json` (listed in `index.json`) instead hand-authors one realistically-named,
+sensibly-connected Part directly (no `createStream`/`generateIndustry` involved at
+all) for the UNION of every `requiredTypes`/`optionalTypes` entry across all 13 view
+definitions — 42 ArchiMate-typed Parts plus 39 `'c'`-type Connectors, deliberately
+reusing shared types across different views' own definitions (`Node`/`Device`/
+`ApplicationApplication` etc. each appear in several) so every one of the 13
+generated views ends up with genuine internal connectivity, not isolated nodes, all
+placed on a view named `home` (matching what a fresh document already calls its own
+default view). A 43rd Part — a `Text`-type "About This Data Set" note, soft-yellow
+fill, placed top-left on that same `home` view — carries the exact natural-language
+prompt/recipe used to generate this data set (reading `GENERATE_VIEW_GROUPS` for the
+current type list, creating one Part per type, connecting related pairs with plain
+`'c'` Connectors) so a person can hand it to an AI assistant later to regenerate or
+extend it as the view definitions themselves evolve. New
+`check_full_generate_view_data_set_example` (`tests/run_all.py`): loads the file for
+real, runs the real Advanced > Generate View dialog with every view checked, and
+confirms all 13 views are created (none skipped), NOT ONE gets a "Parts Needed"
+marker (the report's own acceptance bar — every required type across all 13 views
+genuinely has a matching Part), and the on-canvas note exists with substantial
+description text — proven via TEMP BREAK (temporarily removing one required Part,
+`BusinessRole`, from the shipped file reproduced exactly one "Organization Structure
+View Parts Needed" marker, then the file was regenerated back to its full form).
+
 **Tab bar's phantom vertical scrollbar** — reported directly: *"why are there up and
 down scroller arrows on the tab line? there appears no way to increase the tab line
 rows and when tabs fill the one row they continue right with a horizontal scroll

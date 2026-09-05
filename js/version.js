@@ -5854,4 +5854,30 @@
 // check_tabs_row_no_spurious_vertical_scrollbar (tests/run_all.py), proven via
 // TEMP BREAK removing the new rule, which reproduced the exact computed 'auto'
 // value. DESIGN_DOCUMENT.md and tests/README.md updated.
-export const APP_VERSION = '0.947';
+// v0.948: new example file, reported directly: "not restricted to parts from
+// 'generate industry', create a full data set of any industry that will have all
+// parts needed for all the 'generate view' views. If possible on the 'home' view
+// add a text note with the prompt details on how to gather the information again."
+// generateIndustry's own Function->Capability->Application Capability->Entity
+// chain can never by itself populate most of the element types
+// GENERATE_VIEW_GROUPS spans (BusinessActor/BusinessRole, Node/Device,
+// CommunicationNetwork, Constraint/Requirement/Principle, etc. are simply outside
+// what that mechanism generates). New public/examples/full generate view data set
+// demo.json (listed in index.json) instead hand-authors 42 realistically-named,
+// sensibly-connected Parts directly -- one per distinct type across the UNION of
+// every requiredTypes/optionalTypes entry in all 13 GENERATE_VIEW_GROUPS
+// definitions -- plus 39 'c'-type Connectors reusing shared types across views for
+// genuine internal connectivity, all placed on a view named 'home'. A 43rd Part, a
+// Text-type "About This Data Set" note (soft-yellow, top-left on that same 'home'
+// view), carries the exact natural-language prompt/recipe used to generate this
+// data set, for regenerating or extending it later as the view definitions
+// themselves evolve. New check_full_generate_view_data_set_example
+// (tests/run_all.py): loads the file for real, runs the real Advanced > Generate
+// View dialog with every view checked, confirms all 13 views are created with
+// ZERO "Parts Needed" markers (the report's own acceptance bar) and the on-canvas
+// note carries substantial text -- proven via TEMP BREAK (removing one required
+// Part from the shipped file reproduced exactly one marker, then the file was
+// regenerated back to its full form). instructions.html's Quick Start line points
+// to this new example as the "no missing parts" alternative. DESIGN_DOCUMENT.md
+// and tests/README.md updated.
+export const APP_VERSION = '0.948';

@@ -17369,6 +17369,92 @@ def check_tabs_row_no_spurious_vertical_scrollbar(page):
     return True, "the tab row no longer gets a spurious vertical scrollbar (overflow-y explicitly hidden) while horizontal tab overflow/scrolling still works correctly"
 
 
+def check_full_generate_view_data_set_example(page):
+    """New feature/example file, reported directly: "not restricted to parts from
+    'generate industry', create a full data set of any industry that will have all
+    parts needed for all the 'generate view' views. If possible on the 'home' view
+    add a text note with the prompt details on how to gather the information again."
+    "full generate view data set demo.json" (public/examples/, listed in
+    index.json) ships one realistically-named, sensibly-connected Part for EVERY
+    element type used by ANY of GENERATE_VIEW_GROUPS's 13 view definitions
+    (commands.js) — the union of every requiredTypes/optionalTypes entry, not just
+    what Generate Industry's own Function/Capability/Entity chain would ever
+    produce — plus a "About This Data Set" Text note (soft-yellow fill) on the
+    'home' view carrying the exact prompt/recipe used to generate it, for
+    reproducibility. Loads the file for real, runs the real Advanced > Generate View
+    dialog with every one of the 13 views checked, and confirms: all 13 views are
+    actually created (none skipped for lacking matching parts); NOT ONE of them
+    gets a "<view> Parts Needed" Text marker (proving every required type genuinely
+    has at least one matching Part in the shipped data — the acceptance bar the
+    report itself named); and the on-canvas "About This Data Set" note exists on the
+    home view with non-trivial description text."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+
+      const manifestRes = await fetch('public/examples/index.json', { cache: 'no-store' });
+      const manifest = await manifestRes.json();
+      const listedInManifest = manifest.includes('full generate view data set demo.json');
+
+      const res = await fetch('public/examples/full generate view data set demo.json', { cache: 'no-store' });
+      const obj = await res.json();
+      store.loadFromJSON(obj);
+      store.tabs = [];
+      const homeView = store.findView(store.currentView) || store.doc.views[0];
+      const tab = app.createCanvasTab(homeView);
+      app.switchToTab(tab.id);
+
+      const notePart = store.doc.parts.find(p => p.type === 'Text' && p.label === 'About This Data Set');
+      const noteVm = notePart ? store.viewMembersForView(homeView.id).find(v => v.objectType === 'part' && v.objectId === notePart.id) : null;
+
+      const viewCountBefore = store.doc.views.length;
+      document.getElementById('advanced-menu-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      document.querySelector('#advanced-menu .dd-item[data-action=\\"generateView\\"]').click();
+      await new Promise(r => setTimeout(r, 60));
+      // Every checkbox starts checked (Select All already fully checked) -- just submit.
+      document.getElementById('gv-process').click();
+      await new Promise(r => setTimeout(r, 200));
+
+      const toasts = document.querySelectorAll('.toast');
+      const lastToast = toasts.length ? toasts[toasts.length - 1].textContent : null;
+      const newViewCount = store.doc.views.length - viewCountBefore;
+      const partsNeededMarkers = store.doc.parts.filter(p => p.type === 'Text' && p.label.endsWith('Parts Needed'));
+
+      return {
+        listedInManifest,
+        distinctPartTypes: [...new Set(store.doc.parts.map(p => p.type))].length,
+        notePartFound: !!notePart,
+        noteVmFound: !!noteVm,
+        noteDescriptionLength: notePart ? notePart.description.length : 0,
+        newViewCount,
+        partsNeededMarkerCount: partsNeededMarkers.length,
+        partsNeededMarkerLabels: partsNeededMarkers.map(p => p.label),
+        lastToast,
+      };
+    }
+    """)
+    problems = []
+    if not result["listedInManifest"]:
+        problems.append("expected 'full generate view data set demo.json' to be listed in examples/index.json")
+    if result["notePartFound"] is False:
+        problems.append("expected an 'About This Data Set' Text part to exist")
+    if not result["noteVmFound"]:
+        problems.append("expected the note to actually be placed on the 'home' view")
+    if result["noteDescriptionLength"] < 200:
+        problems.append(f"expected the note's description to carry substantial prompt/recipe text (>200 chars), got {result['noteDescriptionLength']} chars")
+    if result["newViewCount"] != 13:
+        problems.append(f"expected all 13 Generate View definitions to produce a view (none skipped for lacking matching parts), got {result['newViewCount']} new views")
+    if result["partsNeededMarkerCount"] != 0:
+        problems.append(f"expected ZERO 'Parts Needed' markers (every required type across all 13 views must have at least one matching Part in this data set), got {result['partsNeededMarkerCount']}: {result['partsNeededMarkerLabels']}")
+    if not result["lastToast"] or "created 13 view" not in result["lastToast"]:
+        problems.append(f"expected a 'Generate View: created 13 views...' summary toast, got {result['lastToast']!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, f"the full generate-view data set example ({result['distinctPartTypes']} distinct part types) produces all 13 Generate View views fully populated with zero 'Parts Needed' markers, and carries its own regeneration prompt as an on-canvas note"
+
+
 CHECKS = [
     check_boots_clean,
     check_example_simulates,
@@ -17588,6 +17674,7 @@ CHECKS = [
     check_remap_sort_priority_includes_raw_label,
     check_generate_view_redraws_with_show_all_text,
     check_tabs_row_no_spurious_vertical_scrollbar,
+    check_full_generate_view_data_set_example,
 ]
 
 
