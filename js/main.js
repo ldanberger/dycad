@@ -5,7 +5,7 @@ import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCo
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule, formatSimValue, segmentIntersectsRect } from './canvas.js';
 import { computeRoutedPath } from './routing.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
-import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, copyModel, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors } from './commands.js';
+import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, copyModel, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors, GENERATE_VIEW_GROUPS, generateSelectedViews } from './commands.js';
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection, computeSectionLayout, getAllowedTypesForView } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog, pushActivityLog, pushDebugLog } from './simulation.js';
@@ -1991,6 +1991,87 @@ class App {
    * "no click-outside-to-close" convention), so nothing behind it is reachable while
    * it's open, which ruled out a "preview" button that would open the catalog in
    * another tab the person still couldn't see. */
+  /** Advanced > Generate View: TOGAF-style starter views built from parts/connectors
+   * already in the selected model — reported directly: "create a new 'Generate View'
+   * menu item under advanced tab... present user with the headers... and view names,
+   * with a selection box for each (and one to select/deselect all) and a model
+   * selector... Provide a 'process' or similar submit button." See
+   * generateSelectedViews (commands.js) for the actual generation logic and
+   * GENERATE_VIEW_GROUPS for the 13 view definitions/four headers, rendered here
+   * directly so the two stay in sync with no separate list to maintain. Checkbox
+   * select-all uses the same sync/indeterminate idiom as promptAutoDetectConnectors
+   * above; every view starts checked, same "start from everything, let the person
+   * deselect" convention that dialog also uses. */
+  promptGenerateView() {
+    const root = document.getElementById('modal-root');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const box = document.createElement('div');
+    box.className = 'modal-box';
+    box.style.width = '620px';
+    box.style.maxWidth = '92vw';
+
+    const modelOptions = this.store.doc.models.map((m) => m.modelName);
+    const currentModel = this.store.defaultModel;
+
+    const groupsHtml = GENERATE_VIEW_GROUPS.map((g) => `
+      <div style="margin-top:10px;font-weight:600;font-size:12px;">${escapeHtml(g.header)}</div>
+      ${g.views.map((v) => `
+        <label style="display:flex;align-items:center;gap:6px;padding:3px 0 3px 12px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" class="gv-view-check" data-key="${v.key}" checked />
+          ${escapeHtml(v.name)}
+        </label>
+      `).join('')}
+    `).join('');
+
+    box.innerHTML = `
+      <h3>Generate View</h3>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
+        Generates one starter view per checked item below, built only from parts and "connector"-type
+        relationships already in the selected model — no new parts are created. If a view's usual element
+        type has no matching parts in this model, that's noted in the Message Log and the view is still
+        generated from whatever else is available (or skipped if nothing at all matches). Each new view is
+        laid out with Remap, and the parameters used are recorded in that view's own Note field so the layout
+        can be reproduced later.
+      </div>
+      <div class="prop-row"><label>Model</label><select id="gv-model">${modelOptions.map((m) => `<option value="${escapeHtml(m)}" ${ciEq(m, currentModel) ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('')}</select></div>
+      <label style="display:flex;align-items:center;gap:6px;padding:6px 0;font-size:12px;font-weight:600;border-top:1px solid var(--border);margin-top:8px;cursor:pointer;">
+        <input type="checkbox" id="gv-select-all" />
+        Select / Deselect All
+      </label>
+      <div style="max-height:340px;overflow-y:auto;">${groupsHtml}</div>
+      <div class="modal-actions">
+        <button class="cancel">Cancel</button>
+        <button id="gv-process" class="primary">Process</button>
+      </div>
+    `;
+    overlay.appendChild(box);
+    root.appendChild(overlay);
+    box.querySelector('.cancel').addEventListener('click', () => overlay.remove());
+
+    const checkboxes = () => [...box.querySelectorAll('.gv-view-check')];
+    const selectAll = box.querySelector('#gv-select-all');
+    const syncSelectAll = () => {
+      const cbs = checkboxes();
+      const checkedCount = cbs.filter((c) => c.checked).length;
+      selectAll.checked = checkedCount === cbs.length;
+      selectAll.indeterminate = checkedCount > 0 && checkedCount < cbs.length;
+    };
+    checkboxes().forEach((cb) => cb.addEventListener('change', syncSelectAll));
+    selectAll.addEventListener('change', (e) => {
+      checkboxes().forEach((cb) => { cb.checked = e.target.checked; });
+    });
+    syncSelectAll();
+
+    box.querySelector('#gv-process').addEventListener('click', () => {
+      const viewKeys = checkboxes().filter((c) => c.checked).map((c) => c.dataset.key);
+      const model = box.querySelector('#gv-model').value;
+      overlay.remove();
+      if (viewKeys.length === 0) { this.toast('Generate View: no views selected.', true); return; }
+      generateSelectedViews(this, { model, viewKeys });
+    });
+  }
+
   promptGenerateIndustry() {
     if (!this.store.doc.industryTree || this.store.doc.industryTree.length === 0) {
       this.toast('No industry data loaded — use File > Load SFCCE.', true);
@@ -5150,6 +5231,8 @@ function wireGlobalEvents(app) {
     { label: 'Open Nubium Data Value Chain Model', url: 'https://www.nubium.com/blog/datavaluechain/' },
     { label: 'Open Microsoft CDM', url: 'https://github.com/microsoft/CDM?tab=readme-ov-file' },
     { separator: true },
+    { label: 'Generate View', action: 'generateView' },
+    { separator: true },
     { label: 'Generate Inventory View', action: 'generateInventoryView' },
     { label: 'Generate Industry', action: 'generateIndustry' },
     { label: 'Smart Check Model', action: 'smartCheckModel' },
@@ -5166,7 +5249,9 @@ function wireGlobalEvents(app) {
   advancedMenu.innerHTML = ADVANCED_LINKS.map((l) => l.separator ? '<div class="dd-separator"></div>' : `<div class="dd-item" data-url="${l.url || ''}" data-action="${l.action || ''}">${l.label}</div>`).join('');
   advancedMenu.querySelectorAll('.dd-item').forEach((item) => {
     item.addEventListener('click', () => {
-      if (item.dataset.action === 'generateInventoryView') {
+      if (item.dataset.action === 'generateView') {
+        app.promptGenerateView();
+      } else if (item.dataset.action === 'generateInventoryView') {
         generateInventoryView(app);
       } else if (item.dataset.action === 'generateIndustry') {
         app.promptGenerateIndustry();

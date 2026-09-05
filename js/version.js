@@ -5692,4 +5692,151 @@
 // it for ordinary scripted parts' leftBadge, are untouched. New
 // check_ui_dashboard_output_value_not_truncated, proven via TEMP BREAK reproducing
 // the exact reported truncated text. DESIGN_DOCUMENT.md and tests/README.md updated.
-export const APP_VERSION = '0.941';
+// v0.942: new feature, reported directly: "Using the list below or a recommended list,
+// create a new 'Generate View' menu item under advanced tab in its own section before
+// 'Generate Inventory View'. This generate view item will present user with the
+// headers ('Business Architecture Views' etc.) and view names, with a selection box
+// for each (and one to select/deselect all) and a model selector. Upon selection,
+// using existing parts and connectors type 'c' for specified model, generate a view
+// for each. Do not create new parts. if a part is missing that is needed (for example
+// role), identify it as needed and for what view in the message log and put the
+// remaining parts in the view. Provide a 'process' or similar submit button, that when
+// selected will generate the new views and identify any issues. Format as appropriate
+// for clean layout using remap with options, and in view note field record remap
+// parameters to reproduce layout of each view." Added GENERATE_VIEW_GROUPS
+// (commands.js) -- 13 TOGAF-style view definitions (Organization Structure, Business
+// Capability, Value Stream / Business Process, Business Function, Data Management /
+// Logical Data, Data Flow / Integration, Application Portfolio / Component,
+// Application Communication / Interface, Technology Infrastructure / Processing,
+// Network / Communications, Deployment, Security & Control, Standards &
+// Interoperability), each a requiredTypes/optionalTypes pair of ArchiMate element
+// types -- and generateSelectedViews(app, {model, viewKeys}), which for each checked
+// definition collects only EXISTING parts of those types in the chosen model plus
+// only 'c'-category connectors between them (never 's' Stream or 'd' Derived, and
+// never creating a new Part or Connector), remaps for a clean layout
+// (applyRemapLayout, same defaults generateInventoryView uses), and writes a
+// human-readable record of the remap parameters used -- including a ready-to-paste
+// remap(app, tab, {...}) Script Console call -- into the new view's own Note field.
+// A missing requiredType is logged by name against the specific view (not blocking);
+// a view matching nothing at all in the model is skipped rather than left empty, and
+// that's logged too. View gained a `note` field (state.js/custom.json/render.js) --
+// it previously existed on Part/Connector/ViewMember but not View itself. New
+// App.promptGenerateView (main.js) dialog: headers/view names/checkboxes rendered
+// directly from GENERATE_VIEW_GROUPS, a synced Select/Deselect All (same idiom
+// promptAutoDetectConnectors uses), and a Model selector; wired into the Advanced
+// menu as its own separator-bounded section immediately before Generate Inventory
+// View. Four new checks (check_generate_view_menu_position,
+// check_generate_view_dialog_matches_definitions,
+// check_generate_view_generates_only_from_existing_parts_and_c_connectors,
+// check_generate_view_skips_view_with_no_matching_parts) -- all proven via TEMP
+// BREAK. DESIGN_DOCUMENT.md, tests/README.md, and instructions.html updated.
+// v0.943: fix bug, reported directly: "there are what appears to be duplicate parts
+// when I use 'generate industry', which results in multiple copies in the new views.
+// For example DataDataEntity appears 3 times for label 'Customer Profile', all same
+// stream and section. Were these actually from different streams and recorded
+// incorrectly?" Diagnosis: confirmed against the real shipped default dataset that
+// "Customer Profile" genuinely appears under 4 different Business Capabilities --
+// an ordinary shared-master-data shape, not a data error. generateIndustry/
+// createStream's xIds+model Part reuse was already correct; the actual bug was
+// upstream in buildIndustryTree (js/sfce.js), which derived an entity's fallback
+// nodeId (used when no explicit Entity Id is mapped -- the built-in dataset has
+// none) by chaining through its parent Application Capability's own nodeId, same as
+// Capability/Application Capability -- so the same entity name under different
+// capability branches got a different auto id each time, and the reuse check never
+// found a match.
+// This DIRECTLY CONFLICTED with a prior, deliberate decision: check_batch_script_
+// quickstart's own docstring and the v0.865 changelog entry (below) had already
+// investigated this identical shape once before ("Production Schedule" under two
+// Business Capabilities in the same built-in dataset) and concluded TWICE that two
+// separate Parts was correct, intentional behavior -- an initial name-only-merge fix
+// attempt's full suite run caught this directly (that test failed, still asserting
+// the old two-Part count/24-part total on "Smart Stream Example 2"). Surfaced before
+// proceeding further; reconciled across two follow-ups into a final rule, reported
+// verbatim: first "if the two elements are same label etc. and same stream, they
+// should be merged. If they are same label etc. but different streams they should
+// remain separate," then refined further: "If same label, model, section, and
+// streams then elements should be merged or reused. If same label, model, but
+// different section or stream then should remain separate."
+// Since generateIndustry always sets a generated entity's streamName to the entity's
+// own nodeName, "same label" and "same stream" are the same condition for this
+// pipeline, leaving SECTION as the one remaining axis ("model" is already handled
+// independently -- every xIds+model lookup is scoped to whichever model a given
+// generateIndustry run targets). Fixed by giving Entity -- and only Entity -- a
+// fallback nodeId based on its own SECTION and name together (not chained through
+// its parent Application Capability), since a data entity (unlike Capability/
+// Application Capability, which deliberately stay chained per-parent per "these
+// will never be combined into shared") is meant to be shared/reused across many
+// capabilities WITHIN one section. The explicit-Entity-Id mapping still works
+// exactly as before and takes priority when given. check_generate_industry_shares_
+// entity_across_capabilities (tests/run_all.py) covers both halves in one fixture:
+// two rows share an entity name across branches WITHIN the same section (must
+// merge) plus a third row reusing the same name under a DIFFERENT section (must
+// stay separate) -- both proven via TEMP BREAK. check_batch_script_quickstart
+// updated to expect the now-correctly-merged part count (24 -> 23 on "Smart Stream
+// Example 2") and labels (its two "Production Schedule" occurrences share one
+// section, so still merge under the final section-aware rule exactly as under the
+// simpler name-only version), its stale "confirmed as genuinely distinct, not a
+// dedup bug" framing corrected, and its docstring extended with this resolution --
+// the v0.865 history itself (DESIGN_DOCUMENT.md SS7.5) is left as an accurate record
+// of what was decided then, not rewritten. Already-generated documents with
+// duplicate Parts baked in from a prior run aren't retroactively fixed by any of
+// this; Advanced > Smart Check Model's duplicate-part merge already covers cleaning
+// those up. DESIGN_DOCUMENT.md SS7.1/SS7.2/SS7.5 and tests/README.md updated.
+// v0.944: new feature, reported directly: "change: when generating the views
+// requested and parts are missing for a view, create Text part and node with label
+// view name + ' Parts Needed' and put list of parts needed in the description field
+// and show in view near upper left area with soft red fill." generateSelectedViews
+// (commands.js) now creates one plain 'Text' Part (no prefix/suffix decoration)
+// labeled "<view name> Parts Needed" whenever a view definition has one or more
+// missing requiredTypes, its description listing each missing type by name, placed
+// via a new PARTS_NEEDED_FILL ('#ffb3b3', soft red, distinct from every real
+// elementGroups fill) AFTER the remap call (so it's never fed into Remap as ordinary
+// content -- it has no connectors and isn't modeled data), positioned near the
+// view's own upper-left origin via store.findNonOverlappingPosition. This is a
+// deliberate, documented exception to "do not create new parts" -- diagnostic
+// metadata about the generation run, not new architecture content. New
+// check_generate_view_creates_parts_needed_marker (tests/run_all.py), proven via
+// TEMP BREAK disabling the marker-creation branch; check_generate_view_generates_
+// only_from_existing_parts_and_c_connectors updated (its own fixture has a missing
+// required type, so it now also creates exactly one new Part -- the marker -- and
+// its assertions/docstring were revised to expect and verify that specifically,
+// rather than silently weakening the "no MODELED content" check it exists for).
+// DESIGN_DOCUMENT.md, tests/README.md, and instructions.html updated.
+// v0.945: new feature, reported directly: "add raw label to the sort priority part
+// of remap." REMAP_SORT_KEYS/REMAP_SORT_LABELS (commands.js) gained a new 'rawLabel'
+// entry alongside the pre-existing 'nodeLabel', plus a matching case in
+// remapSortValue (part.rawLabel || ''). Part.rawLabel is the true pre-decoration
+// name (distinct from the fully-decorated part.label, e.g. ApplicationCapability's
+// "Manage " prefix), useful as a sort key whenever that decoration would otherwise
+// scramble an alphabetical grouping. promptRemap's own Sort Priority list is fully
+// data-driven off REMAP_SORT_KEYS, so no other UI code needed to change -- the new
+// key just appears, appended after every already-remembered key on first open, same
+// as elementGroup did when it was added. DEFAULT_REMAP_SORT_KEYS left unchanged (new
+// option, not a default change). New check_remap_sort_priority_includes_raw_label
+// (tests/run_all.py), proven via TEMP BREAK -- the first break attempt only reversed
+// Part creation order (not ViewMember creation order), so it accidentally still
+// passed via stable-sort fallback to creation order; fixed the test fixture to also
+// reverse ViewMember creation order before the break correctly failed.
+// DESIGN_DOCUMENT.md and tests/README.md updated.
+// v0.946: new feature, reported directly: "for the new views as a result of
+// generate views command, run redraw with 'show all text'." generateSelectedViews
+// (commands.js) now sets view.chkShowAllText = true and runs the same
+// redrawAndResolveLayout + normalizeViewCoordinates pair Commands > Redraw's own
+// "Show all text" checkbox uses, run LAST in each view's processing (after remap
+// AND the Parts Needed marker, so the marker's own description factors into the
+// resize too). Caught a real bug while building this: the first attempt passed a
+// bare {viewId} object to redrawAndResolveLayout, but buildNodeEl (canvas.js, called
+// internally to measure nodes) unconditionally reads tab.selection.has(...) --
+// undefined selection threw a TypeError that silently aborted the rest of
+// generateSelectedViews (no active-tab switch, no summary toast), while the
+// already-created view/parts/connectors stayed in the document looking fine in
+// every store-only assertion -- only this feature's own DOM-level test caught it.
+// Fixed by passing {viewId, selection: new Set()}, matching generateIndustry's own
+// actual call shape. New check_generate_view_redraws_with_show_all_text
+// (tests/run_all.py), proven via TEMP BREAK disabling the redraw call.
+// Also: instructions.html gains a bolded "Quick start: Advanced > Generate
+// Industry, then Advanced > Generate View" callout right after the open-source
+// link, reported directly, to create a default set of basic parts and views (some
+// will be missing parts, noted via each view's own Parts Needed marker).
+// DESIGN_DOCUMENT.md and tests/README.md updated.
+export const APP_VERSION = '0.946';

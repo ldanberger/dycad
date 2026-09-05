@@ -1365,6 +1365,7 @@ function viewFieldAccessors(app, tab, view) {
     id: { get: () => view.id, set: (v) => { if (v) app.store.renameView(view.id, v); } },
     viewName: { get: () => view.viewName, set: (v) => { if (v) app.store.renameView(view.id, v); } },
     viewType: { get: () => view.viewType, set: (v) => { if (v) view.viewType = v; } },
+    note: { get: () => view.note || '', set: (v) => { view.note = v; } },
     margin: { get: () => view.margin ?? 50, set: (v) => { view.margin = Number(v) || 0; } },
     spacingScale: { get: () => view.spacingScale ?? 1, set: (v) => { const oldScale = view.spacingScale || 1; app.store.applySpacingScale(view.id, Number(v) || 1); if (isSectionViewType(view.viewType)) rescaleSectionPositions(app.store, view, { spacingScale: oldScale }); } },
     spacingAxis: { get: () => view.spacingAxis || 'both', set: (v) => { view.spacingAxis = v; } },

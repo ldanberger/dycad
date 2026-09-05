@@ -374,6 +374,11 @@
           "access": "r",
           "label": "View Type"
         },
+        "note": {
+          "show": "m",
+          "access": "w",
+          "label": "Note"
+        },
         "margin": {
           "show": "n",
           "access": "w",

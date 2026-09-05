@@ -1508,8 +1508,8 @@ function estimateMaxCols(stepX = 170, baseX = 60, zoom = 1) {
  * remaining nodes ordered by the related streamTemplate's value[] position, wrapping
  * to a new row at MaxCols columns OR whenever the element.group changes.
  */
-const REMAP_SORT_KEYS = ['streamName', 'connectionOrder', 'streamOrder', 'entityType', 'elementGroup', 'nodeLabel'];
-const REMAP_SORT_LABELS = { streamName: 'Stream name', connectionOrder: 'Connection order', streamOrder: 'Stream order', entityType: 'Entity type', elementGroup: 'Element group', nodeLabel: 'Node label' };
+const REMAP_SORT_KEYS = ['streamName', 'connectionOrder', 'streamOrder', 'entityType', 'elementGroup', 'nodeLabel', 'rawLabel'];
+const REMAP_SORT_LABELS = { streamName: 'Stream name', connectionOrder: 'Connection order', streamOrder: 'Stream order', entityType: 'Entity type', elementGroup: 'Element group', nodeLabel: 'Node label', rawLabel: 'Raw label' };
 // Default priority when the user hasn't chosen (or this view has no remembered) order.
 // 4 of the 5 available keys — streamOrder is available to pick manually but not defaulted.
 const DEFAULT_REMAP_SORT_KEYS = ['streamName', 'connectionOrder', 'entityType', 'nodeLabel'];
@@ -1618,6 +1618,14 @@ function remapSortValue(store, template, part, key, connectionOrderMap, viewRele
   if (key === 'entityType') return part.type || '';
   if (key === 'elementGroup') return elementByType(store, part.type)?.group || '';
   if (key === 'nodeLabel') return part.label || '';
+  // "Raw label" -- reported directly: "add raw label to the sort priority part of
+  // remap." Unlike nodeLabel (part.label, the fully-decorated display text — prefix/
+  // suffix applied, e.g. ApplicationCapability's "Manage " prefix), rawLabel is the
+  // true pre-decoration name (Part.rawLabel, wired up as its own distinct field —
+  // see the "wire up Part.rawLabel to the true pre-decoration name" changelog entry)
+  // -- useful as a sort key whenever prefix/suffix decoration would otherwise
+  // scramble an otherwise-meaningful alphabetical grouping across mixed types.
+  if (key === 'rawLabel') return part.rawLabel || '';
   return '';
 }
 
@@ -3436,6 +3444,222 @@ function generateInventoryView(app) {
   app.recordAndRender();
   app.toast(`Generated "${name}" with ${parts.length} parts, ${conns.length} connectors.`, false, true);
   return view;
+}
+
+/** Advanced > Generate View: TOGAF-style starter views built ONLY from parts/connectors
+ * that already exist in the selected model — reported directly: "Using the list below
+ * or a recommended list, create a new 'Generate View' menu item... using existing parts
+ * and connectors type 'c' for specified model, generate a view for each. Do not create
+ * new parts." Each entry's requiredTypes/optionalTypes name ArchiMate element `type`s
+ * (public/custom.json's `elements` list) that view conventionally shows; requiredTypes
+ * are just the ones worth calling out by name when absent (see generateSelectedViews'
+ * own "missing" logging below) — a view is still generated from whatever optionalTypes
+ * parts exist even when every requiredType is missing, and is only skipped outright when
+ * NONE of its types (required or optional) have any matching part at all. Grouped under
+ * the same four headers the report's own list used, so promptGenerateView (main.js) can
+ * render this one array directly instead of duplicating the grouping. */
+/** Fill color for a Generate View "<view name> Parts Needed" marker node — reported
+ * directly as "soft red", distinct from every real elementGroups fill (public/
+ * custom.json) so a missing-parts marker never gets mistaken for a real modeled
+ * element's own color coding. */
+const PARTS_NEEDED_FILL = '#ffb3b3';
+
+const GENERATE_VIEW_GROUPS = [
+  {
+    header: 'Business Architecture Views',
+    views: [
+      { key: 'orgStructure', name: 'Organization Structure View', requiredTypes: ['BusinessActor', 'BusinessRole'], optionalTypes: ['BusinessOrganizationUnit', 'BusinessCollaboration'] },
+      { key: 'businessCapability', name: 'Business Capability View', requiredTypes: ['BusinessCapability'], optionalTypes: ['Capability'] },
+      { key: 'valueStreamProcess', name: 'Value Stream / Business Process View', requiredTypes: ['BusinessProcess'], optionalTypes: ['BusinessEvent', 'BusinessService'] },
+      { key: 'businessFunction', name: 'Business Function View', requiredTypes: ['BusinessFunction'], optionalTypes: ['BusinessProcess'] },
+    ],
+  },
+  {
+    header: 'Information Systems (Data & Application) Architecture Views',
+    views: [
+      { key: 'dataManagement', name: 'Data Management / Logical Data View', requiredTypes: ['DataDataEntity'], optionalTypes: ['DataEntityDetails', 'DataLogicalComponent', 'BusinessObject'] },
+      { key: 'dataFlowIntegration', name: 'Data Flow / Integration View', requiredTypes: ['ApplicationApplication', 'ApplicationInterface'], optionalTypes: ['DataDataEntity', 'ApplicationService'] },
+      { key: 'applicationPortfolio', name: 'Application Portfolio / Component View', requiredTypes: ['ApplicationApplication'], optionalTypes: ['ApplicationLogicalComponent', 'ApplicationPhysicalComponent', 'ApplicationCapability', 'ApplicationService', 'ApplicationFunction', 'ApplicationProcess'] },
+      { key: 'applicationCommunication', name: 'Application Communication / Interface View', requiredTypes: ['ApplicationApplication', 'ApplicationInterface'], optionalTypes: ['ApplicationCollaboration', 'ApplicationInteraction', 'ApplicationEvent'] },
+    ],
+  },
+  {
+    header: 'Technology Architecture Views',
+    views: [
+      { key: 'techInfrastructure', name: 'Technology Infrastructure / Processing View', requiredTypes: ['Node', 'Device'], optionalTypes: ['SystemSoftware', 'Equipment', 'Facility', 'TechnologyPhysicalComponent', 'TechnologyLogicalComponent'] },
+      { key: 'networkCommunications', name: 'Network / Communications View', requiredTypes: ['CommunicationNetwork'], optionalTypes: ['DistributionNetwork', 'Node', 'Device', 'Path'] },
+      { key: 'deployment', name: 'Deployment View', requiredTypes: ['Node', 'Device'], optionalTypes: ['SystemSoftware', 'ApplicationApplication', 'TechnologyPhysicalComponent', 'Path'] },
+    ],
+  },
+  {
+    header: 'Cross-Cutting & Governance Views',
+    views: [
+      { key: 'securityControl', name: 'Security & Control View', requiredTypes: ['Constraint', 'Requirement'], optionalTypes: ['Principle', 'Driver', 'Goal', 'TechnologyService', 'ApplicationService'] },
+      { key: 'standardsInteroperability', name: 'Standards & Interoperability View', requiredTypes: ['Principle', 'Requirement'], optionalTypes: ['Constraint', 'ApplicationInterface', 'TechnologyInterface'] },
+    ],
+  },
+];
+
+/** All 13 view definitions flattened, keyed by `key` — the shape promptGenerateView
+ * (main.js) sends back in its `viewKeys` selection and the shape used to look each
+ * definition back up here. */
+function allGenerateViewDefs() {
+  return GENERATE_VIEW_GROUPS.flatMap((g) => g.views);
+}
+
+/** Turns "Organization Structure View" into "organization-structure-view", matching the
+ * `<slug>-<model>` naming generateInventoryView already uses for its own view names
+ * (`inventory-${model}`) — kept local since commands.js's only other identifier
+ * normalizer (normalizeIdent, near exportDDL) collapses to no separators at all, which
+ * would merge these names unreadably (e.g. "businessfunctionview"). */
+function slugifyViewName(name) {
+  return String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '');
+}
+
+/** Advanced > Generate View's own Process action — see promptGenerateView (main.js) for
+ * the dialog that collects `model` and `viewKeys`. For each selected TOGAF view
+ * definition: gather every part in `model` whose type is in that view's
+ * requiredTypes/optionalTypes (deduped, insertion order = requiredTypes first), pull in
+ * only the 'c'-category connectors ("connectors type 'c'" per the report) between two
+ * INCLUDED parts, remap for a clean layout, and record the remap parameters used into
+ * the new view's own `note` field (view.remapLastOptions already holds the same data
+ * structurally — the note is the human-readable, "how do I get this layout back"
+ * mirror the report asked for). A requiredType with zero matching parts is logged (not
+ * blocking) so the person knows what's missing and from which view; a view with
+ * NOTHING to show (none of its types matched anything at all) is skipped rather than
+ * creating an empty view, and that's logged too. Never creates a Part or Connector —
+ * only existing ones are ever placed. */
+function generateSelectedViews(app, { model, viewKeys }) {
+  const { store } = app;
+  const defs = allGenerateViewDefs().filter((d) => viewKeys.includes(d.key));
+  if (defs.length === 0) { app.toast('Generate View: no views selected.', true); return; }
+
+  const modelParts = store.doc.parts.filter((p) => ciEq(p.model, model));
+  const partsByType = new Map();
+  for (const p of modelParts) {
+    const key = String(p.type).toLowerCase();
+    if (!partsByType.has(key)) partsByType.set(key, []);
+    partsByType.get(key).push(p);
+  }
+  const partsOfType = (t) => partsByType.get(String(t).toLowerCase()) || [];
+
+  let createdCount = 0, skippedCount = 0;
+  const summary = [];
+  let firstCreatedTab = null;
+
+  for (const def of defs) {
+    const orderedTypes = [...def.requiredTypes, ...(def.optionalTypes || [])];
+    const includedParts = [];
+    const seen = new Set();
+    for (const t of orderedTypes) {
+      for (const p of partsOfType(t)) {
+        if (seen.has(p.id)) continue;
+        seen.add(p.id);
+        includedParts.push(p);
+      }
+    }
+
+    const missingRequired = def.requiredTypes.filter((t) => partsOfType(t).length === 0);
+    for (const t of missingRequired) {
+      pushMessageLog(store, `[Generate View: ${def.name}] No "${t}" parts found in model "${model}" — needed for this view. Generating with the remaining available parts.`);
+    }
+
+    if (includedParts.length === 0) {
+      pushMessageLog(store, `[Generate View: ${def.name}] Skipped — model "${model}" has no parts of any type this view uses (${orderedTypes.join(', ')}).`);
+      skippedCount += 1;
+      continue;
+    }
+
+    const baseName = `${slugifyViewName(def.name)}-${model}`;
+    let name = baseName, n = 1;
+    while (store.findView(name)) { name = `${baseName}-${n}`; n += 1; }
+    const view = store.addView(name);
+    const tab = app.createCanvasTab(view);
+    if (!firstCreatedTab) firstCreatedTab = tab;
+
+    const includedIds = new Set(includedParts.map((p) => p.id));
+    const conns = store.doc.connectors.filter((c) => c.connectorType === 'c' && includedIds.has(c.from) && includedIds.has(c.to));
+
+    const vmByPartId = new Map();
+    for (const p of includedParts) {
+      const vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: p.id, x: 0, y: 0, fillColor: elementGroupFill(store, p.type), sectionId: '' });
+      vmByPartId.set(p.id, vm);
+    }
+    for (const c of conns) {
+      const fromVm = vmByPartId.get(c.from), toVm = vmByPartId.get(c.to);
+      if (!fromVm || !toVm) continue;
+      store.createViewMember({ view: view.id, objectType: 'connector', objectId: c.id, fromVmId: fromVm.id, toVmId: toVm.id });
+    }
+
+    const remapOptions = { pattern: 'default', sortKeys: DEFAULT_REMAP_SORT_KEYS };
+    const result = applyRemapLayout(app, view.id, remapOptions);
+    if (result) {
+      const lastOptions = {
+        templateName: result.template.name, pattern: remapOptions.pattern, limitColumnsToView: false,
+        filteredOnly: false, selectedOnly: false, forcePreferRight: false, forceGroupRows: false,
+        edgeAssignment: {}, edgeBlanks: {}, minimizeCrossings: false, minimizeConnectorLength: false,
+        alignBySection: true, customFunctionName: null,
+      };
+      view.remapSortKeys = remapOptions.sortKeys;
+      view.remapLastOptions = lastOptions;
+      const dateStr = new Date().toISOString().slice(0, 10);
+      view.note = `Generated by Advanced > Generate View ("${def.name}") for model "${model}" on ${dateStr}.\n`
+        + `Layout: template="${result.template.name}", pattern="${remapOptions.pattern}", sortKeys=[${remapOptions.sortKeys.join(', ')}], alignBySection=true.\n`
+        + `To reproduce, open Remap on this view (same parameters are also stored in this view's remapLastOptions), or run in Script Console:\n`
+        + `remap(app, tab, ${JSON.stringify({ ...lastOptions, sortKeys: remapOptions.sortKeys }, null, 2)});`;
+    }
+
+    // Reported directly: "when generating the views requested and parts are missing
+    // for a view, create Text part and node with label view name + ' Parts Needed'
+    // and put list of parts needed in the description field and show in view near
+    // upper left area with soft red fill." A plain 'Text' element (no prefix/suffix
+    // decoration, custom.json) rather than a bespoke UI element — created and placed
+    // AFTER the remap call above so it never becomes remap layout input (it isn't a
+    // real modeled element and has no connectors), landing near the view's own
+    // upper-left origin via the same findNonOverlappingPosition nudge every other
+    // manual-placement call in this codebase uses, rather than a fixed point that
+    // could land on top of remapped content.
+    if (missingRequired.length > 0) {
+      const partsNeededPart = store.createPart({
+        type: 'Text',
+        label: `${def.name} Parts Needed`,
+        model,
+        description: `Parts needed for "${def.name}" but not found in model "${model}":\n${missingRequired.map((t) => `- ${t}`).join('\n')}`,
+      });
+      const { w: nodeW, h: nodeH } = getNodeSize(view);
+      const pos = store.findNonOverlappingPosition(view.id, 20, 20, undefined, nodeW, nodeH, view.spacingScale || 1);
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: partsNeededPart.id, x: pos.x, y: pos.y, fillColor: PARTS_NEEDED_FILL, sectionId: '' });
+    }
+
+    // Reported directly: "for the new views as a result of generate views command,
+    // run redraw with 'show all text'." Same mechanism Commands > Redraw's own
+    // "Show all text" checkbox uses (main.js's promptRedraw): persist the setting on
+    // the view (so it stays in effect if the person redraws again later, same as
+    // every other view.chkShowXxx flag), then recompute node sizes to fit full
+    // content (not truncated to 2 lines) and resolve any overlaps that growth
+    // introduces, finishing with the same coordinate normalization pass Redraw
+    // itself always does. Run LAST — after the Parts Needed marker above — so that
+    // marker's own (often multi-line) description factors into the resize too.
+    view.chkShowAllText = true;
+    if (redrawAndResolveLayout(app, { viewId: view.id, selection: new Set() })) {
+      store.normalizeViewCoordinates(view.id);
+    }
+
+    createdCount += 1;
+    const missingSuffix = missingRequired.length ? ` — missing: ${missingRequired.join(', ')}` : '';
+    summary.push(`"${name}" (${includedParts.length} parts, ${conns.length} connectors)${missingSuffix}`);
+  }
+
+  if (firstCreatedTab) app.switchToTab(firstCreatedTab.id);
+  app.recordAndRender();
+
+  if (createdCount === 0) {
+    app.toast(`Generate View: no views were generated — model "${model}" has no matching parts for any of the ${defs.length} selected view${defs.length === 1 ? '' : 's'}. See Message Log for details.`, true);
+    return;
+  }
+  pushMessageLog(store, `[Generate View] Generated ${createdCount} view${createdCount === 1 ? '' : 's'} for model "${model}": ${summary.join('; ')}.`);
+  const skippedSuffix = skippedCount > 0 ? `, skipped ${skippedCount} (no matching parts)` : '';
+  app.toast(`Generate View: created ${createdCount} view${createdCount === 1 ? '' : 's'}${skippedSuffix}. See Message Log for details.`, false, true);
 }
 
 /**
@@ -5511,4 +5735,4 @@ function createDetectedConnectors(app, candidates) {
   return { created, placements, unplaced };
 }
 
-export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, copyModel, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors };
+export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, copyModel, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors, GENERATE_VIEW_GROUPS, generateSelectedViews };

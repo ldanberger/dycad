@@ -7,6 +7,10 @@ layer that lets you describe and regenerate whole business flows, not just draw 
 This page is a working reference, not a tutorial — skim the headings, come back to the section you need.
 Open source: <a href="https://github.com/ldanberger/dycad" target="_blank" rel="noopener">github.com/ldanberger/dycad</a>.</p>
 
+<p><strong>Quick start: Advanced &gt; Generate Industry, then Advanced &gt; Generate View</strong>, to
+create a default set of basic parts and views (some will be missing parts — noted directly on the
+affected view via its own "Parts Needed" marker node).</p>
+
 <nav class="docs-toc">
   <strong>Contents</strong>
   <ol>
@@ -433,6 +437,19 @@ canvas. Availability depends on what's selected — greyed out means the current
     one or more if it has several). The stream filter stays fixed to whatever you picked from the original
     node: if a node it pulls in turns out to also carry some other stream, that other stream is not used to
     keep expanding the search.</td></tr>
+    <tr><td><strong>Generate View</strong></td><td>(Advanced menu) Builds a set of TOGAF-style starter views —
+    Organization Structure, Business Capability, Value Stream / Business Process, Business Function, Data
+    Management / Logical Data, Data Flow / Integration, Application Portfolio / Component, Application
+    Communication / Interface, Technology Infrastructure / Processing, Network / Communications, Deployment,
+    Security &amp; Control, and Standards &amp; Interoperability — grouped under four headers, each with its own
+    checkbox, a Select/Deselect All, and a Model selector. Uses only parts and plain ("connector"-type, not
+    Stream or Derived) relationships already in the chosen model; it never creates new modeled parts. If a
+    view's usual element type has no matches in the model, that's noted in the Message Log (naming the type
+    and the view) and the view is still generated from whatever else is available — plus a "&lt;view name&gt;
+    Parts Needed" Text node is added near the view's upper-left corner (soft red fill), whose Description
+    field lists exactly which types were missing — or the view is skipped entirely if nothing matches at all.
+    Each generated view is laid out with Remap, and the parameters used are written into that view's own Note
+    field so the layout can be reproduced later.</td></tr>
     <tr><td><strong>Generate Industry / Generate Inventory View</strong></td><td>(Advanced menu) Bulk-generate
     a starter set of parts/connectors from the currently-loaded industry data, or a summary inventory view of
     everything in the model. Only one industry dataset is ever loaded at a time — DyCAD starts with a built-in

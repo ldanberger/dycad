@@ -45,7 +45,7 @@ There is no client-side router and no history API usage — the whole app is one
 | `js/rules.js` | Relationship-validity lookups (`validRelationOptions`, `elementByType`, `defaultRelationKeyFor`) — all keyed off `settings.relationshipPairs`/`settings.elements` |
 | `js/render.js` | Header/toolbox/property-panel rendering; the schema-driven `renderShowFieldsPanel` that every editable-field UI in the app is built from; catalog row rendering; light/dark theme application |
 | `js/canvas.js` | The interactive canvas itself: node/edge SVG rendering, drag/connect/lasso-select, zoom/pan, node sizing (`redrawNodeSizes`/`redrawAndResolveLayout`), generic table-tab rendering (`renderTablePage`, drives catalogs *and* the SFCE Catalog page), the Instructions tab's content-fetch renderer, connector routing dispatch (delegates path computation to `routing.js`) |
-| `js/commands.js` | Every command: `createStream`, `duplicateStream`, `splitNode`, `levelUp`/`levelDown`/`levelDownSingle`, `copyNodes`/`pasteNodes`, `remap`/`applyRemapLayout`, `mergeNodes`, `generateInventoryView`, `generateIndustry`, `addExistingPartsToView`, `populateFromTemplate`, `insertSmartStream`, `duplicateSection`, `smartCheckView`, `importDDL`/`exportDDL` (Data Modeling, wiring `ddl.js`'s pure parse/generate logic into the Store), plus the bulk-generation lookup cache (`createBulkLookupCache`) |
+| `js/commands.js` | Every command: `createStream`, `duplicateStream`, `splitNode`, `levelUp`/`levelDown`/`levelDownSingle`, `copyNodes`/`pasteNodes`, `remap`/`applyRemapLayout`, `mergeNodes`, `generateInventoryView`, `generateSelectedViews` (Advanced > Generate View, `GENERATE_VIEW_GROUPS`), `generateIndustry`, `addExistingPartsToView`, `populateFromTemplate`, `insertSmartStream`, `duplicateSection`, `smartCheckView`, `importDDL`/`exportDDL` (Data Modeling, wiring `ddl.js`'s pure parse/generate logic into the Store), plus the bulk-generation lookup cache (`createBulkLookupCache`) |
 | `js/layout.js` | Force-directed Remap pattern: `computeAdjacentGridLayout` (per-component BFS placement), `findConnectedComponents` (Union-Find), `packClustersOnGrid` (shelf packer), `computeClusteredGridLayout` (full pipeline) |
 | `js/routing.js` | Obstacle-avoiding connector path computation (`computeRoutedPath`): visibility-graph + Dijkstra for `direct`, axis-aligned variant for `manhattan` |
 | `js/sections.js` | Section-based view geometry: `computeSectionLayout`, `pixelToNearestGrid` (hit-testing), `isTypeAllowedInSection`, `findFreeCellInSection`/`findFreeCellOrGrowSection`, `rescaleSectionPositions`, `duplicateSectionDefinition` |
@@ -1840,7 +1840,11 @@ Descriptions behave exactly as before (never cascaded — see the module comment
 **Ids deliberately do NOT cascade either** — unlike names, inheriting an id from a
 different level would wrongly conflate two distinct identities — a level with no
 mapped/blank id field simply falls back to `buildIndustryTree`'s existing
-auto-derivation (a chained `slugify` of section/function/.../name). An explicit id
+auto-derivation: a chained `slugify` of section/function/.../name for
+Function/Capability/Application Capability (scoped under their own parent, matching
+"these will never be combined into shared" above), or the entity's own name ALONE for
+Entity — see §7.2's own note on why Entity is the one level whose fallback identity is
+deliberately NOT chained through its parent. An explicit id
 gives that node real, stable identity, surfacing as `xIds`-based find-or-reuse once
 `generateIndustry` (§7.2) creates the actual Part (it already passes `func.nodeId`/
 `cap.nodeId`/`appCap.nodeId`/`ent.nodeId` through as `functionxIds`/`capabilityxIds`/
@@ -1952,6 +1956,90 @@ dataset is enough synchronous work to otherwise freeze the tab. Past 100 generat
 nodes, the tab's selection is explicitly cleared (before, not after, the
 resize/redraw step, since that step can throw and must not gate whether the selection
 gets cleared).
+
+**A shared entity across capabilities was silently duplicated, one Part per
+capability** — reported directly: *"there are what appears to be duplicate parts when
+I use 'generate industry', which results in multiple copies in the new views. For
+example DataDataEntity appears 3 times for label 'Customer Profile', all same stream
+and section. Were these actually from different streams and recorded incorrectly?"*
+Diagnosis confirmed against the actual shipped default dataset
+(`public/capabilities-general-SFCCE.json`): "Customer Profile" genuinely appears as an
+entity under 4 different Business Capabilities (Sales Management, Campaign
+Management, Customer Support, Customer Feedback Management), all sharing the same
+section — a completely ordinary shape for canonical/shared master data, and NOT a
+data-entry error in the dataset itself. `generateIndustry`/`createStream`'s
+xIds+model-based Part reuse (§7.2 above, and the v3.0 changelog entry it was built
+against) is correct and was NOT the bug — it was never given a chance to fire, because
+`buildIndustryTree`'s entity-level nodeId fallback (§7.1, "Ids deliberately do NOT
+cascade either") derived each occurrence's id by chaining through its own PARENT
+Application Capability's nodeId, exactly like Capability/Application Capability do —
+so the SAME entity name under 4 DIFFERENT capability branches minted 4 DIFFERENT auto
+ids, and the otherwise-correct reuse check never found a match. Since `streamName` is
+always just the entity's own `nodeName` (identical across every branch it appears
+under) and `functionSection` happened to be shared here too, every duplicate looked
+identical from the properties panel — "same stream and section" was the visible
+symptom, not a separate recording bug of its own.
+
+**This directly reversed a prior, deliberate decision — reconciled, not overridden by
+accident.** `check_batch_script_quickstart`'s own docstring, and the v0.865 changelog
+entry it references (§7.5), had *already* investigated this exact shape once before
+("Production Schedule" under two Business Capabilities in the same built-in dataset)
+and concluded, twice, that two separate Parts was correct, intentional behavior — the
+full suite run after an initial fix attempt caught this directly (that one test
+failed, asserting the old two-Part count). Surfaced to the user before proceeding
+further, who reconciled the two positions across two follow-ups into a final rule,
+reported verbatim: first *"if the two elements are same label etc. and same stream,
+they should be merged. If they are same label etc. but different streams they should
+remain separate,"* then refined further: *"If same label, model, section, and streams
+then elements should be merged or reused. If same label, model, but different section
+or stream then should remain separate."*
+
+Since `generateIndustry` always sets a generated entity's `streamName` to the
+entity's own `nodeName` (commands.js) — identical across every branch it appears
+under — "same label" and "same stream" are the exact same condition for this
+pipeline, leaving **section** as the one remaining axis this tree-building step must
+encode itself ("model" is already handled independently: every `xIds`+model lookup,
+commands.js, is scoped to whichever model a given `generateIndustry` run targets, so
+two runs against different models never collide regardless of this id). Fixed by
+giving Entity — and only Entity — a fallback nodeId based on its own SECTION and name
+together (`entity-<slugified section>-<slugified name>`, `js/sfce.js`), rather than
+chained through its parent Application Capability the way Function/Capability/
+Application Capability deliberately still are. This is NOT the same "these will
+never be combined into shared" decision from §7.1 — that was about the Load SFCCE
+wizard's own explicit "combine into shared?" collapsing step for Capability/
+Application Capability, a fundamentally different concept (deliberately scoped
+ownership under one Function) from a Data Entity, which is exactly the kind of
+cross-cutting, reusable concept real capabilities are expected to share, WITHIN one
+section. The explicit-Entity-Id mapping (§7.1) still works exactly as before and
+takes priority when given; this change only affects the auto-derived fallback used
+when no id is mapped — which is what the built-in default dataset (no id columns at
+all) and most hand-authored Load SFCCE imports actually hit.
+
+New `check_generate_industry_shares_entity_across_capabilities` (`tests/run_all.py`)
+covers both halves in one fixture: two rows share an entity name under different
+function/capability/application-capability branches WITHIN the same section (must
+merge into one shared `DataDataEntity` Part, connected to BOTH chains, not merely
+deduped-then-orphaned) and a third row reuses the identical entity name under a
+DIFFERENT section (must produce a genuinely SEPARATE Part) — while the three
+originating Function/Capability parts all stay properly distinct throughout. Both
+halves proven via TEMP BREAK: reverting to name-only derivation reproduces the
+original reported duplication AND incorrectly merges the different-section case too.
+`check_batch_script_quickstart` was updated to expect the now-correctly-merged part
+count/labels (both "Production Schedule" occurrences share one section, so still
+merge under the final section-aware rule exactly as they did under the simpler
+name-only version), its stale "confirmed as genuinely distinct, not a dedup bug"
+framing corrected, and its docstring extended with this resolution — the v0.865
+history itself (§7.5) is left as an accurate record of what was decided *then*, not
+rewritten. The rule's "different stream, stay separate" clause doesn't arise anywhere
+in `generateIndustry`'s own pipeline (streamName always equals the entity's own
+name there) — it would only matter for a manual Generate Stream call passing an
+explicit, differing `streamName` for a same-named entity, a `createStream`
+(commands.js) concern this change does not touch.
+
+An already-generated document with duplicate Parts baked in from a previous run isn't
+retroactively fixed by any of this — Advanced > Smart Check Model's duplicate-part
+detection (2+ Parts sharing type+model+label) already catches and offers to merge
+exactly this shape.
 
 ### 7.3 Section reification: `BusinessOrganizationUnit` (aka "OrgUnit")
 
@@ -2132,6 +2220,12 @@ mof/cof/ssf's functions carried an id at all) and lets `sfce.js`'s new
 read-through value, not an id, so no cascade/`GENERATE_UNIQUE_ID` semantics) surface a
 real display/generation order per section, both in the tree and as a new
 `sectionOrder` column in the SFCE Catalog (§7.4).
+
+*(Later reconciled, not reversed by accident: the "Production Schedule under two
+Capabilities becomes two Parts" decision above was revisited and superseded — see
+§7.2's "A shared entity across capabilities was silently duplicated" for the full
+resolution and the general same-label/same-stream rule that settled it. This
+paragraph is left as-is as an accurate record of what was decided at the time.)*
 
 **Single dataset, not a keyed map**: `store.industryData: {[key]: tree}` /
 `store.industryTemplates: {[key]: name}` (memory-only, never persisted) are gone,
@@ -3416,6 +3510,191 @@ confirms the file is actually reachable from the manifest (proven via TEMP BREAK
 removing it from `index.json`), loads with no simulation errors, all 4 elements are
 genuinely bound with zero real connectors, and the shipped values (plus an edited
 Input, re-stepped) both produce the documented, correct Total Cost.
+
+**Advanced > Generate View — TOGAF-style starter views from existing model content**
+(`GENERATE_VIEW_GROUPS`/`generateSelectedViews`, `commands.js`; `App.promptGenerateView`,
+main.js). Reported directly, with a specific 13-view list under four headers ("Business
+Architecture Views," "Information Systems (Data & Application) Architecture Views,"
+"Technology Architecture Views," "Cross-Cutting & Governance Views"): *"create a new
+'Generate View' menu item under advanced tab in its own section before 'Generate
+Inventory View'. This generate view item will present user with the headers... and view
+names, with a selection box for each (and one to select/deselect all) and a model
+selector. Upon selection, using existing parts and connectors type 'c' for specified
+model, generate a view for each. Do not create new parts. if a part is missing that is
+needed (for example role), identify it as needed and for what view in the message log
+and put the remaining parts in the view. Provide a 'process' or similar submit button...
+Format as appropriate for clean layout using remap with options, and in view note field
+record remap parameters to reproduce layout of each view."*
+
+`GENERATE_VIEW_GROUPS` is a flat, hand-authored mapping from each of the report's 13 view
+names to a `requiredTypes`/`optionalTypes` pair of ArchiMate `type` names (from
+`public/custom.json`'s `elements` list) — the ArchiMate/TOGAF metamodels don't define a
+1:1 element-type mapping for several of these (e.g. there is no distinct "Value Stream"
+element type in this tool's vocabulary at all), so each mapping is this project's own
+reasonable default, not a normative TOGAF reading; `requiredTypes` are just the ones
+worth calling out by NAME when absent (see the "missing" logging below) — a view still
+generates from whatever `optionalTypes` parts exist even when every `requiredType` is
+missing. `App.promptGenerateView` renders this single array directly (headers, then one
+checkbox per view, all pre-checked, plus a synced Select/Deselect All checkbox using the
+same idiom `promptAutoDetectConnectors` already established) so the dialog can never
+drift out of sync with the definitions — there is no separate list to maintain. A Model
+`<select>` (defaulting to Default Model) picks which model's parts to draw from.
+
+`generateSelectedViews(app, { model, viewKeys })` — the Process button's handler — for
+each checked definition: collects every Part in `model` whose type is in that view's
+type list (deduped, required types checked first so partial overlaps still read
+sensibly), filters `store.doc.connectors` to `connectorType === 'c'` ("connectors type
+'c'" per the report — this deliberately excludes `'s'` Stream and `'d'` Derived
+connectors, the same three-way `connectorType` distinction `generateInventoryView`
+itself does NOT make, since that command pulls in every connector type regardless) whose
+BOTH endpoints landed in the view, then creates ViewMembers exactly as
+`generateInventoryView` does — **no MODELED Part or Connector is ever created**,
+satisfying "do not create new parts" for real ArchiMate content by construction (there
+is no code path here that calls `createPart`/`createConnector` for a real element type
+at all — the one exception, a diagnostic "Parts Needed" marker, is covered in its own
+paragraph below and is never mistaken for modeled content: distinct `Text` type, no
+connectors, soft-red fill). A `requiredType` with zero matching parts in
+`model` logs `[Generate View: <view name>] No "<type>" parts found in model "<model>" —
+needed for this view. Generating with the remaining available parts.` to the Message Log
+(`pushMessageLog`) — not blocking, matching "identify it as needed and for what view...
+and put the remaining parts in the view" precisely. A view with NOTHING to show at all
+(none of its types, required or optional, matched any part) is skipped outright rather
+than creating an empty view, and that skip is logged by name too — the degrade-gracefully
+counterpart the report's own wording implies but doesn't say explicitly. Layout uses
+`applyRemapLayout` with the same `pattern: 'default'`/`DEFAULT_REMAP_SORT_KEYS` defaults
+`generateInventoryView` uses for a clean starter layout, and (unlike
+`generateInventoryView`, which calls `applyRemapLayout` directly and records nothing)
+also sets `view.remapSortKeys`/`view.remapLastOptions` — the same fields `remap()`
+itself records — AND writes a human-readable mirror of those same parameters into the
+view's own `note` field: which template/pattern/sortKeys were used, plus a ready-to-paste
+`remap(app, tab, {...})` Script Console call carrying the exact options object, satisfying
+"in view note field record remap parameters to reproduce layout of each view" as an
+actually actionable reproduction step, not just a structural record only Remap's own UI
+reads.
+
+**Missing required types get an on-canvas "Parts Needed" marker, not just a Message
+Log entry** — direct follow-up: *"change: when generating the views requested and
+parts are missing for a view, create Text part and node with label view name + '
+Parts Needed' and put list of parts needed in the description field and show in view
+near upper left area with soft red fill."* When a view definition has one or more
+missing `requiredTypes`, `generateSelectedViews` now creates one plain `Text`-type
+Part (`public/custom.json`'s `elements` list — no prefix/suffix decoration, so its
+label renders exactly as given) labeled `<view name> Parts Needed`, its
+`description` listing each missing type by name, and places its ViewMember using a
+distinct `PARTS_NEEDED_FILL` (`#ffb3b3`, a soft red never reused by any real
+`elementGroups` fill) so it reads as a diagnostic annotation, never a modeled
+element. Deliberately created and placed AFTER the `applyRemapLayout` call above
+(not folded into `includedParts`) — it has no connectors and isn't real content, so
+feeding it into Remap as an ordinary node would be wrong on both counts; instead it's
+positioned via the same `store.findNonOverlappingPosition` nudge every other
+manual-placement call in this codebase already uses, from a desired point near the
+view's own origin (upper-left), so it never lands on top of the just-remapped
+content while still generally landing at or before it. This IS a Part-creation
+exception to "do not create new parts" (see this section's opening paragraph above)
+— by design, since it's diagnostic metadata about the generation run itself, not a
+new piece of the architecture being modeled. New
+`check_generate_view_creates_parts_needed_marker` (`tests/run_all.py`): confirms the
+marker Part/label/description/fill/position for the missing-BusinessRole scenario,
+and confirms NO marker at all when every required type is already present — proven
+via TEMP BREAK disabling the marker-creation branch. This also meant
+`check_generate_view_generates_only_from_existing_parts_and_c_connectors`'s own "zero
+new Parts" assertion needed updating (that check's own fixture has a missing required
+type, so it NOW also creates exactly one new Part — the marker) — its docstring and
+assertions were revised to expect exactly that one new Part and to check it's
+specifically the `Text` marker, rather than dropping the check's actual purpose
+(verifying no MODELED content is fabricated).
+
+**View gains a `note` field**: until this feature, `note` existed on Part/Connector/
+ViewMember but not View itself (confirmed by reading `addView`'s object literal and
+`custom.json`'s `showFields.view.fields` directly — there was no view-level free-text
+field at all). Added the same way any new editable field is added per this project's own
+convention: `state.js`'s `addView`/migrateDoc default it to `''`, `custom.json` gains a
+`showFields.view.fields.note` entry (`show:'m'`, multi-line), and `render.js`'s
+`viewFieldAccessors` gains a plain `get`/`set` pair — no bespoke panel needed, since
+`renderViewProperties` already renders `showFields.view.fields` generically via
+`filteredViewSpec`/`renderShowFieldsPanel`, the same schema-driven renderer every other
+entity's panel already uses.
+
+New tests (`tests/run_all.py`): `check_generate_view_menu_position` (own
+separator-bounded section, immediately before `Generate Inventory View`, proven via TEMP
+BREAK removing the second separator); `check_generate_view_dialog_matches_definitions`
+(every header/view name from `GENERATE_VIEW_GROUPS` actually renders, checkbox count
+matches, Select All starts fully checked not indeterminate, Model options match
+`store.doc.models` — proven via TEMP BREAK dropping a group from the render); `check_
+generate_view_generates_only_from_existing_parts_and_c_connectors` (a model with an
+existing BusinessActor + BusinessOrganizationUnit, deliberately no BusinessRole, joined
+by both a `'c'` and a same-endpoints `'s'` connector, run through the real Advanced-menu
+dialog — confirms zero new MODELED Parts (the sole new Part is the "Parts Needed"
+marker, below), exactly the 2 existing Parts (plus that marker) and exactly the 1 `'c'`
+connector viewMember land on the new view, the missing-BusinessRole gap is logged naming
+the view, and the note field records template/pattern/sortKeys — proven via TEMP BREAK
+including every connectorType instead of just `'c'`, which correctly produced 2
+connector viewMembers instead of 1); `check_generate_view_skips_view_with_no_matching_
+parts` (a view definition matching nothing anywhere in the model is skipped, not left as
+an empty view, and the skip is logged — proven via TEMP BREAK disabling the skip branch);
+`check_generate_view_creates_parts_needed_marker` (the "Parts Needed" Text marker itself
+— see its own paragraph above — proven via TEMP BREAK disabling the marker-creation
+branch).
+
+**Remap's Sort Priority gains "Raw label"** — reported directly: *"add raw label to
+the sort priority part of remap."* `REMAP_SORT_KEYS`/`REMAP_SORT_LABELS`
+(`commands.js`) gained a `'rawLabel'` entry alongside the pre-existing `'nodeLabel'`,
+and `remapSortValue` a matching `if (key === 'rawLabel') return part.rawLabel || '';`
+case. `Part.rawLabel` is the true pre-decoration name (distinct from the
+fully-decorated `part.label` — e.g. an `ApplicationCapability`'s "Manage " prefix),
+useful as a sort key whenever that decoration would otherwise scramble an
+alphabetical grouping across mixed types. `promptRemap`'s own Sort Priority list
+(main.js) is fully data-driven off `REMAP_SORT_KEYS` — its own comment: "start from
+the remembered/default order, then append any keys missing from it" — so no other UI
+code needed to change at all; the new key simply appears, appended after every
+already-remembered key on first open, exactly like `elementGroup` did when it was
+added. `DEFAULT_REMAP_SORT_KEYS` (the built-in default order) is deliberately left
+unchanged — this is a new available option, not a change to the out-of-the-box
+default. New `check_remap_sort_priority_includes_raw_label` (`tests/run_all.py`):
+confirms the real dialog's `#rm-priority-list` lists it, and that
+`sortKeys:['rawLabel']` genuinely orders by `rawLabel` — two parts whose rawLabel and
+decorated-label orderings are deliberately REVERSED, with their ViewMembers also
+created in the "wrong" order first, so a broken/no-op sort silently falling back to
+stable creation order couldn't accidentally look correct — proven via TEMP BREAK,
+which on the first attempt surfaced exactly that false-pass risk (the initial test
+fixture only reversed Part creation order, not ViewMember creation order, so the
+break didn't actually fail the check until ViewMember creation order was reversed
+too) before landing on a break that correctly failed.
+
+**Generated views get Redrawn with "Show all text"** — reported directly: *"for the
+new views as a result of generate views command, run redraw with 'show all text'."*
+`generateSelectedViews` now sets `view.chkShowAllText = true` and runs the same pair
+Commands > Redraw's own "Show all text" checkbox uses (`promptRedraw`, main.js):
+`redrawAndResolveLayout` (recompute node size to fit full content, then nudge apart
+anything that growth makes overlap) followed by `store.normalizeViewCoordinates`.
+Run LAST in each view's own processing — after remap AND the Parts Needed marker —
+so the marker's own (often multi-line) description factors into the resize too, and
+so growth from the "show all text" resize can't reintroduce overlaps remap's own
+placement didn't anticipate.
+
+Building this surfaced a real bug the hard way: the first attempt called
+`redrawAndResolveLayout(app, { viewId: view.id })` — a bare object, mirroring
+`generateIndustry`'s similar-LOOKING call elsewhere, but missing the `selection`
+field that call actually includes. `buildNodeEl` (canvas.js, called internally by
+`redrawNodeSizes` to measure each node) unconditionally reads
+`tab.selection.has(vm.id)` — with `selection` undefined, this throws a TypeError,
+which propagated all the way up through `redrawAndResolveLayout` with no try/catch
+anywhere in the call chain, silently ABORTING the rest of `generateSelectedViews` for
+that run: no active-tab switch, no summary toast, no processing of any further
+selected view definitions still queued — while the already-created view/parts/
+connectors up to that point stayed in the document, looking superficially fine in
+every store-level assertion. This is exactly why `check_generate_view_generates_
+only_from_existing_parts_and_c_connectors` and `check_generate_view_creates_parts_
+needed_marker` (both store-only assertions) kept passing even with this bug live —
+only `check_generate_view_redraws_with_show_all_text`'s own DOM-level assertion
+(checking the real rendered `.fnode-description` element) surfaced it, since that
+line never executed once the exception fired one statement earlier. Fixed by passing
+`{ viewId: view.id, selection: new Set() }`, matching `generateIndustry`'s own actual
+call shape exactly. New `check_generate_view_redraws_with_show_all_text`
+(`tests/run_all.py`): a part with a long, multi-line-worthy description confirms
+`chkShowAllText` is persisted true on the new view AND the real `.fnode-description`
+element has no line-clamp truncation — proven via TEMP BREAK disabling the redraw
+call outright.
 
 ## 9. The 3D View subsystem (`view3d.js`)
 

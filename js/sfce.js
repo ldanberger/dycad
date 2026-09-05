@@ -18,11 +18,21 @@
 //      nodeChildren:[{ nodeElementType:'BusinessCapability', nodeName, nodeId, nodeDescription,
 //        nodeChildren:[{ nodeElementType:'ApplicationCapability', nodeName, nodeId, nodeDescription,
 //          nodeChildren:[{ nodeElementType:'DataDataEntity', nodeName, nodeId, nodeDescription }] }] }] }]
-// Every nodeId is auto-derived (a chained slugify of section/function/capability/.../
-// name) UNLESS the wizard's mapping supplies an explicit id field for that level, in
-// which case the mapped value is used as-is — this is what lets Load SFCCE-imported
-// data get real, stable identity (and therefore xIds-based find-or-reuse in
-// generateIndustry/createStream, commands.js) instead of a derived-from-name one.
+// Every nodeId is auto-derived UNLESS the wizard's mapping supplies an explicit id
+// field for that level, in which case the mapped value is used as-is — this is what
+// lets Load SFCCE-imported data get real, stable identity (and therefore xIds-based
+// find-or-reuse in generateIndustry/createStream, commands.js) instead of a derived-
+// from-name one. Function/Capability/Application Capability auto-derive as a CHAINED
+// slugify of section/function/capability/.../name (scoped under their own parent —
+// same name under a different parent is a genuinely different node, matching "these
+// will never be combined into shared" for Capability/Application Capability level
+// sharing, resolveSharedFunctions' own comment below). Entity is the one exception:
+// its auto-derived id is the entity's own name ALONE, not chained through its parent
+// Application Capability — a data entity is meant to be shared/reused across many
+// capabilities (e.g. "Customer Profile" used by Sales, Marketing, and Support alike),
+// so every occurrence of the same entity name anywhere in the tree resolves to the
+// same nodeId, and therefore the same Part once generateIndustry runs (see
+// buildIndustryTree's own comment on this, below).
 // generateIndustry (commands.js) walks this via the 'SFCCE' stream template
 // (custom.json) — registered in store.doc.industryTemplateName (state.js). The built-in
 // default dataset (public/capabilities-general-SFCCE.json, boot-loaded through this
@@ -526,7 +536,51 @@ export function buildIndustryTree(rows) {
       appCapNode.nodeChildren.push({
         nodeElementType: 'DataDataEntity',
         nodeName: row.entityName,
-        nodeId: row.entityId || `${appCapNode.nodeId}-${slugify(row.entityName)}`,
+        // Deliberately NOT chained through appCapNode.nodeId the way capability/
+        // application-capability nodeIds are (a few lines above) — reported directly:
+        // "there are what appears to be duplicate parts when I use 'generate
+        // industry', which results in multiple copies in the new views. For example
+        // DataDataEntity appears 3 times for label 'Customer Profile', all same
+        // stream and section." Root cause: an entity referenced by several DIFFERENT
+        // capabilities (the built-in dataset's own "Customer Profile," used by Sales
+        // Management, Campaign Management, Customer Support, and Customer Feedback
+        // Management alike — a completely ordinary shape for shared/master data) got
+        // a genuinely different auto-derived nodeId per capability branch, so
+        // generateIndustry/createStream's existing xIds+model reuse (which is
+        // otherwise correct — verified back at the v3.0 "Generate Industry" fix,
+        // above) never recognized them as the same entity and created a separate
+        // Part for each. Unlike Capability/Application Capability (deliberately
+        // scoped per parent — "these will never be combined into shared," reported
+        // directly, see resolveSharedFunctions' own comment above), a data entity is
+        // exactly the kind of canonical, cross-cutting concept meant to be reused by
+        // many capabilities. entitiesByKey's own appCapKey-scoped guard just above is
+        // unrelated and unchanged: it only stops the exact same (appCap, entity) row
+        // from producing the same tree EDGE twice, not entity Part identity.
+        //
+        // This DOES reverse a specific, previously-made decision (v0.865, see
+        // DESIGN_DOCUMENT.md SS7.5 and check_batch_script_quickstart's own docstring,
+        // tests/run_all.py) that deliberately gave "Production Schedule" under two
+        // different capabilities two separate ids/Parts. Reconciled directly, general
+        // rule stated verbatim across two follow-ups: first "if the two elements are
+        // same label etc. and same stream, they should be merged. If they are same
+        // label etc. but different streams they should remain separate," then
+        // refined further: "If same label, model, section, and streams then elements
+        // should be merged or reused. If same label, model, but different section or
+        // stream then should remain separate." generateIndustry always sets a
+        // generated entity's streamName to the entity's own nodeName (commands.js),
+        // so "same label" and "same stream" are the same condition here — leaving
+        // SECTION (row.section, the entity's own parent Function's section — see
+        // catSection, commands.js) as the one remaining axis this tree-building step
+        // can and must encode itself. So the fallback nodeId is now keyed on BOTH
+        // section and name: two occurrences of the same entity name under the SAME
+        // section merge into one Part (both real reported cases — "Customer Profile"
+        // across 4 capabilities, "Production Schedule" across 2 — share one section
+        // each, so both still merge exactly as before); the same entity name under a
+        // DIFFERENT section stays separate. "Model" is already handled independently
+        // (every xIds+model lookup, commands.js, is scoped to the model a given
+        // generateIndustry run targets — store.defaultModel — so two runs against
+        // different models never collide here regardless of this id).
+        nodeId: row.entityId || `entity-${slugify(row.section)}-${slugify(row.entityName)}`,
         nodeDescription: row.entityDescription || '',
       });
       entityCount += 1;

@@ -2522,7 +2522,25 @@ def check_batch_script_quickstart(page):
     own showTypes list, right after 'BusinessFunction') — the 12-type trace on 'Smart
     Stream Example 2' becomes a 13-type one, picking up exactly one more part (the
     Business Function's own containing org unit) that was already reachable but
-    previously filtered out; 23 -> 24 expected parts."""
+    previously filtered out; 23 -> 24 expected parts.
+
+    Later, in a different session, reconciled and reversed: the "two distinct
+    'Production Schedule' Parts, confirmed not a dedup bug" conclusion two paragraphs
+    above was revisited after a direct report of the identical shape for a different
+    entity ("Customer Profile" appearing 3x in generated views, all same stream and
+    section — see DESIGN_DOCUMENT.md SS7.2's "A shared entity across capabilities was
+    silently duplicated"). This test's own failure (asserting the old two-Part count)
+    is what surfaced the conflict with that entity-sharing fix before it shipped. The
+    two positions were reconciled with a general rule, reported verbatim: "if the two
+    elements are same label etc. and same stream, they should be merged. If they are
+    same label etc. but different streams they should remain separate." Since
+    generateIndustry always sets a generated entity's streamName to the entity's own
+    nodeName, "same label" and "same stream" are the same condition for this pipeline
+    — so 'Production Schedule' now correctly merges into ONE shared DataDataEntity
+    Part (24 -> 23 expected parts on 'Smart Stream Example 2'), and this test's
+    assertions/expected values below were updated to match. The v0.865 decision that
+    originally produced two Parts (js/version.js, DESIGN_DOCUMENT.md SS7.5) is left as
+    an accurate historical record of what was decided then, not rewritten."""
     result = js(page, """
     async () => {
       const app = window.dycadApp, store = app.store;
@@ -2613,23 +2631,32 @@ def check_batch_script_quickstart(page):
         problems.append("expected 'Insert Smart Stream example done' written to the persistent Message Log -- BatchScript_InsertSmartStreamExample should have run")
     if not result["messageLogHasStream2Done"]:
         problems.append("expected 'Insert Smart Stream example 2 done' written to the persistent Message Log -- BatchScript_InsertSmartStreamExample2 should have run, now uncommented and moved to the end of main()")
-    # 'Production Schedule' appears twice, not once: public/capabilities-general-
-    # SFCCE.json itself lists it as an entity under BOTH the "Manufacturing Operations"
-    # and "Production Planning" Business Capabilities as two separate source records,
-    # and buildIndustryTree (since v0.865, see DESIGN_DOCUMENT.md SS7.5) auto-derives
-    # every Part's id from its own full ancestor chain rather than sharing ids across
-    # capabilities that happen to reuse an entity name -- a deliberate, previously-made
-    # design choice, confirmed (not just assumed) via each part's own distinct id, not a
-    # dedup failure and not something this function's own docstring history introduced.
-    expected_stream_labels = sorted(['Production', 'Production Planning Process', 'Production Planning Consumer', 'Manage Production Planning', 'Manage Production Planning', 'Manufacturing Operations Process', 'Manufacturing Operations Consumer', 'Manage Manufacturing Operations', 'Manage Manufacturing Operations', 'Demand Forecast', 'Production Schedule', 'Production Schedule', 'Bill of Materials'])
+    # 'Production Schedule' now appears ONCE, not twice: public/capabilities-general-
+    # SFCCE.json lists it as an entity under BOTH the "Manufacturing Operations" and
+    # "Production Planning" Business Capabilities as two separate source records, and
+    # until a later session, buildIndustryTree (since v0.865, see DESIGN_DOCUMENT.md
+    # SS7.5) auto-derived every Part's id from its own full ancestor chain rather than
+    # sharing ids across capabilities that happen to reuse an entity name -- correctly
+    # producing two distinct Parts back then. That decision was revisited after a
+    # direct report of the same shape for a different entity ("Customer Profile"
+    # appearing 3x, all same stream/section) and reconciled with a general rule,
+    # reported verbatim: "if the two elements are same label etc. and same stream,
+    # they should be merged. If they are same label etc. but different streams they
+    # should remain separate." generateIndustry always sets a generated entity's
+    # streamName to the entity's own nodeName, so "same label" and "same stream" are
+    # the same condition here -- 'Production Schedule' now correctly merges into ONE
+    # shared DataDataEntity Part, reused (not duplicated) by both capability chains,
+    # matching the rule's first half. See DESIGN_DOCUMENT.md SS7.2's "A shared entity
+    # across capabilities was silently duplicated" for the full resolution.
+    expected_stream_labels = sorted(['Production', 'Production Planning Process', 'Production Planning Consumer', 'Manage Production Planning', 'Manage Production Planning', 'Manufacturing Operations Process', 'Manufacturing Operations Consumer', 'Manage Manufacturing Operations', 'Manage Manufacturing Operations', 'Demand Forecast', 'Production Schedule', 'Bill of Materials'])
     if sorted(result["streamExamplePartLabels"]) != expected_stream_labels:
         problems.append(f"expected BatchScript_InsertSmartStreamExample to trace the full chain from 'Production', got {sorted(result['streamExamplePartLabels'])}")
     if not result["streamExampleSingleTab"]:
         problems.append("expected exactly ONE tab open on the 'Smart Stream Example' view -- BatchScript_RemapExample should reuse InsertSmartStreamExample's own tab, not open a redundant second one")
     if not result["streamExample2ViewCreated"]:
         problems.append("expected BatchScript_InsertSmartStreamExample2 to create its own separate 'Smart Stream Example 2' view")
-    if result["streamExample2PartCount"] != 24:
-        problems.append(f"expected the broader 13-type trace (BusinessOrganizationUnit added to showTypes) to place 24 parts on 'Smart Stream Example 2', got {result['streamExample2PartCount']}")
+    if result["streamExample2PartCount"] != 23:
+        problems.append(f"expected the broader 13-type trace (BusinessOrganizationUnit added to showTypes) to place 23 parts on 'Smart Stream Example 2' (one fewer than before 'Production Schedule' correctly merged into a single shared Part), got {result['streamExample2PartCount']}")
     if not result["streamExample2SingleTab"]:
         problems.append("expected exactly ONE tab open on the 'Smart Stream Example 2' view")
     if not result["streamExample2TabIsActive"]:
@@ -2660,7 +2687,7 @@ def check_batch_script_quickstart(page):
         problems.append(f"expected row type groupings {expected_row_type_sets}, got {result['rowTypeSets']}")
     if problems:
         return False, "; ".join(problems) + f" (full: {result})"
-    return True, "main() (run via the real Script Console UI) runs BatchScript_QuickStart, BatchScript_InsertSmartStreamExample, BatchScript_SmartCheckViewExample, BatchScript_RemapExample, then BatchScript_InsertSmartStreamExample2 in sequence, with pattern:'layered' correctly producing the 4-row hierarchy the first (7-type) trace implies, InsertSmartStreamExample2 unconditionally building its own separate 'Smart Stream Example 2' view (24 parts, the 13-type trace) and ending as the ACTIVE tab, and the exact reminder message logged afterward -- with the two 'Production Schedule' Data Entity parts on the first view confirmed as genuinely distinct (not a dedup bug) by tracing back to the source SFCCE data and buildIndustryTree's own documented id-derivation behavior"
+    return True, "main() (run via the real Script Console UI) runs BatchScript_QuickStart, BatchScript_InsertSmartStreamExample, BatchScript_SmartCheckViewExample, BatchScript_RemapExample, then BatchScript_InsertSmartStreamExample2 in sequence, with pattern:'layered' correctly producing the 4-row hierarchy the first (7-type) trace implies, InsertSmartStreamExample2 unconditionally building its own separate 'Smart Stream Example 2' view (23 parts, the 13-type trace) and ending as the ACTIVE tab, and the exact reminder message logged afterward -- with the 'Production Schedule' Data Entity now confirmed as a single Part correctly SHARED between both capability chains (superseding this test's own earlier 'genuinely distinct, not a dedup bug' assertion -- see this function's docstring for the reconciliation)"
 
 
 def check_script_console_remap_and_smart_check_bindings(page):
@@ -16728,6 +16755,572 @@ def check_ui_dashboard_output_value_not_truncated(page):
     return True, "a UI Output widget's value now renders in full in the description slot (no more 12-character badge-style truncation), while number formatting stays consistent with the badge convention"
 
 
+def check_generate_view_menu_position(page):
+    """Regression guard: Advanced > Generate View was reported as "a new 'Generate View'
+    menu item under advanced tab in its own section before 'Generate Inventory View'" —
+    confirms it sits in its own separator-bounded section immediately before the
+    pre-existing 'Generate Inventory View' item, rather than merged into that section or
+    placed elsewhere in the menu (same ordered-sequence assertion style as
+    check_3d_view_and_reset_pinned_moved_to_advanced above)."""
+    result = js(page, """
+    async () => {
+      document.getElementById('advanced-menu-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      const items = [...document.querySelectorAll('#advanced-menu > *')];
+      const sequence = items.map(el => el.classList.contains('dd-separator') ? '---' : (el.dataset.action || el.textContent));
+      document.getElementById('advanced-menu-btn').click();
+      return { sequence };
+    }
+    """)
+    seq = result["sequence"]
+    gvIdx = seq.index('generateView') if 'generateView' in seq else -1
+    problems = []
+    if gvIdx == -1:
+        problems.append("expected a 'Generate View' item (data-action=generateView) in the Advanced menu")
+    else:
+        if seq[gvIdx - 1] != '---':
+            problems.append(f"expected a separator immediately before 'Generate View', got {seq[gvIdx-1]!r}")
+        if seq[gvIdx + 1] != '---':
+            problems.append(f"expected 'Generate View' to be followed by its own separator (own section), got {seq[gvIdx+1]!r}")
+        if gvIdx + 2 >= len(seq) or seq[gvIdx + 2] != 'generateInventoryView':
+            problems.append(f"expected 'Generate Inventory View' to immediately follow Generate View's own section, got {seq[gvIdx+2] if gvIdx+2 < len(seq) else '(end of menu)'!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full sequence: {seq})"
+    return True, "'Generate View' sits in its own separator-bounded section, immediately before 'Generate Inventory View'"
+
+
+def check_generate_view_dialog_matches_definitions(page):
+    """Regression guard: the Generate View dialog (App.promptGenerateView, main.js) must
+    render every header/view name from commands.js's GENERATE_VIEW_GROUPS — reported
+    directly: "present user with the headers ('Business Architecture Views' etc.) and
+    view names, with a selection box for each (and one to select/deselect all) and a
+    model selector." Also confirms the model selector is populated from the document's
+    actual models and every view checkbox starts checked (select-all starts fully
+    checked, not indeterminate)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+      document.getElementById('advanced-menu-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      document.querySelector('#advanced-menu .dd-item[data-action=\\"generateView\\"]').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      const headers = [...document.querySelectorAll('.modal-box')].pop().innerText;
+      const checks = [...document.querySelectorAll('.gv-view-check')];
+      const expectedDefs = commands.GENERATE_VIEW_GROUPS.flatMap(g => g.views);
+      const modelOptions = [...document.querySelectorAll('#gv-model option')].map(o => o.value);
+      const selectAll = document.getElementById('gv-select-all');
+
+      document.querySelector('.modal-overlay .cancel').click();
+
+      return {
+        allHeadersPresent: commands.GENERATE_VIEW_GROUPS.every(g => headers.includes(g.header)),
+        allViewNamesPresent: expectedDefs.every(v => headers.includes(v.name)),
+        checkboxCount: checks.length,
+        expectedCount: expectedDefs.length,
+        allStartChecked: checks.every(c => c.checked),
+        selectAllChecked: selectAll.checked,
+        selectAllIndeterminate: selectAll.indeterminate,
+        modelOptionsMatchDoc: JSON.stringify(modelOptions) === JSON.stringify(store.doc.models.map(m => m.modelName)),
+        dialogGoneAfterCancel: !document.querySelector('.modal-overlay'),
+      };
+    }
+    """)
+    problems = []
+    if not result["allHeadersPresent"]: problems.append("not every GENERATE_VIEW_GROUPS header text appears in the dialog")
+    if not result["allViewNamesPresent"]: problems.append("not every GENERATE_VIEW_GROUPS view name appears in the dialog")
+    if result["checkboxCount"] != result["expectedCount"]:
+        problems.append(f"expected {result['expectedCount']} view checkboxes (one per definition), got {result['checkboxCount']}")
+    if not result["allStartChecked"]: problems.append("expected every view checkbox to start checked")
+    if not result["selectAllChecked"] or result["selectAllIndeterminate"]:
+        problems.append("expected the Select/Deselect All checkbox to start fully checked, not indeterminate")
+    if not result["modelOptionsMatchDoc"]: problems.append("expected the Model selector's options to match store.doc.models")
+    if not result["dialogGoneAfterCancel"]: problems.append("expected Cancel to remove the dialog")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Generate View dialog renders every header/view name from GENERATE_VIEW_GROUPS, a matching model selector, and an all-checked Select/Deselect All"
+
+
+def check_generate_view_generates_only_from_existing_parts_and_c_connectors(page):
+    """Regression guard for the core Generate View mechanism (commands.js's
+    generateSelectedViews) — reported directly: "using existing parts and connectors
+    type 'c' for specified model, generate a view for each. Do not create new parts. if
+    a part is missing that is needed (for example role), identify it as needed and for
+    what view in the message log and put the remaining parts in the view." Builds a
+    model with a BusinessActor and BusinessOrganizationUnit (Organization Structure
+    View's optional type) but deliberately NO BusinessRole (a required type), connected
+    by both a 'c' connector and a same-endpoints 's' (stream) connector, then runs
+    Generate View for just that one view definition via the real Advanced-menu dialog.
+    Confirms: no new MODELED Part is created (the only new Part is the diagnostic
+    "Parts Needed" Text marker a later follow-up added specifically for this missing-
+    type case — see check_generate_view_creates_parts_needed_marker for its own
+    dedicated coverage, kept out of this check's own assertions to stay scoped to one
+    mechanism); the generated view contains exactly the 2 existing parts (plus that one
+    marker) and exactly 1 connector viewMember (the 'c' one — the 's' one must be
+    excluded); the missing-BusinessRole gap is logged to the Message Log naming both the
+    type and the view; and the view's own Note field records the remap parameters used
+    (the report's "record remap parameters to reproduce layout... in view note field")."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = 'RegrGenView_' + Date.now();
+      store.doc.models.push({ modelName: model });
+      const priorDefaultModel = store.defaultModel;
+      store.defaultModel = model;
+
+      const partCountBefore = store.doc.parts.length;
+      const actor = store.createPart({ type: 'BusinessActor', label: 'RegrGVActor', model });
+      const orgUnit = store.createPart({ type: 'BusinessOrganizationUnit', label: 'RegrGVOrgUnit', model });
+      const connC = store.createConnector({ from: actor.id, to: orgUnit.id, model, connectorType: 'c', relationship: 'o' });
+      const connS = store.createConnector({ from: actor.id, to: orgUnit.id, model, connectorType: 's', relationship: 'q' });
+      const partCountAfterSetup = store.doc.parts.length;
+      const logCountBefore = store.messageLog.length;
+
+      document.getElementById('advanced-menu-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      document.querySelector('#advanced-menu .dd-item[data-action=\\"generateView\\"]').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      // Deselect everything, then check only Organization Structure View.
+      document.getElementById('gv-select-all').click();
+      await new Promise(r => setTimeout(r, 20));
+      document.querySelector('.gv-view-check[data-key=\\"orgStructure\\"]').click();
+      document.getElementById('gv-model').value = model;
+
+      const viewCountBefore = store.doc.views.length;
+      document.getElementById('gv-process').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      const newView = store.doc.views.find(v => v.id.startsWith('organization-structure-view-' + model));
+      const partVms = newView ? store.viewMembersForView(newView.id).filter(vm => vm.objectType === 'part') : [];
+      const connVms = newView ? store.viewMembersForView(newView.id).filter(vm => vm.objectType === 'connector') : [];
+      const newLogEntries = store.messageLog.slice(logCountBefore).map(e => e.message);
+      const newParts = store.doc.parts.filter(p => p.model === model && p.id !== actor.id && p.id !== orgUnit.id);
+
+      const toasts = document.querySelectorAll('.toast');
+      const lastToast = toasts.length ? toasts[toasts.length - 1].textContent : null;
+
+      store.defaultModel = priorDefaultModel;
+
+      return {
+        dialogGoneAfterProcess: !document.querySelector('.modal-overlay'),
+        setupPartCountCorrect: partCountAfterSetup === partCountBefore + 2,
+        onlyNewPartIsTextMarker: newParts.length === 1 && newParts[0].type === 'Text',
+        viewCreated: !!newView,
+        viewCountIncrease: store.doc.views.length - viewCountBefore,
+        partVmCount: partVms.length,
+        connVmCount: connVms.length,
+        connVmIsCType: connVms.length === 1 ? store.findConnector(connVms[0].objectId).connectorType : null,
+        missingRoleLogged: newLogEntries.some(m => m.includes('BusinessRole') && m.includes('Organization Structure View')),
+        note: newView ? newView.note : null,
+        lastToast,
+      };
+    }
+    """)
+    problems = []
+    if not result["dialogGoneAfterProcess"]: problems.append("expected Process to close the dialog")
+    if not result["setupPartCountCorrect"]: problems.append(f"test setup itself is wrong: {result}")
+    if not result["onlyNewPartIsTextMarker"]: problems.append(f"expected Generate View to create NO new MODELED parts — the only new Part should be the 'Text' Parts Needed marker: {result}")
+    if not result["viewCreated"]: problems.append("expected a new view named 'organization-structure-view-<model>' to be created")
+    if result["viewCountIncrease"] != 1: problems.append(f"expected exactly 1 new view (only orgStructure was checked), got {result['viewCountIncrease']}")
+    if result["partVmCount"] != 3: problems.append(f"expected exactly 3 part viewMembers (the existing Actor + OrgUnit, plus the Parts Needed marker), got {result['partVmCount']}")
+    if result["connVmCount"] != 1: problems.append(f"expected exactly 1 connector viewMember (only the 'c'-type one), got {result['connVmCount']}")
+    if result["connVmIsCType"] != 'c': problems.append(f"expected the included connector to be connectorType 'c', got {result['connVmIsCType']!r}")
+    if not result["missingRoleLogged"]: problems.append("expected the Message Log to note the missing BusinessRole, naming Organization Structure View")
+    note = result["note"] or ""
+    if "Generate View" not in note or "pattern" not in note or "sortKeys" not in note:
+        problems.append(f"expected the new view's Note field to record the remap parameters used (template/pattern/sortKeys), got: {note!r}")
+    if not result["lastToast"] or "Generate View" not in result["lastToast"] or "created 1 view" not in result["lastToast"]:
+        problems.append(f"expected a 'Generate View: created 1 view...' summary toast, got {result['lastToast']!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Generate View builds a view from only the existing parts and 'c'-type connectors, creates no new MODELED parts (only the diagnostic Parts Needed marker), logs the missing required type against the specific view, and records reproducible remap parameters in the view's Note field"
+
+
+def check_generate_view_skips_view_with_no_matching_parts(page):
+    """Regression guard: a selected view definition whose types match NOTHING in the
+    chosen model must be skipped (not create an empty view) and the skip must be logged
+    — the other half of "put the remaining parts in the view" from the same report:
+    generation should degrade gracefully down to skipping, never to an empty view."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = 'RegrGenViewSkip_' + Date.now();
+      store.doc.models.push({ modelName: model });
+      const priorDefaultModel = store.defaultModel;
+      store.defaultModel = model;
+      // Deliberately no parts of any type at all in this model.
+      const viewCountBefore = store.doc.views.length;
+      const logCountBefore = store.messageLog.length;
+
+      document.getElementById('advanced-menu-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      document.querySelector('#advanced-menu .dd-item[data-action=\\"generateView\\"]').click();
+      await new Promise(r => setTimeout(r, 60));
+      document.getElementById('gv-select-all').click();
+      document.querySelector('.gv-view-check[data-key=\\"networkCommunications\\"]').click();
+      document.getElementById('gv-model').value = model;
+      document.getElementById('gv-process').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      const newLogEntries = store.messageLog.slice(logCountBefore).map(e => e.message);
+      const toasts = document.querySelectorAll('.toast');
+      const lastToast = toasts.length ? toasts[toasts.length - 1].textContent : null;
+      store.defaultModel = priorDefaultModel;
+      return {
+        viewCountUnchanged: store.doc.views.length === viewCountBefore,
+        skipLogged: newLogEntries.some(m => m.includes('Skipped') && m.includes('Network / Communications View')),
+        lastToast,
+      };
+    }
+    """)
+    problems = []
+    if not result["viewCountUnchanged"]: problems.append("expected no view to be created when nothing in the model matches the selected view's types")
+    if not result["skipLogged"]: problems.append("expected the Message Log to record the skip, naming Network / Communications View")
+    if not result["lastToast"] or "no views were generated" not in result["lastToast"]:
+        problems.append(f"expected a toast reporting nothing was generated, got {result['lastToast']!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "a view definition with no matching parts anywhere in the model is skipped (no empty view created) and the skip is logged"
+
+
+def check_generate_industry_shares_entity_across_capabilities(page):
+    """Regression guard, reported directly: "there are what appears to be duplicate
+    parts when I use 'generate industry', which results in multiple copies in the new
+    views. For example DataDataEntity appears 3 times for label 'Customer Profile',
+    all same stream and section." Root cause: buildIndustryTree (sfce.js) derived an
+    entity's auto-generated nodeId (used only when the wizard's mapping gives no
+    explicit Entity Id) by chaining through its PARENT Application Capability's own
+    nodeId — so the exact same entity name referenced by two different capabilities
+    (an ordinary, expected shape for shared/master data) got two different nodeIds,
+    and generateIndustry/createStream's otherwise-correct xIds+model reuse never
+    recognized them as the same entity. Reconciled across two follow-up
+    clarifications into a final rule, reported verbatim: "If same label, model,
+    section, and streams then elements should be merged or reused. If same label,
+    model, but different section or stream then should remain separate." Since
+    generateIndustry always ties a generated entity's streamName to its own name
+    (commands.js), "same label" already implies "same stream" here — leaving section
+    as the one remaining axis. Fixed by deriving an entity's fallback nodeId from its
+    own SECTION + name together (not chained through its parent Application
+    Capability, and not name alone either).
+
+    Covers BOTH halves of the rule in one fixture: two rows share the entity name
+    "Customer Profile" under two entirely different function/capability/application-
+    capability branches WITHIN the same section (mirroring the built-in dataset's own
+    real shape — Sales Management/Campaign Management, no explicit Entity Id mapped)
+    and must merge into one shared Part; a third row reuses the exact same entity name
+    again but under a DIFFERENT section and must produce a genuinely SEPARATE Part.
+    Also confirms the two originating Business Function/Capability parts remain
+    properly distinct throughout (this fix must not over-merge anything upstream of
+    the entity level)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sfce = await import('./js/sfce.js');
+      const commands = await import('./js/commands.js');
+
+      const rows = [
+        { section: 'RegrShared Section', functionName: 'RegrShared Selling', capabilityName: 'RegrShared Sales Mgmt', applicationCapabilityName: 'RegrShared Sales Mgmt', entityName: 'RegrShared Customer Profile', entityDescription: '' },
+        { section: 'RegrShared Section', functionName: 'RegrShared Marketing', capabilityName: 'RegrShared Campaign Mgmt', applicationCapabilityName: 'RegrShared Campaign Mgmt', entityName: 'RegrShared Customer Profile', entityDescription: '' },
+        { section: 'RegrShared OTHER Section', functionName: 'RegrShared Support', capabilityName: 'RegrShared Support Mgmt', applicationCapabilityName: 'RegrShared Support Mgmt', entityName: 'RegrShared Customer Profile', entityDescription: '' },
+      ];
+      const { tree } = sfce.buildIndustryTree(rows);
+      store.doc.industryTree = tree;
+      store.doc.industryTemplateName = 'SFCCE';
+
+      const view = store.addView('RegrSharedEntity_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      await commands.generateIndustry(app, null, false);
+
+      const entityParts = store.doc.parts.filter(p => p.type === 'DataDataEntity' && p.label.includes('RegrShared Customer Profile'));
+      const sameSectionEntityParts = entityParts.filter(p => p.section === 'RegrShared Section');
+      const otherSectionEntityParts = entityParts.filter(p => p.section === 'RegrShared OTHER Section');
+      const appCapParts = store.doc.parts.filter(p => p.type === 'ApplicationCapability' && p.label.includes('RegrShared'));
+      const funcParts = store.doc.parts.filter(p => p.type === 'BusinessFunction' && p.label.includes('RegrShared'));
+
+      // The entity sits at the END of the SFCCE template chain, immediately preceded
+      // by an ApplicationPhysicalComponent supporting node (a fresh, branch-specific
+      // part each time, never reused) -- not directly by ApplicationCapability itself
+      // (4 slots earlier). So "genuinely shared, not orphaned" is checked via the
+      // number of DISTINCT immediate-predecessor parts connected to the SAME-section
+      // entity: exactly 2 (one per branch's own ApplicationPhysicalComponent), not 1
+      // (which would mean only one branch's chain actually reached it).
+      let distinctPredecessorCount = 0;
+      if (sameSectionEntityParts.length === 1) {
+        const entId = sameSectionEntityParts[0].id;
+        const linkedIds = new Set(
+          store.doc.connectors
+            .filter(c => (c.from === entId || c.to === entId) && c.connectorType === 'c')
+            .map(c => (c.from === entId ? c.to : c.from))
+        );
+        distinctPredecessorCount = linkedIds.size;
+      }
+
+      return {
+        totalEntityPartCount: entityParts.length,
+        sameSectionEntityPartCount: sameSectionEntityParts.length,
+        otherSectionEntityPartCount: otherSectionEntityParts.length,
+        appCapPartCount: appCapParts.length,
+        funcPartCount: funcParts.length,
+        distinctPredecessorCount,
+        entityStreams: sameSectionEntityParts[0]?.streams || [],
+      };
+    }
+    """)
+    problems = []
+    if result["totalEntityPartCount"] != 2:
+        problems.append(f"expected exactly 2 DataDataEntity parts named 'RegrShared Customer Profile' total (1 shared within 'RegrShared Section', 1 separate in 'RegrShared OTHER Section'), got {result['totalEntityPartCount']}")
+    if result["sameSectionEntityPartCount"] != 1:
+        problems.append(f"expected exactly 1 shared DataDataEntity part within the same section, got {result['sameSectionEntityPartCount']}")
+    if result["otherSectionEntityPartCount"] != 1:
+        problems.append(f"expected exactly 1 separate DataDataEntity part in the different section (same label must NOT merge across sections), got {result['otherSectionEntityPartCount']}")
+    if result["appCapPartCount"] != 3:
+        problems.append(f"test setup itself is wrong — expected 3 distinct ApplicationCapability parts (one per branch), got {result['appCapPartCount']}")
+    if result["funcPartCount"] != 3:
+        problems.append(f"expected the 3 originating BusinessFunction parts to remain distinct (this fix must not over-merge anything above entity level), got {result['funcPartCount']}")
+    if result["distinctPredecessorCount"] != 2:
+        problems.append(f"expected the same-section shared entity to be genuinely connected to 2 distinct predecessor parts (one per same-section branch's own chain), got {result['distinctPredecessorCount']}")
+    if "RegrShared Customer Profile" not in result["entityStreams"]:
+        problems.append(f"expected the shared entity's streams to include its own name, got {result['entityStreams']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "the same entity name referenced by two different capabilities WITHIN one section now merges into a single shared DataDataEntity part connected to both chains, while the identical name under a DIFFERENT section correctly stays a separate part"
+
+
+def check_generate_view_creates_parts_needed_marker(page):
+    """New feature, reported directly: "change: when generating the views requested
+    and parts are missing for a view, create Text part and node with label view name +
+    ' Parts Needed' and put list of parts needed in the description field and show in
+    view near upper left area with soft red fill." Builds the same missing-BusinessRole
+    Organization Structure View scenario as check_generate_view_generates_only_from_
+    existing_parts_and_c_connectors and runs Generate View through the real
+    Advanced-menu dialog. Confirms: a new 'Text' Part labeled "Organization Structure
+    View Parts Needed" is created (not merely logged); its description lists the
+    missing type by name; its ViewMember on the new view uses the distinct soft-red
+    PARTS_NEEDED_FILL color (not any real elementGroups fill) and sits near the view's
+    own upper-left origin, clearly BEFORE the remapped content's own typical start
+    (proving it isn't itself fed into the remap layout pass as ordinary content); and
+    that no such marker is created at all for a view where every required type is
+    present (the common, non-degraded case)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = 'RegrGVNeeded_' + Date.now();
+      store.doc.models.push({ modelName: model });
+      const priorDefaultModel = store.defaultModel;
+      store.defaultModel = model;
+
+      // Scenario A: BusinessRole (required) missing -> expect a marker.
+      const actor = store.createPart({ type: 'BusinessActor', label: 'RegrGVNActor', model });
+      const orgUnit = store.createPart({ type: 'BusinessOrganizationUnit', label: 'RegrGVNOrgUnit', model });
+      store.createConnector({ from: actor.id, to: orgUnit.id, model, connectorType: 'c', relationship: 'o' });
+
+      document.getElementById('advanced-menu-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      document.querySelector('#advanced-menu .dd-item[data-action=\\"generateView\\"]').click();
+      await new Promise(r => setTimeout(r, 60));
+      document.getElementById('gv-select-all').click();
+      document.querySelector('.gv-view-check[data-key=\\"orgStructure\\"]').click();
+      document.getElementById('gv-model').value = model;
+      document.getElementById('gv-process').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      const view = store.doc.views.find(v => v.id.startsWith('organization-structure-view-' + model));
+      const markerPart = store.doc.parts.find(p => p.type === 'Text' && p.model === model && p.label === 'Organization Structure View Parts Needed');
+      const markerVm = markerPart && view ? store.viewMembersForView(view.id).find(vm => vm.objectType === 'part' && vm.objectId === markerPart.id) : null;
+      const otherPartVms = view ? store.viewMembersForView(view.id).filter(vm => vm.objectType === 'part' && vm.objectId !== markerPart?.id) : [];
+      const minOtherX = otherPartVms.length ? Math.min(...otherPartVms.map(vm => vm.x)) : null;
+      const minOtherY = otherPartVms.length ? Math.min(...otherPartVms.map(vm => vm.y)) : null;
+
+      // Scenario B: both required types present (BusinessActor + BusinessRole) -> no marker.
+      const model2 = 'RegrGVNeededOk_' + Date.now();
+      store.doc.models.push({ modelName: model2 });
+      store.defaultModel = model2;
+      const actor2 = store.createPart({ type: 'BusinessActor', label: 'RegrGVNActor2', model: model2 });
+      const role2 = store.createPart({ type: 'BusinessRole', label: 'RegrGVNRole2', model: model2 });
+      store.createConnector({ from: actor2.id, to: role2.id, model: model2, connectorType: 'c', relationship: 'o' });
+
+      document.getElementById('advanced-menu-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      document.querySelector('#advanced-menu .dd-item[data-action=\\"generateView\\"]').click();
+      await new Promise(r => setTimeout(r, 60));
+      document.getElementById('gv-select-all').click();
+      document.querySelector('.gv-view-check[data-key=\\"orgStructure\\"]').click();
+      document.getElementById('gv-model').value = model2;
+      document.getElementById('gv-process').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      const markerPartB = store.doc.parts.find(p => p.type === 'Text' && p.model === model2);
+
+      store.defaultModel = priorDefaultModel;
+
+      return {
+        markerCreated: !!markerPart,
+        markerDescription: markerPart?.description || '',
+        markerFillColor: markerVm?.fillColor || null,
+        markerX: markerVm?.x ?? null,
+        markerY: markerVm?.y ?? null,
+        minOtherX, minOtherY,
+        noMarkerWhenComplete: !markerPartB,
+      };
+    }
+    """)
+    problems = []
+    if not result["markerCreated"]:
+        problems.append("expected a new 'Text' Part labeled 'Organization Structure View Parts Needed' to be created")
+    if "BusinessRole" not in result["markerDescription"]:
+        problems.append(f"expected the marker's description to list the missing type 'BusinessRole', got {result['markerDescription']!r}")
+    if result["markerFillColor"] != "#ffb3b3":
+        problems.append(f"expected the marker's fill color to be the soft-red PARTS_NEEDED_FILL (#ffb3b3), got {result['markerFillColor']!r}")
+    if result["markerX"] is None or result["markerX"] > 50:
+        problems.append(f"expected the marker to sit near the view's upper-left origin (x <= 50), got {result['markerX']}")
+    if result["markerY"] is None or result["markerY"] > 50:
+        problems.append(f"expected the marker to sit near the view's upper-left origin (y <= 50), got {result['markerY']}")
+    if result["minOtherX"] is not None and result["markerX"] is not None and result["markerX"] > result["minOtherX"]:
+        problems.append(f"expected the marker to sit at or before the remapped content's own leftmost x ({result['minOtherX']}), got {result['markerX']}")
+    if not result["noMarkerWhenComplete"]:
+        problems.append("expected NO Text marker part to be created when every required type is already present")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "a missing required type now creates a 'Text' Parts Needed marker node (soft-red fill, upper-left, description lists the missing type), and no marker at all when nothing is missing"
+
+
+def check_remap_sort_priority_includes_raw_label(page):
+    """New feature, reported directly: "add raw label to the sort priority part of
+    remap." REMAP_SORT_KEYS/REMAP_SORT_LABELS (commands.js) gained a new 'rawLabel'
+    entry alongside the pre-existing 'nodeLabel' — Part.rawLabel is the true
+    pre-decoration name (distinct from the fully-decorated part.label, e.g. an
+    ApplicationCapability's "Manage " prefix), useful as a sort key whenever that
+    decoration would otherwise scramble an alphabetical grouping. Since the Remap
+    dialog's own Sort Priority list (main.js) is fully data-driven off REMAP_SORT_KEYS
+    (main.js's own comment: "start from the remembered/default order, then append any
+    keys missing from it"), no other UI code needed to change — this confirms the
+    real dialog actually lists it (proving the wiring, not just the constant) and that
+    remapSortValue genuinely sorts by rawLabel, distinctly from nodeLabel (two parts
+    whose rawLabel/label orderings are deliberately REVERSED relative to each other,
+    so an accidental fallback to nodeLabel would produce the wrong order)."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const commands = await import('./js/commands.js');
+
+      const view = store.addView('RegrRawLabelSort_' + Date.now());
+      view.viewType = 'ff';
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      // Decorated label and raw label deliberately sort in OPPOSITE directions, AND
+      // the Zulu-rawLabel part is created FIRST (so a broken/no-op rawLabel sort that
+      // silently fell back to stable/insertion order would still show Zulu first --
+      // wrongly appearing to pass -- rather than accidentally matching the correct
+      // alphabetical answer by construction order).
+      const pZuluRaw = store.createPart({ type: 'Unknown', label: 'AAA_Second', rawLabel: 'Zulu', model: store.defaultModel, streams: [] });
+      const pAlphaRaw = store.createPart({ type: 'Unknown', label: 'ZZZ_First', rawLabel: 'Alpha', model: store.defaultModel, streams: [] });
+      // ViewMember creation order (not Part creation order) is what a broken/no-op
+      // sort would silently fall back to (stable sort over store.viewMembersForView's
+      // own array order) -- Zulu's ViewMember is created FIRST so that fallback would
+      // wrongly keep Zulu first, not accidentally land on the correct answer.
+      const vZ = store.createViewMember({ view: view.id, objectType: 'part', objectId: pZuluRaw.id, x: 0, y: 0 });
+      const vA = store.createViewMember({ view: view.id, objectType: 'part', objectId: pAlphaRaw.id, x: 0, y: 0 });
+
+      // Open the real Remap dialog to confirm the Sort Priority list itself renders it.
+      app.promptRemap(tab);
+      await new Promise(r => setTimeout(r, 60));
+      const rawLabelLi = document.querySelector('#rm-priority-list li[data-key=\\"rawLabel\\"]');
+      const rawLabelListed = !!rawLabelLi;
+      const rawLabelText = rawLabelLi ? rawLabelLi.textContent : null;
+      document.querySelector('.modal-overlay .cancel')?.click();
+      await new Promise(r => setTimeout(r, 30));
+
+      commands.applyRemapLayout(app, view.id, { pattern: 'default', sortKeys: ['rawLabel'] });
+      const rawLabelOrderAlphaFirst = vA.x <= vZ.x && vA.y <= vZ.y && (vA.x < vZ.x || vA.y < vZ.y);
+
+      commands.applyRemapLayout(app, view.id, { pattern: 'default', sortKeys: ['nodeLabel'] });
+      const nodeLabelOrderZuluPartFirst = vZ.x <= vA.x && vZ.y <= vA.y && (vZ.x < vA.x || vZ.y < vA.y);
+
+      return { rawLabelListed, rawLabelText, rawLabelOrderAlphaFirst, nodeLabelOrderZuluPartFirst };
+    }
+    """)
+    problems = []
+    if not result["rawLabelListed"]: problems.append("expected the real Remap dialog's Sort Priority list to include a 'rawLabel' entry")
+    if result["rawLabelText"] and "Raw label" not in result["rawLabelText"]:
+        problems.append(f"expected the 'rawLabel' entry's visible text to be 'Raw label', got {result['rawLabelText']!r}")
+    if not result["rawLabelOrderAlphaFirst"]:
+        problems.append("expected sortKeys:['rawLabel'] to order by Part.rawLabel ('Alpha' before 'Zulu'), independent of the decorated label")
+    if not result["nodeLabelOrderZuluPartFirst"]:
+        problems.append("expected sortKeys:['nodeLabel'] to order by the decorated part.label instead ('AAA_Second' before 'ZZZ_First'), proving rawLabel and nodeLabel are genuinely different sort keys")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Remap's Sort Priority list now includes 'Raw label' (Part.rawLabel), genuinely sorting independently of the decorated node label"
+
+
+def check_generate_view_redraws_with_show_all_text(page):
+    """New feature, reported directly: "for the new views as a result of generate
+    views command, run redraw with 'show all text'." generateSelectedViews
+    (commands.js) now sets view.chkShowAllText = true and runs the same
+    redrawAndResolveLayout + normalizeViewCoordinates pair Commands > Redraw's own
+    "Show all text" checkbox uses (main.js's promptRedraw), after remap and the Parts
+    Needed marker (so the marker's own description factors into the resize too).
+    Builds a model with a BusinessActor whose description is long enough to actually
+    require more than 2 lines, generates Organization Structure View, and confirms:
+    the new view's chkShowAllText flag is persisted true; and the real rendered
+    .fnode-description element for that part has NO line-clamp truncation (the exact
+    DOM signal buildNodeEl, canvas.js, applies only when chkShowAllText is true) —
+    proving this isn't just a flag with no actual effect on what's displayed."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const model = 'RegrGVRedraw_' + Date.now();
+      store.doc.models.push({ modelName: model });
+      const priorDefaultModel = store.defaultModel;
+      store.defaultModel = model;
+
+      const longDescription = 'This is a deliberately long description used to verify that show-all-text sizing actually removes line-clamp truncation instead of just being a flag with no real effect on rendering. '.repeat(3);
+      const actor = store.createPart({ type: 'BusinessActor', label: 'RegrGVRedrawActor', model, description: longDescription });
+      const role = store.createPart({ type: 'BusinessRole', label: 'RegrGVRedrawRole', model });
+      store.createConnector({ from: actor.id, to: role.id, model, connectorType: 'c', relationship: 'o' });
+
+      document.getElementById('advanced-menu-btn').click();
+      await new Promise(r => setTimeout(r, 60));
+      document.querySelector('#advanced-menu .dd-item[data-action=\\"generateView\\"]').click();
+      await new Promise(r => setTimeout(r, 60));
+      document.getElementById('gv-select-all').click();
+      document.querySelector('.gv-view-check[data-key=\\"orgStructure\\"]').click();
+      document.getElementById('gv-model').value = model;
+      document.getElementById('gv-process').click();
+      await new Promise(r => setTimeout(r, 60));
+
+      const view = store.doc.views.find(v => v.id.startsWith('organization-structure-view-' + model));
+      const vm = view ? store.viewMembersForView(view.id).find(v => v.objectType === 'part' && v.objectId === actor.id) : null;
+      const descEl = vm ? document.querySelector(`.fnode[data-vm-id=\\"${vm.id}\\"] .fnode-description`) : null;
+
+      store.defaultModel = priorDefaultModel;
+
+      return {
+        viewFound: !!view,
+        chkShowAllText: view ? view.chkShowAllText : null,
+        descFound: !!descEl,
+        descStyleAttr: descEl ? (descEl.getAttribute('style') || '') : null,
+      };
+    }
+    """)
+    problems = []
+    if not result["viewFound"]: problems.append("expected 'organization-structure-view-<model>' to be created")
+    if not result["chkShowAllText"]: problems.append(f"expected the new view's chkShowAllText to be persisted true, got {result['chkShowAllText']!r}")
+    if not result["descFound"]: problems.append("expected the actor's .fnode-description element to be found on canvas")
+    styleAttr = result["descStyleAttr"] or ""
+    if "line-clamp:unset" not in styleAttr.replace(" ", ""):
+        problems.append(f"expected the description's inline style to remove line-clamp (line-clamp:unset), got {styleAttr!r}")
+    if "overflow:visible" not in styleAttr.replace(" ", ""):
+        problems.append(f"expected the description's inline style to set overflow:visible (full text shown, not clipped), got {styleAttr!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Generate View now persists chkShowAllText=true on each generated view and actually redraws so long descriptions render in full, not truncated to 2 lines"
+
+
 CHECKS = [
     check_boots_clean,
     check_example_simulates,
@@ -16938,6 +17531,14 @@ CHECKS = [
     check_ui_dashboard_canvas_input_preserves_focus_during_rerender,
     check_ui_dashboard_description_hidden_from_root_properties,
     check_ui_dashboard_output_value_not_truncated,
+    check_generate_view_menu_position,
+    check_generate_view_dialog_matches_definitions,
+    check_generate_view_generates_only_from_existing_parts_and_c_connectors,
+    check_generate_view_skips_view_with_no_matching_parts,
+    check_generate_industry_shares_entity_across_capabilities,
+    check_generate_view_creates_parts_needed_marker,
+    check_remap_sort_priority_includes_raw_label,
+    check_generate_view_redraws_with_show_all_text,
 ]
 
 
