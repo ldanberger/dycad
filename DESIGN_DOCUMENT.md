@@ -3111,6 +3111,66 @@ gained two new assertions (`store.simSelectedModel` itself, and the real
 symptom: Default Model shows the copy, but the Simulation toolbar's own dropdown still
 reads the original.
 
+**Property panel: UI dashboard "Value" pinning, Attributes gated to DataEntityDetails,
+Script/Part Script Enabled pinned by default, scroll preserved during sim ticks**: four
+independent property-panel fixes/requests from one follow-up report. (1) *"the special
+ui elements numeric input, text input cannot pin the value field to the pinned area."*
+UINumericInput/UITextInput's synthesized `uiInputValue` ("Value") Root Properties field
+(see "UI dashboard elements" below) only ever existed in a merged spec object built
+fresh inside `renderPartProperties`, never in `custom.json`'s `showFields.part.fields`
+— but `renderPinnedSection` (`render.js`) always looked a pinned field's spec up via
+the plain `custom.json` lookup, so pinning "Value" correctly toggled the pin state (the
+button itself lives in the merged-spec-driven Root Properties section, so it renders
+fine there) while the Pinned section could never find a matching spec entry for it and
+silently rendered nothing. Fixed two ways together: `renderPinnedSection`'s per-source
+shape gained an optional `fields` override (used INSTEAD of the `custom.json` lookup
+when given), and `renderPartProperties` now computes its merged `partSpec` BEFORE
+calling `renderPinnedSection` (it used to be computed after) so that merged spec can be
+passed straight through as the `part` source's `fields`. (2) *"only datadatadetail
+should show the special 'attributes' and 'add addtributes' portion in the properties
+panel"* (i.e. DataEntityDetails) — `showFields.part.fields.attributes` (the Data
+Modeling editable attribute table, `show:'a'`) used to render unconditionally for every
+part type's Root Properties, even though `canvas.js`'s own on-node attribute-list
+rendering already gates its display to DataEntityDetails only (`isAttributeForeignKey`'s
+own doc comment references this same asymmetry). Every other part type showed an
+always-empty, meaningless "+ Add Attribute" table. Fixed by extending the same
+"`partSpec` computed once, used everywhere" restructuring from fix (1): a part that is
+neither a UI dashboard type nor DataEntityDetails now gets its own merged spec with
+`attributes` stripped, so both Root Properties AND the Pinned section (if someone
+globally pins `attributes`) correctly hide it. (3) *"add the fields 'script' and 'Part
+Script Enabled' to be pinned by default in current settings"* — `DEFAULT_PINNED_FIELDS`
+used to be one flat array shared by all three pin groups (`node`/`connector`/`table`);
+a new `defaultPinnedFieldsFor(group)` returns `DEFAULT_PINNED_FIELDS` plus
+`script`/`scriptEnabled` for every group except `connector` (which has no script field
+at all), used by both `getPinnedFields`'s and `getAllPinnedFields`'s empty-localStorage
+fallback — a fresh browser (or one with `dycad-pinned-fields` cleared) now pins
+Script/Part Script Enabled on a Part's Root Properties with no action taken. (4) *"when
+simulator is running, the properties panel repositions to top each tick, can this be
+removed so if user scrolls through properties while sim is running it doesn't
+reposition view back to top of properties?"* Every sim tick calls `app.render()`,
+rebuilding `#properties-body`'s content from scratch even when the exact same node/
+edge/view is still selected. The Properties section doesn't scroll itself —
+`#right-panel` (the whole right sidebar column: Filters then Properties stacked) is the
+actual `overflow-y:auto` container — and its scroll position was getting clobbered on
+every such rebuild with no way to tell "same thing, just updated" apart from "genuinely
+different thing selected." Fixed with a new `propertiesIdentityKey(app, tab)` helper
+(cheaply derives a string key from whichever of catalog-row/3d/section/no-selection/
+multi-select/single-viewMember branch `renderProperties` is about to take, `null` for
+the panel's various empty-hint states) plus a small restructuring: the old monolithic
+`renderProperties` body moved into `renderPropertiesContent(app, tab, body)` unchanged,
+and the new thin `renderProperties(app)` wrapper computes the key, snapshots
+`#right-panel.scrollTop`, stores the key on `properties-body.dataset.propKey`, calls
+`renderPropertiesContent`, then either restores the snapshotted scrollTop (key
+unchanged from last render — same thing still selected, e.g. a sim tick) or explicitly
+resets it to `0` (key differs, or is `null` — a genuine new selection), matching the
+conventional "picking something new scrolls you to its top" expectation rather than
+leaving that case's behavior to chance. Four new checks
+(`check_pinned_field_ui_dashboard_value`, `check_attributes_field_only_for_data_entity_details`,
+`check_pinned_fields_default_includes_script`,
+`check_properties_panel_preserves_scroll_during_render`) — all four proven via TEMP
+BREAK, the last one's negative control (a genuine selection change still resets to
+top) doubling as proof that the reset-to-0 branch is deliberate, not incidental.
+
 **UI dashboard elements** (`isUIDashboardType`, state.js; `ctx.ui`, simulation.js): a
 new element group for building simple sim-driven dashboards, reported directly —
 *"create a new group 'UI' of elements text_out, text_in, numeric_out, numeric_in ...

@@ -5617,4 +5617,35 @@
 // itself, and the real #sim-model-select dropdown's DOM value after render) --
 // proven via TEMP BREAK, which reproduces the exact reported symptom. DESIGN_
 // DOCUMENT.md and tests/README.md updated.
-export const APP_VERSION = '0.938';
+// v0.939: four property-panel fixes/requests from one follow-up report. (1) "the
+// special ui elements numeric input, text input cannot pin the value field to the
+// pinned area" -- UINumericInput/UITextInput's synthesized uiInputValue ("Value")
+// field only ever existed in a merged spec object built inside renderPartProperties,
+// never in custom.json's showFields.part.fields, but renderPinnedSection always
+// looked pinned fields up via the plain custom.json spec, so pinning "Value" toggled
+// the pin state with nothing ever appearing in the Pinned section. Fixed:
+// renderPinnedSection's per-source shape gained an optional `fields` override, and
+// renderPartProperties now computes its merged partSpec BEFORE calling
+// renderPinnedSection (was after) so the same merged spec is used everywhere. (2)
+// "only datadatadetail should show the special 'attributes' and 'add addtributes'
+// portion in the properties panel" -- the Data Modeling attribute table used to
+// render for every part type; now stripped from the merged spec for any part that
+// isn't DataEntityDetails (matching canvas.js's own on-node attribute-list gating).
+// (3) "add the fields 'script' and 'Part Script Enabled' to be pinned by default in
+// current settings" -- DEFAULT_PINNED_FIELDS is now per-group via
+// defaultPinnedFieldsFor(group): the 'node'/'table' groups' default now also includes
+// script/scriptEnabled (connector's default is unchanged -- no script field there).
+// (4) "when simulator is running, the properties panel repositions to top each tick,
+// can this be removed so if user scrolls through properties while sim is running it
+// doesn't reposition view back to top of properties?" -- every sim tick's
+// app.render() rebuilds the Properties panel even with the same node still selected,
+// resetting #right-panel's (the actual overflow-y:auto scroll container) scroll
+// position every time. Fixed with a new propertiesIdentityKey(app, tab) helper:
+// renderProperties now preserves #right-panel's scrollTop across a re-render of the
+// SAME selection, while a genuine selection change still resets it to top. Four new
+// checks (check_pinned_field_ui_dashboard_value,
+// check_attributes_field_only_for_data_entity_details,
+// check_pinned_fields_default_includes_script,
+// check_properties_panel_preserves_scroll_during_render) -- all proven via TEMP
+// BREAK. DESIGN_DOCUMENT.md and tests/README.md updated.
+export const APP_VERSION = '0.939';

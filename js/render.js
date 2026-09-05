@@ -595,9 +595,55 @@ function renderCommands(app) {
 }
 
 // ===================== PROPERTIES PANEL =====================
+/** Identifies "what's about to be shown" in the properties panel, cheaply and without
+ * duplicating renderProperties's own branching logic's side effects — used only to
+ * decide whether this render is redrawing the SAME thing as last time (see
+ * renderProperties below). Returns null for the panel's various empty/hint states,
+ * where there's nothing meaningful to preserve scroll position across anyway. */
+function propertiesIdentityKey(app, tab) {
+  if (tab && tab.selectedCatalogRow && (tab.type === '3d' || (tab.type === 'table' && tab.catalogType))) {
+    return `catalog:${tab.catalogType || '3d'}:${tab.selectedCatalogRow}`;
+  }
+  if (tab && tab.type === '3d') return null;
+  if (!tab || tab.type !== 'canvas') return null;
+  if (tab.selectedSectionId) return `section:${tab.selectedSectionId}`;
+  if (tab.selection.size === 0) return `view:${tab.viewId}`;
+  if (tab.selection.size !== 1) return `multi:${tab.id}:${tab.selection.size}`;
+  return `vm:${[...tab.selection][0]}`;
+}
+
+/** Reported directly: "when simulator is running, the properties panel repositions to
+ * top each tick... if user scrolls through properties while sim is running it doesn't
+ * reposition view back to top of properties." Each tick calls app.render(), which
+ * rebuilds #properties-body's innerHTML from scratch even when the exact same node/
+ * edge/view is still selected — clearing and re-adding content resets its scrollTop to
+ * 0 as a side effect, discarding any scroll position a person had while watching a
+ * part's sim-driven fields update live. Fixed by snapshotting scrollTop beforehand and
+ * restoring it after when propertiesIdentityKey (above) says the panel is showing the
+ * same thing as last render; otherwise (a genuine selection change — a different
+ * node/edge/section/view) explicitly resets scroll to top instead, matching the
+ * conventional "picking something new scrolls you to its top" expectation, since
+ * preserving an old scroll offset against unrelated new content would be more
+ * confusing, not less. */
 function renderProperties(app) {
   const body = document.getElementById('properties-body');
   const tab = app.store.activeTab();
+  const key = propertiesIdentityKey(app, tab);
+  // The Properties section doesn't scroll itself -- #right-panel (the whole sidebar
+  // column: Filters/Properties/Message Log stacked) is the actual overflow-y:auto
+  // container, so THAT's the scrollTop that needs preserving, not #properties-body's
+  // own (which is always 0).
+  const scrollEl = document.getElementById('right-panel');
+  const prevScrollTop = scrollEl ? scrollEl.scrollTop : 0;
+  const preserveScroll = key !== null && key === body.dataset.propKey;
+  body.dataset.propKey = key ?? '';
+
+  renderPropertiesContent(app, tab, body);
+
+  if (scrollEl) scrollEl.scrollTop = preserveScroll ? prevScrollTop : 0;
+}
+
+function renderPropertiesContent(app, tab, body) {
   if (tab && tab.selectedCatalogRow && (tab.type === '3d' || (tab.type === 'table' && tab.catalogType))) {
     renderCatalogRowProperties(app, tab);
     return;
@@ -758,13 +804,22 @@ function selectOptionsFor(app, entityKey, fieldName, currentValue, ctx) {
 //                 viewMember context: the Parts, Connectors, and Views catalog tabs.
 const PINNED_FIELDS_KEY = 'dycad-pinned-fields';
 const DEFAULT_PINNED_FIELDS = ['view', 'type', 'label', 'model', 'streams'];
+// Reported directly: "add the fields 'script' and 'Part Script Enabled' to be pinned
+// by default in current settings." Only meaningful for Parts, so applied to the
+// 'node' (canvas node selection / ViewMembers catalog part rows) and 'table' (Parts
+// catalog tab) groups, not 'connector' (no script field there at all).
+const DEFAULT_PINNED_FIELDS_WITH_SCRIPT = [...DEFAULT_PINNED_FIELDS, 'script', 'scriptEnabled'];
+
+function defaultPinnedFieldsFor(group) {
+  return group === 'connector' ? [...DEFAULT_PINNED_FIELDS] : [...DEFAULT_PINNED_FIELDS_WITH_SCRIPT];
+}
 
 function getPinnedFields(group) {
   try {
     const all = JSON.parse(localStorage.getItem(PINNED_FIELDS_KEY) || '{}');
-    return Array.isArray(all[group]) ? all[group] : [...DEFAULT_PINNED_FIELDS];
+    return Array.isArray(all[group]) ? all[group] : defaultPinnedFieldsFor(group);
   } catch {
-    return [...DEFAULT_PINNED_FIELDS];
+    return defaultPinnedFieldsFor(group);
   }
 }
 
@@ -795,16 +850,16 @@ function getAllPinnedFields() {
   let all = {};
   try { all = JSON.parse(localStorage.getItem(PINNED_FIELDS_KEY) || '{}'); } catch { /* ignore */ }
   return {
-    node: Array.isArray(all.node) ? all.node : [...DEFAULT_PINNED_FIELDS],
-    connector: Array.isArray(all.connector) ? all.connector : [...DEFAULT_PINNED_FIELDS],
-    table: Array.isArray(all.table) ? all.table : [...DEFAULT_PINNED_FIELDS],
+    node: Array.isArray(all.node) ? all.node : defaultPinnedFieldsFor('node'),
+    connector: Array.isArray(all.connector) ? all.connector : defaultPinnedFieldsFor('connector'),
+    table: Array.isArray(all.table) ? all.table : defaultPinnedFieldsFor('table'),
   };
 }
 
 function setAllPinnedFields(config) {
-  setPinnedFields('node', Array.isArray(config?.node) ? config.node : [...DEFAULT_PINNED_FIELDS]);
-  setPinnedFields('connector', Array.isArray(config?.connector) ? config.connector : [...DEFAULT_PINNED_FIELDS]);
-  setPinnedFields('table', Array.isArray(config?.table) ? config.table : [...DEFAULT_PINNED_FIELDS]);
+  setPinnedFields('node', Array.isArray(config?.node) ? config.node : defaultPinnedFieldsFor('node'));
+  setPinnedFields('connector', Array.isArray(config?.connector) ? config.connector : defaultPinnedFieldsFor('connector'));
+  setPinnedFields('table', Array.isArray(config?.table) ? config.table : defaultPinnedFieldsFor('table'));
 }
 
 // ===================== RESIZABLE TEXTAREA HEIGHTS =====================
@@ -895,8 +950,12 @@ function wireFieldHeightPersistence(el, fieldName) {
  * fully live (editable, same dbl-click-to-expand, same pin-toggle button) rather than a
  * separate read-only summary. Pinned fields are ADDED at the top, not moved — they still
  * render in their normal spot below too, same as a pinned Slack message stays in the
- * channel. `sources` is [{ entityKey, accessors, ctx? }, ...]; the first source (in
- * array order) that defines a given pinned field name wins if more than one does. */
+ * channel. `sources` is [{ entityKey, accessors, ctx?, fields? }, ...]; the first source
+ * (in array order) that defines a given pinned field name wins if more than one does.
+ * `fields`, when given, is used INSTEAD of the plain custom.json showFields[entityKey]
+ * lookup — needed by any caller (e.g. renderPartProperties's UI-dashboard/attributes
+ * merged specs) whose effective field set for this entity isn't just custom.json's raw
+ * spec, so a pinned field that only exists in that merged spec can still be found here. */
 function renderPinnedSection(app, tab, pinGroup, sources, body) {
   const pinnedNames = getPinnedFields(pinGroup);
   if (!pinnedNames.length) return;
@@ -906,7 +965,7 @@ function renderPinnedSection(app, tab, pinGroup, sources, body) {
   let mergedCtx = {};
   for (const name of pinnedNames) {
     for (const src of sources) {
-      const spec = app.store.settings.showFields?.[src.entityKey]?.fields || {};
+      const spec = src.fields || app.store.settings.showFields?.[src.entityKey]?.fields || {};
       if (spec[name] && src.accessors[name]) {
         mergedSpec[name] = { ...spec[name], __sourceEntityKey: src.entityKey };
         mergedAccessors[name] = src.accessors[name];
@@ -1714,16 +1773,6 @@ function renderPartProperties(app, vm) {
 
   const tab = app.store.activeTab();
 
-  renderPinnedSection(app, tab, 'node', [
-    { entityKey: 'viewMember', accessors: vmAccessors },
-    { entityKey: 'part', accessors: partAccessors },
-  ], body);
-
-  const topContainer = document.createElement('div');
-  topContainer.className = 'vm-top-fields'; // stable hook for tests — the Pinned section above may or may not be present/first, so callers shouldn't rely on DOM position to find "the real viewMember-only panel"
-  body.appendChild(topContainer);
-  renderShowFieldsPanel(app, tab, 'viewMember', vmAccessors, {}, topContainer, undefined, { pinGroup: 'node' });
-
   // UI dashboard elements (text_out/text_in/numeric_out/numeric_in, reported directly
   // as "a new group 'UI' of elements ... used for simple dashboards") get a DIFFERENT
   // Root Properties spec: script/scriptEnabled are meaningless for them (they're
@@ -1737,19 +1786,54 @@ function renderPartProperties(app, vm) {
   // shared showFields.part.fields, since these two fields are meaningless for every
   // OTHER part type — every other type's own Root Properties panel is completely
   // unaffected.
+  //
+  // `attributes` (the Data Modeling editable attribute table, show:'a') only makes
+  // sense for DataEntityDetails — canvas.js's own on-node attribute list rendering
+  // already gates itself the same way (isUIDashboardType check there, ciEq(part.type,
+  // 'DataEntityDetails') here) — so every other part type had it showing an
+  // always-visible, meaningless empty "+ Add Attribute" table. Stripped from the
+  // merged spec the same way script/scriptEnabled are above.
+  //
+  // Computed BEFORE renderPinnedSection (below), not after, so pinning one of these
+  // synthesized/stripped fields is reflected consistently in the Pinned section too —
+  // it used to be built after, so renderPinnedSection's own custom.json-only lookup
+  // (showFields.part.fields) could never find uiTargetPartId/uiInputValue at all,
+  // silently dropping a pinned "Value" field from the Numeric/Text Input elements'
+  // Pinned section even though the pin toggle itself appeared to work.
   let partSpec = 'part';
   if (isUIDashboardType(part.type)) {
     const baseFields = app.store.settings.showFields?.part?.fields || {};
     const merged = {};
     for (const [name, def] of Object.entries(baseFields)) {
-      if (name === 'script' || name === 'scriptEnabled') continue;
+      if (name === 'script' || name === 'scriptEnabled' || name === 'attributes') continue;
       merged[name] = { ...def, __sourceEntityKey: 'part' };
     }
     merged.uiTargetPartId = { show: 's', access: 'w', label: 'Bound Part', __sourceEntityKey: 'part' };
     if (ciEq(part.type, 'UITextInput')) merged.uiInputValue = { show: 't', access: 'w', label: 'Value', __sourceEntityKey: 'part' };
     else if (ciEq(part.type, 'UINumericInput')) merged.uiInputValue = { show: 'n', access: 'w', label: 'Value', __sourceEntityKey: 'part' };
     partSpec = merged;
+  } else if (!ciEq(part.type, 'DataEntityDetails')) {
+    const baseFields = app.store.settings.showFields?.part?.fields || {};
+    if (baseFields.attributes) {
+      const merged = {};
+      for (const [name, def] of Object.entries(baseFields)) {
+        if (name === 'attributes') continue;
+        merged[name] = { ...def, __sourceEntityKey: 'part' };
+      }
+      partSpec = merged;
+    }
   }
+
+  renderPinnedSection(app, tab, 'node', [
+    { entityKey: 'viewMember', accessors: vmAccessors },
+    { entityKey: 'part', accessors: partAccessors, fields: typeof partSpec === 'object' ? partSpec : undefined },
+  ], body);
+
+  const topContainer = document.createElement('div');
+  topContainer.className = 'vm-top-fields'; // stable hook for tests — the Pinned section above may or may not be present/first, so callers shouldn't rely on DOM position to find "the real viewMember-only panel"
+  body.appendChild(topContainer);
+  renderShowFieldsPanel(app, tab, 'viewMember', vmAccessors, {}, topContainer, undefined, { pinGroup: 'node' });
+
   renderRootPropertiesSection(app, partSpec, partAccessors, body, undefined, { pinGroup: 'node', idNamespace: 'part' });
 }
 

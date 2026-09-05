@@ -16199,6 +16199,244 @@ def check_load_sfcce_dialog_ux_and_generate_unique_id(page):
     return True, "Load SFCCE's dialog is now a compact 6-row grid with correctly-worded (none)/(generate unique) options, right-click-copies its exact mapping call like Remap's own submit button, and the mapped Section Id/Description now surface on the generated BusinessOrganizationUnit part's own properties and in the SFCE Catalog's table columns"
 
 
+def check_pinned_field_ui_dashboard_value(page):
+    """Regression guard, reported directly: "the special ui elements numeric input,
+    text input cannot pin the value field to the pinned area." UINumericInput/
+    UITextInput parts (isUIDashboardType, state.js) get a synthesized "Value"
+    (uiInputValue) Root Properties field that only exists in a merged spec object
+    built in renderPartProperties (render.js) -- it isn't in custom.json's
+    showFields.part.fields at all. renderPinnedSection used to ALWAYS look the field
+    up via the plain custom.json showFields[entityKey] lookup, so pinning "Value"
+    correctly toggled the pin state (the button itself lives in the merged-spec-driven
+    Root Properties section) but the Pinned section could never find a spec entry for
+    it and silently rendered nothing -- pin the button lit up, but no pinned row ever
+    appeared. Fixed by computing the merged spec BEFORE the Pinned section renders and
+    passing it as an explicit `fields` override on renderPinnedSection's part source.
+    Covers both UINumericInput (show:'n') and UITextInput (show:'t') on a real node
+    selection, clicking the real pin button in the DOM (not calling internals
+    directly) -- proven via TEMP BREAK."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const render = await import('./js/render.js');
+      render.setAllPinnedFields({ node: [], connector: [], table: [] });
+
+      const view = store.addView('RegrUiDashPin_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const out = {};
+      for (const [type, expectedInputType] of [['UINumericInput', 'number'], ['UITextInput', 'text']]) {
+        const part = store.createPart({ type, label: 'RegrUiDashPin_' + type, model: store.defaultModel, streams: [] });
+        const vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: 40, y: 40 });
+        tab.selection = new Set([vm.id]);
+        app.render();
+
+        const pinBtn = document.querySelector('.root-properties-section [data-pin-field=\"uiInputValue\"]');
+        out[type + '_pinBtnPresent'] = !!pinBtn;
+        pinBtn.click();
+        // toggling the pin button calls app.render() itself synchronously
+
+        const pinnedInput = document.getElementById('sf-pinned-node-uiInputValue');
+        out[type + '_pinnedRowPresent'] = !!pinnedInput;
+        out[type + '_pinnedRowType'] = pinnedInput ? pinnedInput.type : null;
+        out[type + '_expectedInputType'] = expectedInputType;
+
+        render.setAllPinnedFields({ node: [], connector: [], table: [] }); // reset between the two part types
+        tab.selection = new Set();
+        app.render();
+      }
+      return out;
+    }
+    """)
+    problems = []
+    for type_, expected in [('UINumericInput', 'number'), ('UITextInput', 'text')]:
+        if not result[f"{type_}_pinBtnPresent"]:
+            problems.append(f"test setup: expected {type_}'s Root Properties to have a pin button for uiInputValue")
+        if not result[f"{type_}_pinnedRowPresent"]:
+            problems.append(f"expected pinning {type_}'s Value field to make it appear in the Pinned section (#sf-pinned-node-uiInputValue), but it never rendered")
+        elif result[f"{type_}_pinnedRowType"] != expected:
+            problems.append(f"expected {type_}'s pinned Value field to render as a {expected!r} input, got {result[f'{type_}_pinnedRowType']!r}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "pinning UINumericInput/UITextInput's synthesized 'Value' (uiInputValue) field now correctly shows it in the Pinned section, not just toggling an inert pin button"
+
+
+def check_attributes_field_only_for_data_entity_details(page):
+    """Regression guard, reported directly: "only datadatadetail should show the
+    special 'attributes' and 'add attributes' portion in the properties panel."
+    showFields.part.fields.attributes (the Data Modeling editable attribute table,
+    show:'a') used to render unconditionally for EVERY part type's Root Properties,
+    even though it's only ever meaningful for DataEntityDetails -- canvas.js's own
+    on-node attribute-list rendering already gates itself the same way
+    (isAttributeForeignKey's own doc comment references it). Every other part type
+    showed an always-empty, meaningless "+ Add Attribute" table. Fixed by stripping
+    `attributes` from the merged Root Properties spec for any part type that isn't
+    DataEntityDetails (and isn't a UI dashboard type, which already gets its own
+    fully-separate merged spec). Also confirms the fix is consistent in the Pinned
+    section: pinning 'attributes' globally still only surfaces it for a
+    DataEntityDetails part, not for an unrelated part type."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const render = await import('./js/render.js');
+
+      const view = store.addView('RegrAttrsGate_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+
+      const ded = store.createPart({ type: 'DataEntityDetails', label: 'RegrAttrsGate_DED', model: store.defaultModel, streams: [] });
+      const bf = store.createPart({ type: 'BusinessFunction', label: 'RegrAttrsGate_BF', model: store.defaultModel, streams: [] });
+      const dedVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: ded.id, x: 40, y: 40 });
+      const bfVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: bf.id, x: 200, y: 40 });
+
+      const out = {};
+
+      render.setAllPinnedFields({ node: [], connector: [], table: [] });
+      tab.selection = new Set([dedVm.id]);
+      app.render();
+      out.dedRootAttributesPresent = !!document.getElementById('sf-part-attributes');
+
+      tab.selection = new Set([bfVm.id]);
+      app.render();
+      out.bfRootAttributesPresent = !!document.getElementById('sf-part-attributes');
+
+      // Pinned globally -- should only surface where the field is actually meaningful.
+      render.setAllPinnedFields({ node: ['attributes'], connector: [], table: [] });
+      tab.selection = new Set([dedVm.id]);
+      app.render();
+      out.dedPinnedAttributesPresent = !!document.getElementById('sf-pinned-node-attributes');
+
+      tab.selection = new Set([bfVm.id]);
+      app.render();
+      out.bfPinnedAttributesPresent = !!document.getElementById('sf-pinned-node-attributes');
+
+      render.setAllPinnedFields({ node: [], connector: [], table: [] });
+      return out;
+    }
+    """)
+    problems = []
+    if not result["dedRootAttributesPresent"]:
+        problems.append("expected DataEntityDetails to still show the Attributes field in Root Properties")
+    if result["bfRootAttributesPresent"]:
+        problems.append("expected BusinessFunction (not DataEntityDetails) to NOT show the Attributes field in Root Properties")
+    if not result["dedPinnedAttributesPresent"]:
+        problems.append("expected a pinned Attributes field to appear in the Pinned section for a DataEntityDetails part")
+    if result["bfPinnedAttributesPresent"]:
+        problems.append("expected a pinned Attributes field to stay absent from the Pinned section for a BusinessFunction part (attributes are meaningless for it)")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "the Attributes/+Add Attribute editable table now only shows for DataEntityDetails parts, in both Root Properties and the Pinned section -- every other part type no longer shows an always-empty, meaningless table"
+
+
+def check_pinned_fields_default_includes_script(page):
+    """Regression guard/new-feature check, reported directly: "add the fields
+    'script' and 'Part Script Enabled' to be pinned by default in current settings."
+    DEFAULT_PINNED_FIELDS (render.js) used to be one flat list shared by all three pin
+    groups (node/connector/table); a fresh browser with no dycad-pinned-fields
+    localStorage entry yet would default the node group (canvas node selection / the
+    ViewMembers catalog's part rows) to view/type/label/model/streams only. Now
+    defaultPinnedFieldsFor('node') additionally includes script/scriptEnabled (Part-
+    only fields, meaningless for connectors, so the 'connector' group's own default is
+    deliberately left unchanged). Confirms both getAllPinnedFields()'s fallback AND a
+    real, freshly-selected part's Root Properties Pinned section actually show Script/
+    Part Script Enabled with NO prior pinning action taken."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const render = await import('./js/render.js');
+      localStorage.removeItem('dycad-pinned-fields');
+
+      const defaults = render.getAllPinnedFields();
+
+      const view = store.addView('RegrDefaultScriptPin_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const part = store.createPart({ type: 'BusinessFunction', label: 'RegrDefaultScriptPin', model: store.defaultModel, streams: [] });
+      const vm = store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: 40, y: 40 });
+      tab.selection = new Set([vm.id]);
+      app.render();
+
+      const out = {
+        nodeDefaultHasScript: defaults.node.includes('script'),
+        nodeDefaultHasScriptEnabled: defaults.node.includes('scriptEnabled'),
+        connectorDefaultHasScript: defaults.connector.includes('script'),
+        pinnedScriptPresent: !!document.getElementById('sf-pinned-node-script'),
+        pinnedScriptEnabledPresent: !!document.getElementById('sf-pinned-node-scriptEnabled'),
+      };
+      render.setAllPinnedFields({ node: [], connector: [], table: [] }); // leave a clean slate for later checks
+      return out;
+    }
+    """)
+    problems = []
+    if not result["nodeDefaultHasScript"] or not result["nodeDefaultHasScriptEnabled"]:
+        problems.append("expected the 'node' pin group's default field list to include both 'script' and 'scriptEnabled'")
+    if result["connectorDefaultHasScript"]:
+        problems.append("expected the 'connector' pin group's default to NOT include 'script' (connectors have no script field)")
+    if not result["pinnedScriptPresent"] or not result["pinnedScriptEnabledPresent"]:
+        problems.append("expected a freshly-selected part (no prior pinning) to already show Script/Part Script Enabled in its Pinned section")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "Script and Part Script Enabled are now pinned by default (for the 'node' pin group) on a fresh/cleared pinned-fields setting"
+
+
+def check_properties_panel_preserves_scroll_during_render(page):
+    """Regression guard, reported directly: "when simulator is running, the properties
+    panel repositions to top each tick, can this be removed so if user scrolls through
+    properties while sim is running it doesn't reposition view back to top of
+    properties?" Every simulation tick calls app.render(), which rebuilds
+    #properties-body's innerHTML from scratch even when the exact same node is still
+    selected -- #right-panel (the actual overflow-y:auto scrolling container; the
+    Properties section itself doesn't scroll on its own) lost its scroll position as a
+    side effect. Fixed via propertiesIdentityKey (render.js): renderProperties now
+    snapshots #right-panel's scrollTop beforehand and restores it after, but ONLY when
+    the panel is showing the exact same thing as last render (same selected
+    viewMember/section/view) -- a genuine selection change still resets to top, proven
+    here as a negative control alongside the positive same-selection case."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.addView('RegrScrollPreserve_' + Date.now(), 'ff');
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const partA = store.createPart({ type: 'BusinessFunction', label: 'RegrScrollPreserve_A', model: store.defaultModel, streams: [] });
+      const partB = store.createPart({ type: 'BusinessFunction', label: 'RegrScrollPreserve_B', model: store.defaultModel, streams: [] });
+      const vmA = store.createViewMember({ view: view.id, objectType: 'part', objectId: partA.id, x: 40, y: 40 });
+      const vmB = store.createViewMember({ view: view.id, objectType: 'part', objectId: partB.id, x: 200, y: 40 });
+
+      const rightPanel = document.getElementById('right-panel');
+      rightPanel.style.maxHeight = '150px'; // force a real scrollbar regardless of natural content height
+
+      tab.selection = new Set([vmA.id]);
+      app.render();
+      rightPanel.scrollTop = 80;
+      const scrolledTo = rightPanel.scrollTop; // what the browser actually clamped it to
+
+      // Simulate a sim tick's re-render: SAME selection, called again.
+      app.render();
+      const afterSameSelectionRerender = rightPanel.scrollTop;
+
+      // Negative control: a genuine selection change should still reset to top.
+      tab.selection = new Set([vmB.id]);
+      app.render();
+      const afterSelectionChange = rightPanel.scrollTop;
+
+      rightPanel.style.maxHeight = '';
+      return { scrolledTo, afterSameSelectionRerender, afterSelectionChange };
+    }
+    """)
+    problems = []
+    if result["scrolledTo"] <= 0:
+        problems.append(f"test setup: expected #right-panel to actually be scrollable (scrollTop > 0 after setting it), got {result['scrolledTo']}")
+    elif result["afterSameSelectionRerender"] != result["scrolledTo"]:
+        problems.append(f"expected re-rendering with the SAME node still selected to preserve #right-panel's scroll position ({result['scrolledTo']}), got {result['afterSameSelectionRerender']}")
+    if result["afterSelectionChange"] != 0:
+        problems.append(f"expected a genuine selection change to still reset #right-panel's scroll to top, got {result['afterSelectionChange']}")
+    if problems:
+        return False, "; ".join(problems) + f" (full: {result})"
+    return True, "re-rendering the properties panel while the same node/edge/view stays selected (e.g. every simulation tick) now preserves the user's scroll position, while a genuine selection change still resets it to top"
+
+
 CHECKS = [
     check_boots_clean,
     check_example_simulates,
@@ -16401,6 +16639,10 @@ CHECKS = [
     check_smart_check_model_detection_and_fix_precedence,
     check_smart_check_model_dialog,
     check_copy_model,
+    check_pinned_field_ui_dashboard_value,
+    check_attributes_field_only_for_data_entity_details,
+    check_pinned_fields_default_includes_script,
+    check_properties_panel_preserves_scroll_during_render,
 ]
 
 
