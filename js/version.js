@@ -5880,4 +5880,10 @@
 // regenerated back to its full form). instructions.html's Quick Start line points
 // to this new example as the "no missing parts" alternative. DESIGN_DOCUMENT.md
 // and tests/README.md updated.
-export const APP_VERSION = '0.948';
+// v0.949: new public/DyCAD-User-Manual.pdf -- a full illustrated user manual (enterprise
+// architecture/process mapping/data modeling foundations for a newcomer, a guided
+// walkthrough with real screenshots, and a full reference section covering everything
+// instructions.html covers), assembled outside the app from a live session and
+// containing no code of its own. instructions.html gains one new line, directly above
+// its existing "Quick start" paragraph, linking to it (public/DyCAD-User-Manual.pdf).
+export const APP_VERSION = '0.949';
