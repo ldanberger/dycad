@@ -2003,7 +2003,7 @@ def check_save_load_toolbar_buttons_renamed(page):
         page.wait_for_timeout(100)
         page.click("#file-menu >> text=Load")
     chooser = fc_info.value
-    chooser.set_files("/home/larry/projects/dycad/public/examples/pipeline demo.json")
+    chooser.set_files(str(ROOT / "public/examples/pipeline demo.json"))
     page.wait_for_timeout(300)
     part_count = page.evaluate("window.dycadApp.store.doc.parts.length")
     if not part_count:
@@ -10724,7 +10724,7 @@ def check_view3d_disposed_on_full_document_load(page):
       return { oldTabId, hadInstanceBefore };
     }
     """)
-    page.set_input_files("#load-json-input", "/home/larry/projects/dycad/public/examples/pipeline demo.json")
+    page.set_input_files("#load-json-input", str(ROOT / "public/examples/pipeline demo.json"))
     page.wait_for_timeout(400)
     after = js(page, f"""
     async () => {{
