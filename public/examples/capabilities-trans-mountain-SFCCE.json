@@ -1,0 +1,5048 @@
+[
+  {
+    "function": "Accounting",
+    "functionDescription": "Records and reconciles the financial transactions of the pipeline, terminal, and marine businesses.",
+    "functionId": "accounting",
+    "businessCapabilities": [
+      {
+        "name": "Pipeline Asset & Cost Accounting",
+        "description": "Accounts for capital-intensive pipeline, pump station, and terminal assets across their life.",
+        "applicationCapabilities": [
+          {
+            "name": "Fixed Asset & Capitalization Accounting",
+            "description": "Capitalizes expansion and sustaining spend and tracks depreciation by pipeline segment and terminal.",
+            "sections": [
+              "Resources Sustainment Functions",
+              "Finance Control Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Fixed Asset Record",
+                "description": "A capitalized pipeline, station, tank, or dock asset with cost and useful life."
+              },
+              {
+                "name": "Capital Work Order",
+                "description": "An authorized capital job that accumulates costs against an asset."
+              },
+              {
+                "name": "Depreciation Schedule",
+                "description": "The periodic charge allocating asset cost over its regulated life."
+              },
+              {
+                "name": "Asset Retirement Obligation",
+                "description": "The estimated cost of decommissioning and abandoning a pipeline segment."
+              }
+            ]
+          },
+          {
+            "name": "Regulatory Deferral & Cost Recovery Accounting",
+            "description": "Tracks costs and deferral balances recoverable through tolls under the regulator-approved framework.",
+            "sections": [
+              "Resources Sustainment Functions",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Regulatory Deferral Account",
+                "description": "A balance of costs or revenues deferred for future toll recovery."
+              },
+              {
+                "name": "Cost Recovery Entry",
+                "description": "A ledger entry linking incurred cost to toll recovery."
+              },
+              {
+                "name": "Toll Adjustment Record",
+                "description": "A true-up between forecast and actual recoverable cost."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "General Ledger & Period Close",
+        "description": "Maintains the ledger and executes month-end and year-end close.",
+        "applicationCapabilities": [
+          {
+            "name": "General Ledger & Period Close",
+            "description": "Posts journals across legal entities and manages the close calendar, commonly on an ERP such as SAP.",
+            "sections": [
+              "Resources Sustainment Functions",
+              "Finance Control Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Journal Entry",
+                "description": "A balanced posting to the general ledger."
+              },
+              {
+                "name": "Chart of Accounts",
+                "description": "The account structure used to classify pipeline financial activity."
+              },
+              {
+                "name": "Period Close Checklist",
+                "description": "The ordered tasks that must complete to close a period."
+              },
+              {
+                "name": "Intercompany Transaction",
+                "description": "A charge between the Canadian and U.S. Trans Mountain entities."
+              }
+            ]
+          },
+          {
+            "name": "Payables & Receivables Processing",
+            "description": "Processes vendor invoices, payments, customer invoices, and cash receipts.",
+            "sections": [
+              "Resources Sustainment Functions",
+              "Centralized Operational Functions (Economies of Scale)"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Vendor Invoice",
+                "description": "A supplier bill awaiting approval and payment."
+              },
+              {
+                "name": "Payment Run",
+                "description": "A batch of approved payments issued to vendors."
+              },
+              {
+                "name": "Shipper Invoice",
+                "description": "A bill issued to a shipper for transportation and terminal services."
+              },
+              {
+                "name": "Cash Receipt",
+                "description": "A payment received and applied against an invoice."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Ad hoc/Enhancement Projects",
+    "functionDescription": "Delivers one-off improvements and enhancements to pipeline operations, facilities, and business processes.",
+    "functionId": "projects",
+    "businessCapabilities": [
+      {
+        "name": "Enhancement Project Delivery",
+        "description": "Scopes, approves, and executes small and medium enhancement projects outside of major expansion.",
+        "applicationCapabilities": [
+          {
+            "name": "Enhancement Project Intake & Approval",
+            "description": "Captures enhancement requests and routes them through business-case and funding approval.",
+            "sections": [
+              "Continuous Improvement Functions",
+              "Staff Specialist Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Enhancement Request",
+                "description": "A proposed improvement to a facility, process, or system."
+              },
+              {
+                "name": "Business Case",
+                "description": "The justification, cost, and benefit analysis supporting a project."
+              },
+              {
+                "name": "Funding Approval",
+                "description": "A recorded authorization to spend against a project."
+              }
+            ]
+          },
+          {
+            "name": "Enhancement Project Tracking",
+            "description": "Tracks schedule, cost, and scope for enhancement projects from approval to closeout.",
+            "sections": [
+              "Continuous Improvement Functions",
+              "Projects & Construction"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Project Charter",
+                "description": "The agreed scope, objectives, and sponsor of a project."
+              },
+              {
+                "name": "Project Schedule",
+                "description": "The dated activities and milestones of a project."
+              },
+              {
+                "name": "Change Request",
+                "description": "A formal request to alter project scope, cost, or schedule."
+              },
+              {
+                "name": "Lessons Learned Entry",
+                "description": "A recorded insight captured at project closeout."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Audit",
+    "functionDescription": "Provides independent assurance over financial reporting, operational controls, and regulatory commitments.",
+    "functionId": "audit",
+    "businessCapabilities": [
+      {
+        "name": "Internal & External Audit",
+        "description": "Plans and reports on audits of controls, financials, and compliance.",
+        "applicationCapabilities": [
+          {
+            "name": "Audit Planning & Findings Management",
+            "description": "Maintains the audit plan and tracks findings and management actions to closure.",
+            "sections": [
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "esf",
+            "entities": [
+              {
+                "name": "Audit Plan",
+                "description": "The approved schedule of audits for a fiscal year."
+              },
+              {
+                "name": "Audit Finding",
+                "description": "An identified control gap or non-conformance from an audit."
+              },
+              {
+                "name": "Management Action Plan",
+                "description": "The committed corrective action and due date for a finding."
+              },
+              {
+                "name": "Audit Workpaper",
+                "description": "The evidence and testing record supporting an audit conclusion."
+              }
+            ]
+          },
+          {
+            "name": "Crown Corporation Reporting & Special Examination",
+            "description": "Supports reporting and examinations required of a federal Crown corporation.",
+            "sections": [
+              "Enterprise Scope Functions",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Special Examination Report",
+                "description": "A periodic external examination of a Crown corporation's systems and practices."
+              },
+              {
+                "name": "Auditor General Query",
+                "description": "A request from the external auditor requiring a documented response."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Regulatory Compliance Assurance",
+        "description": "Provides assurance that regulatory commitments and conditions are being met.",
+        "applicationCapabilities": [
+          {
+            "name": "Regulatory Commitment Audit",
+            "description": "Audits performance against regulator conditions and management-system requirements.",
+            "sections": [
+              "Enterprise Scope Functions",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Regulatory Condition",
+                "description": "A binding requirement attached to a certificate or approval."
+              },
+              {
+                "name": "Compliance Audit Result",
+                "description": "The outcome of testing a condition or commitment."
+              },
+              {
+                "name": "Corrective Action",
+                "description": "A recorded action to close a compliance gap."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Budgeting",
+    "functionDescription": "Plans and controls operating and capital budgets across the pipeline and marine system.",
+    "functionId": "budget",
+    "businessCapabilities": [
+      {
+        "name": "Operating & Capital Budgeting",
+        "description": "Builds and approves annual operating and multi-year capital plans.",
+        "applicationCapabilities": [
+          {
+            "name": "Operating Budget Preparation",
+            "description": "Builds cost-center operating budgets for operations, maintenance, and corporate functions.",
+            "sections": [
+              "Finance Control Functions"
+            ],
+            "sectionId": "fcf",
+            "entities": [
+              {
+                "name": "Operating Budget",
+                "description": "The approved annual operating spend by cost center."
+              },
+              {
+                "name": "Cost Center",
+                "description": "An organizational unit that accumulates and reports costs."
+              },
+              {
+                "name": "Budget Assumption",
+                "description": "A planning driver such as throughput or power price."
+              },
+              {
+                "name": "Budget Version",
+                "description": "A dated iteration of a budget under review."
+              }
+            ]
+          },
+          {
+            "name": "Capital Plan Management",
+            "description": "Manages the multi-year capital plan for sustaining, integrity, and growth projects.",
+            "sections": [
+              "Finance Control Functions",
+              "Projects & Construction"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Capital Plan",
+                "description": "The multi-year plan of authorized and forecast capital projects."
+              },
+              {
+                "name": "Capital Project Estimate",
+                "description": "The estimated cost of a capital project at a given stage."
+              },
+              {
+                "name": "Contingency Allocation",
+                "description": "An amount held against project risk and released by approval."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Forecasting & Variance Analysis",
+        "description": "Reforecasts spend and explains variances to plan.",
+        "applicationCapabilities": [
+          {
+            "name": "Forecast & Variance Reporting",
+            "description": "Produces forecasts and variance explanations for management and the shareholder.",
+            "sections": [
+              "Finance Control Functions"
+            ],
+            "sectionId": "fcf",
+            "entities": [
+              {
+                "name": "Forecast Scenario",
+                "description": "A projected financial outcome under stated assumptions."
+              },
+              {
+                "name": "Variance Explanation",
+                "description": "A narrative reason for a difference between actual and plan."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Controller",
+    "functionDescription": "Owns financial controls, reporting integrity, and statutory reporting.",
+    "functionId": "controller",
+    "businessCapabilities": [
+      {
+        "name": "Financial Controls & Reporting",
+        "description": "Operates internal controls over financial reporting and produces consolidated statements.",
+        "applicationCapabilities": [
+          {
+            "name": "Financial Consolidation & Reporting",
+            "description": "Consolidates entity results and produces management and statutory financial statements.",
+            "sections": [
+              "Finance Control Functions"
+            ],
+            "sectionId": "fcf",
+            "entities": [
+              {
+                "name": "Consolidated Financial Statement",
+                "description": "The combined statements across Trans Mountain entities."
+              },
+              {
+                "name": "Reporting Package",
+                "description": "A standardized submission of results from a reporting unit."
+              },
+              {
+                "name": "Elimination Entry",
+                "description": "An adjustment removing intercompany balances on consolidation."
+              }
+            ]
+          },
+          {
+            "name": "Internal Control Management",
+            "description": "Documents key controls and records test results and deficiencies.",
+            "sections": [
+              "Finance Control Functions",
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Key Control",
+                "description": "A documented control over a material financial process."
+              },
+              {
+                "name": "Control Test Result",
+                "description": "The pass or fail outcome of a control test."
+              },
+              {
+                "name": "Control Deficiency",
+                "description": "A recorded weakness in the design or operation of a control."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Treasury & Debt Management",
+        "description": "Manages cash, borrowing, and liquidity for a Crown-owned pipeline.",
+        "applicationCapabilities": [
+          {
+            "name": "Cash & Debt Management",
+            "description": "Forecasts cash and administers loan and guarantee arrangements with the shareholder and lenders.",
+            "sections": [
+              "Finance Control Functions"
+            ],
+            "sectionId": "fcf",
+            "entities": [
+              {
+                "name": "Cash Forecast",
+                "description": "A projection of inflows and outflows over a planning horizon."
+              },
+              {
+                "name": "Debt Facility",
+                "description": "A credit arrangement with its limit, rate, and terms."
+              },
+              {
+                "name": "Bank Account",
+                "description": "An account used for receipts and disbursements."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Customer Relations",
+    "functionDescription": "Manages relationships with shippers, refiners, and other customers who move product on the system.",
+    "functionId": "customerrelations",
+    "businessCapabilities": [
+      {
+        "name": "Shipper Relationship Management",
+        "description": "Maintains shipper accounts, contacts, and service issues.",
+        "applicationCapabilities": [
+          {
+            "name": "Shipper Account Management",
+            "description": "Maintains shipper master records, credit standing, and contacts.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Shipper Account",
+                "description": "A customer authorized to nominate and ship product."
+              },
+              {
+                "name": "Shipper Contact",
+                "description": "A named representative of a shipper."
+              },
+              {
+                "name": "Credit Assessment",
+                "description": "An evaluation of a shipper's creditworthiness and required security."
+              },
+              {
+                "name": "Service Agreement",
+                "description": "The contract terms governing a shipper's use of the system."
+              }
+            ]
+          },
+          {
+            "name": "Shipper Inquiry & Issue Tracking",
+            "description": "Logs and resolves shipper questions, disputes, and service requests.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Shipper Inquiry",
+                "description": "A question or request raised by a shipper."
+              },
+              {
+                "name": "Dispute Case",
+                "description": "A contested invoice, volume, or quality result under review."
+              },
+              {
+                "name": "Customer Notification",
+                "description": "A notice sent to shippers about outages, tolls, or procedures."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Customer Engagement & Feedback",
+        "description": "Collects shipper feedback and reports on service performance.",
+        "applicationCapabilities": [
+          {
+            "name": "Shipper Feedback & Satisfaction",
+            "description": "Captures shipper feedback and service-level scorecards.",
+            "sections": [
+              "Mainstream Operational Functions"
+            ],
+            "sectionId": "mof",
+            "entities": [
+              {
+                "name": "Shipper Survey Response",
+                "description": "A shipper's structured feedback on service."
+              },
+              {
+                "name": "Service Level Scorecard",
+                "description": "A periodic measure of delivery against shipper expectations."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Data Admin",
+    "functionDescription": "Administers enterprise data platforms, master data, and shared data services across all Functions.",
+    "functionId": "datadmin",
+    "businessCapabilities": [
+      {
+        "name": "Master & Reference Data Administration",
+        "description": "Maintains enterprise master data shared across pipeline, finance, and commercial systems.",
+        "applicationCapabilities": [
+          {
+            "name": "Enterprise Master Data Maintenance",
+            "description": "Maintains asset, location, vendor, and shipper master records used across programs.",
+            "sections": [
+              "Centralized Operational Functions (Economies of Scale)"
+            ],
+            "sectionId": "cof",
+            "entities": [
+              {
+                "name": "Asset Master Record",
+                "description": "The enterprise identity of a pipeline segment, station, or tank."
+              },
+              {
+                "name": "Location Master Record",
+                "description": "A standardized facility, mile-post, or land-parcel location."
+              },
+              {
+                "name": "Vendor Master Record",
+                "description": "The enterprise record of a supplier."
+              },
+              {
+                "name": "Reference Code Set",
+                "description": "A controlled list of codes used across systems."
+              }
+            ]
+          },
+          {
+            "name": "Enterprise Dataset Management",
+            "description": "Creates and maintains cross-program enterprise datasets and their refresh schedules.",
+            "sections": [
+              "Centralized Operational Functions (Economies of Scale)"
+            ],
+            "sectionId": "cof",
+            "entities": [
+              {
+                "name": "Enterprise Dataset",
+                "description": "A curated dataset shared across Core Programs."
+              },
+              {
+                "name": "Data Refresh Schedule",
+                "description": "The timing of loads that keep a dataset current."
+              },
+              {
+                "name": "Data Lineage Record",
+                "description": "A trace of where a data element originates and how it flows."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Shared Data Infrastructure",
+        "description": "Provides backup, storage, and platform services to every Function.",
+        "applicationCapabilities": [
+          {
+            "name": "Data Platform & Backup Administration",
+            "description": "Operates data storage, backup, and recovery for corporate and operational systems.",
+            "sections": [
+              "Centralized Operational Functions (Economies of Scale)",
+              "Security & Cyber"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Backup Job",
+                "description": "A scheduled copy of a system or database."
+              },
+              {
+                "name": "Storage Allocation",
+                "description": "A reserved amount of storage for a system."
+              },
+              {
+                "name": "Recovery Point",
+                "description": "A restorable state of a system at a point in time."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Data Governance",
+    "functionDescription": "Sets and enforces the policies, ownership, and quality standards for Trans Mountain data.",
+    "functionId": "datagovernance",
+    "businessCapabilities": [
+      {
+        "name": "Data Policy & Stewardship",
+        "description": "Defines data ownership, standards, and stewardship roles.",
+        "applicationCapabilities": [
+          {
+            "name": "Data Ownership & Stewardship",
+            "description": "Assigns owners and stewards to critical data domains such as integrity, measurement, and land.",
+            "sections": [
+              "Resources Sustainment Functions",
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Data Domain",
+                "description": "A subject area of data with an accountable owner."
+              },
+              {
+                "name": "Data Steward Assignment",
+                "description": "The link between a person and a data domain."
+              },
+              {
+                "name": "Data Standard",
+                "description": "A rule for naming, formatting, or coding data."
+              }
+            ]
+          },
+          {
+            "name": "Data Quality Monitoring",
+            "description": "Measures and reports data quality against defined rules.",
+            "sections": [
+              "Resources Sustainment Functions",
+              "Centralized Operational Functions (Economies of Scale)"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Data Quality Rule",
+                "description": "A test that a data element must satisfy."
+              },
+              {
+                "name": "Data Quality Issue",
+                "description": "A recorded violation of a rule requiring remediation."
+              },
+              {
+                "name": "Data Quality Score",
+                "description": "A calculated measure of a dataset's fitness."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Information & Records Governance",
+        "description": "Governs retention and access for regulated pipeline records.",
+        "applicationCapabilities": [
+          {
+            "name": "Records Retention & Classification",
+            "description": "Classifies records and applies retention rules for pipeline construction and integrity records.",
+            "sections": [
+              "Resources Sustainment Functions",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Records Classification",
+                "description": "The category assigned to a record for handling."
+              },
+              {
+                "name": "Retention Schedule",
+                "description": "The period a record class must be kept."
+              },
+              {
+                "name": "Legal Hold",
+                "description": "A notice suspending disposal of specified records."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Data Management",
+    "functionDescription": "Creates, updates, and reports on the data of individual Core Programs such as pipeline, terminals, and commercial.",
+    "functionId": "datamgmt",
+    "businessCapabilities": [
+      {
+        "name": "Program Data Maintenance",
+        "description": "Keeps each Core Program's own operational data accurate and current.",
+        "applicationCapabilities": [
+          {
+            "name": "Pipeline Operating Data Maintenance",
+            "description": "Updates pipeline segment attributes, station data, and operating parameters for the operations program.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Pipeline Segment",
+                "description": "A defined length of pipe with common diameter, grade, and vintage."
+              },
+              {
+                "name": "Pump Station Record",
+                "description": "The attributes and equipment list of a pump station."
+              },
+              {
+                "name": "Maximum Operating Pressure",
+                "description": "The approved pressure limit for a segment."
+              },
+              {
+                "name": "Valve Record",
+                "description": "A mainline or lateral valve and its location and type."
+              }
+            ]
+          },
+          {
+            "name": "Terminal & Tank Data Maintenance",
+            "description": "Maintains tank, dock, and terminal data used by terminal operations.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Terminals & Marine Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Tank Record",
+                "description": "The capacity, product service, and inspection status of a storage tank."
+              },
+              {
+                "name": "Dock Record",
+                "description": "The attributes of a marine loading berth."
+              },
+              {
+                "name": "Terminal Record",
+                "description": "The identity and configuration of a terminal facility."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Program Reporting",
+        "description": "Produces reports from each program's own data.",
+        "applicationCapabilities": [
+          {
+            "name": "Operational Reporting",
+            "description": "Produces throughput, deliveries, and downtime reports for operations management.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Throughput Report",
+                "description": "A summary of volumes moved by segment and period."
+              },
+              {
+                "name": "Downtime Event",
+                "description": "A recorded interruption to flow or capacity."
+              },
+              {
+                "name": "Delivery Summary",
+                "description": "A record of volumes delivered by location."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Data Support (Analytics, Support, Policies)",
+    "functionDescription": "Assists operational managers with analytics, data policy, and decision support.",
+    "functionId": "datasupport",
+    "businessCapabilities": [
+      {
+        "name": "Analytics & Decision Support",
+        "description": "Provides analytic models and dashboards that assist operational and commercial managers.",
+        "applicationCapabilities": [
+          {
+            "name": "Operational Analytics",
+            "description": "Builds analytics on flow, pressure, and equipment condition to support operating decisions, often on a historian such as AVEVA PI.",
+            "sections": [
+              "Staff Specialist Functions",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Analytic Model",
+                "description": "A calculation or statistical model used for decisions."
+              },
+              {
+                "name": "Dashboard Definition",
+                "description": "The layout and measures of a management dashboard."
+              },
+              {
+                "name": "Time Series Tag",
+                "description": "A named stream of measured values from a field instrument."
+              }
+            ]
+          },
+          {
+            "name": "Commercial & Capacity Analytics",
+            "description": "Analyzes nominations, apportionment, and utilization to support commercial planning.",
+            "sections": [
+              "Staff Specialist Functions",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Utilization Metric",
+                "description": "A measure of how much capacity is used."
+              },
+              {
+                "name": "Forecast Demand",
+                "description": "A projected shipper demand for capacity."
+              },
+              {
+                "name": "Apportionment Analysis",
+                "description": "A study of how oversubscribed capacity was allocated."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Data Policy Support",
+        "description": "Advises managers on the application of data policies.",
+        "applicationCapabilities": [
+          {
+            "name": "Data Policy Guidance",
+            "description": "Maintains guidance and exceptions for how data may be used and shared.",
+            "sections": [
+              "Staff Specialist Functions"
+            ],
+            "sectionId": "ssf",
+            "entities": [
+              {
+                "name": "Data Sharing Agreement",
+                "description": "A record of the terms for sharing data with a party."
+              },
+              {
+                "name": "Policy Exception",
+                "description": "A documented approved deviation from a data policy."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Delivery",
+    "functionDescription": "Delivers crude oil and refined product to receiving terminals, refineries, and the marine dock.",
+    "functionId": "delivery",
+    "businessCapabilities": [
+      {
+        "name": "Product Delivery Execution",
+        "description": "Executes scheduled deliveries to receipt locations and confirms volumes.",
+        "applicationCapabilities": [
+          {
+            "name": "Delivery Scheduling & Confirmation",
+            "description": "Schedules deliveries to terminals and refineries and confirms delivered volumes.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Delivery Schedule",
+                "description": "The planned timing and volume of a delivery to a location."
+              },
+              {
+                "name": "Delivery Ticket",
+                "description": "The record of a completed delivery with volume and quality."
+              },
+              {
+                "name": "Receipt Location",
+                "description": "A point at which product leaves the system to a receiver."
+              },
+              {
+                "name": "Delivery Nomination",
+                "description": "A shipper request for a volume at a delivery point."
+              }
+            ]
+          },
+          {
+            "name": "Batch Sequencing & Tracking",
+            "description": "Sequences and tracks batches of different crude types and products through the line.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Pipeline Operations",
+              "Control Centre Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Batch",
+                "description": "A discrete volume of a single product moved through the pipeline."
+              },
+              {
+                "name": "Batch Sequence",
+                "description": "The ordered plan of batches to limit interface volume."
+              },
+              {
+                "name": "Interface Volume",
+                "description": "The mixed volume between two adjacent batches."
+              },
+              {
+                "name": "Batch Position Record",
+                "description": "The current location of a batch in the line."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Marine Delivery",
+        "description": "Delivers crude to tankers at the marine terminal.",
+        "applicationCapabilities": [
+          {
+            "name": "Tanker Loading Coordination",
+            "description": "Coordinates tanker arrival, berthing, and loading with pipeline receipts.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Terminals & Marine Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Tanker Call",
+                "description": "A scheduled visit of a vessel to the marine terminal."
+              },
+              {
+                "name": "Loading Plan",
+                "description": "The planned volume and grade to load onto a vessel."
+              },
+              {
+                "name": "Bill of Lading",
+                "description": "The document recording cargo loaded onto a vessel."
+              },
+              {
+                "name": "Berth Assignment",
+                "description": "The allocation of a dock to a vessel for a time window."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Digital Transformation, Modernization, Refresh",
+    "functionDescription": "Modernizes Trans Mountain's technology, applications, and operating technology over time.",
+    "functionId": "dt",
+    "businessCapabilities": [
+      {
+        "name": "Technology Roadmap & Modernization",
+        "description": "Plans and executes application and infrastructure modernization.",
+        "applicationCapabilities": [
+          {
+            "name": "Application Portfolio & Roadmap",
+            "description": "Maintains the inventory of applications and the modernization roadmap.",
+            "sections": [
+              "Continuous Improvement Functions",
+              "Staff Specialist Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Application Inventory Item",
+                "description": "A system in the application portfolio."
+              },
+              {
+                "name": "Modernization Initiative",
+                "description": "A funded effort to replace or upgrade a system."
+              },
+              {
+                "name": "Technology Lifecycle Record",
+                "description": "The support and end-of-life dates of a technology."
+              }
+            ]
+          },
+          {
+            "name": "Operational Technology Refresh Planning",
+            "description": "Plans refresh of SCADA, field devices, and control-network equipment.",
+            "sections": [
+              "Continuous Improvement Functions",
+              "Control Centre Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "OT Asset",
+                "description": "A field device, PLC, RTU, or network element in the control environment."
+              },
+              {
+                "name": "Refresh Plan",
+                "description": "A schedule for replacing aging OT components."
+              },
+              {
+                "name": "Obsolescence Notice",
+                "description": "A vendor notice that a product is being discontinued."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Digital Innovation",
+        "description": "Pilots digital tools that improve operations and safety.",
+        "applicationCapabilities": [
+          {
+            "name": "Digital Pilot Management",
+            "description": "Tracks pilots such as drone inspection and predictive maintenance.",
+            "sections": [
+              "Continuous Improvement Functions"
+            ],
+            "sectionId": "cif",
+            "entities": [
+              {
+                "name": "Pilot Project",
+                "description": "A time-boxed trial of a new digital capability."
+              },
+              {
+                "name": "Pilot Outcome",
+                "description": "The measured result and decision from a pilot."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "EHS",
+    "functionDescription": "Protects the health and safety of workers, contractors, and the public and manages environmental compliance.",
+    "functionId": "ehs",
+    "businessCapabilities": [
+      {
+        "name": "Occupational Health & Safety",
+        "description": "Manages worker and contractor safety programs across pipeline, terminal, and construction work.",
+        "applicationCapabilities": [
+          {
+            "name": "Incident Reporting & Investigation",
+            "description": "Records safety incidents and near misses and manages investigations and corrective actions.",
+            "sections": [
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "esf",
+            "entities": [
+              {
+                "name": "Safety Incident",
+                "description": "A recorded injury, near miss, or unsafe event."
+              },
+              {
+                "name": "Investigation Report",
+                "description": "The findings and root causes of an incident."
+              },
+              {
+                "name": "Corrective Action Item",
+                "description": "A follow-up task assigned to prevent recurrence."
+              },
+              {
+                "name": "Lost Time Record",
+                "description": "A record of days away from work due to injury."
+              }
+            ]
+          },
+          {
+            "name": "Work Permit & Hazard Control",
+            "description": "Issues hot work, confined space, and ground disturbance permits with hazard assessments.",
+            "sections": [
+              "Enterprise Scope Functions",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Work Permit",
+                "description": "An authorization to perform a hazardous task under set controls."
+              },
+              {
+                "name": "Job Hazard Analysis",
+                "description": "A task-level assessment of hazards and controls."
+              },
+              {
+                "name": "Lockout Tagout Record",
+                "description": "The isolation of energy sources before work."
+              },
+              {
+                "name": "Contractor Safety Qualification",
+                "description": "An evaluation of a contractor's safety program."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Environmental Compliance Management",
+        "description": "Manages environmental permits, monitoring, and reporting.",
+        "applicationCapabilities": [
+          {
+            "name": "Environmental Monitoring & Compliance",
+            "description": "Tracks environmental conditions, permit requirements, and monitoring results along the right-of-way.",
+            "sections": [
+              "Enterprise Scope Functions",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Environmental Permit",
+                "description": "An approval with conditions from an environmental authority."
+              },
+              {
+                "name": "Monitoring Result",
+                "description": "A measured environmental observation such as water quality."
+              },
+              {
+                "name": "Environmental Condition",
+                "description": "A commitment to protect a species, watercourse, or habitat."
+              },
+              {
+                "name": "Emissions Record",
+                "description": "A measured or estimated release to air."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "ESG",
+    "functionDescription": "Manages environmental, social, and governance commitments and disclosure, including Indigenous partnership and climate.",
+    "functionId": "esg",
+    "businessCapabilities": [
+      {
+        "name": "ESG Reporting & Disclosure",
+        "description": "Produces sustainability metrics and disclosures for the shareholder and the public.",
+        "applicationCapabilities": [
+          {
+            "name": "Sustainability Reporting",
+            "description": "Collects and reports emissions, safety, and community metrics for annual disclosure.",
+            "sections": [
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "esf",
+            "entities": [
+              {
+                "name": "ESG Metric",
+                "description": "A measured sustainability indicator with a reporting period."
+              },
+              {
+                "name": "Sustainability Report",
+                "description": "A published disclosure of ESG performance."
+              },
+              {
+                "name": "Emissions Inventory",
+                "description": "The total greenhouse gas emissions by source and year."
+              }
+            ]
+          },
+          {
+            "name": "Climate & Emissions Management",
+            "description": "Tracks emission reduction targets and energy use of pump stations.",
+            "sections": [
+              "Enterprise Scope Functions",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Emission Reduction Target",
+                "description": "A committed reduction with a base year and deadline."
+              },
+              {
+                "name": "Energy Consumption Record",
+                "description": "Electricity or fuel used by a facility."
+              },
+              {
+                "name": "Offset Record",
+                "description": "A credit applied against emissions."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Community & Social Investment",
+        "description": "Manages community benefits and investment commitments.",
+        "applicationCapabilities": [
+          {
+            "name": "Community Investment Tracking",
+            "description": "Tracks community investment, benefit agreements, and local hiring commitments.",
+            "sections": [
+              "Enterprise Scope Functions",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Community Investment",
+                "description": "A contribution to a community program or initiative."
+              },
+              {
+                "name": "Benefit Commitment",
+                "description": "A promised outcome to a community or Indigenous group."
+              },
+              {
+                "name": "Local Hiring Record",
+                "description": "A record of employment and contracting with local groups."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Finance",
+    "functionDescription": "Manages the financial health, funding, and financial performance of the corporation.",
+    "functionId": "finance",
+    "businessCapabilities": [
+      {
+        "name": "Financial Planning & Performance",
+        "description": "Plans and monitors corporate financial performance against targets.",
+        "applicationCapabilities": [
+          {
+            "name": "Financial Performance Management",
+            "description": "Tracks revenue, cost, and return metrics for the executive team and shareholder.",
+            "sections": [
+              "Finance Control Functions"
+            ],
+            "sectionId": "fcf",
+            "entities": [
+              {
+                "name": "Financial Metric",
+                "description": "A tracked measure such as EBITDA or unit cost per barrel."
+              },
+              {
+                "name": "Performance Target",
+                "description": "An approved goal for a financial metric."
+              },
+              {
+                "name": "Board Financial Package",
+                "description": "The financial reporting prepared for the board."
+              }
+            ]
+          },
+          {
+            "name": "Investment & Capital Allocation",
+            "description": "Evaluates and ranks investment options for capital allocation.",
+            "sections": [
+              "Finance Control Functions",
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Investment Proposal",
+                "description": "A proposed use of capital with expected return."
+              },
+              {
+                "name": "Capital Ranking",
+                "description": "A prioritization of proposals against constraints."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Revenue & Tolls Finance",
+        "description": "Accounts for transportation revenue and toll billing.",
+        "applicationCapabilities": [
+          {
+            "name": "Toll Billing & Revenue Recognition",
+            "description": "Bills shippers for transportation and recognizes revenue by contract.",
+            "sections": [
+              "Finance Control Functions",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Toll Invoice",
+                "description": "A charge to a shipper for volume moved at the applicable toll."
+              },
+              {
+                "name": "Revenue Recognition Entry",
+                "description": "The accounting of revenue in the correct period."
+              },
+              {
+                "name": "Contract Revenue Schedule",
+                "description": "The expected revenue from a firm service contract."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Financial Support (Policies and Priorities)",
+    "functionDescription": "Assists operating managers with financial policy, priorities, and decision support.",
+    "functionId": "financesupport",
+    "businessCapabilities": [
+      {
+        "name": "Financial Policy & Advisory",
+        "description": "Sets financial policies and advises managers on spend priorities.",
+        "applicationCapabilities": [
+          {
+            "name": "Financial Policy Management",
+            "description": "Maintains delegation of authority, spending limits, and financial policies.",
+            "sections": [
+              "Staff Specialist Functions"
+            ],
+            "sectionId": "ssf",
+            "entities": [
+              {
+                "name": "Delegation of Authority",
+                "description": "A rule stating who may approve a spend of a given size."
+              },
+              {
+                "name": "Financial Policy",
+                "description": "A documented rule for financial behavior."
+              },
+              {
+                "name": "Spending Limit",
+                "description": "The maximum amount an approver may authorize."
+              }
+            ]
+          },
+          {
+            "name": "Business Partner Financial Analysis",
+            "description": "Provides financial analysis to operating and project managers.",
+            "sections": [
+              "Staff Specialist Functions",
+              "Projects & Construction"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Cost Benefit Analysis",
+                "description": "A comparison of costs and benefits of an option."
+              },
+              {
+                "name": "Financial Advisory Note",
+                "description": "A written analysis provided to a manager."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "GRC",
+    "functionDescription": "Governs enterprise risk, compliance, and regulatory obligations across the corporation.",
+    "functionId": "grc",
+    "businessCapabilities": [
+      {
+        "name": "Enterprise Risk Management",
+        "description": "Identifies, assesses, and monitors enterprise risks.",
+        "applicationCapabilities": [
+          {
+            "name": "Risk Register Management",
+            "description": "Maintains the enterprise risk register and treatment plans.",
+            "sections": [
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "esf",
+            "entities": [
+              {
+                "name": "Enterprise Risk",
+                "description": "An event that could affect objectives with likelihood and impact."
+              },
+              {
+                "name": "Risk Treatment Plan",
+                "description": "The actions to mitigate or accept a risk."
+              },
+              {
+                "name": "Key Risk Indicator",
+                "description": "A measure signaling a change in risk exposure."
+              },
+              {
+                "name": "Risk Appetite Statement",
+                "description": "The level of risk the corporation is willing to accept."
+              }
+            ]
+          },
+          {
+            "name": "Business Continuity Management",
+            "description": "Manages continuity plans and impact analyses for critical operations.",
+            "sections": [
+              "Enterprise Scope Functions",
+              "Emergency Management"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Business Impact Analysis",
+                "description": "An assessment of the effect of losing a function."
+              },
+              {
+                "name": "Continuity Plan",
+                "description": "A documented approach to maintain critical operations."
+              },
+              {
+                "name": "Continuity Exercise",
+                "description": "A test of a continuity plan and its results."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Compliance & Policy Management",
+        "description": "Manages policies, obligations, and compliance attestations.",
+        "applicationCapabilities": [
+          {
+            "name": "Compliance Obligation Register",
+            "description": "Maintains regulatory and contractual obligations and the controls that satisfy them.",
+            "sections": [
+              "Enterprise Scope Functions",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Compliance Obligation",
+                "description": "A legal or regulatory requirement the corporation must meet."
+              },
+              {
+                "name": "Policy Document",
+                "description": "A corporate policy with owner and review date."
+              },
+              {
+                "name": "Attestation",
+                "description": "A confirmation by an employee or manager of compliance."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Human Resourcing",
+    "functionDescription": "Attracts, develops, and supports the workforce needed to operate and expand the pipeline.",
+    "functionId": "hr",
+    "businessCapabilities": [
+      {
+        "name": "Talent Acquisition & Workforce Planning",
+        "description": "Plans workforce needs and recruits for operations, integrity, and projects.",
+        "applicationCapabilities": [
+          {
+            "name": "Recruitment & Onboarding",
+            "description": "Manages job postings, candidates, offers, and onboarding for skilled trades and professionals.",
+            "sections": [
+              "Staff Specialist Functions",
+              "Resources Sustainment Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Job Requisition",
+                "description": "An approved request to fill a position."
+              },
+              {
+                "name": "Candidate Profile",
+                "description": "A prospective employee's application and assessment."
+              },
+              {
+                "name": "Offer Letter",
+                "description": "A formal employment offer."
+              },
+              {
+                "name": "Onboarding Task",
+                "description": "A step to bring a new hire into the organization."
+              }
+            ]
+          },
+          {
+            "name": "Workforce Planning",
+            "description": "Forecasts headcount and skills needs by location and Function.",
+            "sections": [
+              "Staff Specialist Functions"
+            ],
+            "sectionId": "ssf",
+            "entities": [
+              {
+                "name": "Headcount Plan",
+                "description": "The planned staffing by unit and period."
+              },
+              {
+                "name": "Skills Inventory",
+                "description": "A record of workforce capabilities."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Learning, Competency & Qualification",
+        "description": "Develops and certifies the competencies required for safety-critical roles.",
+        "applicationCapabilities": [
+          {
+            "name": "Training & Competency Management",
+            "description": "Tracks training, operator qualifications, and required certifications.",
+            "sections": [
+              "Staff Specialist Functions",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Training Course",
+                "description": "A defined learning offering."
+              },
+              {
+                "name": "Training Record",
+                "description": "A record that a person completed a course."
+              },
+              {
+                "name": "Operator Qualification",
+                "description": "A certification to perform a covered pipeline task."
+              },
+              {
+                "name": "Certification Expiry",
+                "description": "A dated requirement to renew a credential."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "IT/S Work Methods (Technology, Systems)",
+    "functionDescription": "Provides the technology, systems, and work methods that support every Function.",
+    "functionId": "its",
+    "businessCapabilities": [
+      {
+        "name": "Enterprise Application Services",
+        "description": "Delivers and supports the applications used across the corporation.",
+        "applicationCapabilities": [
+          {
+            "name": "Application Support & Change Management",
+            "description": "Manages incidents, changes, and releases for enterprise applications.",
+            "sections": [
+              "Staff Specialist Functions",
+              "Centralized Operational Functions (Economies of Scale)"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Service Request",
+                "description": "A user request for an IT service."
+              },
+              {
+                "name": "IT Incident",
+                "description": "An unplanned interruption to an IT service."
+              },
+              {
+                "name": "Change Ticket",
+                "description": "A controlled request to modify a system."
+              },
+              {
+                "name": "Release Record",
+                "description": "A packaged set of changes deployed to production."
+              }
+            ]
+          },
+          {
+            "name": "Integration & Interface Management",
+            "description": "Manages interfaces between SCADA, historian, ERP, and commercial systems.",
+            "sections": [
+              "Staff Specialist Functions",
+              "Centralized Operational Functions (Economies of Scale)"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Interface Definition",
+                "description": "The agreed format and schedule of a data exchange."
+              },
+              {
+                "name": "Integration Job",
+                "description": "A run of a scheduled data transfer."
+              },
+              {
+                "name": "Message Log",
+                "description": "A record of messages exchanged between systems."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Technology Infrastructure",
+        "description": "Provides networks, end-user devices, and infrastructure.",
+        "applicationCapabilities": [
+          {
+            "name": "Infrastructure & Network Management",
+            "description": "Operates corporate networks, servers, and end-user devices.",
+            "sections": [
+              "Staff Specialist Functions",
+              "Centralized Operational Functions (Economies of Scale)",
+              "Security & Cyber"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Network Device",
+                "description": "A router, switch, or firewall in the corporate network."
+              },
+              {
+                "name": "Server Instance",
+                "description": "A physical or virtual server."
+              },
+              {
+                "name": "User Account",
+                "description": "A person's identity and access in corporate systems."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Legal Policies",
+    "functionDescription": "Provides legal advice, contract oversight, and legal policy for the corporation.",
+    "functionId": "legal",
+    "businessCapabilities": [
+      {
+        "name": "Legal Advisory & Contracts",
+        "description": "Advises on and manages contracts and legal matters.",
+        "applicationCapabilities": [
+          {
+            "name": "Contract Management",
+            "description": "Stores and tracks contracts with shippers, vendors, and Indigenous partners.",
+            "sections": [
+              "Staff Specialist Functions"
+            ],
+            "sectionId": "ssf",
+            "entities": [
+              {
+                "name": "Contract",
+                "description": "A legally binding agreement with parties and terms."
+              },
+              {
+                "name": "Contract Amendment",
+                "description": "A formal change to an existing contract."
+              },
+              {
+                "name": "Contract Obligation",
+                "description": "A dated deliverable or duty within a contract."
+              }
+            ]
+          },
+          {
+            "name": "Litigation & Claims Management",
+            "description": "Tracks legal proceedings, claims, and related documentation.",
+            "sections": [
+              "Staff Specialist Functions"
+            ],
+            "sectionId": "ssf",
+            "entities": [
+              {
+                "name": "Legal Matter",
+                "description": "A dispute or proceeding being handled by counsel."
+              },
+              {
+                "name": "Claim",
+                "description": "A demand for compensation made by or against the corporation."
+              },
+              {
+                "name": "Legal Opinion",
+                "description": "A written advice from counsel."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Access to Information & Privacy",
+        "description": "Handles information requests and privacy obligations of a federal Crown corporation.",
+        "applicationCapabilities": [
+          {
+            "name": "Information Request & Privacy Handling",
+            "description": "Logs and responds to information and privacy requests and breaches.",
+            "sections": [
+              "Staff Specialist Functions",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Information Request",
+                "description": "A formal request for access to records."
+              },
+              {
+                "name": "Privacy Breach Report",
+                "description": "A recorded loss or unauthorized access to personal information."
+              },
+              {
+                "name": "Redaction Log",
+                "description": "The record of information withheld from a disclosure."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Marketing",
+    "functionDescription": "Positions Trans Mountain's transportation and marine services to shippers and the market.",
+    "functionId": "marketing",
+    "businessCapabilities": [
+      {
+        "name": "Market Analysis & Positioning",
+        "description": "Analyzes crude markets and positions services to customers.",
+        "applicationCapabilities": [
+          {
+            "name": "Market Intelligence",
+            "description": "Tracks crude differentials, refinery demand, and competing routes to Asia-Pacific and the U.S. West Coast.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Market Report",
+                "description": "An analysis of market conditions and outlook."
+              },
+              {
+                "name": "Crude Price Differential",
+                "description": "The price gap between crude grades or markets."
+              },
+              {
+                "name": "Competitor Route Profile",
+                "description": "A description of an alternative export path."
+              }
+            ]
+          },
+          {
+            "name": "Service Offering Management",
+            "description": "Defines the service options and terms offered to shippers.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Service Offering",
+                "description": "A defined transportation or storage product."
+              },
+              {
+                "name": "Open Season Notice",
+                "description": "A published invitation to bid for new capacity."
+              },
+              {
+                "name": "Marketing Campaign",
+                "description": "A coordinated outreach to prospective shippers."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "New Bus. Development",
+    "functionDescription": "Identifies and pursues new pipeline, terminal, and marine opportunities and partnerships.",
+    "functionId": "busdev",
+    "businessCapabilities": [
+      {
+        "name": "Opportunity Identification & Evaluation",
+        "description": "Screens and evaluates growth and partnership opportunities.",
+        "applicationCapabilities": [
+          {
+            "name": "Opportunity Pipeline Management",
+            "description": "Tracks prospective expansions, acquisitions, and partnerships through evaluation gates.",
+            "sections": [
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "esf",
+            "entities": [
+              {
+                "name": "Business Opportunity",
+                "description": "A potential growth initiative under assessment."
+              },
+              {
+                "name": "Stage Gate Review",
+                "description": "A decision point at which an opportunity proceeds or stops."
+              },
+              {
+                "name": "Feasibility Study",
+                "description": "An early assessment of technical and commercial viability."
+              }
+            ]
+          },
+          {
+            "name": "Commercial Structuring",
+            "description": "Models commercial structures and returns for new opportunities.",
+            "sections": [
+              "Enterprise Scope Functions",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Commercial Term Sheet",
+                "description": "The proposed key terms of a deal."
+              },
+              {
+                "name": "Return Model",
+                "description": "A financial model of an opportunity's returns."
+              },
+              {
+                "name": "Partnership Proposal",
+                "description": "A proposed arrangement with an Indigenous or industry partner."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Op Support (Priorities in Flows: Scheduling, Resourcing, Business Analysis)",
+    "functionDescription": "Assists operational managers with scheduling, resourcing, and analysis of operating flows.",
+    "functionId": "opsupport",
+    "businessCapabilities": [
+      {
+        "name": "Operations Scheduling & Resourcing",
+        "description": "Schedules work and resources around the operating plan.",
+        "applicationCapabilities": [
+          {
+            "name": "Work Scheduling & Resource Planning",
+            "description": "Schedules maintenance and operating work against crew and equipment availability.",
+            "sections": [
+              "Staff Specialist Functions",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Work Schedule",
+                "description": "The planned dates and crews for jobs."
+              },
+              {
+                "name": "Crew Roster",
+                "description": "The assigned staff and shifts for a location."
+              },
+              {
+                "name": "Resource Booking",
+                "description": "A reservation of equipment or people for a task."
+              }
+            ]
+          },
+          {
+            "name": "Outage & Shutdown Coordination",
+            "description": "Coordinates planned outages and shutdown windows with the flow plan.",
+            "sections": [
+              "Staff Specialist Functions",
+              "Pipeline Operations",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Planned Outage",
+                "description": "A scheduled interruption for maintenance or tie-in."
+              },
+              {
+                "name": "Shutdown Window",
+                "description": "A defined period when a facility is out of service."
+              },
+              {
+                "name": "Capacity Impact Notice",
+                "description": "A notice of reduced capacity due to an outage."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Operations Business Analysis",
+        "description": "Analyzes operating processes and performance to improve them.",
+        "applicationCapabilities": [
+          {
+            "name": "Operations Performance Analysis",
+            "description": "Analyzes availability, efficiency, and cost of operations.",
+            "sections": [
+              "Staff Specialist Functions",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Availability Metric",
+                "description": "The proportion of time equipment is able to operate."
+              },
+              {
+                "name": "Operating Cost Metric",
+                "description": "A unit cost measure for operations."
+              },
+              {
+                "name": "Process Improvement Proposal",
+                "description": "A suggested change to an operating process."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Personnel",
+    "functionDescription": "Administers employment, payroll, benefits, and workforce records.",
+    "functionId": "personnel",
+    "businessCapabilities": [
+      {
+        "name": "Payroll & Benefits Administration",
+        "description": "Pays employees and administers benefits and pension.",
+        "applicationCapabilities": [
+          {
+            "name": "Payroll Processing",
+            "description": "Calculates and issues pay including shift, overtime, and remote-site allowances.",
+            "sections": [
+              "Resources Sustainment Functions"
+            ],
+            "sectionId": "rsf",
+            "entities": [
+              {
+                "name": "Payroll Run",
+                "description": "A processing cycle that pays a group of employees."
+              },
+              {
+                "name": "Time Sheet",
+                "description": "A record of hours worked."
+              },
+              {
+                "name": "Pay Statement",
+                "description": "An employee's itemized pay for a period."
+              },
+              {
+                "name": "Allowance",
+                "description": "An additional payment for site, travel, or on-call work."
+              }
+            ]
+          },
+          {
+            "name": "Benefits & Pension Administration",
+            "description": "Administers benefit enrolment and pension participation.",
+            "sections": [
+              "Resources Sustainment Functions"
+            ],
+            "sectionId": "rsf",
+            "entities": [
+              {
+                "name": "Benefit Enrolment",
+                "description": "An employee's selected benefit coverage."
+              },
+              {
+                "name": "Pension Record",
+                "description": "A member's pension service and entitlement."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Employee Records & Relations",
+        "description": "Maintains employee records and manages labour relations.",
+        "applicationCapabilities": [
+          {
+            "name": "Employee Record Management",
+            "description": "Maintains position, job history, and employment terms.",
+            "sections": [
+              "Resources Sustainment Functions"
+            ],
+            "sectionId": "rsf",
+            "entities": [
+              {
+                "name": "Employee Record",
+                "description": "The core employment data of a person."
+              },
+              {
+                "name": "Position",
+                "description": "A defined role in the organization structure."
+              },
+              {
+                "name": "Employment Agreement",
+                "description": "The terms under which an employee works."
+              }
+            ]
+          },
+          {
+            "name": "Labour & Employee Relations",
+            "description": "Tracks grievances and collective-agreement administration for unionized crews.",
+            "sections": [
+              "Resources Sustainment Functions"
+            ],
+            "sectionId": "rsf",
+            "entities": [
+              {
+                "name": "Grievance",
+                "description": "A formal complaint about the application of an agreement."
+              },
+              {
+                "name": "Collective Agreement",
+                "description": "The negotiated terms for a bargaining unit."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Procurement",
+    "functionDescription": "Sources, contracts, and receives the materials, equipment, and services the pipeline needs.",
+    "functionId": "procurement",
+    "businessCapabilities": [
+      {
+        "name": "Sourcing & Contracting",
+        "description": "Runs competitive sourcing and manages supplier agreements.",
+        "applicationCapabilities": [
+          {
+            "name": "Sourcing & Tendering",
+            "description": "Issues tenders, evaluates bids, and awards contracts for goods and services.",
+            "sections": [
+              "Centralized Operational Functions (Economies of Scale)"
+            ],
+            "sectionId": "cof",
+            "entities": [
+              {
+                "name": "Request for Proposal",
+                "description": "A solicitation for bids on a scope of work."
+              },
+              {
+                "name": "Bid Evaluation",
+                "description": "A scored assessment of a supplier's bid."
+              },
+              {
+                "name": "Purchase Agreement",
+                "description": "A contract for the supply of goods or services."
+              },
+              {
+                "name": "Supplier Qualification",
+                "description": "An assessment of a supplier's fitness to work for the corporation."
+              }
+            ]
+          },
+          {
+            "name": "Supplier & Contractor Management",
+            "description": "Manages supplier performance, safety prequalification, and Indigenous business participation.",
+            "sections": [
+              "Centralized Operational Functions (Economies of Scale)",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Supplier Record",
+                "description": "The master data of an approved supplier."
+              },
+              {
+                "name": "Supplier Performance Review",
+                "description": "A periodic assessment of a supplier's delivery."
+              },
+              {
+                "name": "Indigenous Business Participation Record",
+                "description": "A measure of contracts awarded to Indigenous businesses."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Materials & Inventory Management",
+        "description": "Manages pipe, valve, and spare-part inventory.",
+        "applicationCapabilities": [
+          {
+            "name": "Purchasing & Inventory Control",
+            "description": "Manages purchase orders, receipts, warehouse stock, and spares, typically within an ERP and maintenance system.",
+            "sections": [
+              "Centralized Operational Functions (Economies of Scale)",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Purchase Order",
+                "description": "An authorization to a supplier to deliver goods or services."
+              },
+              {
+                "name": "Goods Receipt",
+                "description": "A confirmation that ordered items arrived."
+              },
+              {
+                "name": "Inventory Item",
+                "description": "A stocked part or material with quantity and location."
+              },
+              {
+                "name": "Pipe Inventory Record",
+                "description": "A record of line pipe by heat, grade, and coating."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Product Improvement & Development",
+    "functionDescription": "Improves and develops the transportation, storage, and marine services offered to shippers.",
+    "functionId": "proddev",
+    "businessCapabilities": [
+      {
+        "name": "Service Design & Improvement",
+        "description": "Designs new and improved transportation and terminal services.",
+        "applicationCapabilities": [
+          {
+            "name": "Service Development",
+            "description": "Develops new service products such as new crude types, storage, and dock services.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Service Concept",
+                "description": "A proposed new or improved service."
+              },
+              {
+                "name": "Service Requirement",
+                "description": "A stated need a service must satisfy."
+              },
+              {
+                "name": "Product Specification",
+                "description": "The quality and handling parameters of a transported product."
+              }
+            ]
+          },
+          {
+            "name": "Tariff & Terms Development",
+            "description": "Develops tariff rules and terms for new services.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Commercial & Customer Services",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Tariff Rule",
+                "description": "A rule in the published tariff governing service."
+              },
+              {
+                "name": "Tariff Change Proposal",
+                "description": "A draft change to a tariff for regulatory filing."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Production",
+    "functionDescription": "Runs the day-to-day transportation of crude oil and refined products from Alberta to British Columbia and Washington State.",
+    "functionId": "prod",
+    "businessCapabilities": [
+      {
+        "name": "Pipeline Transportation Operations",
+        "description": "Moves product through the pipeline system according to the operating plan.",
+        "applicationCapabilities": [
+          {
+            "name": "Pipeline Flow Planning",
+            "description": "Plans line flows, pump configurations, and product sequencing to meet nominations.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Operating Plan",
+                "description": "The planned flows, pressures, and pump lineups for a period."
+              },
+              {
+                "name": "Pump Configuration",
+                "description": "The set of units running at a station."
+              },
+              {
+                "name": "Line Fill Record",
+                "description": "The volume of product held in a line segment."
+              }
+            ]
+          },
+          {
+            "name": "Field Operations Management",
+            "description": "Manages routine field rounds, station checks, and operating logs.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Operator Log Entry",
+                "description": "A dated record of operating observations and actions."
+              },
+              {
+                "name": "Station Round Check",
+                "description": "A routine inspection of a station's equipment."
+              },
+              {
+                "name": "Field Operating Procedure",
+                "description": "A controlled procedure for a field task."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Terminal & Storage Production",
+        "description": "Receives, stores, and transfers product at terminals.",
+        "applicationCapabilities": [
+          {
+            "name": "Terminal Inventory & Transfer Management",
+            "description": "Manages tank inventory, transfers, and receipts at terminals.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Terminals & Marine Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Tank Inventory Balance",
+                "description": "The measured volume held in a tank at a time."
+              },
+              {
+                "name": "Transfer Order",
+                "description": "An instruction to move product between tanks or lines."
+              },
+              {
+                "name": "Receipt Record",
+                "description": "A recorded volume received into a terminal."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Public Affairs",
+    "functionDescription": "Communicates with governments, communities, media, and the public about the pipeline and the expansion.",
+    "functionId": "publicaffairs",
+    "businessCapabilities": [
+      {
+        "name": "Government & Stakeholder Relations",
+        "description": "Manages relations with governments and stakeholders.",
+        "applicationCapabilities": [
+          {
+            "name": "Stakeholder Relationship Management",
+            "description": "Tracks stakeholder interactions, commitments, and issues along the corridor.",
+            "sections": [
+              "Staff Specialist Functions",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Stakeholder",
+                "description": "A group or person with an interest in the pipeline."
+              },
+              {
+                "name": "Engagement Record",
+                "description": "A logged interaction with a stakeholder."
+              },
+              {
+                "name": "Issue Log Entry",
+                "description": "A concern raised and its handling status."
+              },
+              {
+                "name": "Commitment to Stakeholder",
+                "description": "A promise made and tracked to completion."
+              }
+            ]
+          },
+          {
+            "name": "Government Relations Tracking",
+            "description": "Tracks correspondence and briefings with federal, provincial, and municipal governments.",
+            "sections": [
+              "Staff Specialist Functions",
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Government Briefing",
+                "description": "A prepared briefing for a government audience."
+              },
+              {
+                "name": "Ministerial Correspondence",
+                "description": "A formal letter to or from a government office."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Media & Public Communications",
+        "description": "Manages public and media communications.",
+        "applicationCapabilities": [
+          {
+            "name": "Media & Public Communications Management",
+            "description": "Manages media inquiries, news releases, and public notifications.",
+            "sections": [
+              "Staff Specialist Functions"
+            ],
+            "sectionId": "ssf",
+            "entities": [
+              {
+                "name": "Media Inquiry",
+                "description": "A request from a journalist for information."
+              },
+              {
+                "name": "News Release",
+                "description": "A public statement on a topic."
+              },
+              {
+                "name": "Public Notification",
+                "description": "A required notice to the public about an activity."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Selling",
+    "functionDescription": "Sells transportation and terminal capacity to shippers under firm and uncommitted service.",
+    "functionId": "selling",
+    "businessCapabilities": [
+      {
+        "name": "Capacity Sales & Contracting",
+        "description": "Sells firm and uncommitted capacity and executes shipper contracts.",
+        "applicationCapabilities": [
+          {
+            "name": "Firm Service Contract Management",
+            "description": "Manages long-term firm service agreements and the capacity they reserve.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Firm Service Agreement",
+                "description": "A long-term contract reserving capacity for a shipper."
+              },
+              {
+                "name": "Contracted Capacity",
+                "description": "The volume reserved by a shipper per period."
+              },
+              {
+                "name": "Capacity Allocation",
+                "description": "The share of system capacity assigned to a shipper."
+              },
+              {
+                "name": "Contract Term Record",
+                "description": "The start, end, and renewal of a contract."
+              }
+            ]
+          },
+          {
+            "name": "Uncommitted Capacity Sales",
+            "description": "Sells uncommitted capacity and manages apportionment when demand exceeds supply.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Uncommitted Capacity Offer",
+                "description": "A volume of non-firm capacity available for sale."
+              },
+              {
+                "name": "Apportionment Event",
+                "description": "A period when oversubscribed capacity is shared among shippers."
+              },
+              {
+                "name": "Shipper Bid",
+                "description": "A shipper's request for a volume and term."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Sales Pipeline & Pricing",
+        "description": "Manages customer prospects and pricing.",
+        "applicationCapabilities": [
+          {
+            "name": "Sales Opportunity Management",
+            "description": "Tracks prospects and negotiations for capacity and services.",
+            "sections": [
+              "Mainstream Operational Functions",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Sales Opportunity",
+                "description": "A prospective sale of capacity or services."
+              },
+              {
+                "name": "Quote",
+                "description": "A priced offer to a shipper."
+              },
+              {
+                "name": "Negotiation Record",
+                "description": "A logged exchange on commercial terms."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Pipeline Control & SCADA",
+    "functionDescription": "Monitors and controls the Trans Mountain pipeline system in real time from the control centre.",
+    "functionId": "pipelinecontrol",
+    "businessCapabilities": [
+      {
+        "name": "Real-Time Monitoring & Control",
+        "description": "Supervises pressures, flows, and equipment states across the system 24 hours a day.",
+        "applicationCapabilities": [
+          {
+            "name": "SCADA Supervision & Control",
+            "description": "Collects field data from RTUs and PLCs and issues commands to pumps, valves, and terminals.",
+            "sections": [
+              "Control Centre Operations",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "SCADA Point",
+                "description": "A monitored or controlled value from a field device."
+              },
+              {
+                "name": "Control Command",
+                "description": "An operator instruction sent to a field device."
+              },
+              {
+                "name": "Setpoint",
+                "description": "A target pressure, flow, or speed for a device or segment."
+              },
+              {
+                "name": "Operating Mode Change",
+                "description": "A recorded shift between operating states such as start-up or shutdown."
+              }
+            ]
+          },
+          {
+            "name": "Alarm Management",
+            "description": "Prioritizes, rationalizes, and analyzes alarms to keep operators focused on abnormal conditions.",
+            "sections": [
+              "Control Centre Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Alarm Event",
+                "description": "A notification of an abnormal condition."
+              },
+              {
+                "name": "Alarm Rationalization Record",
+                "description": "The approved priority and response for an alarm."
+              },
+              {
+                "name": "Alarm Performance Report",
+                "description": "A measure of alarm rates and stale alarms per operator."
+              }
+            ]
+          },
+          {
+            "name": "Process Historian & Trending",
+            "description": "Archives time-series operating data for trending and analysis, commonly on a historian such as AVEVA PI.",
+            "sections": [
+              "Control Centre Operations",
+              "Staff Specialist Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Historian Tag",
+                "description": "A named archived measurement."
+              },
+              {
+                "name": "Trend View",
+                "description": "A saved chart of one or more tags over time."
+              },
+              {
+                "name": "Event Frame",
+                "description": "A time-bounded occurrence of interest in process data."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Leak Detection & Line Balance",
+        "description": "Detects and responds to potential releases using computational pipeline monitoring.",
+        "applicationCapabilities": [
+          {
+            "name": "Computational Pipeline Monitoring",
+            "description": "Runs real-time transient models and mass-balance checks to detect leaks, aligned with API RP 1130.",
+            "sections": [
+              "Control Centre Operations",
+              "Pipeline Operations",
+              "Emergency Management"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Leak Alarm",
+                "description": "A model-generated indication of a potential release."
+              },
+              {
+                "name": "Line Balance Record",
+                "description": "A comparison of volume in against volume out over an interval."
+              },
+              {
+                "name": "Leak Detection Threshold",
+                "description": "A configured sensitivity for an alarm."
+              },
+              {
+                "name": "Leak Investigation Record",
+                "description": "The documented assessment of a leak alarm."
+              }
+            ]
+          },
+          {
+            "name": "Pipeline Hydraulic Simulation",
+            "description": "Simulates hydraulics and batch movement to plan flows and support operators.",
+            "sections": [
+              "Control Centre Operations",
+              "Pipeline Operations",
+              "Staff Specialist Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Hydraulic Model",
+                "description": "A digital representation of the line's pressure and flow behaviour."
+              },
+              {
+                "name": "Simulation Scenario",
+                "description": "A saved set of inputs for a what-if run."
+              },
+              {
+                "name": "Pressure Profile",
+                "description": "The pressure along a line at a point in time."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Control Room Management",
+        "description": "Manages controller qualification, shift handover, and fatigue controls.",
+        "applicationCapabilities": [
+          {
+            "name": "Controller Shift & Fatigue Management",
+            "description": "Manages controller schedules, handovers, and fatigue risk in line with control room regulations.",
+            "sections": [
+              "Control Centre Operations",
+              "Resources Sustainment Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Controller Shift",
+                "description": "A scheduled period of duty for a controller."
+              },
+              {
+                "name": "Shift Handover Log",
+                "description": "The recorded transfer of operating state between controllers."
+              },
+              {
+                "name": "Fatigue Risk Assessment",
+                "description": "An evaluation of controller fatigue exposure."
+              },
+              {
+                "name": "Controller Qualification",
+                "description": "A record of certification for control room work."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Pipeline Integrity Management",
+    "functionDescription": "Assesses and manages the mechanical condition of the pipeline to prevent failures and releases.",
+    "functionId": "integrity",
+    "businessCapabilities": [
+      {
+        "name": "In-Line Inspection",
+        "description": "Runs and analyzes in-line inspection tools to find metal loss, cracks, and geometry defects.",
+        "applicationCapabilities": [
+          {
+            "name": "In-Line Inspection Planning & Analysis",
+            "description": "Plans ILI runs, receives tool data, and produces anomaly lists aligned with API 1163.",
+            "sections": [
+              "Pipeline Integrity & Engineering",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "ILI Run",
+                "description": "A single passage of an inspection tool through a segment."
+              },
+              {
+                "name": "Anomaly",
+                "description": "An indication of metal loss, crack, dent, or other defect in the pipe wall."
+              },
+              {
+                "name": "Tool Vendor Report",
+                "description": "The vendor's reported findings from an ILI run."
+              },
+              {
+                "name": "Tool Validation Result",
+                "description": "A comparison of tool findings against field measurements."
+              }
+            ]
+          },
+          {
+            "name": "Anomaly Assessment & Repair Tracking",
+            "description": "Assesses anomalies against CSA Z662 criteria and tracks excavations, repairs, and sleeves.",
+            "sections": [
+              "Pipeline Integrity & Engineering"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Dig Site",
+                "description": "An excavation to verify or repair an anomaly."
+              },
+              {
+                "name": "Fitness-for-Service Assessment",
+                "description": "An engineering evaluation of whether a defect is acceptable."
+              },
+              {
+                "name": "Repair Record",
+                "description": "A permanent or temporary repair applied to the pipe."
+              },
+              {
+                "name": "Pressure Restriction",
+                "description": "A temporary reduction in operating pressure pending repair."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Corrosion & Coating Management",
+        "description": "Controls external and internal corrosion through coatings and cathodic protection.",
+        "applicationCapabilities": [
+          {
+            "name": "Cathodic Protection Management",
+            "description": "Tracks rectifier output, test-point surveys, and interference on protected segments.",
+            "sections": [
+              "Pipeline Integrity & Engineering",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Cathodic Protection Survey",
+                "description": "A set of potential readings along a segment."
+              },
+              {
+                "name": "Rectifier Record",
+                "description": "The location and output of a cathodic protection rectifier."
+              },
+              {
+                "name": "Test Point Reading",
+                "description": "A single measured potential at a test station."
+              }
+            ]
+          },
+          {
+            "name": "Corrosion Threat Assessment",
+            "description": "Models corrosion threats and prioritizes mitigation for each segment.",
+            "sections": [
+              "Pipeline Integrity & Engineering"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Corrosion Growth Rate",
+                "description": "The estimated rate of wall loss at a location."
+              },
+              {
+                "name": "Coating Condition Record",
+                "description": "The assessed state of pipe coating."
+              },
+              {
+                "name": "Corrosion Threat Score",
+                "description": "A ranked measure of corrosion exposure for a segment."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Geohazard & Crossing Management",
+        "description": "Manages slope, landslide, seismic, and watercourse threats along the mountainous route.",
+        "applicationCapabilities": [
+          {
+            "name": "Geotechnical Hazard Management",
+            "description": "Monitors slopes, landslides, and washouts in mountainous terrain and assesses risk to the pipe.",
+            "sections": [
+              "Pipeline Integrity & Engineering",
+              "Land & Right-of-Way"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Geohazard Site",
+                "description": "A location subject to slope instability, erosion, or subsidence."
+              },
+              {
+                "name": "Slope Monitoring Reading",
+                "description": "A measured movement at an instrumented slope."
+              },
+              {
+                "name": "Geohazard Risk Rating",
+                "description": "A ranked exposure of the pipe to a geohazard."
+              },
+              {
+                "name": "Mitigation Work Order",
+                "description": "A planned intervention to reduce a geohazard threat."
+              }
+            ]
+          },
+          {
+            "name": "Watercourse Crossing Management",
+            "description": "Assesses scour and depth of cover at river and stream crossings.",
+            "sections": [
+              "Pipeline Integrity & Engineering",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Watercourse Crossing",
+                "description": "A location where the pipeline crosses a river or stream."
+              },
+              {
+                "name": "Depth of Cover Survey",
+                "description": "A measurement of soil cover over the pipe."
+              },
+              {
+                "name": "Scour Assessment",
+                "description": "An evaluation of channel erosion near the pipe."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Integrity Program Management",
+        "description": "Governs the integrity management program and its performance.",
+        "applicationCapabilities": [
+          {
+            "name": "Integrity Risk & Program Reporting",
+            "description": "Aggregates threats, risks, and program metrics for management and the regulator.",
+            "sections": [
+              "Pipeline Integrity & Engineering",
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Integrity Threat",
+                "description": "A mechanism such as corrosion or cracking that could cause failure."
+              },
+              {
+                "name": "Integrity Risk Assessment",
+                "description": "A combined likelihood and consequence evaluation."
+              },
+              {
+                "name": "Integrity Program Metric",
+                "description": "A tracked measure of program performance."
+              },
+              {
+                "name": "Integrity Management Plan",
+                "description": "The documented plan for managing a segment's integrity."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Maintenance & Reliability",
+    "functionDescription": "Keeps pumps, tanks, valves, and control equipment reliable through planned and corrective work.",
+    "functionId": "maintenance",
+    "businessCapabilities": [
+      {
+        "name": "Maintenance Work Management",
+        "description": "Plans, schedules, and records maintenance on operating assets.",
+        "applicationCapabilities": [
+          {
+            "name": "Work Order & Preventive Maintenance Management",
+            "description": "Manages work orders, PM schedules, and equipment history, commonly on an EAM such as IBM Maximo or SAP PM.",
+            "sections": [
+              "Pipeline Operations",
+              "Terminals & Marine Operations",
+              "Centralized Operational Functions (Economies of Scale)"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Work Order",
+                "description": "A planned job for maintenance or repair of an asset."
+              },
+              {
+                "name": "Preventive Maintenance Schedule",
+                "description": "A recurring plan for inspection or service."
+              },
+              {
+                "name": "Equipment History",
+                "description": "The maintenance and failure record of an asset."
+              },
+              {
+                "name": "Failure Code",
+                "description": "A classification of how and why equipment failed."
+              }
+            ]
+          },
+          {
+            "name": "Spare Parts & Critical Spares",
+            "description": "Manages critical spares for pumps, motors, and valves at stations and terminals.",
+            "sections": [
+              "Pipeline Operations",
+              "Centralized Operational Functions (Economies of Scale)"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Critical Spare",
+                "description": "A part whose absence would extend an outage."
+              },
+              {
+                "name": "Reorder Point",
+                "description": "The stock level that triggers replenishment."
+              },
+              {
+                "name": "Repair Order",
+                "description": "An instruction to refurbish a removable component."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Rotating & Static Equipment Reliability",
+        "description": "Monitors pumps, motors, tanks, and vessels for degradation.",
+        "applicationCapabilities": [
+          {
+            "name": "Pump & Motor Condition Monitoring",
+            "description": "Tracks vibration, temperature, and efficiency of mainline pumps and drives.",
+            "sections": [
+              "Pipeline Operations",
+              "Pipeline Integrity & Engineering"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Vibration Reading",
+                "description": "A measurement of equipment vibration."
+              },
+              {
+                "name": "Pump Performance Curve",
+                "description": "The expected head and flow characteristics of a pump."
+              },
+              {
+                "name": "Condition Alert",
+                "description": "A notice that a monitored parameter exceeds limits."
+              }
+            ]
+          },
+          {
+            "name": "Tank & Pressure Equipment Inspection",
+            "description": "Schedules inspection of storage tanks and pressure vessels to API and CSA standards.",
+            "sections": [
+              "Terminals & Marine Operations",
+              "Pipeline Integrity & Engineering"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Tank Inspection Report",
+                "description": "The findings of an internal or external tank inspection."
+              },
+              {
+                "name": "Pressure Vessel Record",
+                "description": "The design and inspection history of a vessel."
+              },
+              {
+                "name": "Relief Valve Test Record",
+                "description": "The result of testing a pressure safety valve."
+              },
+              {
+                "name": "Inspection Due Date",
+                "description": "The next required inspection date for an asset."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Engineering & Asset Management",
+    "functionDescription": "Governs the design, change, and lifecycle of pipeline and terminal assets.",
+    "functionId": "engineering",
+    "businessCapabilities": [
+      {
+        "name": "Engineering Change & Documentation",
+        "description": "Controls changes and the engineering record for facilities.",
+        "applicationCapabilities": [
+          {
+            "name": "Management of Change",
+            "description": "Assesses and approves changes to facilities, procedures, and control systems.",
+            "sections": [
+              "Pipeline Integrity & Engineering",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Change Proposal",
+                "description": "A request to alter a facility or procedure."
+              },
+              {
+                "name": "Change Risk Review",
+                "description": "An assessment of the safety effect of a change."
+              },
+              {
+                "name": "Change Approval",
+                "description": "A recorded authorization to implement a change."
+              }
+            ]
+          },
+          {
+            "name": "Engineering Document Management",
+            "description": "Manages drawings, P&IDs, specifications, and as-built records.",
+            "sections": [
+              "Pipeline Integrity & Engineering",
+              "Centralized Operational Functions (Economies of Scale)"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "P&ID",
+                "description": "A piping and instrumentation diagram of a facility."
+              },
+              {
+                "name": "As-Built Drawing",
+                "description": "A drawing reflecting the constructed condition."
+              },
+              {
+                "name": "Engineering Specification",
+                "description": "A technical requirement for equipment or work."
+              },
+              {
+                "name": "Document Revision",
+                "description": "A version of a controlled engineering document."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Asset Lifecycle Management",
+        "description": "Plans asset strategy, replacement, and life extension.",
+        "applicationCapabilities": [
+          {
+            "name": "Asset Strategy & Lifecycle Planning",
+            "description": "Defines asset strategies and forecasts replacement and life-extension needs.",
+            "sections": [
+              "Pipeline Integrity & Engineering",
+              "Finance Control Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Asset Strategy",
+                "description": "The plan for inspecting, maintaining, and replacing an asset class."
+              },
+              {
+                "name": "Asset Condition Score",
+                "description": "A rating of an asset's health."
+              },
+              {
+                "name": "Replacement Forecast",
+                "description": "The expected timing and cost of asset replacement."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Terminal & Tank Farm Operations",
+    "functionDescription": "Operates the Edmonton, Kamloops, Burnaby, and Sumas terminals and tank farms that receive, store, and deliver product.",
+    "functionId": "terminals",
+    "businessCapabilities": [
+      {
+        "name": "Tank Farm Operations",
+        "description": "Manages storage and movement of product in tanks.",
+        "applicationCapabilities": [
+          {
+            "name": "Tank Gauging & Inventory Control",
+            "description": "Measures tank levels and reconciles inventory by product and shipper.",
+            "sections": [
+              "Terminals & Marine Operations",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Tank Gauge Reading",
+                "description": "A measured level and temperature of a tank."
+              },
+              {
+                "name": "Shipper Inventory Balance",
+                "description": "The volume of a shipper's product held in storage."
+              },
+              {
+                "name": "Tank Movement Record",
+                "description": "A recorded inflow or outflow of a tank."
+              }
+            ]
+          },
+          {
+            "name": "Terminal Scheduling & Transfer Coordination",
+            "description": "Schedules tank-to-line and line-to-dock transfers to meet nominations.",
+            "sections": [
+              "Terminals & Marine Operations",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Terminal Schedule",
+                "description": "The planned receipts, transfers, and deliveries at a terminal."
+              },
+              {
+                "name": "Line-Up Instruction",
+                "description": "The valve alignment required for a transfer."
+              },
+              {
+                "name": "Transfer Confirmation",
+                "description": "A record that a transfer completed as planned."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Terminal Safety & Environmental Systems",
+        "description": "Operates fire protection, vapour, and containment systems.",
+        "applicationCapabilities": [
+          {
+            "name": "Fire Protection & Vapour Management",
+            "description": "Manages fire systems, vapour recovery, and hazardous-area equipment at terminals.",
+            "sections": [
+              "Terminals & Marine Operations",
+              "Emergency Management"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Fire System Test Record",
+                "description": "The result of testing fire protection equipment."
+              },
+              {
+                "name": "Vapour Recovery Unit Log",
+                "description": "The operating record of a vapour recovery unit."
+              },
+              {
+                "name": "Hazardous Area Classification",
+                "description": "The classification of zones with flammable atmospheres."
+              }
+            ]
+          },
+          {
+            "name": "Containment & Stormwater Management",
+            "description": "Manages secondary containment, drainage, and stormwater at terminals.",
+            "sections": [
+              "Terminals & Marine Operations",
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Containment Berm Record",
+                "description": "The design and condition of a tank containment area."
+              },
+              {
+                "name": "Stormwater Discharge Record",
+                "description": "A measured discharge with test results."
+              },
+              {
+                "name": "Sump Level Reading",
+                "description": "A level measurement in a collection sump."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Westridge Marine Terminal & Vessel Operations",
+    "functionDescription": "Operates the Westridge Marine Terminal and coordinates tanker loading, vessel safety, and marine spill readiness.",
+    "functionId": "marineops",
+    "businessCapabilities": [
+      {
+        "name": "Vessel Scheduling & Loading",
+        "description": "Coordinates tanker arrivals, loading, and departures.",
+        "applicationCapabilities": [
+          {
+            "name": "Vessel Scheduling & Berth Management",
+            "description": "Manages vessel nominations, arrival windows, and berth allocation at the dock.",
+            "sections": [
+              "Terminals & Marine Operations",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Vessel Nomination",
+                "description": "A shipper's request to load a named vessel in a window."
+              },
+              {
+                "name": "Arrival Window",
+                "description": "The allowed time range for a vessel's arrival."
+              },
+              {
+                "name": "Berth Schedule",
+                "description": "The allocation of berths across vessels over time."
+              },
+              {
+                "name": "Demurrage Claim",
+                "description": "A charge for a vessel's delay beyond agreed laytime."
+              }
+            ]
+          },
+          {
+            "name": "Marine Loading Operations",
+            "description": "Controls loading arms and records cargo volumes and quality at the dock.",
+            "sections": [
+              "Terminals & Marine Operations",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Loading Record",
+                "description": "The recorded flow, volume, and time of a cargo loading."
+              },
+              {
+                "name": "Ship-Shore Safety Checklist",
+                "description": "An agreed pre-transfer safety checklist."
+              },
+              {
+                "name": "Cargo Certificate",
+                "description": "A certified quantity and quality of loaded cargo."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Marine Safety & Vessel Vetting",
+        "description": "Assesses tanker suitability and oversees marine safety practices.",
+        "applicationCapabilities": [
+          {
+            "name": "Tanker Vetting & Acceptance",
+            "description": "Assesses tankers against Trans Mountain's acceptance standard before they may load.",
+            "sections": [
+              "Terminals & Marine Operations",
+              "Emergency Management"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Vessel Profile",
+                "description": "The characteristics, ownership, and class of a tanker."
+              },
+              {
+                "name": "Vetting Inspection",
+                "description": "An assessment of a vessel's condition and crew practices."
+              },
+              {
+                "name": "Vessel Acceptance Decision",
+                "description": "The approval or rejection of a vessel to call."
+              },
+              {
+                "name": "Vessel Incident History",
+                "description": "A record of a vessel's casualties and detentions."
+              }
+            ]
+          },
+          {
+            "name": "Marine Traffic & Escort Coordination",
+            "description": "Coordinates pilots, tug escorts, and traffic movements with port and coast authorities.",
+            "sections": [
+              "Terminals & Marine Operations",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Pilotage Order",
+                "description": "A booking for a marine pilot for a transit."
+              },
+              {
+                "name": "Tug Escort Assignment",
+                "description": "The tugs assigned to escort a vessel."
+              },
+              {
+                "name": "Vessel Traffic Notice",
+                "description": "A notice of a vessel's movement or restriction."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Marine Spill Preparedness",
+        "description": "Maintains readiness to respond to spills on water.",
+        "applicationCapabilities": [
+          {
+            "name": "Marine Spill Response Readiness",
+            "description": "Manages response resources, agreements with response organizations, and exercises for marine spills.",
+            "sections": [
+              "Terminals & Marine Operations",
+              "Emergency Management"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Response Resource",
+                "description": "A boom, skimmer, or vessel available for response."
+              },
+              {
+                "name": "Response Organization Agreement",
+                "description": "A contract for marine spill response services."
+              },
+              {
+                "name": "Marine Exercise Record",
+                "description": "The scenario and lessons from a spill exercise."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Capacity Nominations & Scheduling",
+    "functionDescription": "Manages how shippers request, receive, and are allocated pipeline and dock capacity each month.",
+    "functionId": "nominations",
+    "businessCapabilities": [
+      {
+        "name": "Nomination Management",
+        "description": "Receives and validates shipper nominations for monthly volumes.",
+        "applicationCapabilities": [
+          {
+            "name": "Shipper Nomination Processing",
+            "description": "Accepts, validates, and confirms monthly nominations by product, receipt, and delivery point.",
+            "sections": [
+              "Commercial & Customer Services",
+              "Control Centre Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Nomination",
+                "description": "A shipper's request to move a volume of a product between points in a month."
+              },
+              {
+                "name": "Nomination Validation Result",
+                "description": "The outcome of checking a nomination against contract and capacity."
+              },
+              {
+                "name": "Receipt Point",
+                "description": "A location where a shipper injects product."
+              },
+              {
+                "name": "Nomination Revision",
+                "description": "A change to a previously submitted nomination."
+              }
+            ]
+          },
+          {
+            "name": "Apportionment & Capacity Allocation",
+            "description": "Allocates capacity when nominations exceed available capacity, per the tariff rules.",
+            "sections": [
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Available Capacity",
+                "description": "The volume the system can move in a period."
+              },
+              {
+                "name": "Apportionment Calculation",
+                "description": "The allocation of capacity to shippers by rule."
+              },
+              {
+                "name": "Allocation Notice",
+                "description": "A communication to shippers of their approved volumes."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Pipeline Scheduling",
+        "description": "Turns approved nominations into an operating schedule.",
+        "applicationCapabilities": [
+          {
+            "name": "Monthly & Daily Scheduling",
+            "description": "Builds the monthly batch schedule and daily updates from approved nominations.",
+            "sections": [
+              "Commercial & Customer Services",
+              "Control Centre Operations",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Monthly Schedule",
+                "description": "The approved plan of batches and volumes for a month."
+              },
+              {
+                "name": "Daily Schedule Update",
+                "description": "An intra-month adjustment to the plan."
+              },
+              {
+                "name": "Line Space Reservation",
+                "description": "A portion of the line reserved for a shipper's batch."
+              },
+              {
+                "name": "Schedule Change Notice",
+                "description": "A communication of a schedule change to affected parties."
+              }
+            ]
+          },
+          {
+            "name": "Shipper Portal & Volume Reporting",
+            "description": "Gives shippers online access to nominations, inventory, and statements.",
+            "sections": [
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Shipper Portal Account",
+                "description": "A user login for a shipper's staff."
+              },
+              {
+                "name": "Volume Statement",
+                "description": "A summary of a shipper's receipts, deliveries, and inventory."
+              },
+              {
+                "name": "Portal Notification",
+                "description": "A message posted to shippers through the portal."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Tolls & Tariff Administration",
+    "functionDescription": "Establishes, files, and applies the tolls and tariff terms under which service is provided.",
+    "functionId": "tolls",
+    "businessCapabilities": [
+      {
+        "name": "Toll Design & Regulatory Filing",
+        "description": "Designs tolls and files them with the regulator.",
+        "applicationCapabilities": [
+          {
+            "name": "Toll Design & Cost of Service",
+            "description": "Calculates the revenue requirement and designs tolls by service and distance.",
+            "sections": [
+              "Commercial & Customer Services",
+              "Finance Control Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Revenue Requirement",
+                "description": "The total annual amount the tolls must recover."
+              },
+              {
+                "name": "Toll Schedule",
+                "description": "The published rates by service, product, and path."
+              },
+              {
+                "name": "Cost of Service Study",
+                "description": "An allocation of costs to services and shipper classes."
+              },
+              {
+                "name": "Rate Base",
+                "description": "The value of assets on which return is earned."
+              }
+            ]
+          },
+          {
+            "name": "Tariff Filing & Amendment",
+            "description": "Prepares tariff amendments and applications to the Canada Energy Regulator and U.S. regulators.",
+            "sections": [
+              "Commercial & Customer Services",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Tariff Filing",
+                "description": "A submission of tariff terms to a regulator."
+              },
+              {
+                "name": "Filing Approval Record",
+                "description": "The regulator's decision on a filing."
+              },
+              {
+                "name": "Tariff Version",
+                "description": "An effective-dated version of the tariff."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Toll Application & Settlement",
+        "description": "Applies tolls to shipments and settles toll adjustments.",
+        "applicationCapabilities": [
+          {
+            "name": "Toll Calculation & Adjustment",
+            "description": "Applies the correct toll to each shipment, handles surcharges, and settles adjustments.",
+            "sections": [
+              "Commercial & Customer Services",
+              "Finance Control Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Toll Calculation",
+                "description": "The computed charge for a shipment."
+              },
+              {
+                "name": "Surcharge",
+                "description": "An additional toll component such as an incentive or cost pass-through."
+              },
+              {
+                "name": "Toll Settlement",
+                "description": "The true-up of billed versus final tolls."
+              },
+              {
+                "name": "Toll Dispute",
+                "description": "A shipper's challenge of a toll amount."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Measurement, Quality & Volume Accounting",
+    "functionDescription": "Measures the quantity and quality of product received, stored, and delivered and reconciles volumes.",
+    "functionId": "measurement",
+    "businessCapabilities": [
+      {
+        "name": "Custody Transfer Measurement",
+        "description": "Measures volumes at receipt and delivery points for billing and balance.",
+        "applicationCapabilities": [
+          {
+            "name": "Meter & Proving Management",
+            "description": "Manages custody-transfer meters, provings, and calibration to measurement standards.",
+            "sections": [
+              "Pipeline Operations",
+              "Terminals & Marine Operations",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Meter",
+                "description": "A device measuring flow at a custody-transfer point."
+              },
+              {
+                "name": "Meter Proving Record",
+                "description": "A test establishing a meter's correction factor."
+              },
+              {
+                "name": "Flow Computer Configuration",
+                "description": "The settings of a computer calculating volumes."
+              },
+              {
+                "name": "Measurement Audit Finding",
+                "description": "A discrepancy found in a measurement audit."
+              }
+            ]
+          },
+          {
+            "name": "Volume Reconciliation & Loss Control",
+            "description": "Reconciles receipts to deliveries and analyzes gains and losses by segment.",
+            "sections": [
+              "Pipeline Operations",
+              "Commercial & Customer Services",
+              "Finance Control Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Volume Reconciliation",
+                "description": "A comparison of receipts, deliveries, and inventory over a period."
+              },
+              {
+                "name": "Loss and Gain Record",
+                "description": "An unexplained volume difference on a segment."
+              },
+              {
+                "name": "Shrinkage Factor",
+                "description": "An allowance for shrinkage in a product."
+              },
+              {
+                "name": "Reconciliation Adjustment",
+                "description": "A correction applied to volumes."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Product Quality Management",
+        "description": "Ensures products meet specification and are protected from contamination.",
+        "applicationCapabilities": [
+          {
+            "name": "Sampling & Laboratory Management",
+            "description": "Manages sampling programs and lab results for density, viscosity, sulphur, and water content.",
+            "sections": [
+              "Terminals & Marine Operations",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Sample",
+                "description": "A physical specimen taken from a line, tank, or vessel."
+              },
+              {
+                "name": "Lab Result",
+                "description": "A measured property of a sample."
+              },
+              {
+                "name": "Product Specification Limit",
+                "description": "An allowed range for a quality parameter."
+              },
+              {
+                "name": "Composite Sampler Record",
+                "description": "The operating record of an automatic sampler."
+              }
+            ]
+          },
+          {
+            "name": "Crude Quality & Segregation Management",
+            "description": "Manages crude streams and quality segregation across heavy, medium, and light streams.",
+            "sections": [
+              "Pipeline Operations",
+              "Commercial & Customer Services"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Crude Stream",
+                "description": "A defined grade of crude with a quality range."
+              },
+              {
+                "name": "Quality Bank Adjustment",
+                "description": "A charge or credit for quality differences."
+              },
+              {
+                "name": "Off-Specification Event",
+                "description": "A delivery or receipt outside quality limits."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Pipeline Power & Energy Management",
+    "functionDescription": "Manages the electricity supply and energy efficiency of pump stations and terminals.",
+    "functionId": "power",
+    "businessCapabilities": [
+      {
+        "name": "Power Supply & Cost Management",
+        "description": "Secures and manages electrical supply to remote pump stations.",
+        "applicationCapabilities": [
+          {
+            "name": "Utility Power Management",
+            "description": "Manages utility service agreements, load forecasts, and power billing for stations.",
+            "sections": [
+              "Pipeline Operations",
+              "Finance Control Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Utility Service Agreement",
+                "description": "A contract for electrical supply at a site."
+              },
+              {
+                "name": "Electricity Bill",
+                "description": "A utility's charge for consumption and demand."
+              },
+              {
+                "name": "Load Forecast",
+                "description": "A projected electrical demand of a facility."
+              },
+              {
+                "name": "Power Outage Event",
+                "description": "A loss of electrical supply to a facility."
+              }
+            ]
+          },
+          {
+            "name": "Pump Energy Optimization",
+            "description": "Optimizes pump configurations to reduce energy per barrel moved.",
+            "sections": [
+              "Pipeline Operations",
+              "Staff Specialist Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Energy Intensity Metric",
+                "description": "Energy consumed per unit of throughput."
+              },
+              {
+                "name": "Optimization Recommendation",
+                "description": "A proposed pump lineup to lower energy use."
+              },
+              {
+                "name": "Variable Frequency Drive Record",
+                "description": "The configuration and performance of a drive."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Right-of-Way & Land Management",
+    "functionDescription": "Acquires, holds, and manages the land rights along the 1,150 km corridor and at facility sites.",
+    "functionId": "landmgmt",
+    "businessCapabilities": [
+      {
+        "name": "Land Rights & Agreements",
+        "description": "Manages easements, statutory rights-of-way, and agreements with landowners.",
+        "applicationCapabilities": [
+          {
+            "name": "Land Rights & Easement Management",
+            "description": "Maintains the register of easements, rights-of-way, leases, and related agreements by parcel.",
+            "sections": [
+              "Land & Right-of-Way",
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Land Parcel",
+                "description": "A legally described parcel crossed by or adjacent to the pipeline."
+              },
+              {
+                "name": "Statutory Right-of-Way",
+                "description": "A registered right to operate a pipeline across a parcel."
+              },
+              {
+                "name": "Easement Agreement",
+                "description": "A negotiated agreement granting land rights."
+              },
+              {
+                "name": "Lease",
+                "description": "A rental agreement for land or facility space."
+              }
+            ]
+          },
+          {
+            "name": "Landowner Relations & Compensation",
+            "description": "Tracks landowner contacts, commitments, and compensation for use and damages.",
+            "sections": [
+              "Land & Right-of-Way",
+              "Mainstream Operational Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Landowner",
+                "description": "A person or entity with an interest in a parcel."
+              },
+              {
+                "name": "Landowner Contact Log",
+                "description": "A record of an interaction with a landowner."
+              },
+              {
+                "name": "Compensation Payment",
+                "description": "A payment for land use or damages."
+              },
+              {
+                "name": "Landowner Commitment",
+                "description": "A promise made to a landowner and tracked to completion."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Right-of-Way Encroachment & Crossing Control",
+        "description": "Controls third-party activity and crossings on the right-of-way.",
+        "applicationCapabilities": [
+          {
+            "name": "Crossing & Encroachment Agreement Management",
+            "description": "Reviews and approves crossings by roads, utilities, and structures and tracks encroachments.",
+            "sections": [
+              "Land & Right-of-Way",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Crossing Request",
+                "description": "A third party's application to cross the pipeline."
+              },
+              {
+                "name": "Crossing Agreement",
+                "description": "A signed set of conditions for a crossing."
+              },
+              {
+                "name": "Encroachment Record",
+                "description": "An unauthorized structure or activity on the right-of-way."
+              },
+              {
+                "name": "Third-Party Owner",
+                "description": "The party that owns a crossing utility or road."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Damage Prevention & Public Awareness",
+    "functionDescription": "Prevents third-party damage to the pipeline and keeps the public and emergency officials aware of it.",
+    "functionId": "damageprevention",
+    "businessCapabilities": [
+      {
+        "name": "Ground Disturbance Protection",
+        "description": "Responds to locate requests and controls excavation near the pipeline.",
+        "applicationCapabilities": [
+          {
+            "name": "One-Call Locate Request Management",
+            "description": "Receives locate requests from a one-call service and dispatches locators.",
+            "sections": [
+              "Land & Right-of-Way",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Locate Request",
+                "description": "A request from an excavator for marking of buried facilities."
+              },
+              {
+                "name": "Locate Ticket",
+                "description": "A dispatched task to mark the pipeline location."
+              },
+              {
+                "name": "Line Marking Record",
+                "description": "The evidence that a line was marked before excavation."
+              },
+              {
+                "name": "Excavator Contact",
+                "description": "A person or company performing ground disturbance."
+              }
+            ]
+          },
+          {
+            "name": "Ground Disturbance Authorization",
+            "description": "Issues authorizations and inspects work within the prescribed area.",
+            "sections": [
+              "Land & Right-of-Way",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Ground Disturbance Authorization",
+                "description": "A permission to work within the safety zone."
+              },
+              {
+                "name": "Excavation Inspection",
+                "description": "An on-site check of work near the pipe."
+              },
+              {
+                "name": "Unauthorized Activity Report",
+                "description": "A record of work performed without authorization."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Right-of-Way Patrol & Surveillance",
+        "description": "Patrols the corridor for threats.",
+        "applicationCapabilities": [
+          {
+            "name": "Aerial & Ground Patrol Management",
+            "description": "Schedules and records aerial, drone, and ground patrols and findings.",
+            "sections": [
+              "Pipeline Operations",
+              "Land & Right-of-Way"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Patrol Route",
+                "description": "A defined route flown or driven along the pipeline."
+              },
+              {
+                "name": "Patrol Finding",
+                "description": "An observation such as construction, erosion, or vegetation."
+              },
+              {
+                "name": "Drone Flight Record",
+                "description": "The log of an unmanned aircraft patrol."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Public Awareness Program",
+        "description": "Delivers required outreach to the public, excavators, and emergency officials.",
+        "applicationCapabilities": [
+          {
+            "name": "Public Awareness & Emergency Official Outreach",
+            "description": "Manages mailing lists, campaigns, and effectiveness evaluation for regulated outreach.",
+            "sections": [
+              "Staff Specialist Functions",
+              "Emergency Management",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Awareness Audience",
+                "description": "A group targeted for outreach such as residents or excavators."
+              },
+              {
+                "name": "Outreach Mailing",
+                "description": "A distributed safety communication."
+              },
+              {
+                "name": "Program Effectiveness Survey",
+                "description": "A measure of audience understanding."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Indigenous Relations & Engagement",
+    "functionDescription": "Builds and maintains relationships, agreements, and consultation with Indigenous communities along the route.",
+    "functionId": "indigenous",
+    "businessCapabilities": [
+      {
+        "name": "Consultation & Agreements",
+        "description": "Records consultation and manages agreements with Indigenous communities.",
+        "applicationCapabilities": [
+          {
+            "name": "Indigenous Consultation & Engagement Tracking",
+            "description": "Tracks consultation activities, concerns raised, and commitments by community.",
+            "sections": [
+              "Regulatory & Indigenous Affairs",
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Indigenous Community",
+                "description": "A First Nation, Métis, or other Indigenous group with an interest in the route."
+              },
+              {
+                "name": "Consultation Activity",
+                "description": "A meeting or exchange with a community."
+              },
+              {
+                "name": "Concern Raised",
+                "description": "An issue identified by a community and its response."
+              },
+              {
+                "name": "Consultation Commitment",
+                "description": "A promise made to a community and tracked to completion."
+              }
+            ]
+          },
+          {
+            "name": "Mutual Benefit Agreement Management",
+            "description": "Manages agreements that provide benefits, capacity funding, and participation to communities.",
+            "sections": [
+              "Regulatory & Indigenous Affairs",
+              "Finance Control Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Mutual Benefit Agreement",
+                "description": "A signed agreement providing benefits to an Indigenous community."
+              },
+              {
+                "name": "Benefit Payment",
+                "description": "A scheduled payment or contribution under an agreement."
+              },
+              {
+                "name": "Capacity Funding Record",
+                "description": "Funding provided so a community can participate in review."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Indigenous Participation in Operations",
+        "description": "Supports Indigenous monitoring, employment, and contracting.",
+        "applicationCapabilities": [
+          {
+            "name": "Indigenous Monitoring & Advisory Coordination",
+            "description": "Coordinates Indigenous monitors and advisory committee input on construction and operations.",
+            "sections": [
+              "Regulatory & Indigenous Affairs",
+              "Projects & Construction"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Indigenous Monitor Assignment",
+                "description": "A monitor placed on a work site or activity."
+              },
+              {
+                "name": "Monitoring Observation",
+                "description": "A finding recorded by a monitor."
+              },
+              {
+                "name": "Advisory Committee Recommendation",
+                "description": "A recommendation from an advisory and monitoring committee."
+              },
+              {
+                "name": "Traditional Land Use Study",
+                "description": "A community's documented use of land and resources."
+              }
+            ]
+          },
+          {
+            "name": "Indigenous Employment & Contracting",
+            "description": "Tracks Indigenous employment and business contract targets.",
+            "sections": [
+              "Regulatory & Indigenous Affairs",
+              "Resources Sustainment Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Indigenous Employment Record",
+                "description": "A worker's participation in employment or training."
+              },
+              {
+                "name": "Indigenous Contract Award",
+                "description": "A contract awarded to an Indigenous business."
+              },
+              {
+                "name": "Participation Target",
+                "description": "A goal for Indigenous employment or contracting."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Regulatory Affairs",
+    "functionDescription": "Manages the corporation's obligations and filings with the Canada Energy Regulator, U.S. pipeline regulators, and other authorities.",
+    "functionId": "regulatory",
+    "businessCapabilities": [
+      {
+        "name": "Regulatory Applications & Conditions",
+        "description": "Prepares applications and manages compliance with conditions.",
+        "applicationCapabilities": [
+          {
+            "name": "Regulatory Application & Filing Management",
+            "description": "Prepares, files, and tracks applications and information requests before regulators.",
+            "sections": [
+              "Regulatory & Indigenous Affairs",
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Regulatory Application",
+                "description": "A formal request to a regulator for an approval."
+              },
+              {
+                "name": "Regulator Information Request",
+                "description": "A regulator's question requiring a written response."
+              },
+              {
+                "name": "Regulatory Decision",
+                "description": "The regulator's determination and its conditions."
+              },
+              {
+                "name": "Filing Submission",
+                "description": "A document package filed with a regulator."
+              }
+            ]
+          },
+          {
+            "name": "Certificate & Condition Compliance Management",
+            "description": "Tracks each certificate condition, its owner, evidence, and filing deadline.",
+            "sections": [
+              "Regulatory & Indigenous Affairs",
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Certificate Condition",
+                "description": "A requirement in an approval to be met by a date."
+              },
+              {
+                "name": "Condition Compliance Evidence",
+                "description": "Documentation showing a condition is satisfied."
+              },
+              {
+                "name": "Condition Filing",
+                "description": "A submission to the regulator demonstrating compliance."
+              },
+              {
+                "name": "Condition Owner Assignment",
+                "description": "The person accountable for a condition."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Regulatory Inspection & Event Reporting",
+        "description": "Manages regulator audits and reports of incidents.",
+        "applicationCapabilities": [
+          {
+            "name": "Regulatory Audit & Inspection Management",
+            "description": "Manages regulator inspections, audits, orders, and corrective actions.",
+            "sections": [
+              "Regulatory & Indigenous Affairs",
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Regulator Inspection",
+                "description": "A visit or audit by a regulator's inspector."
+              },
+              {
+                "name": "Regulator Order",
+                "description": "A directive from a regulator."
+              },
+              {
+                "name": "Non-Compliance Finding",
+                "description": "A regulator's identified deviation from a requirement."
+              }
+            ]
+          },
+          {
+            "name": "Incident Notification & Reporting",
+            "description": "Reports releases and reportable events to the regulator within required timelines.",
+            "sections": [
+              "Regulatory & Indigenous Affairs",
+              "Emergency Management"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Reportable Event",
+                "description": "An incident meeting a regulator's reporting criteria."
+              },
+              {
+                "name": "Event Notification",
+                "description": "An initial notice of an event to the regulator."
+              },
+              {
+                "name": "Detailed Incident Report",
+                "description": "A full report of cause and corrective actions."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "U.S. Pipeline Regulation",
+        "description": "Meets obligations for the Puget Sound pipeline in Washington State.",
+        "applicationCapabilities": [
+          {
+            "name": "U.S. Pipeline Safety Compliance",
+            "description": "Tracks federal and state pipeline safety requirements and reports for U.S. assets.",
+            "sections": [
+              "Regulatory & Indigenous Affairs",
+              "Pipeline Integrity & Engineering"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "U.S. Compliance Requirement",
+                "description": "A federal or state pipeline safety obligation."
+              },
+              {
+                "name": "Annual Report Submission",
+                "description": "A required yearly report to a U.S. regulator."
+              },
+              {
+                "name": "Operator Identification Record",
+                "description": "The registered identity of the U.S. operator."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Emergency Management & Response",
+    "functionDescription": "Prepares for and responds to pipeline, terminal, and marine emergencies including releases and fires.",
+    "functionId": "emergency",
+    "businessCapabilities": [
+      {
+        "name": "Emergency Preparedness",
+        "description": "Plans, resources, and exercises the emergency response capability.",
+        "applicationCapabilities": [
+          {
+            "name": "Emergency Response Plan Management",
+            "description": "Maintains site and geographic emergency response plans and response contact lists.",
+            "sections": [
+              "Emergency Management",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Emergency Response Plan",
+                "description": "A documented plan for responding to an emergency."
+              },
+              {
+                "name": "Geographic Response Plan",
+                "description": "A plan of tactics for a defined area of the route."
+              },
+              {
+                "name": "Emergency Contact",
+                "description": "A person or agency to be notified in an emergency."
+              },
+              {
+                "name": "Response Equipment Cache",
+                "description": "A stored set of response equipment at a location."
+              }
+            ]
+          },
+          {
+            "name": "Emergency Exercise & Training Management",
+            "description": "Plans exercises with responders and tracks lessons learned.",
+            "sections": [
+              "Emergency Management",
+              "Staff Specialist Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Exercise Plan",
+                "description": "The design of a drill or exercise."
+              },
+              {
+                "name": "Exercise Evaluation",
+                "description": "The assessment of performance in an exercise."
+              },
+              {
+                "name": "Responder Training Record",
+                "description": "A person's incident command and response training."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Incident Response & Command",
+        "description": "Coordinates the response to an actual event.",
+        "applicationCapabilities": [
+          {
+            "name": "Incident Command & Response Management",
+            "description": "Manages the incident command structure, tasks, and logs during a response.",
+            "sections": [
+              "Emergency Management",
+              "Pipeline Operations",
+              "Control Centre Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Emergency Incident",
+                "description": "An event activating the response organization."
+              },
+              {
+                "name": "Incident Action Plan",
+                "description": "The objectives and assignments for an operational period."
+              },
+              {
+                "name": "Command Log Entry",
+                "description": "A timed record of a decision or action."
+              },
+              {
+                "name": "Resource Deployment",
+                "description": "The assignment of people or equipment to a response."
+              }
+            ]
+          },
+          {
+            "name": "Emergency Notification & Mass Communication",
+            "description": "Notifies staff, responders, agencies, and residents during an incident.",
+            "sections": [
+              "Emergency Management",
+              "Staff Specialist Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Notification Message",
+                "description": "A message sent to a defined audience."
+              },
+              {
+                "name": "Notification Roster",
+                "description": "A list of people notified for an event type."
+              },
+              {
+                "name": "Acknowledgement Record",
+                "description": "A confirmation that a recipient received a message."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Environmental Protection & Reclamation",
+    "functionDescription": "Protects the environment along the route through impact management, monitoring, remediation, and reclamation.",
+    "functionId": "environment",
+    "businessCapabilities": [
+      {
+        "name": "Environmental Impact Management",
+        "description": "Assesses and manages effects on species, water, and habitat.",
+        "applicationCapabilities": [
+          {
+            "name": "Species & Habitat Management",
+            "description": "Manages species-at-risk, wildlife, and habitat commitments and seasonal restrictions.",
+            "sections": [
+              "Environmental Stewardship",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Species at Risk Record",
+                "description": "An occurrence of a protected species near the route."
+              },
+              {
+                "name": "Wildlife Restriction",
+                "description": "A seasonal limit on work to protect wildlife."
+              },
+              {
+                "name": "Habitat Compensation Plan",
+                "description": "A plan to offset habitat loss."
+              },
+              {
+                "name": "Environmental Survey",
+                "description": "A field survey of ecological conditions."
+              }
+            ]
+          },
+          {
+            "name": "Watercourse & Fisheries Protection",
+            "description": "Manages fish and fish-habitat protections for watercourse work.",
+            "sections": [
+              "Environmental Stewardship",
+              "Projects & Construction"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Fish-Bearing Watercourse",
+                "description": "A stream or river with fish presence."
+              },
+              {
+                "name": "Instream Work Window",
+                "description": "The allowed period for work in a watercourse."
+              },
+              {
+                "name": "Sediment Control Measure",
+                "description": "A control that limits sediment entering water."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Remediation & Reclamation",
+        "description": "Cleans up contamination and restores disturbed land.",
+        "applicationCapabilities": [
+          {
+            "name": "Contaminated Site Management",
+            "description": "Tracks contaminated sites, assessments, and remediation through closure.",
+            "sections": [
+              "Environmental Stewardship",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Contaminated Site",
+                "description": "A location with impacted soil or groundwater."
+              },
+              {
+                "name": "Site Assessment Report",
+                "description": "A study of the extent of contamination."
+              },
+              {
+                "name": "Remediation Plan",
+                "description": "An approved plan for cleanup."
+              },
+              {
+                "name": "Closure Certificate",
+                "description": "A confirmation that a site meets criteria."
+              }
+            ]
+          },
+          {
+            "name": "Reclamation & Revegetation Management",
+            "description": "Tracks post-construction reclamation, revegetation, and monitoring to success criteria.",
+            "sections": [
+              "Environmental Stewardship",
+              "Land & Right-of-Way",
+              "Projects & Construction"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Reclamation Area",
+                "description": "A disturbed area to be restored."
+              },
+              {
+                "name": "Revegetation Plan",
+                "description": "A plan for restoring plant cover."
+              },
+              {
+                "name": "Reclamation Monitoring Result",
+                "description": "A measured success indicator of reclamation."
+              },
+              {
+                "name": "Weed Management Record",
+                "description": "A treatment of invasive plants on the right-of-way."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Cultural & Heritage Resources",
+        "description": "Protects archaeological and heritage resources.",
+        "applicationCapabilities": [
+          {
+            "name": "Archaeological & Heritage Resource Management",
+            "description": "Manages archaeological finds, permits, and chance-find procedures.",
+            "sections": [
+              "Environmental Stewardship",
+              "Regulatory & Indigenous Affairs",
+              "Projects & Construction"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Archaeological Site",
+                "description": "A location containing heritage resources."
+              },
+              {
+                "name": "Heritage Permit",
+                "description": "An approval to investigate or disturb a heritage site."
+              },
+              {
+                "name": "Chance Find Report",
+                "description": "A record of an unexpected discovery during work."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Major Project Delivery (Expansion & Capital Projects)",
+    "functionDescription": "Plans and builds major expansion and capital projects such as the Trans Mountain Expansion.",
+    "functionId": "projectdelivery",
+    "businessCapabilities": [
+      {
+        "name": "Construction Execution & Oversight",
+        "description": "Executes and oversees pipeline, station, and terminal construction.",
+        "applicationCapabilities": [
+          {
+            "name": "Construction Execution Management",
+            "description": "Manages spreads, crews, and daily progress across pipeline and facility construction.",
+            "sections": [
+              "Projects & Construction",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Construction Spread",
+                "description": "A section of the route built by one contractor team."
+              },
+              {
+                "name": "Daily Progress Report",
+                "description": "A record of work completed in a day."
+              },
+              {
+                "name": "Trenchless Crossing Record",
+                "description": "The details of a drilled or tunnelled crossing."
+              },
+              {
+                "name": "Work Front Status",
+                "description": "The state of activities at a point on the route."
+              }
+            ]
+          },
+          {
+            "name": "Construction Inspection & Quality Assurance",
+            "description": "Manages welding, non-destructive testing, and inspection records for construction.",
+            "sections": [
+              "Projects & Construction",
+              "Pipeline Integrity & Engineering"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Weld Record",
+                "description": "The details and inspection result of a pipeline weld."
+              },
+              {
+                "name": "NDT Result",
+                "description": "The outcome of a non-destructive test on a weld."
+              },
+              {
+                "name": "Inspection Test Plan",
+                "description": "The required inspection points for a work package."
+              },
+              {
+                "name": "Non-Conformance Report",
+                "description": "A record of work that fails requirements."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Project Controls & Contracting",
+        "description": "Controls cost, schedule, and contracts on capital projects.",
+        "applicationCapabilities": [
+          {
+            "name": "Project Cost & Schedule Control",
+            "description": "Tracks commitments, forecasts, progress, and schedule for capital projects.",
+            "sections": [
+              "Projects & Construction",
+              "Finance Control Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Cost Report",
+                "description": "A periodic report of budget, commitment, and forecast."
+              },
+              {
+                "name": "Earned Value Measure",
+                "description": "A comparison of work performed against plan."
+              },
+              {
+                "name": "Critical Path Activity",
+                "description": "An activity that determines project duration."
+              },
+              {
+                "name": "Risk Contingency Draw",
+                "description": "A use of contingency for a realized risk."
+              }
+            ]
+          },
+          {
+            "name": "Construction Contract Administration",
+            "description": "Manages contractor contracts, changes, claims, and payments.",
+            "sections": [
+              "Projects & Construction",
+              "Centralized Operational Functions (Economies of Scale)"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Construction Contract",
+                "description": "An agreement with a contractor for defined work."
+              },
+              {
+                "name": "Contract Change Order",
+                "description": "An approved change to contract scope or price."
+              },
+              {
+                "name": "Contractor Claim",
+                "description": "A request for additional time or compensation."
+              },
+              {
+                "name": "Progress Payment",
+                "description": "A payment for work certified as complete."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Commissioning & Turnover",
+        "description": "Commissions new facilities and hands them to operations.",
+        "applicationCapabilities": [
+          {
+            "name": "Commissioning & Handover Management",
+            "description": "Manages pre-commissioning, hydrotest, start-up, and turnover of systems to operations.",
+            "sections": [
+              "Projects & Construction",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Hydrostatic Test Record",
+                "description": "The pressure test result for a pipe section."
+              },
+              {
+                "name": "Commissioning Checklist",
+                "description": "The steps that prove a system is ready."
+              },
+              {
+                "name": "System Turnover Package",
+                "description": "The documentation and status handed to operations."
+              },
+              {
+                "name": "Punch List Item",
+                "description": "An outstanding item to complete before closeout."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Physical & Cyber Security",
+    "functionDescription": "Protects people, facilities, and control systems from physical and cyber threats.",
+    "functionId": "security",
+    "businessCapabilities": [
+      {
+        "name": "Physical Security",
+        "description": "Secures facilities, dock, and pipeline assets.",
+        "applicationCapabilities": [
+          {
+            "name": "Facility Access & Site Security Management",
+            "description": "Manages site access, guards, surveillance, and security incidents at stations, terminals, and the dock.",
+            "sections": [
+              "Security & Cyber",
+              "Terminals & Marine Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Site Access Permit",
+                "description": "An authorization for a person or vehicle to enter a site."
+              },
+              {
+                "name": "Security Incident",
+                "description": "A trespass, theft, or threat at a facility."
+              },
+              {
+                "name": "Security Camera Feed",
+                "description": "A video stream covering a protected area."
+              },
+              {
+                "name": "Visitor Log Entry",
+                "description": "A record of a visitor to a facility."
+              }
+            ]
+          },
+          {
+            "name": "Public Safety & Protest Interaction Management",
+            "description": "Coordinates safety measures and law-enforcement liaison for demonstrations at facilities.",
+            "sections": [
+              "Security & Cyber",
+              "Emergency Management",
+              "Regulatory & Indigenous Affairs"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Demonstration Notice",
+                "description": "A notice of a planned or ongoing public demonstration."
+              },
+              {
+                "name": "Safety Perimeter",
+                "description": "A defined zone to protect the public and workers."
+              },
+              {
+                "name": "Law Enforcement Contact",
+                "description": "A liaison with police or other authorities."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Cyber Security for Operational Technology",
+        "description": "Protects SCADA and control networks aligned with IEC 62443.",
+        "applicationCapabilities": [
+          {
+            "name": "OT Cyber Threat & Vulnerability Management",
+            "description": "Monitors control networks and manages vulnerabilities and patching of OT assets.",
+            "sections": [
+              "Security & Cyber",
+              "Control Centre Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Cyber Vulnerability",
+                "description": "A weakness in a system that could be exploited."
+              },
+              {
+                "name": "Security Event",
+                "description": "A logged occurrence indicating possible compromise."
+              },
+              {
+                "name": "Patch Record",
+                "description": "A security update applied to a system."
+              },
+              {
+                "name": "Network Zone Definition",
+                "description": "A segment of the control network with defined trust and rules."
+              }
+            ]
+          },
+          {
+            "name": "Identity & Access Management",
+            "description": "Manages identities, roles, and privileged access to corporate and control systems.",
+            "sections": [
+              "Security & Cyber",
+              "Staff Specialist Functions",
+              "Centralized Operational Functions (Economies of Scale)"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Access Role",
+                "description": "A set of permissions assigned to a job function."
+              },
+              {
+                "name": "Privileged Access Grant",
+                "description": "A time-limited elevated permission."
+              },
+              {
+                "name": "Access Review Result",
+                "description": "A periodic confirmation that access is appropriate."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Geospatial & Pipeline Data Management",
+    "functionDescription": "Maintains the spatial and asset-location data that describes the pipeline and its surroundings.",
+    "functionId": "gis",
+    "businessCapabilities": [
+      {
+        "name": "Pipeline Spatial Data",
+        "description": "Maintains centreline, asset, and land layers.",
+        "applicationCapabilities": [
+          {
+            "name": "Pipeline GIS & Alignment Data Management",
+            "description": "Maintains the pipeline centreline and asset layers on a pipeline data model such as PODS, typically in Esri ArcGIS.",
+            "sections": [
+              "Centralized Operational Functions (Economies of Scale)",
+              "Pipeline Integrity & Engineering",
+              "Land & Right-of-Way"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Pipeline Centreline",
+                "description": "The surveyed geometry of the pipeline with stationing."
+              },
+              {
+                "name": "Alignment Sheet",
+                "description": "A drawing of the pipeline route with features."
+              },
+              {
+                "name": "Station Chainage Reference",
+                "description": "A linear reference position along the line."
+              },
+              {
+                "name": "Spatial Feature Layer",
+                "description": "A mapped set of features such as crossings or valves."
+              }
+            ]
+          },
+          {
+            "name": "Remote Sensing & Survey Data Management",
+            "description": "Manages LiDAR, aerial imagery, and survey data used for monitoring and planning.",
+            "sections": [
+              "Centralized Operational Functions (Economies of Scale)",
+              "Pipeline Integrity & Engineering",
+              "Environmental Stewardship"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "LiDAR Dataset",
+                "description": "A point-cloud survey of terrain along the route."
+              },
+              {
+                "name": "Aerial Image",
+                "description": "An orthophoto or drone image of the corridor."
+              },
+              {
+                "name": "Survey Control Point",
+                "description": "A surveyed reference used for positioning."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Corporate Governance & Shareholder Relations",
+    "functionDescription": "Governs the Crown corporation, its board, and its reporting to the Government of Canada as shareholder.",
+    "functionId": "governance",
+    "businessCapabilities": [
+      {
+        "name": "Board & Corporate Secretariat",
+        "description": "Supports the board and corporate governance.",
+        "applicationCapabilities": [
+          {
+            "name": "Board & Governance Management",
+            "description": "Manages board meetings, resolutions, and director records.",
+            "sections": [
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "esf",
+            "entities": [
+              {
+                "name": "Board Meeting",
+                "description": "A scheduled meeting of the board or a committee."
+              },
+              {
+                "name": "Board Resolution",
+                "description": "A formal decision of the board."
+              },
+              {
+                "name": "Director Record",
+                "description": "The profile and terms of a director."
+              },
+              {
+                "name": "Corporate Bylaw",
+                "description": "A rule governing the corporation."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Shareholder & Public Reporting",
+        "description": "Reports to the shareholder and the public as required of a Crown corporation.",
+        "applicationCapabilities": [
+          {
+            "name": "Corporate Plan & Shareholder Reporting",
+            "description": "Prepares the corporate plan, quarterly reports, and annual report for the shareholder.",
+            "sections": [
+              "Enterprise Scope Functions",
+              "Finance Control Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Corporate Plan",
+                "description": "The multi-year plan submitted for shareholder approval."
+              },
+              {
+                "name": "Quarterly Report",
+                "description": "A periodic report of performance to the shareholder."
+              },
+              {
+                "name": "Annual Report",
+                "description": "The yearly public report of activities and results."
+              },
+              {
+                "name": "Shareholder Direction",
+                "description": "A directive from the shareholder to the corporation."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Insurance & Claims Management",
+    "functionDescription": "Manages insurance coverage and claims for property, liability, and environmental risk.",
+    "functionId": "insurance",
+    "businessCapabilities": [
+      {
+        "name": "Insurance Program Management",
+        "description": "Places and manages insurance coverage.",
+        "applicationCapabilities": [
+          {
+            "name": "Insurance Policy Administration",
+            "description": "Manages policies, premiums, and coverage schedules for facilities and liabilities.",
+            "sections": [
+              "Finance Control Functions",
+              "Enterprise Scope Functions"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Insurance Policy",
+                "description": "A contract of coverage with limits and deductibles."
+              },
+              {
+                "name": "Premium Payment",
+                "description": "A payment for coverage."
+              },
+              {
+                "name": "Insured Asset Schedule",
+                "description": "A list of assets covered under a policy."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Claims & Third-Party Damage Management",
+        "description": "Handles claims from or against the corporation.",
+        "applicationCapabilities": [
+          {
+            "name": "Claims Processing",
+            "description": "Registers and settles property damage, third-party, and incident-related claims.",
+            "sections": [
+              "Finance Control Functions",
+              "Land & Right-of-Way"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Insurance Claim",
+                "description": "A request for indemnity under a policy."
+              },
+              {
+                "name": "Third-Party Damage Claim",
+                "description": "A claim for damage attributed to the pipeline."
+              },
+              {
+                "name": "Claim Settlement",
+                "description": "The agreed resolution and payment of a claim."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "function": "Facilities & Fleet Management",
+    "functionDescription": "Manages offices, field facilities, and vehicles used to support pipeline operations.",
+    "functionId": "facilities",
+    "businessCapabilities": [
+      {
+        "name": "Facilities Management",
+        "description": "Maintains offices, field buildings, and support sites.",
+        "applicationCapabilities": [
+          {
+            "name": "Building & Site Management",
+            "description": "Manages leases, space, maintenance, and services for buildings and field sites.",
+            "sections": [
+              "Resources Sustainment Functions",
+              "Centralized Operational Functions (Economies of Scale)"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Building Record",
+                "description": "A corporate or field building with its space and services."
+              },
+              {
+                "name": "Facility Service Request",
+                "description": "A request for building maintenance or service."
+              },
+              {
+                "name": "Space Allocation",
+                "description": "The assignment of space to a team."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Fleet & Equipment Management",
+        "description": "Manages vehicles and mobile equipment.",
+        "applicationCapabilities": [
+          {
+            "name": "Vehicle & Mobile Equipment Management",
+            "description": "Tracks vehicles, inspections, fuel, and utilization for field crews and patrols.",
+            "sections": [
+              "Resources Sustainment Functions",
+              "Pipeline Operations"
+            ],
+            "sectionId": "",
+            "entities": [
+              {
+                "name": "Vehicle",
+                "description": "A truck or other on-road unit assigned to a crew."
+              },
+              {
+                "name": "Vehicle Inspection Record",
+                "description": "A recorded pre-trip or periodic inspection."
+              },
+              {
+                "name": "Fuel Transaction",
+                "description": "A purchase of fuel for a vehicle."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]
