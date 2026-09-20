@@ -5922,4 +5922,19 @@
 // (tests/run_all.py) drives the real Properties inputs on the reported 2x20/35-node
 // scenario, proven via three TEMP BREAKs (old behavior, pack-tight, never-raise-rows).
 // instructions.html, DESIGN_DOCUMENT.md (6.3), and tests/README.md updated.
-export const APP_VERSION = '0.951';
+// v0.952: new right-click / toolbar "Move To" command for section-based views, reported directly:
+// "for view with sections, when one or more elements selected, add a right click item 'move to'
+// and present list of sections of current view, user can only select one. When user selects
+// section, update section to new value and reshow all impacted sections, including adding new
+// row if needed." Lists the view's body sections (not the title-only one) in a shared
+// .dropdown-menu popover; choosing one moves the selected nodes into that section's next free
+// cells in their current order, adds a row if it's full, and re-aligns the sections below.
+// A node whose type the target section doesn't allow isn't moved (same rejection wording and
+// Message Log behavior as drag-and-drop); sections allowing none of the selected types are
+// greyed with a tooltip but stay clickable so the rule gets explained. Disabled in freeform
+// views. Populate From Model's cell-assignment/growth/re-alignment code was extracted into the
+// shared sections.js placeInSectionsGrowing so both commands use one implementation (its
+// existing checks still pass). New check_move_to_section_context_menu (tests/run_all.py) drives
+// the real right-click menu, proven via four TEMP BREAKs. instructions.html,
+// DESIGN_DOCUMENT.md (6.3), and tests/README.md updated.
+export const APP_VERSION = '0.952';

@@ -1,7 +1,7 @@
 // commands.js — Duplicate Stream, Split Node, Level Up, Level Down, Generate (createStream)
 import { ciEq, newId, relationCodeFor } from './state.js';
 import { elementByType, findRelationshipPair, isRelationValid } from './rules.js';
-import { isSectionViewType, createSectionPlacer, computeSectionLayout, isTypeAllowedInSection, findFreeCellInSection, findFreeCellOrGrowSection, duplicateSectionDefinition, gridToPixel, rescaleSectionPositions, BASE_X, BASE_Y, SECTION_GAP, NODE_INSET_X, NODE_INSET_Y } from './sections.js';
+import { isSectionViewType, createSectionPlacer, computeSectionLayout, isTypeAllowedInSection, findFreeCellInSection, findFreeCellOrGrowSection, duplicateSectionDefinition, placeInSectionsGrowing, BASE_X, BASE_Y, SECTION_GAP, NODE_INSET_X, NODE_INSET_Y } from './sections.js';
 import { redrawNodeSizes, redrawAndResolveLayout, getNodeSize } from './canvas.js';
 import { computeClusteredGridLayout, computeHubClusterGridLayout } from './layout.js';
 import { pushMessageLog } from './simulation.js';
@@ -3222,8 +3222,6 @@ function populateFromModel(app, tab, options = {}) {
   }
 
   // ---- the 'unmatched' section (created only if something needs it) ----
-  const oldSections = (view.sections || []).map((s) => ({ ...s }));
-  const oldLayout = computeSectionLayout(view);
   let unmatchedSection = null;
   if (unmatched.length > 0) {
     unmatchedSection = (view.sections || []).find((s) => ciEq(s.sectionId, UNMATCHED_SECTION_ID) || ciEq(s.name, UNMATCHED_SECTION_ID));
@@ -3241,55 +3239,19 @@ function populateFromModel(app, tab, options = {}) {
     }
   }
 
-  // ---- assign cells: first free cell per section, row-major, unlimited rows ----
-  const cursors = new Map(); // section.id -> next-free-cell function
-  const placements = [];     // { part, section, row, col }
-  const cursorFor = (section) => {
-    if (cursors.has(section.id)) return cursors.get(section.id);
-    const occupied = new Set();
-    const oldEntry = oldLayout.find((e) => e.section.id === section.id);
-    if (oldEntry) {
-      for (const vm of existingVms) {
-        if (vm.sectionId !== section.sectionId) continue;
-        const col = Math.max(0, Math.round((vm.x - oldEntry.bodyLeft - NODE_INSET_X) / oldEntry.cellW));
-        const row = Math.max(0, Math.round((vm.y - oldEntry.bodyTop - NODE_INSET_Y) / oldEntry.cellH));
-        occupied.add(`${row},${col}`);
-      }
-    }
-    const cols = Math.max(1, section.columnCount || 1);
-    let r = 0, c = 0;
-    const next = () => {
-      while (occupied.has(`${r},${c}`)) { c += 1; if (c >= cols) { c = 0; r += 1; } }
-      const cell = { row: r, col: c };
-      c += 1; if (c >= cols) { c = 0; r += 1; }
-      return cell;
-    };
-    cursors.set(section.id, next);
-    return next;
-  };
-  for (const { part, section } of matched) placements.push({ part, section, ...cursorFor(section)() });
-  for (const part of unmatched) placements.push({ part, section: unmatchedSection, ...cursorFor(unmatchedSection)() });
-
-  // ---- grow sections by whole rows, re-align what already sat below them ----
-  let grew = false;
-  for (const p of placements) {
-    if ((p.section.rowCount || 1) < p.row + 1) { p.section.rowCount = p.row + 1; grew = true; }
-  }
-  if (grew) rescaleSectionPositions(store, view, { sections: oldSections });
-
-  const layout = computeSectionLayout(view);
+  // ---- place: first free cell per section, growing rows / re-aligning sections below as needed ----
+  const items = [...matched, ...unmatched.map((part) => ({ part, section: unmatchedSection }))];
+  const cells = placeInSectionsGrowing(store, view, items);
   const fillByType = new Map();
-  for (const p of placements) {
-    const entry = layout.find((e) => e.section.id === p.section.id);
-    const { x, y } = gridToPixel(entry, p.row, p.col);
-    if (!fillByType.has(p.part.type)) fillByType.set(p.part.type, elementGroupFill(store, p.part.type));
-    store.createViewMember({ view: view.id, objectType: 'part', objectId: p.part.id, x, y, sectionId: p.section.sectionId, fillColor: fillByType.get(p.part.type) });
-  }
+  items.forEach(({ part, section }, i) => {
+    if (!fillByType.has(part.type)) fillByType.set(part.type, elementGroupFill(store, part.type));
+    store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: cells[i].x, y: cells[i].y, sectionId: section.sectionId, fillColor: fillByType.get(part.type) });
+  });
 
-  if (placements.length > 0) redrawAndResolveLayout(app, { viewId: view.id, selection: new Set() });
+  if (items.length > 0) redrawAndResolveLayout(app, { viewId: view.id, selection: new Set() });
   app.recordAndRender();
 
-  const n = placements.length;
+  const n = items.length;
   const leftOut = [];
   if (alreadyOn) leftOut.push(`${alreadyOn} already on this view`);
   if (skippedType) leftOut.push(`${skippedType} of a type no section on this view allows`);
@@ -3299,6 +3261,65 @@ function populateFromModel(app, tab, options = {}) {
     `Populated from model: added ${n} part${n === 1 ? '' : 's'}${unmatched.length ? ` (${unmatched.length} into the "${UNMATCHED_SECTION_ID}" section)` : ''}.${leftOut.length ? ` Left out: ${leftOut.join('; ')}.` : ''}`,
     false, true,
   );
+}
+
+// ===================== MOVE TO (section) =====================
+/**
+ * Right-click "Move To": moves the selected nodes into ONE chosen section of the current
+ * (section-based) view. Each node's sectionId becomes the target's and it lands in the target's
+ * next free cell (row-major, in the nodes' current top-to-bottom / left-to-right order, so their
+ * relative order carries over); the target gains rows as needed and every section below a grown
+ * one is re-aligned (placeInSectionsGrowing). Cells the nodes leave behind stay empty — nothing
+ * else in the source section is moved. Same type rule as drag-and-drop: a node whose type the
+ * target section doesn't allow is NOT moved, and each such node gets a rejection naming the
+ * section, what it actually allows, and the node's own type (one rejection → that full message
+ * as the toast; several → a short toast, every individual reason in the Message Log). Nodes
+ * already in the target, and selected connectors, are ignored.
+ */
+function moveNodesToSection(app, tab, vmIds, targetSectionInstanceId) {
+  const { store } = app;
+  const view = store.findView(tab.viewId);
+  if (!view || !isSectionViewType(view.viewType)) {
+    app.toast('Move To only applies to section-based views — this view is freeform, so there are no sections to move nodes into.', true);
+    return;
+  }
+  const target = (view.sections || []).find((s) => s.id === targetSectionInstanceId);
+  if (!target) { app.toast('Move To: that section no longer exists on this view.', true); return; }
+
+  const toMove = [], rejections = [];
+  let alreadyThere = 0;
+  for (const id of vmIds) {
+    const vm = store.findViewMember(id);
+    if (!vm || vm.objectType !== 'part') continue;
+    const part = store.findPart(vm.objectId);
+    if (!part) continue;
+    if (vm.sectionId === target.sectionId) { alreadyThere += 1; continue; }
+    if (!isTypeAllowedInSection(target, part.type)) {
+      const allowed = target.elementTypes || [];
+      const allowedText = allowed.includes('*') ? 'any type' : allowed.length === 0 ? 'no element types at all' : allowed.join(', ');
+      rejections.push(`"${part.label}" (${part.type}) cannot be moved to section "${target.name}" — that section only allows: ${allowedText}.`);
+      continue;
+    }
+    toMove.push(vm);
+  }
+  toMove.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+
+  if (toMove.length > 0) {
+    const rowsBefore = target.rowCount || 1;
+    const cells = placeInSectionsGrowing(store, view, toMove.map(() => ({ section: target })), new Set(toMove.map((vm) => vm.id)));
+    toMove.forEach((vm, i) => { vm.x = cells[i].x; vm.y = cells[i].y; vm.sectionId = target.sectionId; });
+    const rowsAdded = (target.rowCount || 1) - rowsBefore;
+    app.toast(`Moved ${toMove.length} node${toMove.length === 1 ? '' : 's'} to section "${target.name}"${rowsAdded > 0 ? ` — added ${rowsAdded} row${rowsAdded === 1 ? '' : 's'} to fit` : ''}.`, false, true);
+  } else if (rejections.length === 0) {
+    app.toast(alreadyThere > 0 ? `The selected node${alreadyThere === 1 ? ' is' : 's are'} already in section "${target.name}".` : 'Move To: no nodes are selected.');
+  }
+  if (rejections.length === 1) {
+    app.toast(rejections[0], true);
+  } else if (rejections.length > 1) {
+    app.toast(`${rejections.length} nodes were not allowed in section "${target.name}" and were not moved.`, true);
+    for (const r of rejections) pushMessageLog(store, `[Section move rejected] ${r}`);
+  }
+  app.recordAndRender();
 }
 
 /** "Insert Smart Stream" (freeform views only) — traces a chain of EXISTING parts and
@@ -5898,4 +5919,4 @@ function createDetectedConnectors(app, candidates) {
   return { created, placements, unplaced };
 }
 
-export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, populateFromModel, insertSmartStream, duplicateSection, copyModel, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors, GENERATE_VIEW_GROUPS, generateSelectedViews };
+export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, populateFromModel, moveNodesToSection, insertSmartStream, duplicateSection, copyModel, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors, GENERATE_VIEW_GROUPS, generateSelectedViews };

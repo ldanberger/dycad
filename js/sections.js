@@ -304,6 +304,64 @@ export function reflowSectionAfterResize(store, view, section, oldSections) {
   return { count: items.length, rowCount: section.rowCount };
 }
 
+/**
+ * Finds a cell for each of `items` (each `{ section }`, in placement order): the first free
+ * cell of that section, row-major, with unlimited rows — a section that fills up gains a row
+ * rather than stacking nodes. Used by every command that drops several nodes into sections at
+ * once (Populate From Model, Move To). `excludeVmIds` are nodes about to be moved by the
+ * caller: they don't count as occupying their old cells, and the caller must reposition them
+ * itself from the returned x/y (they're only provisionally re-aligned here).
+ *
+ * Two phases, because growing a section shifts every section below it: (1) hand out
+ * (row, col) cells and raise each section's rowCount to fit; (2) if anything grew, re-align
+ * the nodes that already sat below via rescaleSectionPositions, then compute pixel positions
+ * from the FINAL layout. Returns one `{ section, row, col, x, y }` per item, same order.
+ * Does not create or modify any ViewMember itself.
+ */
+export function placeInSectionsGrowing(store, view, items, excludeVmIds = new Set()) {
+  const oldSections = (view.sections || []).map((s) => ({ ...s }));
+  const oldLayout = computeSectionLayout(view);
+  const existing = store.viewMembersForView(view.id).filter((vm) => vm.objectType === 'part' && !excludeVmIds.has(vm.id));
+
+  const cursors = new Map(); // section.id -> next-free-cell function
+  const cursorFor = (section) => {
+    if (cursors.has(section.id)) return cursors.get(section.id);
+    const occupied = new Set();
+    const oldEntry = oldLayout.find((e) => e.section.id === section.id);
+    if (oldEntry) {
+      for (const vm of existing) {
+        if (vm.sectionId !== section.sectionId) continue;
+        const col = Math.max(0, Math.round((vm.x - oldEntry.bodyLeft - NODE_INSET_X) / oldEntry.cellW));
+        const row = Math.max(0, Math.round((vm.y - oldEntry.bodyTop - NODE_INSET_Y) / oldEntry.cellH));
+        occupied.add(`${row},${col}`);
+      }
+    }
+    const cols = Math.max(1, section.columnCount || 1);
+    let r = 0, c = 0;
+    const next = () => {
+      while (occupied.has(`${r},${c}`)) { c += 1; if (c >= cols) { c = 0; r += 1; } }
+      const cell = { row: r, col: c };
+      c += 1; if (c >= cols) { c = 0; r += 1; }
+      return cell;
+    };
+    cursors.set(section.id, next);
+    return next;
+  };
+  const cells = items.map(({ section }) => ({ section, ...cursorFor(section)() }));
+
+  let grew = false;
+  for (const cell of cells) {
+    if ((cell.section.rowCount || 1) < cell.row + 1) { cell.section.rowCount = cell.row + 1; grew = true; }
+  }
+  if (grew) rescaleSectionPositions(store, view, { sections: oldSections });
+
+  const layout = computeSectionLayout(view);
+  return cells.map((cell) => {
+    const entry = layout.find((e) => e.section.id === cell.section.id);
+    return { ...cell, ...gridToPixel(entry, cell.row, cell.col) };
+  });
+}
+
 /** Insert a new blank section immediately after the given section instance (by its instance id). */
 export function insertSectionAfter(view, afterSectionInstanceId) {
   const list = view.sections || (view.sections = []);

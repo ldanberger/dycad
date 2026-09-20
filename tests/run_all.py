@@ -17861,6 +17861,199 @@ def check_section_resize_reflows_nodes(page):
                   "exactly reversible), and a row count too small for its nodes is raised to fit instead of stacking them")
 
 
+def check_move_to_section_context_menu(page):
+    """New command, reported directly: "for view with sections, when one or more elements
+    selected, add a right click item 'move to' and present list of sections of current view,
+    user can only select one. When user selects section, update section to new value and
+    reshow all impacted sections, including adding new row if needed." Drives the REAL
+    right-click menu on a 3-section 'org' view (Alpha/Beta/Gamma, each 1 row x 2 columns;
+    Alpha and Gamma allow only BusinessFunction, Beta also BusinessActor) plus a title-only
+    section. Covers: the menu item is enabled only with a node selected in a section view
+    (disabled in a freeform view); the list offers exactly the body sections in order, NOT
+    the title-only one; a section that allows none of the selected types is greyed with its
+    allowed types as a tooltip; moving a node into a FULL section (Alpha) adds a row, moves
+    the node's sectionId, and re-aligns the sections below it (every node still inside its own
+    section body, nothing stacked); moving a mixed selection moves the allowed node and rejects
+    the BusinessActor with a toast naming section, what it allows, and the type; moving two
+    nodes keeps their relative order; choosing a greyed section explains the rule instead of
+    doing nothing."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sections = await import('./js/sections.js');
+      const toasts = [];
+      const origToast = app.toast.bind(app);
+      app.toast = (m, e, l) => { toasts.push({ m, e: !!e }); return origToast(m, e, l); };
+
+      const view = store.addView('MoveTo_' + Date.now());
+      view.viewType = 'org';
+      view.sections = [
+        { id: 's-t', viewType: 'org', sectionId: 'title', order: 0, name: 'Title Band', rowCount: 1, columnCount: 4, elementTypes: [] },
+        { id: 's-a', viewType: 'org', sectionId: 'aaa', order: 1, name: 'Alpha', rowCount: 1, columnCount: 2, elementTypes: ['BusinessFunction'] },
+        { id: 's-b', viewType: 'org', sectionId: 'bbb', order: 2, name: 'Beta', rowCount: 1, columnCount: 2, elementTypes: ['BusinessFunction', 'BusinessActor'] },
+        { id: 's-c', viewType: 'org', sectionId: 'ccc', order: 3, name: 'Gamma', rowCount: 1, columnCount: 2, elementTypes: ['BusinessFunction'] },
+      ];
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const M = store.defaultModel;
+      const mk = (type, label, sid, row, col) => {
+        const part = store.createPart({ type, label, model: M, streams: [] });
+        const e = sections.computeSectionLayout(view).find(x => x.section.sectionId === sid);
+        const pos = sections.gridToPixel(e, row, col);
+        return store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: pos.x, y: pos.y, sectionId: sid });
+      };
+      const F1 = mk('BusinessFunction', 'F1', 'aaa', 0, 0), F2 = mk('BusinessFunction', 'F2', 'aaa', 0, 1);
+      const F3 = mk('BusinessFunction', 'F3', 'bbb', 0, 0), A1 = mk('BusinessActor', 'A1', 'bbb', 0, 1);
+      const F4 = mk('BusinessFunction', 'F4', 'ccc', 0, 0);
+
+      const select = (...vms) => { tab.selection.clear(); for (const v of vms) tab.selection.add(v.id); };
+      const openMenu = async () => {
+        document.querySelectorAll('.canvas-context-menu, .move-to-menu').forEach(m => m.remove());
+        app.showCanvasContextMenu(300, 200, { x: 0, y: 0 });
+        await new Promise(r => setTimeout(r, 20));
+        const item = document.querySelector('.canvas-context-menu .cmd-context-item[data-key="moveTo"]');
+        return { found: !!item, disabled: item ? item.classList.contains('disabled') : null, label: item?.textContent.trim(), item };
+      };
+      const openList = async () => {
+        const m = await openMenu();
+        if (!m.found || m.disabled) return { ...m, list: null };
+        m.item.click();
+        await new Promise(r => setTimeout(r, 20));
+        const list = [...document.querySelectorAll('.move-to-menu .dd-item')].map(i => ({ name: i.textContent, disabled: i.classList.contains('disabled'), title: i.title, el: i }));
+        return { ...m, list };
+      };
+      const pick = async (name) => {
+        const l = await openList();
+        const entry = l.list.find(x => x.name === name);
+        entry.el.click();
+        await new Promise(r => setTimeout(r, 30));
+        return l;
+      };
+      const cell = (vm) => {
+        const e = sections.computeSectionLayout(view).find(x => x.section.sectionId === vm.sectionId);
+        return [Math.round((vm.y - e.bodyTop - sections.NODE_INSET_Y) / e.cellH), Math.round((vm.x - e.bodyLeft - sections.NODE_INSET_X) / e.cellW)];
+      };
+      const allInBounds = () => {
+        const layout = sections.computeSectionLayout(view);
+        return store.viewMembersForView(view.id).filter(v => v.objectType === 'part').every(vm => {
+          const e = layout.find(x => x.section.sectionId === vm.sectionId);
+          return e && vm.x >= e.bodyLeft && vm.x < e.bodyLeft + e.width && vm.y >= e.bodyTop && vm.y < e.bodyTop + e.bodyHeight;
+        });
+      };
+      const noStacking = () => {
+        const seen = new Set();
+        for (const vm of store.viewMembersForView(view.id).filter(v => v.objectType === 'part')) { const k = vm.x + ',' + vm.y; if (seen.has(k)) return false; seen.add(k); }
+        return true;
+      };
+      const rows = () => Object.fromEntries(view.sections.map(s => [s.sectionId, s.rowCount]));
+      const lastToast = () => toasts[toasts.length - 1];
+
+      const out = {};
+      // ---- menu availability ----
+      select();
+      out.noSelection = (await openMenu()).disabled;
+      select(F3);
+      const listFn = await openList();
+      out.menuLabel = listFn.label;
+      out.listNames = listFn.list.map(x => x.name);
+      out.listDisabledForFunction = listFn.list.map(x => x.disabled);
+      select(A1);
+      const listActor = await openList();
+      out.listDisabledForActor = listActor.list.map(x => x.disabled);
+      out.alphaTooltip = listActor.list.find(x => x.name === 'Alpha').title;
+      document.querySelectorAll('.move-to-menu, .canvas-context-menu').forEach(m => m.remove());
+
+      // ---- 1: F3 (Beta) -> Alpha, which is full: Alpha gains a row, sections below re-aligned ----
+      const bYBefore = A1.y, cYBefore = F4.y;
+      select(F3);
+      await pick('Alpha');
+      out.step1 = { section: F3.sectionId, cell: cell(F3), rows: rows(), aRowsAdded: rows().aaa, a1: [A1.sectionId, cell(A1)], f4: [F4.sectionId, cell(F4)],
+                    belowShifted: A1.y > bYBefore && F4.y > cYBefore, inBounds: allInBounds(), noStacking: noStacking(), toast: lastToast() };
+
+      // ---- 2: F4 + A1 -> Alpha: F4 moves, the actor is rejected by name ----
+      select(A1, F4);
+      await pick('Alpha');
+      out.step2 = { f4: [F4.sectionId, cell(F4)], a1Section: A1.sectionId, rows: rows(), inBounds: allInBounds(), noStacking: noStacking(),
+                    rejection: toasts.find(t => t.e && t.m.includes('"A1"')) };
+
+      // ---- 3: F1 + F2 -> Gamma (now empty): both move, order kept ----
+      select(F2, F1);
+      await pick('Gamma');
+      out.step3 = { f1: [F1.sectionId, cell(F1)], f2: [F2.sectionId, cell(F2)], inBounds: allInBounds(), noStacking: noStacking(), rows: rows() };
+
+      // ---- 4: choosing a greyed section (actor -> Alpha) explains, moves nothing ----
+      select(A1);
+      const before = toasts.length;
+      await pick('Alpha');
+      out.step4 = { a1Section: A1.sectionId, toast: toasts.slice(before).find(t => t.e) };
+
+      // ---- freeform view: menu item disabled ----
+      const ff = store.addView('MoveToFF_' + Date.now());
+      ff.viewType = 'ff';
+      const ffTab = app.createCanvasTab(ff);
+      app.switchToTab(ffTab.id);
+      const ffPart = store.createPart({ type: 'BusinessFunction', label: 'FF1', model: M, streams: [] });
+      const ffVm = store.createViewMember({ view: ff.id, objectType: 'part', objectId: ffPart.id, x: 60, y: 60, sectionId: '' });
+      ffTab.selection.clear(); ffTab.selection.add(ffVm.id);
+      out.freeformDisabled = (await openMenu()).disabled;
+      document.querySelectorAll('.canvas-context-menu').forEach(m => m.remove());
+      app.toast = origToast;
+      return out;
+    }
+    """)
+    o = result
+    problems = []
+    if o["noSelection"] is not True:
+        problems.append(f"'Move To' should be disabled with nothing selected, got disabled={o['noSelection']!r}")
+    if o["menuLabel"] != "Move To":
+        problems.append(f"expected a right-click item labeled 'Move To', got {o['menuLabel']!r}")
+    if o["listNames"] != ["Alpha", "Beta", "Gamma"]:
+        problems.append(f"the section list should be the body sections in order (no title-only section), got {o['listNames']}")
+    if o["listDisabledForFunction"] != [False, False, False]:
+        problems.append(f"a BusinessFunction fits every section, none should be greyed: {o['listDisabledForFunction']}")
+    if o["listDisabledForActor"] != [True, False, True]:
+        problems.append(f"a BusinessActor only fits Beta — Alpha/Gamma should be greyed: {o['listDisabledForActor']}")
+    if "BusinessFunction" not in o["alphaTooltip"]:
+        problems.append(f"a section's tooltip should list what it allows, got {o['alphaTooltip']!r}")
+    s1 = o["step1"]
+    if s1["section"] != "aaa" or s1["cell"] != [1, 0]:
+        problems.append(f"step 1: F3 should land in Alpha's new second row (aaa, [1,0]), got {s1['section']} {s1['cell']}")
+    if s1["rows"].get("aaa") != 2:
+        problems.append(f"step 1: full Alpha should gain a row (2), got {s1['rows']}")
+    if not s1["belowShifted"]:
+        problems.append("step 1: the sections below the grown Alpha should have been shifted down")
+    if s1["a1"] != ["bbb", [0, 1]] or s1["f4"] != ["ccc", [0, 0]]:
+        problems.append(f"step 1: nodes left behind must keep their own cells, got A1={s1['a1']} F4={s1['f4']}")
+    if not s1["inBounds"] or not s1["noStacking"]:
+        problems.append(f"step 1: layout broken (inBounds={s1['inBounds']}, noStacking={s1['noStacking']})")
+    if not s1["toast"] or "added 1 row" not in s1["toast"]["m"]:
+        problems.append(f"step 1: expected a toast reporting the added row, got {s1['toast']}")
+    s2 = o["step2"]
+    if s2["f4"] != ["aaa", [1, 1]]:
+        problems.append(f"step 2: F4 should move to Alpha's next free cell (aaa, [1,1]), got {s2['f4']}")
+    if s2["a1Section"] != "bbb":
+        problems.append(f"step 2: the BusinessActor must NOT be moved into Alpha, it's in {s2['a1Section']!r}")
+    rej = s2["rejection"]
+    if not rej or "BusinessActor" not in rej["m"] or "Alpha" not in rej["m"] or "BusinessFunction" not in rej["m"]:
+        problems.append(f"step 2: expected a rejection naming the section, its allowed types, and the node's type, got {rej}")
+    if s2["rows"].get("aaa") != 2 or not s2["inBounds"] or not s2["noStacking"]:
+        problems.append(f"step 2: layout broken (rows={s2['rows']}, inBounds={s2['inBounds']}, noStacking={s2['noStacking']})")
+    s3 = o["step3"]
+    if s3["f1"] != ["ccc", [0, 0]] or s3["f2"] != ["ccc", [0, 1]]:
+        problems.append(f"step 3: F1/F2 should land in Gamma in their original relative order ([0,0] then [0,1]), got {s3['f1']} {s3['f2']}")
+    if not s3["inBounds"] or not s3["noStacking"]:
+        problems.append("step 3: layout broken")
+    s4 = o["step4"]
+    if s4["a1Section"] != "bbb" or not s4["toast"] or "cannot be moved" not in s4["toast"]["m"]:
+        problems.append(f"step 4: choosing a greyed section must move nothing and explain the rule, got section={s4['a1Section']!r} toast={s4['toast']}")
+    if o["freeformDisabled"] is not True:
+        problems.append(f"'Move To' should be disabled in a freeform view, got disabled={o['freeformDisabled']!r}")
+    if problems:
+        return False, "; ".join(problems)
+    return True, ("the right-click 'Move To' lists the view's body sections (greying those that allow none of the selected types), moves the selection into the chosen one "
+                  "keeping order, adds a row to a full target and re-aligns the sections below, rejects a disallowed type with a rule-naming toast, and is disabled in freeform views")
+
+
 CHECKS = [
     check_boots_clean,
     check_example_simulates,
@@ -18084,6 +18277,7 @@ CHECKS = [
     check_populate_from_model_matches_sections,
     check_populate_from_model_dialog_wiring,
     check_section_resize_reflows_nodes,
+    check_move_to_section_context_menu,
 ]
 
 

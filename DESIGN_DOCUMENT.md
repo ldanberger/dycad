@@ -1819,7 +1819,24 @@ after `rowCount` is raised, nodes that already sat below are re-aligned through
 `rescaleSectionPositions(store, view, { sections: oldSnapshot })` (the same mechanism §6.3
 already documents for a single section's row/column change), and only then are the new
 ViewMembers created from the recomputed layout. Parts already on the view are never moved
-or duplicated; connectors are not added.
+or duplicated; connectors are not added. That cell-assignment/growth/re-alignment step is the
+shared `placeInSectionsGrowing(store, view, items, excludeVmIds)` in `sections.js` — it hands
+back `{ section, row, col, x, y }` per item and creates nothing itself — also used by Move To.
+
+**Move To (`moveNodesToSection`, `commands.js`; `showMoveToMenu`, `main.js`).** Right-click (or
+the toolbar's Move To button) with nodes selected in a section-based view lists the view's
+sections — `.dropdown-menu`, the shared scrolling dropdown class; title-only sections have no
+body and aren't offered — and choosing one moves the selection there at once. The nodes go
+into the target's next free cells (row-major, in their current top-to-bottom / left-to-right
+order, so relative order carries over) via `placeInSectionsGrowing`, passing the moving nodes
+as `excludeVmIds` so their old cells don't count as occupied and the caller repositions them
+itself. A full target gains rows and the sections below are re-aligned; cells the nodes leave
+behind stay empty — nothing else in the source section moves. Same type rule as drag-and-drop:
+a node whose type the target doesn't allow isn't moved, with a rejection naming the section,
+what it allows, and the node's type (one → that message as the toast; several → a short toast
+plus every reason in the Message Log). A section allowing none of the selected types is greyed
+in the list with its allowed types as a tooltip but stays clickable, so choosing it explains
+the rule rather than silently doing nothing. Disabled in freeform views.
 
 ### 7.1 Load SFCE (`js/sfce.js` + `main.js` wizard)
 

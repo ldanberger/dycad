@@ -370,6 +370,11 @@ canvas. Availability depends on what's selected — greyed out means the current
     <strong>Include unmatched sections</strong> to also add parts whose type the view allows but whose section is
     missing or isn't on this view — they go into a section named <em>unmatched</em> at the bottom of the view.
     Parts already on the view are left where they are.</td></tr>
+    <tr><td><strong>Move To</strong></td><td>Section-based views only. With one or more nodes selected, right-click and
+    choose <em>Move To</em>, then pick one of the view's sections from the list. The nodes move into that section's
+    next free cells in their current order, the section gains a row if it's full, and the sections below shift to
+    match. A node whose element type the chosen section doesn't allow stays where it is, with a message naming the
+    rule; sections that allow none of the selected types are greyed in the list.</td></tr>
     <tr><td><strong>Insert Smart Stream</strong></td><td>Freeform views only. Traces a chain of existing parts
     into the current view by element type: pick a Connector Type (Connectors or Streams), a Starting Element
     type — which populates a Starting Element Instances checklist of that type's actual parts, defaulting to

@@ -5,7 +5,7 @@ import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCo
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule, formatSimValue, segmentIntersectsRect } from './canvas.js';
 import { computeRoutedPath } from './routing.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
-import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, populateFromModel, insertSmartStream, duplicateSection as duplicateSectionCommand, copyModel, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors, GENERATE_VIEW_GROUPS, generateSelectedViews } from './commands.js';
+import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, populateFromModel, moveNodesToSection, insertSmartStream, duplicateSection as duplicateSectionCommand, copyModel, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors, GENERATE_VIEW_GROUPS, generateSelectedViews } from './commands.js';
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection, computeSectionLayout, getAllowedTypesForView } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog, pushActivityLog, pushDebugLog } from './simulation.js';
@@ -1570,10 +1570,60 @@ class App {
         const def = defs.find((d) => d.key === item.dataset.key);
         if (!def || !def.enabled) return;
         menu.remove();
-        this.runCommand(item.dataset.key, canvasPos);
+        this.runCommand(item.dataset.key, canvasPos, { x: clientX, y: clientY });
       });
     });
     const closer = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('pointerdown', closer); } };
+    setTimeout(() => document.addEventListener('pointerdown', closer), 10);
+  }
+
+  /** "Move To" (right-click / toolbar): a single-choice list of the current view's sections
+   * (title-only sections have no body, so they're not offered). Clicking one moves the selected
+   * nodes there immediately (moveNodesToSection) — no separate confirm step. Uses the shared
+   * .dropdown-menu class (scrolls past 70vh, so a long section list still fits). A section that
+   * allows none of the selected nodes' types is greyed with its allowed types as a tooltip, but
+   * stays clickable: choosing it explains the rule that blocked the move instead of doing
+   * nothing. */
+  showMoveToMenu(tab, selIds, anchor) {
+    const view = this.store.findView(tab.viewId);
+    if (!view || !isSectionViewType(view.viewType)) return;
+    const selectedTypes = [...new Set(selIds
+      .map((id) => this.store.findViewMember(id))
+      .filter((vm) => vm && vm.objectType === 'part')
+      .map((vm) => this.store.findPart(vm.objectId)?.type)
+      .filter(Boolean))];
+    const sections = (view.sections || [])
+      .filter((s) => !ciEq(s.sectionId, 'title'))
+      .slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    if (sections.length === 0) { this.toast('Move To: this view has no sections that can hold nodes.', true); return; }
+
+    document.querySelectorAll('.move-to-menu').forEach((m) => m.remove());
+    const menu = document.createElement('div');
+    menu.className = 'dropdown-menu move-to-menu';
+    menu.style.left = `${anchor?.x ?? 100}px`;
+    menu.style.top = `${anchor?.y ?? 100}px`;
+    menu.style.right = 'auto';
+    menu.style.marginTop = '0';
+    menu.innerHTML = `<div class="dd-empty" style="font-weight:600;">Move to section</div>` + sections.map((s) => {
+      const allowed = s.elementTypes || [];
+      const allowedText = allowed.includes('*') ? 'any type' : allowed.length === 0 ? 'no element types' : allowed.join(', ');
+      const fits = selectedTypes.some((t) => isTypeAllowedInSection(s, t));
+      return `<div class="dd-item ${fits ? '' : 'disabled'}" data-section="${escapeHtml(s.id)}" title="Allows: ${escapeHtml(allowedText)}">${escapeHtml(s.name || s.sectionId)}</div>`;
+    }).join('');
+    document.getElementById('modal-root').appendChild(menu);
+    // keep the list on screen: shift up/left if it would run off the bottom/right edge
+    const rect = menu.getBoundingClientRect();
+    if (rect.bottom > window.innerHeight) menu.style.top = `${Math.max(4, window.innerHeight - rect.height - 8)}px`;
+    if (rect.right > window.innerWidth) menu.style.left = `${Math.max(4, window.innerWidth - rect.width - 8)}px`;
+
+    const closer = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('pointerdown', closer); } };
+    menu.querySelectorAll('.dd-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        menu.remove();
+        document.removeEventListener('pointerdown', closer);
+        moveNodesToSection(this, tab, selIds, item.dataset.section);
+      });
+    });
     setTimeout(() => document.addEventListener('pointerdown', closer), 10);
   }
 
@@ -1620,7 +1670,7 @@ class App {
   }
 
   // ===================== COMMANDS =====================
-  runCommand(key, canvasPos) {
+  runCommand(key, canvasPos, anchor) {
     const tab = this.store.activeTab();
     if (!tab || tab.type !== 'canvas') return;
     const selIds = [...tab.selection];
@@ -1677,6 +1727,8 @@ class App {
       this.promptPopulateFromTemplate(tab);
     } else if (key === 'populateFromModel') {
       this.promptPopulateFromModel(tab);
+    } else if (key === 'moveTo') {
+      this.showMoveToMenu(tab, selIds, anchor);
     } else if (key === 'insertSmartStream') {
       this.promptInsertSmartStream(tab);
     } else if (key === 'smartCheckNode') {

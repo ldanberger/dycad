@@ -217,6 +217,7 @@ button, select, input { font-family: inherit; font-size: inherit; color: inherit
   padding: 6px 8px; border-radius: 4px; cursor: pointer; white-space: nowrap;
 }
 .dropdown-menu .dd-item:hover { background: var(--accent-soft); }
+.dropdown-menu .dd-item.disabled { opacity: .45; }
 .dropdown-menu .dd-empty { padding: 6px 8px; color: var(--text-muted); }
 .dropdown-menu .dd-separator { height: 1px; margin: 4px 2px; background: var(--border); }
 .menu-item-wrap .dropdown-menu { left: 0; right: auto; }

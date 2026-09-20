@@ -544,6 +544,7 @@ const CMD_ICONS = {
   merge: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"/><circle cx="15" cy="6" r="2.5"/><path d="M5 8.5v2a3 3 0 0 0 3 3h4a3 3 0 0 0 3-3v-2"/><circle cx="10" cy="16" r="2.2"/></svg>',
   redraw: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="14" height="9" rx="1.5"/><path d="M14 2.5l2 2-2 2M16 4.5H10"/></svg>',
   addExisting: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="10" height="12" rx="1.5"/><path d="M5.5 7.5h4M5.5 10.5h4M5.5 13.5h2.5"/><circle cx="15.5" cy="14.5" r="3.2"/><path d="M15.5 13v3M14 14.5h3"/></svg>',
+  moveTo: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="15" height="5" rx="1"/><rect x="2.5" y="12.5" width="15" height="5" rx="1"/><path d="M10 9v3.5M8 11l2 2 2-2"/></svg>',
   populateFromModel: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="6" height="6" rx="1"/><rect x="11.5" y="2.5" width="6" height="6" rx="1"/><path d="M10 11v6.5M7 14.5l3 3 3-3"/></svg>',
   populateFromTemplate: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="6" height="6" rx="1"/><rect x="11.5" y="2.5" width="6" height="6" rx="1"/><rect x="2.5" y="11.5" width="6" height="6" rx="1"/><path d="M14.5 12v6M11.5 15h6"/></svg>',
   insertSmartStream: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="3.5" cy="10" r="2"/><circle cx="10" cy="4.5" r="2"/><circle cx="10" cy="15.5" r="2"/><circle cx="16.5" cy="10" r="2"/><path d="M5.3 8.9L8.2 6M5.3 11.1L8.2 14M11.8 5.6L14.7 8.9M11.8 14.4L14.7 11.1"/></svg>',
@@ -560,6 +561,7 @@ function getCommandDefs(app) {
   const nodeSelectionCount = isCanvas ? [...tab.selection].filter((id) => app.store.findViewMember(id)?.objectType === 'part').length : 0;
   const view = isCanvas ? app.store.findView(tab.viewId) : null;
   const isFreeformCanvas = isCanvas && view && !isSectionViewType(view.viewType);
+  const isSectionCanvas = isCanvas && !!view && isSectionViewType(view.viewType);
 
   return [
     { key: 'duplicateStream', label: 'Duplicate Stream', hint: 'Duplicate Stream — clone a stream to a new name', enabled: !!singlePart && (singlePart.streams || []).length > 0 },
@@ -569,6 +571,7 @@ function getCommandDefs(app) {
     { key: 'levelIt', label: 'Level It', hint: 'Level It — replace this node with the correct stream-template type where it directly connects across a gap (freeform views only)', enabled: isFreeformCanvas && !!singlePart },
     { key: 'generate', label: 'Generate Stream', hint: 'Generate Stream — build a stream from a template', enabled: isCanvas },
     { key: 'copy', label: 'Copy', hint: 'Copy — copy the selected nodes', enabled: hasNodeSelection },
+    { key: 'moveTo', label: 'Move To', hint: 'Move To — move the selected nodes into another section of this view (section-based views only)', enabled: isSectionCanvas && hasNodeSelection },
     { key: 'paste', label: 'Paste', hint: 'Paste — paste copied nodes into this view', enabled: isCanvas && !!app.clipboard },
     { key: 'remap', label: 'Remap', hint: 'Remap — reorganize this view by stream template', enabled: isCanvas },
     { key: 'merge', label: 'Merge', hint: 'Merge — combine 2+ selected nodes into one', enabled: nodeSelectionCount >= 2 },
@@ -591,7 +594,7 @@ function renderCommands(app) {
     btn.disabled = !d.enabled;
     btn.title = d.hint;
     btn.innerHTML = CMD_ICONS[d.key];
-    btn.addEventListener('click', () => app.runCommand(d.key));
+    btn.addEventListener('click', (e) => app.runCommand(d.key, undefined, { x: e.clientX, y: e.clientY }));
     wrap.appendChild(btn);
   }
 }
