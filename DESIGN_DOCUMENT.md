@@ -1781,6 +1781,46 @@ File > Load SFCCE replaces it. Tree shape:
 }]
 ```
 
+**Editing a section's row/column count (`reflowSectionAfterResize`, `sections.js`).** The
+Properties panel's Row Count and Column Count setters (`render.js`'s `renderSectionProperties`)
+used to call only `rescaleSectionPositions`, which keeps every node at its old `(row, col)` —
+right for the sections *below* the edited one, wrong for the edited section itself (a narrower
+grid left nodes outside it; a shorter one stacked them on the last row). Both setters now call
+`reflowSectionAfterResize` instead. Each of the section's nodes has a *slot*, its row-major
+index in the old grid (`row * oldColumns + col`), and keeps that slot in the new grid
+(`floor(slot / newColumns)`, `slot % newColumns`) — so reading the section left-to-right,
+top-to-bottom gives the same sequence before and after, deliberate gaps included, and
+changing the count back restores the original arrangement exactly (2×20 with 35 nodes →
+4×10 at 10 columns → 2×20 again). Nodes that somehow shared a slot are pushed to the next
+free one. `rowCount` is raised when the new grid needs more rows (fewer columns, or a row
+count typed below what the nodes need) and never lowered — it's a number the person set on
+purpose — and a toast says so. Order of operations matters: old slots are read before
+anything moves, the final `rowCount` is settled before the layout is recomputed (added rows
+shift every section below), `rescaleSectionPositions` then re-aligns all sections, and last
+the edited section's nodes are placed at their reflowed cells.
+
+**Populate From Model (`populateFromModel`, `commands.js`).** The section-view sibling of
+Populate From Template: it places the current model's *own* existing Parts into a
+section-based view instead of a template's. A part goes into a section when that
+section's `elementTypes` allow the part's type **and** the part's section id matches the
+section's `sectionId`. A `Part` only stores a section *name* (`Part.section`); the id
+itself lives on the section's `BusinessOrganizationUnit` part (`xIds`, §7.3) and on each
+`ViewMember.sectionId`, so a part "matches" a view section when `Part.section` equals that
+section's `sectionId`, equals its `name`, or names an org unit whose `xIds` equals its
+`sectionId`. Title-only sections (`sectionId` `'title'`) have no body and never hold parts.
+Two deliberate rules: a part whose id matches a section that just doesn't *allow* its type
+is left out (a type mismatch, not a missing id), and a part whose type *no* section allows
+is never added. The dialog's **Include unmatched sections** checkbox additionally adds
+parts of an allowed type whose id is missing or matches nothing, into a section named
+`unmatched` (created below the last section, or reused — never duplicated — on a re-run).
+Cells are assigned first (`(row, col)` per section, first free cell, row-major, unlimited
+rows) and pixels last, because growing an earlier section shifts every section below it:
+after `rowCount` is raised, nodes that already sat below are re-aligned through
+`rescaleSectionPositions(store, view, { sections: oldSnapshot })` (the same mechanism §6.3
+already documents for a single section's row/column change), and only then are the new
+ViewMembers created from the recomputed layout. Parts already on the view are never moved
+or duplicated; connectors are not added.
+
 ### 7.1 Load SFCE (`js/sfce.js` + `main.js` wizard)
 
 Imports an arbitrary external JSON file, replacing whatever `store.doc.industryTree`

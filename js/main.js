@@ -5,7 +5,7 @@ import { renderTabs, renderToolbar, renderToolbox, renderSelectionInfo, renderCo
 import { renderPages, renderCanvasPage, wireGlobalCanvasHandlers, buildMarkerDefs, redrawNodeSizes, redrawAndResolveLayout, getNodeSize, passesStreamFilter, passesElementTypeFilter, isAnyVisibilityFilterActive, expandVisiblePartVmIdsByLevel, disposeView3DTab, getView3DModule, formatSimValue, segmentIntersectsRect } from './canvas.js';
 import { computeRoutedPath } from './routing.js';
 import { validRelationOptions, elementByType, defaultRelationKeyFor } from './rules.js';
-import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection as duplicateSectionCommand, copyModel, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors, GENERATE_VIEW_GROUPS, generateSelectedViews } from './commands.js';
+import { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, populateFromModel, insertSmartStream, duplicateSection as duplicateSectionCommand, copyModel, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, scanStreamsForAutoComplete, autoCompleteStreams, createBulkLookupCache, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors, GENERATE_VIEW_GROUPS, generateSelectedViews } from './commands.js';
 import { APP_VERSION } from './version.js';
 import { isSectionViewType, pixelToNearestGrid, isTypeAllowedInSection, insertSectionAfter, removeSectionAndMembers, findFreeCellInSection, computeSectionLayout, getAllowedTypesForView } from './sections.js';
 import { stepSimulation, startContinuousRun, pauseContinuousRun, continueContinuousRun, stopContinuousRun, resetSimulation, saveSimSnapshot, loadSimSnapshot, pushMessageLog, pushActivityLog, pushDebugLog } from './simulation.js';
@@ -365,6 +365,7 @@ function scriptConsoleInnerHTML(modelName, { standalone } = {}) {
             <tr><td><code>activityLog(...)</code>, <code>debugLog(...)</code></td><td>Same as <code>messageLog(...)</code>, writing to the sibling Activity/Debug Log tabs instead (Step 43) — Message for brief messages, Activity for more detail, Debug for deep/verbose dumps.</td></tr>
             <tr><td><code>generateIndustry(app, onProgress, placeInView)</code></td><td>Generates a full industry model.</td></tr>
             <tr><td><code>populateFromTemplate(app, tab, templateName)</code></td><td>Populates a view from a stream template.</td></tr>
+            <tr><td><code>populateFromModel(app, tab, { includeUnmatched })</code></td><td>Adds the model's existing parts to a section-based view, each into the section whose element types and section id match; <code>includeUnmatched: true</code> also adds the rest into an "unmatched" section.</td></tr>
             <tr><td><code>remap(app, tab, options)</code></td><td>options: <code>sortKeys, templateName</code>,
               <code>pattern</code> (<code>'default'|'none'|'layered'|'force'|'clusters'</code>),
               <code>limitColumnsToView, visiblePartVmIds, forcePreferRight, forceGroupRows</code>,
@@ -742,7 +743,7 @@ class App {
     if (!tab || tab.type !== 'canvas') { this.toast('Open a canvas view with Data Entity Details tables first.', true); return; }
 
     const code = this.store.batchScriptCode || '';
-    const bindingNames = ['app', 'store', 'model', 'findParts', 'log', 'messageLog', 'activityLog', 'debugLog', 'generateIndustry', 'populateFromTemplate', 'remap', 'smartCheckView', 'smartCheckNode', 'insertSmartStream'];
+    const bindingNames = ['app', 'store', 'model', 'findParts', 'log', 'messageLog', 'activityLog', 'debugLog', 'generateIndustry', 'populateFromTemplate', 'populateFromModel', 'remap', 'smartCheckView', 'smartCheckNode', 'insertSmartStream'];
     const logToMessageLog = (...args) => pushMessageLog(this.store, args.map((a) => (typeof a === 'string' ? a : stringifyForConsole(a))).join(' '));
     const logToActivityLog = (...args) => pushActivityLog(this.store, args.map((a) => (typeof a === 'string' ? a : stringifyForConsole(a))).join(' '));
     const logToDebugLog = (...args) => pushDebugLog(this.store, args.map((a) => (typeof a === 'string' ? a : stringifyForConsole(a))).join(' '));
@@ -750,7 +751,7 @@ class App {
       this, this.store, this.store.simSelectedModel || null,
       (query) => { const { type, model } = query || {}; return this.store.doc.parts.filter((p) => (!type || ciEq(p.type, type)) && (!model || ciEq(p.model, model))); },
       logToMessageLog, logToMessageLog, logToActivityLog, logToDebugLog,
-      generateIndustry, populateFromTemplate, remap, smartCheckView, smartCheckNode, insertSmartStream,
+      generateIndustry, populateFromTemplate, populateFromModel, remap, smartCheckView, smartCheckNode, insertSmartStream,
     ];
 
     let fn;
@@ -1083,7 +1084,7 @@ class App {
       if (!code.trim()) return;
       const fnName = runFnSelect.value || 'main';
 
-      const bindingNames = ['app', 'store', 'model', 'findParts', 'log', 'messageLog', 'activityLog', 'debugLog', 'generateIndustry', 'populateFromTemplate', 'remap', 'smartCheckView', 'smartCheckNode', 'insertSmartStream'];
+      const bindingNames = ['app', 'store', 'model', 'findParts', 'log', 'messageLog', 'activityLog', 'debugLog', 'generateIndustry', 'populateFromTemplate', 'populateFromModel', 'remap', 'smartCheckView', 'smartCheckNode', 'insertSmartStream'];
       const bindingValues = [
         this, this.store, this.store.simSelectedModel || null,
         findPartsForConsole,
@@ -1091,7 +1092,7 @@ class App {
         (msg) => pushMessageLog(this.store, typeof msg === 'string' ? msg : stringifyForConsole(msg)),
         (msg) => pushActivityLog(this.store, typeof msg === 'string' ? msg : stringifyForConsole(msg)),
         (msg) => pushDebugLog(this.store, typeof msg === 'string' ? msg : stringifyForConsole(msg)),
-        generateIndustry, populateFromTemplate, remap, smartCheckView, smartCheckNode, insertSmartStream,
+        generateIndustry, populateFromTemplate, populateFromModel, remap, smartCheckView, smartCheckNode, insertSmartStream,
       ];
 
       let result, threw = false, errMessage = '';
@@ -1674,6 +1675,8 @@ class App {
       this.promptAddExisting(tab, canvasPos);
     } else if (key === 'populateFromTemplate') {
       this.promptPopulateFromTemplate(tab);
+    } else if (key === 'populateFromModel') {
+      this.promptPopulateFromModel(tab);
     } else if (key === 'insertSmartStream') {
       this.promptInsertSmartStream(tab);
     } else if (key === 'smartCheckNode') {
@@ -1784,6 +1787,20 @@ class App {
         { key: 'template', label: 'Template', type: 'select', options: names, value: names[0] },
       ],
       onSubmit: (vals) => populateFromTemplate(this, tab, vals.template),
+    });
+  }
+
+  /** Populate From Model's dialog. Section-based views only (populateFromModel itself
+   * rejects a freeform view with a toast naming the rule, same as Insert Smart Stream).
+   * The single option decides what happens to parts whose section id is missing or
+   * matches no section on this view: left out, or collected into an "unmatched" section. */
+  promptPopulateFromModel(tab) {
+    this.promptModal({
+      title: 'Populate From Model',
+      fields: [
+        { key: 'includeUnmatched', label: 'Include unmatched sections', type: 'checkbox', value: false },
+      ],
+      onSubmit: (vals) => populateFromModel(this, tab, { includeUnmatched: !!vals.includeUnmatched }),
     });
   }
 

@@ -256,6 +256,54 @@ export function rescaleSectionPositions(store, view, oldSnapshot) {
   }
 }
 
+/**
+ * A section's rowCount and/or columnCount was just edited (already applied to `section`);
+ * `oldSections` is view.sections with just this section's PRE-edit counts restored (the
+ * same shape rescaleSectionPositions takes). Reflows THIS section's own nodes into the new
+ * grid, keeping their order, and re-aligns every other section's nodes to the shifted layout.
+ *
+ * Each node's slot is its row-major index in the OLD grid (row * oldColumns + col) and it
+ * keeps that slot number in the new grid (newRow = floor(slot / newColumns), newCol =
+ * slot % newColumns) — so reading the section left-to-right, top-to-bottom gives the same
+ * sequence before and after, gaps included, and changing the column count back restores
+ * the original arrangement exactly. Two nodes that somehow shared a slot are pushed to the
+ * next free one rather than stacked. If the new grid needs more rows than the section has
+ * (fewer columns, or a rowCount edited below what its nodes need), rowCount is raised to
+ * fit — never lowered, since a row count is something the person set on purpose.
+ *
+ * Order matters here: every node's old slot is read BEFORE anything moves; the section's
+ * final rowCount is settled BEFORE the layout is recomputed (rows added here shift every
+ * section below); rescaleSectionPositions then re-aligns all sections' nodes to that final
+ * layout (this section's nodes only provisionally); and last, this section's nodes are
+ * placed at their reflowed cells. Returns { count, rowCount } (nodes reflowed, final rows).
+ */
+export function reflowSectionAfterResize(store, view, section, oldSections) {
+  const oldSection = oldSections.find((s) => s.id === section.id) || section;
+  const oldEntry = computeSectionLayout({ ...view, sections: oldSections }).find((e) => e.section.id === section.id);
+  const oldCols = Math.max(1, oldSection.columnCount || 1);
+  const newCols = Math.max(1, section.columnCount || 1);
+  const vms = store.viewMembersForView(view.id).filter((vm) => vm.objectType === 'part' && vm.sectionId === section.sectionId);
+
+  const items = oldEntry ? vms.map((vm, i) => {
+    const col = Math.min(oldCols - 1, Math.max(0, Math.round((vm.x - oldEntry.bodyLeft - NODE_INSET_X) / oldEntry.cellW)));
+    const row = Math.max(0, Math.round((vm.y - oldEntry.bodyTop - NODE_INSET_Y) / oldEntry.cellH));
+    return { vm, slot: row * oldCols + col, i };
+  }).sort((a, b) => a.slot - b.slot || a.i - b.i) : [];
+  let last = -1;
+  for (const it of items) { it.target = Math.max(it.slot, last + 1); last = it.target; }
+
+  const neededRows = items.length ? Math.floor(last / newCols) + 1 : 0;
+  if ((section.rowCount || 1) < neededRows) section.rowCount = neededRows;
+
+  rescaleSectionPositions(store, view, { sections: oldSections });
+  const newEntry = computeSectionLayout(view).find((e) => e.section.id === section.id);
+  for (const it of items) {
+    const { x, y } = gridToPixel(newEntry, Math.floor(it.target / newCols), it.target % newCols);
+    it.vm.x = x; it.vm.y = y;
+  }
+  return { count: items.length, rowCount: section.rowCount };
+}
+
 /** Insert a new blank section immediately after the given section instance (by its instance id). */
 export function insertSectionAfter(view, afterSectionInstanceId) {
   const list = view.sections || (view.sections = []);

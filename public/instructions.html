@@ -72,7 +72,9 @@ no blank-canvas guessing required.</p>
   document, which is why they're already there even in a brand-new session.</li>
   <li>The right column's <strong>Filters</strong> and <strong>Properties</strong> panels both track your
   canvas selection: click empty canvas space to see a view's own settings, click a node/connector/section to
-  see its own properties instead.</li>
+  see its own properties instead. On a section, changing <strong>Row Count</strong> or <strong>Column Count</strong>
+  re-flows that section's nodes into the new grid in their original left-to-right, top-to-bottom order, adding rows
+  when they're needed to fit.</li>
   <li>Once you've explored the generated views, "The Data Model" (next) covers the five record types
   everything is built from, and "Commands" covers what the left-sidebar panel/right-click menu can do to
   whatever you have selected.</li>
@@ -361,6 +363,13 @@ canvas. Availability depends on what's selected — greyed out means the current
     <tr><td><strong>Populate From Template</strong></td><td>Fills a view from a page template matching its
     view type (e.g. a full "Enterprise Functions" section layout) — reuses existing parts by label/type/model
     match where possible rather than duplicating them.</td></tr>
+    <tr><td><strong>Populate From Model</strong></td><td>Section-based views only. Adds this model's
+    existing parts to the view, each into the section whose allowed element types include the part's type
+    <em>and</em> whose section id matches the part's section (the part's Section field can hold the section's id
+    or name, or name an Organization Unit whose id is the section's). Sections grow by whole rows as needed. Tick
+    <strong>Include unmatched sections</strong> to also add parts whose type the view allows but whose section is
+    missing or isn't on this view — they go into a section named <em>unmatched</em> at the bottom of the view.
+    Parts already on the view are left where they are.</td></tr>
     <tr><td><strong>Insert Smart Stream</strong></td><td>Freeform views only. Traces a chain of existing parts
     into the current view by element type: pick a Connector Type (Connectors or Streams), a Starting Element
     type — which populates a Starting Element Instances checklist of that type's actual parts, defaulting to

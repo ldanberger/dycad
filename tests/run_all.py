@@ -17455,6 +17455,412 @@ def check_full_generate_view_data_set_example(page):
     return True, f"the full generate-view data set example ({result['distinctPartTypes']} distinct part types) produces all 13 Generate View views fully populated with zero 'Parts Needed' markers, and carries its own regeneration prompt as an on-canvas note"
 
 
+def check_populate_from_model_matches_sections(page):
+    """New command, reported directly: "similar to 'populate from template', add a
+    'populate from model' command that will add parts to the current view, matching
+    section settings of element types and section ids. In user dialog add 'include
+    unmatched sections' checkbox, and if user selects this also include those same element
+    types that have missing section ids or section ids that don't match any on view. If it
+    is selected create a section named 'unmatched' and place unmatched into this section,
+    extending rows as needed for all view sections."
+    Builds a 4-section 'org' view (Alpha allows BusinessFunction, Beta allows
+    BusinessFunction+BusinessActor, Gamma allows BusinessFunction; all 3 columns wide, 1 row
+    tall) and a model whose parts cover every rule: section id given directly on
+    Part.section ('aaa'), by section NAME ('Beta Section'), via a BusinessOrganizationUnit
+    part whose xIds is the id ('Some Beta Dept' -> 'bbb'); a BusinessActor whose id names
+    a section that doesn't allow actors; a type no section allows; and 4 parts with a
+    missing / non-matching id. One node already sits in Gamma. Without the checkbox:
+    only the 6 matching parts are added (Alpha's 4 need a second row — Alpha must GROW, and
+    the existing Gamma node must stay inside Gamma's shifted body, not float over Beta), and
+    NO 'unmatched' section appears. With it: exactly one section named 'unmatched' is
+    created below the others holding exactly the 4 unmatched parts, itself grown to 2 rows
+    (4 parts, 3 columns); the type-blocked actor and the disallowed type are still left out;
+    re-running adds nothing and doesn't duplicate the section. A freeform view is refused
+    with a toast naming the rule."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sections = await import('./js/sections.js');
+      const commands = await import('./js/commands.js');
+      const toasts = [];
+      const origToast = app.toast.bind(app);
+      app.toast = (m, e, l) => { toasts.push({ m, e: !!e }); return origToast(m, e, l); };
+
+      const view = store.addView('PopModel_' + Date.now());
+      view.viewType = 'org';
+      view.sections = [
+        { id: 's-title', viewType: 'org', sectionId: 'title', order: 0, name: 'Title', rowCount: 1, columnCount: 4, elementTypes: [] },
+        { id: 's-a', viewType: 'org', sectionId: 'aaa', order: 1, name: 'Alpha Section', rowCount: 1, columnCount: 3, elementTypes: ['BusinessFunction'] },
+        { id: 's-b', viewType: 'org', sectionId: 'bbb', order: 2, name: 'Beta Section', rowCount: 1, columnCount: 3, elementTypes: ['BusinessFunction', 'BusinessActor'] },
+        { id: 's-c', viewType: 'org', sectionId: 'ccc', order: 3, name: 'Gamma Section', rowCount: 1, columnCount: 3, elementTypes: ['BusinessFunction'] },
+      ];
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const M = store.defaultModel;
+      const mk = (type, label, section) => store.createPart({ type, label, model: M, streams: [], section: section || '' });
+
+      // one node already in Gamma, at row 0 / col 0
+      const existing = mk('BusinessFunction', 'Existing-Gamma', 'ccc');
+      const gEntry = sections.computeSectionLayout(view).find(e => e.section.sectionId === 'ccc');
+      const gPos = sections.gridToPixel(gEntry, 0, 0);
+      store.createViewMember({ view: view.id, objectType: 'part', objectId: existing.id, x: gPos.x, y: gPos.y, sectionId: 'ccc' });
+      // Settle the view's node size BEFORE populating. Otherwise the trailing Redraw inside
+      // populateFromModel changes the node size and its own rescale pass re-snaps every node —
+      // which would silently mask a missing re-alignment of nodes below a grown section.
+      const canvas = await import('./js/canvas.js');
+      canvas.redrawNodeSizes(app, tab);
+
+      const alpha = ['A1', 'A2', 'A3', 'A4'].map(l => mk('BusinessFunction', l, 'aaa'));
+      const betaByName = mk('BusinessFunction', 'B-by-name', 'Beta Section');
+      mk('BusinessOrganizationUnit', 'Some Beta Dept', 'Some Beta Dept').xIds = 'bbb';
+      const betaByOrg = mk('BusinessFunction', 'B-by-org-unit', 'Some Beta Dept');
+      const typeBlocked = mk('BusinessActor', 'Actor-in-Alpha', 'aaa');   // id matches Alpha, but Alpha doesn't allow actors
+      const typeNowhere = mk('BusinessCapability', 'Cap-nowhere', 'aaa'); // no section allows this type
+      const unmatchedParts = [mk('BusinessFunction', 'U-blank', ''), mk('BusinessFunction', 'U-blank2', ''),
+                              mk('BusinessFunction', 'U-unknown', 'zzz'), mk('BusinessFunction', 'U-unknown2', 'Unknown Dept')];
+
+      const inBounds = () => {
+        const layout = sections.computeSectionLayout(view);
+        return store.viewMembersForView(view.id).filter(v => v.objectType === 'part').every(vm => {
+          const e = layout.find(x => x.section.sectionId === vm.sectionId);
+          return e && vm.x >= e.bodyLeft && vm.x < e.bodyLeft + e.width && vm.y >= e.bodyTop && vm.y < e.bodyTop + e.bodyHeight;
+        });
+      };
+      const noStacking = () => {
+        const seen = new Set();
+        for (const vm of store.viewMembersForView(view.id).filter(v => v.objectType === 'part')) {
+          const k = vm.x + ',' + vm.y; if (seen.has(k)) return false; seen.add(k);
+        }
+        return true;
+      };
+      const sectionOf = (part) => { const vm = store.viewMembersForView(view.id).find(v => v.objectType === 'part' && v.objectId === part.id); return vm ? vm.sectionId : null; };
+      const partVmCount = () => store.viewMembersForView(view.id).filter(v => v.objectType === 'part').length;
+
+      // ---- A: checkbox OFF ----
+      commands.populateFromModel(app, tab, { includeUnmatched: false });
+      const afterA = {
+        count: partVmCount(),
+        alphaSections: alpha.map(sectionOf),
+        betaByName: sectionOf(betaByName), betaByOrg: sectionOf(betaByOrg),
+        typeBlocked: sectionOf(typeBlocked), typeNowhere: sectionOf(typeNowhere),
+        unmatchedPlaced: unmatchedParts.map(sectionOf),
+        hasUnmatchedSection: view.sections.some(s => s.sectionId === 'unmatched'),
+        alphaRows: view.sections.find(s => s.sectionId === 'aaa').rowCount,
+        existingSection: sectionOf(existing),
+        inBounds: inBounds(), noStacking: noStacking(),
+        toast: toasts[toasts.length - 1]?.m,
+      };
+
+      // ---- B: checkbox ON ----
+      commands.populateFromModel(app, tab, { includeUnmatched: true });
+      const unmatchedSecs = view.sections.filter(s => s.sectionId === 'unmatched' || s.name === 'unmatched');
+      const um = unmatchedSecs[0];
+      const maxOtherOrder = Math.max(...view.sections.filter(s => s !== um).map(s => s.order));
+      const afterB = {
+        count: partVmCount(),
+        unmatchedSectionCount: unmatchedSecs.length,
+        unmatchedName: um?.name, unmatchedId: um?.sectionId, unmatchedRows: um?.rowCount,
+        unmatchedIsLast: um ? um.order > maxOtherOrder : false,
+        unmatchedPlaced: unmatchedParts.map(sectionOf),
+        typeBlocked: sectionOf(typeBlocked), typeNowhere: sectionOf(typeNowhere),
+        inBounds: inBounds(), noStacking: noStacking(),
+        toast: toasts[toasts.length - 1]?.m,
+      };
+
+      // ---- C: run again -> idempotent ----
+      commands.populateFromModel(app, tab, { includeUnmatched: true });
+      const afterC = {
+        count: partVmCount(),
+        unmatchedSectionCount: view.sections.filter(s => s.sectionId === 'unmatched').length,
+        inBounds: inBounds(), noStacking: noStacking(),
+      };
+
+      // ---- D: freeform view refused ----
+      const ff = store.addView('PopModelFF_' + Date.now());
+      ff.viewType = 'ff';
+      const ffTab = app.createCanvasTab(ff);
+      app.switchToTab(ffTab.id);
+      const before = toasts.length;
+      commands.populateFromModel(app, ffTab, { includeUnmatched: true });
+      const afterD = {
+        vms: store.viewMembersForView(ff.id).length,
+        toast: toasts.slice(before).find(t => t.e)?.m,
+      };
+      app.toast = origToast;
+      return { afterA, afterB, afterC, afterD };
+    }
+    """)
+    a, b, c, d = result["afterA"], result["afterB"], result["afterC"], result["afterD"]
+    problems = []
+    # A
+    if a["count"] != 7:
+        problems.append(f"checkbox OFF: expected 7 part nodes (1 existing + 6 matching), got {a['count']}")
+    if a["alphaSections"] != ["aaa"] * 4:
+        problems.append(f"checkbox OFF: the 4 parts whose Part.section is the id 'aaa' should all land in Alpha, got {a['alphaSections']}")
+    if a["betaByName"] != "bbb":
+        problems.append(f"checkbox OFF: a part whose section names 'Beta Section' should land in Beta, got {a['betaByName']!r}")
+    if a["betaByOrg"] != "bbb":
+        problems.append(f"checkbox OFF: a part whose section names an org unit with xIds 'bbb' should land in Beta, got {a['betaByOrg']!r}")
+    if a["typeBlocked"] is not None or a["typeNowhere"] is not None:
+        problems.append(f"checkbox OFF: a type-mismatched/disallowed part must not be added (actor-in-Alpha={a['typeBlocked']!r}, capability={a['typeNowhere']!r})")
+    if any(s is not None for s in a["unmatchedPlaced"]):
+        problems.append(f"checkbox OFF: unmatched parts must be left out, got {a['unmatchedPlaced']}")
+    if a["hasUnmatchedSection"]:
+        problems.append("checkbox OFF: no 'unmatched' section should be created")
+    if a["alphaRows"] != 2:
+        problems.append(f"checkbox OFF: Alpha holds 4 parts in 3 columns and must grow to 2 rows, got {a['alphaRows']}")
+    if a["existingSection"] != "ccc":
+        problems.append("checkbox OFF: the pre-existing Gamma node changed section")
+    if not a["inBounds"]:
+        problems.append("checkbox OFF: a node sits outside its section's body — existing nodes below a grown section weren't re-aligned")
+    if not a["noStacking"]:
+        problems.append("checkbox OFF: two nodes share the same position")
+    if not a["toast"] or "added 6 part" not in a["toast"] or "4 with no matching section" not in a["toast"]:
+        problems.append(f"checkbox OFF: expected a toast reporting 6 added and 4 with no matching section, got {a['toast']!r}")
+    # B
+    if b["count"] != 11:
+        problems.append(f"checkbox ON: expected 11 part nodes (7 + 4 unmatched), got {b['count']}")
+    if b["unmatchedSectionCount"] != 1 or b["unmatchedName"] != "unmatched" or b["unmatchedId"] != "unmatched":
+        problems.append(f"checkbox ON: expected exactly one section named/id 'unmatched', got count={b['unmatchedSectionCount']} name={b['unmatchedName']!r} id={b['unmatchedId']!r}")
+    if not b["unmatchedIsLast"]:
+        problems.append("checkbox ON: the 'unmatched' section should sit below every other section")
+    if b["unmatchedPlaced"] != ["unmatched"] * 4:
+        problems.append(f"checkbox ON: the 4 unmatched parts should all be in 'unmatched', got {b['unmatchedPlaced']}")
+    if b["unmatchedRows"] != 2:
+        problems.append(f"checkbox ON: 4 parts across 3 columns need 2 rows in 'unmatched', got {b['unmatchedRows']}")
+    if b["typeBlocked"] is not None or b["typeNowhere"] is not None:
+        problems.append(f"checkbox ON: type-blocked/disallowed parts must still be left out, got actor={b['typeBlocked']!r} capability={b['typeNowhere']!r}")
+    if not b["inBounds"] or not b["noStacking"]:
+        problems.append(f"checkbox ON: layout broken (inBounds={b['inBounds']}, noStacking={b['noStacking']})")
+    if not b["toast"] or "4 into the \"unmatched\" section" not in b["toast"]:
+        problems.append(f"checkbox ON: expected the toast to report 4 parts into the 'unmatched' section, got {b['toast']!r}")
+    # C
+    if c["count"] != 11 or c["unmatchedSectionCount"] != 1:
+        problems.append(f"re-run: expected no new nodes and still one 'unmatched' section, got count={c['count']} sections={c['unmatchedSectionCount']}")
+    if not c["inBounds"] or not c["noStacking"]:
+        problems.append("re-run: layout broken")
+    # D
+    if d["vms"] != 0 or not d["toast"] or "freeform" not in d["toast"]:
+        problems.append(f"freeform view: expected refusal toast naming 'freeform' and nothing added, got vms={d['vms']} toast={d['toast']!r}")
+    if problems:
+        return False, "; ".join(problems)
+    return True, ("Populate From Model matches by section element types + section id (direct id, section name, or org-unit xIds), grows Alpha/'unmatched' by whole rows "
+                  "without leaving nodes outside their sections, leaves unmatched and type-blocked parts out unless 'Include unmatched sections' is ticked (then exactly one "
+                  "'unmatched' section holds them), is idempotent, and refuses freeform views")
+
+
+def check_populate_from_model_dialog_wiring(page):
+    """Wiring guard for the new Populate From Model command (its logic is covered by
+    check_populate_from_model_matches_sections, which calls the command directly): the
+    toolbar command button must exist and be enabled on a section view, open a dialog
+    titled 'Populate From Model' with an UNCHECKED 'Include unmatched sections' checkbox,
+    and that checkbox must actually drive the command — submitting unticked leaves an
+    unmatched part out, submitting ticked puts it in a new 'unmatched' section."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const view = store.addView('PopModelDlg_' + Date.now());
+      view.viewType = 'org';
+      view.sections = [
+        { id: 's-title', viewType: 'org', sectionId: 'title', order: 0, name: 'Title', rowCount: 1, columnCount: 4, elementTypes: [] },
+        { id: 's-a', viewType: 'org', sectionId: 'aaa', order: 1, name: 'Alpha Section', rowCount: 1, columnCount: 3, elementTypes: ['BusinessFunction'] },
+      ];
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      store.createPart({ type: 'BusinessFunction', label: 'Loose', model: store.defaultModel, streams: [], section: 'nowhere' });
+      app.render();
+      const btn = [...document.querySelectorAll('#commands-list .cmd-icon-btn')].find(b => b.title.startsWith('Populate From Model'));
+      const out = { buttonFound: !!btn, buttonEnabled: btn ? !btn.disabled : false };
+      const open = async () => { btn.click(); await new Promise(r => setTimeout(r, 40)); return document.querySelector('#modal-root .modal-box'); };
+      const partVms = () => store.viewMembersForView(view.id).filter(v => v.objectType === 'part');
+
+      let box = await open();
+      out.title = box?.querySelector('h3')?.textContent;
+      const cb = box?.querySelector('input[type=checkbox][data-key=includeUnmatched]');
+      out.checkboxFound = !!cb;
+      out.checkboxLabel = cb?.parentElement?.querySelector('label')?.textContent;
+      out.checkboxDefault = cb ? cb.checked : null;
+      box.querySelector('.submit').click();
+      await new Promise(r => setTimeout(r, 60));
+      out.unticked = { nodes: partVms().length, hasUnmatchedSection: view.sections.some(s => s.sectionId === 'unmatched') };
+
+      box = await open();
+      box.querySelector('input[type=checkbox][data-key=includeUnmatched]').checked = true;
+      box.querySelector('.submit').click();
+      await new Promise(r => setTimeout(r, 60));
+      out.ticked = { nodes: partVms().length, hasUnmatchedSection: view.sections.some(s => s.sectionId === 'unmatched'), sectionIds: partVms().map(v => v.sectionId) };
+      return out;
+    }
+    """)
+    problems = []
+    if not result["buttonFound"] or not result["buttonEnabled"]:
+        problems.append(f"expected an enabled 'Populate From Model' toolbar command on a section view (found={result['buttonFound']}, enabled={result['buttonEnabled']})")
+    if result["title"] != "Populate From Model":
+        problems.append(f"expected the dialog titled 'Populate From Model', got {result['title']!r}")
+    if not result["checkboxFound"] or result["checkboxLabel"] != "Include unmatched sections":
+        problems.append(f"expected a checkbox labeled 'Include unmatched sections', got found={result['checkboxFound']} label={result['checkboxLabel']!r}")
+    if result["checkboxDefault"] is not False:
+        problems.append(f"expected the checkbox to start unticked, got {result['checkboxDefault']!r}")
+    if result["unticked"] != {"nodes": 0, "hasUnmatchedSection": False}:
+        problems.append(f"submitting unticked should add nothing and create no section, got {result['unticked']}")
+    if result["ticked"] != {"nodes": 1, "hasUnmatchedSection": True, "sectionIds": ["unmatched"]}:
+        problems.append(f"submitting ticked should add the loose part into a new 'unmatched' section, got {result['ticked']}")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the Populate From Model toolbar command opens its dialog with an unticked 'Include unmatched sections' checkbox, and the checkbox genuinely controls whether the unmatched part is added"
+
+
+def check_section_resize_reflows_nodes(page):
+    """New behavior, reported directly: "in a view with sections and column and row count,
+    if user adjusts the column or row count then recalculate the positions in that section.
+    for example if row count is 2 and column count is 20 and there are 35 elements, then
+    changing column count to 10 should result in adding 2 rows and moving elements to these
+    new rows, maintaining original order across all rows and columns." Before, editing
+    either count in the section's Properties panel left every node at its old (row, col) —
+    only the sections BELOW were re-aligned — so shrinking columns left nodes hanging outside
+    the narrower section, and shrinking rows stacked nodes on the last row. Drives the real
+    Properties-panel inputs on exactly the reported scenario (a 2-row x 20-column section,
+    35 nodes; the last one deliberately left with a gap before it, so a 'pack them tight'
+    reflow would put it in the wrong cell) plus a second section below. Columns 20 -> 10:
+    rows go 2 -> 4, node k sits at row floor(slot/10) / col slot%10 in the SAME row-major
+    sequence, nothing is stacked or outside its section, the section below moved down with
+    the growth and still sits inside its own body, and a toast says rows were added.
+    Columns back 10 -> 20: every node returns to its ORIGINAL coordinates (exactly
+    reversible; rows are not taken away). Rows 4 -> 1 with 35 nodes still in 20 columns:
+    raised to the 2 the nodes need, nodes unmoved, toast says so."""
+    result = js(page, """
+    async () => {
+      const app = window.dycadApp, store = app.store;
+      const sections = await import('./js/sections.js');
+      const toasts = [];
+      const origToast = app.toast.bind(app);
+      app.toast = (m, e, l) => { toasts.push(m); return origToast(m, e, l); };
+
+      const view = store.addView('SecReflow_' + Date.now());
+      view.viewType = 'org';
+      view.sections = [
+        { id: 's-a', viewType: 'org', sectionId: 'aaa', order: 0, name: 'Wide Section', rowCount: 2, columnCount: 20, elementTypes: ['BusinessFunction'] },
+        { id: 's-b', viewType: 'org', sectionId: 'bbb', order: 1, name: 'Below Section', rowCount: 1, columnCount: 5, elementTypes: ['BusinessFunction'] },
+      ];
+      const tab = app.createCanvasTab(view);
+      app.switchToTab(tab.id);
+      const M = store.defaultModel;
+      const secA = view.sections[0];
+      const aEntry = sections.computeSectionLayout(view).find(e => e.section.sectionId === 'aaa');
+      // N0..N33 fill slots 0..33; N34 is at slot 36 (a gap of two empty cells before it)
+      const slotOf = (k) => (k <= 33 ? k : 36);
+      const nodes = [];
+      for (let k = 0; k < 35; k++) {
+        const part = store.createPart({ type: 'BusinessFunction', label: 'N' + k, model: M, streams: [] });
+        const s = slotOf(k);
+        const pos = sections.gridToPixel(aEntry, Math.floor(s / 20), s % 20);
+        nodes.push(store.createViewMember({ view: view.id, objectType: 'part', objectId: part.id, x: pos.x, y: pos.y, sectionId: 'aaa' }));
+      }
+      const bPart = store.createPart({ type: 'BusinessFunction', label: 'Below', model: M, streams: [] });
+      const bEntry = sections.computeSectionLayout(view).find(e => e.section.sectionId === 'bbb');
+      const bPos = sections.gridToPixel(bEntry, 0, 0);
+      const bVm = store.createViewMember({ view: view.id, objectType: 'part', objectId: bPart.id, x: bPos.x, y: bPos.y, sectionId: 'bbb' });
+      const original = nodes.map(n => [n.x, n.y]);
+      const bYBefore = bVm.y;
+
+      const editField = async (field, value) => {
+        tab.selectedSectionId = secA.id;
+        app.render();
+        await new Promise(r => setTimeout(r, 30));
+        const el = document.getElementById('sf-section-' + field);
+        if (!el) return false;
+        el.value = String(value);
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 30));
+        return true;
+      };
+      const cellOf = (vm) => {
+        const e = sections.computeSectionLayout(view).find(x => x.section.sectionId === 'aaa');
+        return [Math.round((vm.y - e.bodyTop - sections.NODE_INSET_Y) / e.cellH), Math.round((vm.x - e.bodyLeft - sections.NODE_INSET_X) / e.cellW)];
+      };
+      const allInBounds = () => {
+        const layout = sections.computeSectionLayout(view);
+        return store.viewMembersForView(view.id).filter(v => v.objectType === 'part').every(vm => {
+          const e = layout.find(x => x.section.sectionId === vm.sectionId);
+          return e && vm.x >= e.bodyLeft && vm.x < e.bodyLeft + e.width && vm.y >= e.bodyTop && vm.y < e.bodyTop + e.bodyHeight;
+        });
+      };
+      const noStacking = () => {
+        const seen = new Set();
+        for (const vm of store.viewMembersForView(view.id).filter(v => v.objectType === 'part')) { const k = vm.x + ',' + vm.y; if (seen.has(k)) return false; seen.add(k); }
+        return true;
+      };
+      const rowMajorLabels = () => nodes.slice().sort((p, q) => (p.y - q.y) || (p.x - q.x)).map(n => store.findPart(n.objectId).label);
+
+      // ---- columns 20 -> 10 ----
+      const found1 = await editField('columnCount', 10);
+      const after10 = {
+        found: found1, cols: secA.columnCount, rows: secA.rowCount,
+        cells: nodes.map(cellOf),
+        order: rowMajorLabels(),
+        inBounds: allInBounds(), noStacking: noStacking(),
+        belowMovedDown: bVm.y > bYBefore,
+        toast: toasts[toasts.length - 1],
+      };
+      // ---- columns 10 -> 20 ----
+      await editField('columnCount', 20);
+      const back20 = {
+        cols: secA.columnCount, rows: secA.rowCount,
+        restored: nodes.every((n, i) => n.x === original[i][0] && n.y === original[i][1]),
+        inBounds: allInBounds(), noStacking: noStacking(),
+      };
+      // ---- rows -> 1 (too few for 35 nodes in 20 columns) ----
+      const before1 = nodes.map(n => [n.x, n.y]);
+      const toastsBefore = toasts.length;
+      await editField('rowCount', 1);
+      const rows1 = {
+        rows: secA.rowCount,
+        unmoved: nodes.every((n, i) => n.x === before1[i][0] && n.y === before1[i][1]),
+        inBounds: allInBounds(), noStacking: noStacking(),
+        toast: toasts.slice(toastsBefore).pop(),
+      };
+      app.toast = origToast;
+      return { after10, back20, rows1, expectedCells: nodes.map((_, k) => { const s = slotOf(k); return [Math.floor(s / 10), s % 10]; }),
+               expectedOrder: nodes.map((_, k) => 'N' + k) };
+    }
+    """)
+    a, b, c = result["after10"], result["back20"], result["rows1"]
+    problems = []
+    if not a["found"]:
+        problems.append("the section's Properties panel has no columnCount input (sf-section-columnCount)")
+    if a["rows"] != 4:
+        problems.append(f"columns 20 -> 10 with 35 nodes: expected rows 2 -> 4 (+2), got {a['rows']}")
+    if a["cells"] != result["expectedCells"]:
+        bad = [(i, got, want) for i, (got, want) in enumerate(zip(a["cells"], result["expectedCells"])) if got != want][:4]
+        problems.append(f"columns 20 -> 10: nodes weren't reflowed row-major into the new 10-wide grid (node, got, wanted): {bad}")
+    if a["order"] != result["expectedOrder"]:
+        problems.append(f"columns 20 -> 10: original order across rows/columns not preserved, got {a['order'][:8]}...")
+    if not a["inBounds"] or not a["noStacking"]:
+        problems.append(f"columns 20 -> 10: layout broken (inBounds={a['inBounds']}, noStacking={a['noStacking']})")
+    if not a["belowMovedDown"]:
+        problems.append("columns 20 -> 10: the section below should have moved down with the 2 added rows")
+    if not a["toast"] or "4 rows" not in a["toast"]:
+        problems.append(f"columns 20 -> 10: expected a toast saying the section now has 4 rows, got {a['toast']!r}")
+    if not b["restored"]:
+        problems.append("columns 10 -> 20: nodes did not return to their original coordinates (reflow should be exactly reversible)")
+    if b["rows"] != 4:
+        problems.append(f"columns 10 -> 20: rows must not be taken away automatically, expected 4, got {b['rows']}")
+    if not b["inBounds"] or not b["noStacking"]:
+        problems.append("columns 10 -> 20: layout broken")
+    if c["rows"] != 2:
+        problems.append(f"rows -> 1 with 35 nodes in 20 columns: expected the count raised to the 2 rows the nodes need, got {c['rows']}")
+    if not c["unmoved"]:
+        problems.append("rows -> 1: nodes moved even though they still fit in 2 rows")
+    if not c["inBounds"] or not c["noStacking"]:
+        problems.append("rows -> 1: layout broken (nodes stacked/outside the section)")
+    if not c["toast"] or "2 rows" not in c["toast"]:
+        problems.append(f"rows -> 1: expected a toast saying the section now has 2 rows, got {c['toast']!r}")
+    if problems:
+        return False, "; ".join(problems)
+    return True, ("changing a section's column count reflows its 35 nodes row-major (2x20 -> 4x10, order and the deliberate gap preserved, section below shifted, "
+                  "exactly reversible), and a row count too small for its nodes is raised to fit instead of stacking them")
+
+
 CHECKS = [
     check_boots_clean,
     check_example_simulates,
@@ -17675,6 +18081,9 @@ CHECKS = [
     check_generate_view_redraws_with_show_all_text,
     check_tabs_row_no_spurious_vertical_scrollbar,
     check_full_generate_view_data_set_example,
+    check_populate_from_model_matches_sections,
+    check_populate_from_model_dialog_wiring,
+    check_section_resize_reflows_nodes,
 ]
 
 

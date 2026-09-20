@@ -1,7 +1,7 @@
 // commands.js — Duplicate Stream, Split Node, Level Up, Level Down, Generate (createStream)
 import { ciEq, newId, relationCodeFor } from './state.js';
 import { elementByType, findRelationshipPair, isRelationValid } from './rules.js';
-import { isSectionViewType, createSectionPlacer, computeSectionLayout, isTypeAllowedInSection, findFreeCellInSection, findFreeCellOrGrowSection, duplicateSectionDefinition, BASE_X, BASE_Y, SECTION_GAP, NODE_INSET_X, NODE_INSET_Y } from './sections.js';
+import { isSectionViewType, createSectionPlacer, computeSectionLayout, isTypeAllowedInSection, findFreeCellInSection, findFreeCellOrGrowSection, duplicateSectionDefinition, gridToPixel, rescaleSectionPositions, BASE_X, BASE_Y, SECTION_GAP, NODE_INSET_X, NODE_INSET_Y } from './sections.js';
 import { redrawNodeSizes, redrawAndResolveLayout, getNodeSize } from './canvas.js';
 import { computeClusteredGridLayout, computeHubClusterGridLayout } from './layout.js';
 import { pushMessageLog } from './simulation.js';
@@ -3138,6 +3138,169 @@ function populateFromTemplate(app, tab, templateName) {
   app.toast(`Populated from "${templateName}": ${addedCount} added, ${createdCount} created, ${skippedCount} skipped, ${connCount} connector${connCount === 1 ? '' : 's'}.`, false, true);
 }
 
+// ===================== POPULATE FROM MODEL =====================
+const UNMATCHED_SECTION_ID = 'unmatched';
+
+/**
+ * "Populate From Model" — the section-view sibling of Populate From Template: instead of
+ * a template's parts, it adds the current model's OWN existing Parts to this view, each
+ * into the section whose settings fit it. A part lands in a section when (1) that
+ * section's elementTypes allow the part's type AND (2) the part's section id matches the
+ * section's sectionId. A Part only stores a section NAME (Part.section — Generate
+ * Industry/Load SFCCE's plain string tag); the id itself lives on the section's
+ * BusinessOrganizationUnit part (xIds) and on each ViewMember (sectionId). So a part's
+ * section counts as matching a view section when Part.section equals that section's
+ * sectionId, equals its name, or names an org unit whose xIds equals its sectionId.
+ * Title-only sections (sectionId 'title') have no body and never hold parts.
+ *
+ * `includeUnmatched`: also add parts whose type some section allows but whose section id
+ * is missing or matches no section on this view, into a section named 'unmatched'
+ * (created at the bottom of the view, or reused if it's already there). A part whose
+ * section id DOES match a section that just doesn't allow its type is still left out —
+ * that's a type/section mismatch, not a missing id.
+ *
+ * Sections grow by whole rows as needed (every section, not just 'unmatched') so nothing
+ * is stacked on an occupied cell; nodes already sitting below a grown section are
+ * re-aligned via rescaleSectionPositions. Parts already on this view are never moved or
+ * duplicated. Placement is by (row, col) cell first and pixels last, since growing an
+ * earlier section shifts every section below it.
+ */
+function populateFromModel(app, tab, options = {}) {
+  const includeUnmatched = !!options.includeUnmatched;
+  const { store } = app;
+  const view = store.findView(tab.viewId);
+  if (!view) return;
+  if (!isSectionViewType(view.viewType)) {
+    app.toast('Populate From Model only applies to section-based views — this view is freeform, so there are no sections to match.', true);
+    return;
+  }
+  store.ensureViewSections(view);
+  const bySectionOrder = (a, b) => (a.order ?? 0) - (b.order ?? 0);
+  const bodySections = (view.sections || [])
+    .filter((s) => !ciEq(s.sectionId, 'title') && !ciEq(s.sectionId, UNMATCHED_SECTION_ID))
+    .sort(bySectionOrder);
+  if (bodySections.length === 0) {
+    app.toast(`Populate From Model needs at least one section that can hold parts — this view ("${view.viewType}") has none.`, true);
+    return;
+  }
+
+  const modelName = store.defaultModel;
+  const orgUnitXIdByLabel = new Map(); // section name (lowercased) -> the section's own id
+  for (const p of store.doc.parts) {
+    if (ciEq(p.type, 'BusinessOrganizationUnit') && ciEq(p.model, modelName) && p.label && p.xIds) {
+      orgUnitXIdByLabel.set(String(p.label).toLowerCase(), p.xIds);
+    }
+  }
+  const existingVms = store.viewMembersForView(view.id).filter((vm) => vm.objectType === 'part');
+  const onViewPartIds = new Set(existingVms.map((vm) => vm.objectId));
+
+  // ---- classify every part in this model ----
+  const typeAllowedAnywhere = new Map();
+  const isTypeHeld = (type) => {
+    if (!typeAllowedAnywhere.has(type)) typeAllowedAnywhere.set(type, bodySections.some((s) => isTypeAllowedInSection(s, type)));
+    return typeAllowedAnywhere.get(type);
+  };
+  const matched = []; // { part, section }
+  const unmatched = [];
+  let alreadyOn = 0, skippedType = 0, skippedTypeInSection = 0, skippedUnmatched = 0;
+  for (const part of store.doc.parts) {
+    if (!ciEq(part.model, modelName)) continue;
+    if (onViewPartIds.has(part.id)) { alreadyOn += 1; continue; }
+    if (!isTypeHeld(part.type)) { skippedType += 1; continue; }
+    const key = String(part.section || '').trim();
+    const orgId = key ? orgUnitXIdByLabel.get(key.toLowerCase()) : null;
+    const idMatches = key ? bodySections.filter((s) => ciEq(s.sectionId, key) || ciEq(s.name, key) || (orgId && ciEq(s.sectionId, orgId))) : [];
+    if (idMatches.length > 0) {
+      const target = idMatches.find((s) => isTypeAllowedInSection(s, part.type));
+      if (target) matched.push({ part, section: target });
+      else skippedTypeInSection += 1;
+    } else if (includeUnmatched) {
+      unmatched.push(part);
+    } else {
+      skippedUnmatched += 1;
+    }
+  }
+
+  // ---- the 'unmatched' section (created only if something needs it) ----
+  const oldSections = (view.sections || []).map((s) => ({ ...s }));
+  const oldLayout = computeSectionLayout(view);
+  let unmatchedSection = null;
+  if (unmatched.length > 0) {
+    unmatchedSection = (view.sections || []).find((s) => ciEq(s.sectionId, UNMATCHED_SECTION_ID) || ciEq(s.name, UNMATCHED_SECTION_ID));
+    if (!unmatchedSection) {
+      const anyType = bodySections.some((s) => (s.elementTypes || []).includes('*'));
+      const types = anyType ? ['*'] : [...new Set(bodySections.flatMap((s) => s.elementTypes || []))];
+      unmatchedSection = {
+        id: newId(), sectionId: UNMATCHED_SECTION_ID, viewType: view.viewType,
+        order: Math.max(-1, ...(view.sections || []).map((s) => s.order ?? 0)) + 1,
+        name: UNMATCHED_SECTION_ID,
+        rowCount: 1, columnCount: Math.max(1, ...bodySections.map((s) => s.columnCount || 1)),
+        elementTypes: types,
+      };
+      view.sections.push(unmatchedSection);
+    }
+  }
+
+  // ---- assign cells: first free cell per section, row-major, unlimited rows ----
+  const cursors = new Map(); // section.id -> next-free-cell function
+  const placements = [];     // { part, section, row, col }
+  const cursorFor = (section) => {
+    if (cursors.has(section.id)) return cursors.get(section.id);
+    const occupied = new Set();
+    const oldEntry = oldLayout.find((e) => e.section.id === section.id);
+    if (oldEntry) {
+      for (const vm of existingVms) {
+        if (vm.sectionId !== section.sectionId) continue;
+        const col = Math.max(0, Math.round((vm.x - oldEntry.bodyLeft - NODE_INSET_X) / oldEntry.cellW));
+        const row = Math.max(0, Math.round((vm.y - oldEntry.bodyTop - NODE_INSET_Y) / oldEntry.cellH));
+        occupied.add(`${row},${col}`);
+      }
+    }
+    const cols = Math.max(1, section.columnCount || 1);
+    let r = 0, c = 0;
+    const next = () => {
+      while (occupied.has(`${r},${c}`)) { c += 1; if (c >= cols) { c = 0; r += 1; } }
+      const cell = { row: r, col: c };
+      c += 1; if (c >= cols) { c = 0; r += 1; }
+      return cell;
+    };
+    cursors.set(section.id, next);
+    return next;
+  };
+  for (const { part, section } of matched) placements.push({ part, section, ...cursorFor(section)() });
+  for (const part of unmatched) placements.push({ part, section: unmatchedSection, ...cursorFor(unmatchedSection)() });
+
+  // ---- grow sections by whole rows, re-align what already sat below them ----
+  let grew = false;
+  for (const p of placements) {
+    if ((p.section.rowCount || 1) < p.row + 1) { p.section.rowCount = p.row + 1; grew = true; }
+  }
+  if (grew) rescaleSectionPositions(store, view, { sections: oldSections });
+
+  const layout = computeSectionLayout(view);
+  const fillByType = new Map();
+  for (const p of placements) {
+    const entry = layout.find((e) => e.section.id === p.section.id);
+    const { x, y } = gridToPixel(entry, p.row, p.col);
+    if (!fillByType.has(p.part.type)) fillByType.set(p.part.type, elementGroupFill(store, p.part.type));
+    store.createViewMember({ view: view.id, objectType: 'part', objectId: p.part.id, x, y, sectionId: p.section.sectionId, fillColor: fillByType.get(p.part.type) });
+  }
+
+  if (placements.length > 0) redrawAndResolveLayout(app, { viewId: view.id, selection: new Set() });
+  app.recordAndRender();
+
+  const n = placements.length;
+  const leftOut = [];
+  if (alreadyOn) leftOut.push(`${alreadyOn} already on this view`);
+  if (skippedType) leftOut.push(`${skippedType} of a type no section on this view allows`);
+  if (skippedTypeInSection) leftOut.push(`${skippedTypeInSection} whose own section doesn't allow their type`);
+  if (skippedUnmatched) leftOut.push(`${skippedUnmatched} with no matching section (tick "Include unmatched sections" to add them)`);
+  app.toast(
+    `Populated from model: added ${n} part${n === 1 ? '' : 's'}${unmatched.length ? ` (${unmatched.length} into the "${UNMATCHED_SECTION_ID}" section)` : ''}.${leftOut.length ? ` Left out: ${leftOut.join('; ')}.` : ''}`,
+    false, true,
+  );
+}
+
 /** "Insert Smart Stream" (freeform views only) — traces a chain of EXISTING parts and
  * connectors starting from every part of `startType`, expanding hop-by-hop through
  * connectors of ONE chosen connectorType, in the chosen direction(s), for up to
@@ -5735,4 +5898,4 @@ function createDetectedConnectors(app, candidates) {
   return { created, placements, unplaced };
 }
 
-export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, insertSmartStream, duplicateSection, copyModel, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors, GENERATE_VIEW_GROUPS, generateSelectedViews };
+export { createStream, duplicateStream, nextStreamName, splitNode, levelUp, levelUpEntityDetails, levelIt, levelDown, levelDownSingle, copyNodes, pasteNodes, remap, applyRemapLayout, mergeNodes, mergePartsAndView, mergeViewOnly, REMAP_SORT_KEYS, REMAP_SORT_LABELS, DEFAULT_REMAP_SORT_KEYS, generateInventoryView, generateIndustry, addExistingPartsToView, populateFromTemplate, populateFromModel, insertSmartStream, duplicateSection, copyModel, smartCheckModel, applySmartCheckModelFixes, smartCheckView, smartCheckNode, createBulkLookupCache, scanStreamsForAutoComplete, autoCompleteStreams, deriveStreamNames, findCrossingCounterpart, findCompositionChildView, importDDL, exportDDL, detectConnectorCandidates, createDetectedConnectors, GENERATE_VIEW_GROUPS, generateSelectedViews };

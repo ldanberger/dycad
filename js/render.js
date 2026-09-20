@@ -1,6 +1,6 @@
 // render.js — header, toolbox, properties panel rendering (canvas rendering lives in canvas.js)
 import { ciEq, newId, isUIDashboardType } from './state.js';
-import { getAllowedTypesForView, isSectionViewType, rescaleSectionPositions } from './sections.js';
+import { getAllowedTypesForView, isSectionViewType, rescaleSectionPositions, reflowSectionAfterResize } from './sections.js';
 import { redrawAndResolveLayout } from './canvas.js';
 import { validRelationOptions } from './rules.js';
 
@@ -544,6 +544,7 @@ const CMD_ICONS = {
   merge: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.5"/><circle cx="15" cy="6" r="2.5"/><path d="M5 8.5v2a3 3 0 0 0 3 3h4a3 3 0 0 0 3-3v-2"/><circle cx="10" cy="16" r="2.2"/></svg>',
   redraw: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="14" height="9" rx="1.5"/><path d="M14 2.5l2 2-2 2M16 4.5H10"/></svg>',
   addExisting: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="10" height="12" rx="1.5"/><path d="M5.5 7.5h4M5.5 10.5h4M5.5 13.5h2.5"/><circle cx="15.5" cy="14.5" r="3.2"/><path d="M15.5 13v3M14 14.5h3"/></svg>',
+  populateFromModel: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="6" height="6" rx="1"/><rect x="11.5" y="2.5" width="6" height="6" rx="1"/><path d="M10 11v6.5M7 14.5l3 3 3-3"/></svg>',
   populateFromTemplate: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="6" height="6" rx="1"/><rect x="11.5" y="2.5" width="6" height="6" rx="1"/><rect x="2.5" y="11.5" width="6" height="6" rx="1"/><path d="M14.5 12v6M11.5 15h6"/></svg>',
   insertSmartStream: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="3.5" cy="10" r="2"/><circle cx="10" cy="4.5" r="2"/><circle cx="10" cy="15.5" r="2"/><circle cx="16.5" cy="10" r="2"/><path d="M5.3 8.9L8.2 6M5.3 11.1L8.2 14M11.8 5.6L14.7 8.9M11.8 14.4L14.7 11.1"/></svg>',
   smartCheckNode: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="10" height="8" rx="1.5"/><circle cx="15.5" cy="14.5" r="3.2"/><path d="M14 14.5l1 1 2-2"/></svg>',
@@ -574,6 +575,7 @@ function getCommandDefs(app) {
     { key: 'redraw', label: 'Redraw', hint: 'Redraw — recalculate best node size and normalize coordinates for this view', enabled: isCanvas },
     { key: 'addExisting', label: 'Add Existing', hint: 'Add Existing — bring existing parts (and optionally their connectors) into this view', enabled: isCanvas },
     { key: 'populateFromTemplate', label: 'Populate From Template', hint: 'Populate From Template — add parts/connectors from a page template matching this view type', enabled: isCanvas },
+    { key: 'populateFromModel', label: 'Populate From Model', hint: 'Populate From Model — add this model\'s existing parts to this view, into the sections whose element types and section ids match', enabled: isCanvas },
     { key: 'insertSmartStream', label: 'Insert Smart Stream', hint: 'Insert Smart Stream — trace a chain of parts/connectors by element type into this view', enabled: isCanvas },
     { key: 'smartCheckNode', label: 'Smart Check Node', hint: 'Smart Check Node — repair gaps reachable from this one node', enabled: !!singlePart },
   ];
@@ -1305,33 +1307,31 @@ function renderSectionProperties(app, tab) {
   const section = view?.sections?.find((s) => s.id === tab.selectedSectionId);
   if (!view || !section) { body.innerHTML = '<div class="empty-hint">Section not found.</div>'; return; }
 
+  // Editing a section's row or column count reflows THAT section's nodes into the new grid
+  // (same order, e.g. 35 nodes in 2 rows x 20 columns become 4 rows x 10 columns when the
+  // column count drops to 10) and re-aligns the sections below — see
+  // reflowSectionAfterResize. If the reflow needs more rows than the person asked for, the
+  // row count is raised to fit and a toast says so.
+  const applyGridChange = (prop, v) => {
+    const old = section[prop];
+    section[prop] = Math.max(1, Number(v) || 1);
+    if (section[prop] === old) return;
+    const rowsAsEdited = section.rowCount;
+    const oldSections = view.sections.map((s) => (s === section ? { ...s, [prop]: old } : s));
+    const { count, rowCount } = reflowSectionAfterResize(app.store, view, section, oldSections);
+    if (rowCount > rowsAsEdited) {
+      const cols = Math.max(1, section.columnCount || 1);
+      app.toast(`Section "${section.name}" now has ${rowCount} rows — needed to keep its ${count} element${count === 1 ? '' : 's'} in order across ${cols} column${cols === 1 ? '' : 's'}.`);
+    }
+  };
+
   const accessors = {
     viewType: { get: () => section.viewType, set: () => {} },
     sectionId: { get: () => section.sectionId, set: () => {} },
     order: { get: () => section.order, set: (v) => { section.order = Number(v) || 0; } },
     name: { get: () => section.name, set: (v) => { section.name = v; } },
-    rowCount: {
-      get: () => section.rowCount,
-      set: (v) => {
-        const oldRowCount = section.rowCount;
-        section.rowCount = Math.max(1, Number(v) || 1);
-        if (section.rowCount !== oldRowCount) {
-          const oldSections = view.sections.map((s) => (s === section ? { ...s, rowCount: oldRowCount } : s));
-          rescaleSectionPositions(app.store, view, { sections: oldSections });
-        }
-      },
-    },
-    columnCount: {
-      get: () => section.columnCount,
-      set: (v) => {
-        const oldColumnCount = section.columnCount;
-        section.columnCount = Math.max(1, Number(v) || 1);
-        if (section.columnCount !== oldColumnCount) {
-          const oldSections = view.sections.map((s) => (s === section ? { ...s, columnCount: oldColumnCount } : s));
-          rescaleSectionPositions(app.store, view, { sections: oldSections });
-        }
-      },
-    },
+    rowCount: { get: () => section.rowCount, set: (v) => applyGridChange('rowCount', v) },
+    columnCount: { get: () => section.columnCount, set: (v) => applyGridChange('columnCount', v) },
     elementTypes: {
       get: () => section.elementTypes || [],
       set: (v) => { section.elementTypes = v.split(',').map((s) => s.trim()).filter(Boolean); },

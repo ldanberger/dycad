@@ -5886,4 +5886,40 @@
 // instructions.html covers), assembled outside the app from a live session and
 // containing no code of its own. instructions.html gains one new line, directly above
 // its existing "Quick start" paragraph, linking to it (public/DyCAD-User-Manual.pdf).
-export const APP_VERSION = '0.949';
+// v0.950: new Populate From Model command (toolbar + script console `populateFromModel(app,
+// tab, { includeUnmatched })`), reported directly: "similar to 'populate from template', add a
+// 'populate from model' command that will add parts to the current view, matching section
+// settings of element types and section ids. In user dialog add 'include unmatched sections'
+// checkbox, and if user selects this also include those same element types that have missing
+// section ids or section ids that don't match any on view. If it is selected create a section
+// named 'unmatched' and place unmatched into this section, extending rows as needed for all
+// view sections." Section-based views only (a freeform view is refused with a toast naming
+// the rule). Adds the model's existing Parts, each into a section whose elementTypes allow its
+// type AND whose sectionId matches -- a Part only stores a section NAME, so the id is resolved
+// three ways: Part.section equals the section's id, equals its name, or names a
+// BusinessOrganizationUnit part whose xIds is the id. Title-only sections never hold parts.
+// A part whose id matches a section that doesn't allow its type, or whose type no section
+// allows, is always left out. "Include unmatched sections" adds parts of an allowed type with
+// a missing/non-matching id into a section named 'unmatched' (created last, reused on a
+// re-run). Sections grow by whole rows as needed; nodes already sitting below a grown section
+// are re-aligned via rescaleSectionPositions. Parts already on the view are untouched;
+// connectors are not added. New checks check_populate_from_model_matches_sections and
+// check_populate_from_model_dialog_wiring (tests/run_all.py), each proven via TEMP BREAK.
+// instructions.html, DESIGN_DOCUMENT.md (6.3), and tests/README.md updated.
+// v0.951: editing a section's Row Count or Column Count (Properties panel) now re-flows that
+// section's nodes, reported directly: "in a view with sections and column and row count, if
+// user adjusts the column or row count then recalculate the positions in that section. for
+// example if row count is 2 and column count is 20 and there are 35 elements, then changing
+// column count to 10 should result in adding 2 rows and moving elements to these new rows,
+// maintaining original order across all rows and columns." Before, both setters only called
+// rescaleSectionPositions, which keeps each node at its old (row, col): right for sections
+// BELOW the edited one, wrong for the edited section itself (narrower left nodes outside it,
+// shorter stacked them on its last row). New sections.js reflowSectionAfterResize gives each
+// node a slot (row-major index in the old grid) and keeps that slot in the new grid, so order
+// and any deliberate gaps are preserved and changing the count back is exactly reversible;
+// rowCount is raised (never lowered) when the new grid needs more rows, with a toast; the
+// sections below are re-aligned as before. New check_section_resize_reflows_nodes
+// (tests/run_all.py) drives the real Properties inputs on the reported 2x20/35-node
+// scenario, proven via three TEMP BREAKs (old behavior, pack-tight, never-raise-rows).
+// instructions.html, DESIGN_DOCUMENT.md (6.3), and tests/README.md updated.
+export const APP_VERSION = '0.951';
