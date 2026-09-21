@@ -3280,7 +3280,7 @@
       "name": "Enterprise Functions",
       "viewTypes": [
         "ff",
-        "org"
+        "org", "org4lob"
       ],
       "parts": [
         {
