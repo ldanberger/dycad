@@ -5294,10 +5294,10 @@ function wireGlobalEvents(app) {
 
   // ===== Advanced menu (external reference links, open in a new tab) =====
   const ADVANCED_LINKS = [
-    { label: 'Open TOGAF Meta Model', url: 'https://larry42.com/img/togafmetamodel.png' },
+    { label: 'Open TOGAF Meta Model', url: 'public/togafmetamodel.png' },
     { label: 'ArchiMate 3.2 Specification', url: 'https://pubs.opengroup.org/architecture/archimate32-doc/' },
-    { label: 'Open Nubium Enterprise Functions Model', url: 'https://www.nubium.com/blog/datamanagementfaces/' },
-    { label: 'Open Nubium Data Value Chain Model', url: 'https://www.nubium.com/blog/datavaluechain/' },
+    { label: 'Open Nubium Enterprise Functions Model', url: 'public/manyfacesofdatamanagement.pdf' },
+    { label: 'Open Nubium Data Value Chain Model', url: 'public/datavaluechain.pdf' },
     { label: 'Open Microsoft CDM', url: 'https://github.com/microsoft/CDM?tab=readme-ov-file' },
     { separator: true },
     { label: 'Generate View', action: 'generateView' },
